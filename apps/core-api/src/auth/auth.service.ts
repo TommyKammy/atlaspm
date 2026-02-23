@@ -1,0 +1,40 @@
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { SignJWT, jwtVerify, createRemoteJWKSet } from 'jose';
+import { createSecretKey } from 'crypto';
+import type { AuthUser } from '../common/types';
+
+@Injectable()
+export class AuthService {
+  async verify(authHeader?: string): Promise<AuthUser> {
+    if (!authHeader?.startsWith('Bearer ')) throw new UnauthorizedException('Missing bearer token');
+    const token = authHeader.slice('Bearer '.length);
+    const devEnabled = process.env.DEV_AUTH_ENABLED === 'true';
+    if (devEnabled) {
+      const secret = createSecretKey(Buffer.from(process.env.DEV_AUTH_SECRET ?? 'dev-secret'));
+      const { payload } = await jwtVerify(token, secret, { issuer: 'atlaspm-dev', audience: 'atlaspm-dev' });
+      if (!payload.sub) throw new UnauthorizedException('Missing sub');
+      return { sub: payload.sub, email: payload.email as string | undefined, name: payload.name as string | undefined };
+    }
+
+    const jwks = createRemoteJWKSet(new URL(process.env.OIDC_JWKS_URI ?? ''));
+    const { payload } = await jwtVerify(token, jwks, {
+      issuer: process.env.OIDC_ISSUER,
+      audience: process.env.OIDC_AUDIENCE,
+    });
+    if (!payload.sub) throw new UnauthorizedException('Missing sub');
+    return { sub: payload.sub, email: payload.email as string | undefined, name: payload.name as string | undefined };
+  }
+
+  async mintDevToken(sub: string, email?: string, name?: string) {
+    if (process.env.DEV_AUTH_ENABLED !== 'true') throw new UnauthorizedException('Dev auth disabled');
+    const secret = createSecretKey(Buffer.from(process.env.DEV_AUTH_SECRET ?? 'dev-secret'));
+    return new SignJWT({ email, name })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setIssuedAt()
+      .setExpirationTime('15m')
+      .setIssuer('atlaspm-dev')
+      .setAudience('atlaspm-dev')
+      .setSubject(sub)
+      .sign(secret);
+  }
+}

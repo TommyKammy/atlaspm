@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: atlaspm-postgres
+    environment:
+      POSTGRES_USER: atlaspm
+      POSTGRES_PASSWORD: atlaspm
+      POSTGRES_DB: atlaspm
+    ports:
+      - '55432:5432'
+    volumes:
+      - atlaspm_pg_data:/var/lib/postgresql/data
+
+  core-api:
+    build:
+      context: ../..
+      dockerfile: apps/core-api/Dockerfile
+    container_name: atlaspm-core-api
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      DATABASE_URL: postgresql://atlaspm:atlaspm@postgres:5432/atlaspm?schema=public
+      DEV_AUTH_ENABLED: 'true'
+      DEV_AUTH_SECRET: dev-secret-change-me
+      OIDC_ISSUER: https://example.okta.com/oauth2/default
+      OIDC_AUDIENCE: atlaspm
+      OIDC_JWKS_URI: https://example.okta.com/oauth2/default/v1/keys
+    depends_on:
+      - postgres
+    ports:
+      - '3001:3001'
+
+  web-ui:
+    build:
+      context: ../..
+      dockerfile: apps/web-ui/Dockerfile
+      args:
+        NEXT_PUBLIC_CORE_API_URL: http://localhost:3001
+        NEXT_PUBLIC_DEV_AUTH_ENABLED: 'true'
+        NEXT_PUBLIC_DEV_TOKEN_ENDPOINT: http://localhost:3001/dev-auth/token
+    container_name: atlaspm-web-ui
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      NEXT_PUBLIC_CORE_API_URL: http://localhost:3001
+      NEXT_PUBLIC_DEV_AUTH_ENABLED: 'true'
+      NEXT_PUBLIC_DEV_TOKEN_ENDPOINT: http://localhost:3001/dev-auth/token
+    depends_on:
+      - core-api
+    ports:
+      - '3000:3000'
+
+volumes:
+  atlaspm_pg_data:

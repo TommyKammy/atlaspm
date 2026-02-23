@@ -1,0 +1,192 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ProjectRole {
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  BLOCKED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Workspace {
+  id          String   @id @default(uuid())
+  name        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  projects    Project[]
+  memberships WorkspaceMembership[]
+}
+
+model User {
+  id          String   @id
+  email       String?
+  displayName String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  workspaceMemberships WorkspaceMembership[]
+  projectMemberships   ProjectMembership[]
+}
+
+model WorkspaceMembership {
+  id          String   @id @default(uuid())
+  workspaceId String
+  userId      String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  workspaceId String
+  name        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  memberships ProjectMembership[]
+  sections    Section[]
+  tasks       Task[]
+  rules       Rule[]
+  webhooks    Webhook[]
+}
+
+model ProjectMembership {
+  id          String      @id @default(uuid())
+  projectId   String
+  userId      String
+  role        ProjectRole
+  createdAt   DateTime    @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+}
+
+model Section {
+  id          String   @id @default(uuid())
+  projectId   String
+  name        String
+  position    Int
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks   Task[]
+
+  @@unique([projectId, position])
+}
+
+model Task {
+  id             String     @id @default(uuid())
+  projectId       String
+  sectionId       String
+  title          String
+  description    String?
+  status         TaskStatus @default(TODO)
+  progressPercent Int       @default(0)
+  priority       Priority?
+  assigneeUserId String?
+  startAt        DateTime?
+  dueAt          DateTime?
+  tags           String[]   @default([])
+  completedAt    DateTime?
+  position       Int
+  version        Int        @default(1)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  section Section @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, sectionId, position])
+}
+
+model Rule {
+  id          String   @id @default(uuid())
+  projectId   String
+  name        String
+  templateKey String
+  enabled     Boolean  @default(true)
+  cooldownSec Int      @default(60)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  runs    RuleRun[]
+
+  @@unique([projectId, templateKey])
+}
+
+model RuleRun {
+  id            String   @id @default(uuid())
+  ruleId         String
+  taskId         String
+  changed        Boolean
+  startedAt      DateTime @default(now())
+  finishedAt     DateTime?
+  correlationId String
+
+  rule Rule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([ruleId, taskId, startedAt])
+}
+
+model AuditEvent {
+  id            String   @id @default(uuid())
+  actor         String
+  entityType    String
+  entityId      String
+  action        String
+  beforeJson    Json?
+  afterJson     Json?
+  correlationId String
+  createdAt     DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+}
+
+model OutboxEvent {
+  id            String   @id @default(uuid())
+  type          String
+  payload       Json
+  correlationId String
+  createdAt     DateTime @default(now())
+  deliveredAt   DateTime?
+
+  @@index([type, createdAt])
+}
+
+model Webhook {
+  id          String   @id @default(uuid())
+  projectId   String
+  targetUrl   String
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}

@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #f6f8fa;
+  --card: #ffffff;
+  --text: #0f172a;
+  --muted: #64748b;
+  --line: #e2e8f0;
+}
+
+body {
+  background: linear-gradient(160deg, #f8fafc, #edf2f7 55%, #e2e8f0);
+  color: var(--text);
+  font-family: 'IBM Plex Sans', sans-serif;
+}

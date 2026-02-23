@@ -1,0 +1,16 @@
+{
+  "name": "@atlaspm/playwright",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "echo 'no dev'",
+    "build": "echo 'no build'",
+    "lint": "echo 'no lint'",
+    "test": "echo 'use pnpm e2e'",
+    "e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.1",
+    "typescript": "^5.7.3"
+  }
+}
