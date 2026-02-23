@@ -1045,12 +1045,15 @@ export class TasksController {
     });
     const position = (topTask?.position ?? 1000) - 1000;
 
-    return this.subtaskService.createSubtask(parentId, {
+    const taskData = {
       ...body,
       projectId: parentTask.projectId,
       sectionId: parentTask.sectionId,
       position,
-    });
+      startAt: body.startAt ? new Date(body.startAt) : null,
+      dueAt: body.dueAt ? new Date(body.dueAt) : null,
+    };
+    return this.subtaskService.createSubtask(parentId, taskData);
   }
 
   @Get('tasks/:id/subtasks')

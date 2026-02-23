@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CycleDetectionService } from './cycle-detection.service';
-import { DependencyType, type Task } from '@prisma/client';
+import { Prisma, DependencyType, type Task } from '@prisma/client';
 
 export interface SubtaskTreeNode extends Task {
   children: SubtaskTreeNode[];
@@ -38,12 +38,11 @@ export class SubtaskService {
     // Validate hierarchy depth (max 5 levels)
     await this.cycleDetection.validateHierarchyDepth(parentId, 5);
 
-    return this.prisma.task.create({
-      data: {
-        ...taskData,
-        parentId,
-      },
-    });
+    const data: Prisma.TaskUncheckedCreateInput = {
+      ...taskData as unknown as Prisma.TaskUncheckedCreateInput,
+      parentId,
+    };
+    return this.prisma.task.create({ data });
   }
 
   /**
@@ -92,7 +91,7 @@ export class SubtaskService {
     let currentTask: Task | null = null;
 
     while (currentId) {
-      const task = await this.prisma.task.findUnique({
+      const task: Task | null = await this.prisma.task.findUnique({
         where: { id: currentId },
       });
 
@@ -113,7 +112,7 @@ export class SubtaskService {
     let currentId: string | null = taskId;
 
     while (currentId) {
-      const task = await this.prisma.task.findUnique({
+      const task: Task | null = await this.prisma.task.findUnique({
         where: { id: currentId },
       });
 
