@@ -17,9 +17,10 @@ import { CollabController } from './collab/collab.controller';
 import { WorkspaceAdminController } from './workspaces/workspace-admin.controller';
 import { SearchModule } from './search/search.module';
 import { PortfoliosModule } from './portfolios/portfolios.module';
+import { WorkloadModule } from './workload/workload.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, SearchModule, PortfoliosModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, SearchModule, PortfoliosModule, WorkloadModule],
   controllers: [
     WorkspacesController,
     ProjectsController,
