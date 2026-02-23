@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  type-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 9
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      
+      - run: pnpm install --frozen-lockfile
+      
+      - run: pnpm type-check
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 9
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      
+      - run: pnpm install --frozen-lockfile
+      
+      - run: pnpm lint
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: atlaspm
+          POSTGRES_PASSWORD: atlaspm
+          POSTGRES_DB: atlaspm
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 55432:5432
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 9
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      
+      - run: pnpm install --frozen-lockfile
+      
+      - run: pnpm --filter @atlaspm/core-api prisma:generate
+      
+      - run: pnpm --filter @atlaspm/core-api prisma:migrate
+        env:
+          DATABASE_URL: postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public
+      
+      - run: pnpm test
+        env:
+          DATABASE_URL: postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [type-check, lint]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 9
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      
+      - run: pnpm install --frozen-lockfile
+      
+      - run: pnpm build

@@ -10,6 +10,7 @@
     "lint": "eslint src --ext .ts",
     "test": "pnpm prisma:generate && DATABASE_URL=${DATABASE_URL:-postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public} pnpm prisma:migrate && DATABASE_URL=${DATABASE_URL:-postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public} vitest run",
     "test:watch": "vitest",
+    "type-check": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts"
