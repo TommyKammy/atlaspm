@@ -1,169 +1,56 @@
 'use client';
 
-import { Menu, Moon, Sun } from 'lucide-react';
-import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useTheme } from 'next-themes';
-import { useQuery } from '@tanstack/react-query';
-import { useMemo, type ReactNode } from 'react';
-import { api } from '@/lib/api';
-import { queryKeys } from '@/lib/query-keys';
-import type { Project, Workspace } from '@/lib/types';
-import { Button } from '@/components/ui/button';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useEffect, useState, type ReactNode } from 'react';
+import { HeaderBar } from '@/components/layout/HeaderBar';
+import { Sidebar } from '@/components/layout/Sidebar';
+import {
+  CONTENT_LAYOUT_COOKIE,
+  SIDEBAR_MODE_COOKIE,
+  THEME_PRESET_COOKIE,
+  type ContentLayout,
+  type SidebarMode,
+  type ThemePreset,
+} from '@/lib/layout-preferences';
 import { cn } from '@/lib/utils';
 
-function ThemeToggle() {
-  const { setTheme } = useTheme();
+type AppShellProps = {
+  children: ReactNode;
+  initialSidebarMode?: SidebarMode;
+  initialContentLayout?: ContentLayout;
+  initialThemePreset?: ThemePreset;
+};
 
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="icon" data-testid="theme-toggle">
-          <Sun className="h-4 w-4 scale-100 rotate-0 transition-all dark:scale-0 dark:-rotate-90" />
-          <Moon className="absolute h-4 w-4 scale-0 rotate-90 transition-all dark:scale-100 dark:rotate-0" />
-          <span className="sr-only">Toggle theme</span>
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => setTheme('light')}>Light</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme('dark')}>Dark</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme('system')}>System</DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
+function setCookie(name: string, value: string) {
+  document.cookie = `${name}=${value}; path=/; max-age=31536000; samesite=lax`;
 }
 
-function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
-  const pathname = usePathname();
-  const { data: projects = [] } = useQuery<Project[]>({
-    queryKey: queryKeys.projects,
-    queryFn: () => api('/projects'),
-  });
-  const { data: workspaces = [] } = useQuery<Workspace[]>({
-    queryKey: queryKeys.workspaces,
-    queryFn: () => api('/workspaces'),
-  });
-  const isWorkspaceAdmin = workspaces.some((workspace) => workspace.role === 'WS_ADMIN');
-
-  const handleNavigate = () => {
-    onNavigate?.();
-  };
-
-  return (
-    <div className="flex h-full w-[240px] flex-col bg-card">
-      <div className="px-3 py-3">
-        <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Projects</p>
-      </div>
-      <Separator />
-      <ScrollArea className="flex-1 px-2 py-2">
-        <nav className="space-y-1">
-          <Link
-            href="/"
-            onClick={handleNavigate}
-            className={cn(
-              'block rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-              pathname === '/' && 'bg-muted text-foreground',
-            )}
-          >
-            All projects
-          </Link>
-          {projects.map((project) => {
-            const active = pathname === `/projects/${project.id}` || pathname.startsWith(`/projects/${project.id}/`);
-            return (
-              <Link
-                key={project.id}
-                href={`/projects/${project.id}`}
-                onClick={handleNavigate}
-                data-testid={`sidebar-project-${project.id}`}
-                className={cn(
-                  'block rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-                  active && 'bg-muted text-foreground',
-                )}
-              >
-                {project.name}
-              </Link>
-            );
-          })}
-        </nav>
-        {isWorkspaceAdmin ? (
-          <>
-            <Separator className="my-3" />
-            <p className="px-2 text-[11px] uppercase tracking-wider text-muted-foreground">Admin</p>
-            <nav className="mt-2 space-y-1">
-              <Link
-                href="/admin/users"
-                onClick={handleNavigate}
-                data-testid="sidebar-admin-users"
-                className={cn(
-                  'block rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-                  pathname === '/admin/users' && 'bg-muted text-foreground',
-                )}
-              >
-                Users
-              </Link>
-            </nav>
-          </>
-        ) : null}
-      </ScrollArea>
-    </div>
-  );
-}
-
-function HeaderBar() {
-  const pathname = usePathname();
-  const { data: projects = [] } = useQuery<Project[]>({
-    queryKey: queryKeys.projects,
-    queryFn: () => api('/projects'),
-  });
-
-  const title = useMemo(() => {
-    const match = pathname.match(/^\/projects\/([^/]+)/);
-    if (!match) return 'Projects';
-    return projects.find((project) => project.id === match[1])?.name ?? 'Project';
-  }, [pathname, projects]);
-
-  return (
-    <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:px-6">
-      <div className="flex items-center gap-2">
-        <div className="md:hidden">
-          <Sheet>
-            <SheetTrigger asChild>
-              <Button variant="outline" size="icon" aria-label="Open sidebar">
-                <Menu className="h-4 w-4" />
-              </Button>
-            </SheetTrigger>
-            <SheetContent>
-              <SidebarContent />
-            </SheetContent>
-          </Sheet>
-        </div>
-        <div>
-          <p className="text-[11px] uppercase tracking-wider text-muted-foreground">AtlasPM</p>
-          <h1 className="text-sm font-medium">{title}</h1>
-        </div>
-      </div>
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div>
-              <ThemeToggle />
-            </div>
-          </TooltipTrigger>
-          <TooltipContent>Theme</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    </header>
-  );
-}
-
-export default function AppShell({ children }: { children: ReactNode }) {
+export default function AppShell({
+  children,
+  initialSidebarMode = 'full',
+  initialContentLayout = 'full',
+  initialThemePreset = 'default',
+}: AppShellProps) {
   const pathname = usePathname();
   const isLogin = pathname === '/login';
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>(initialSidebarMode);
+  const [contentLayout, setContentLayout] = useState<ContentLayout>(initialContentLayout);
+  const [themePreset, setThemePreset] = useState<ThemePreset>(initialThemePreset);
+
+  useEffect(() => {
+    document.documentElement.dataset.sidebarMode = sidebarMode;
+    setCookie(SIDEBAR_MODE_COOKIE, sidebarMode);
+  }, [sidebarMode]);
+
+  useEffect(() => {
+    document.documentElement.dataset.contentLayout = contentLayout;
+    setCookie(CONTENT_LAYOUT_COOKIE, contentLayout);
+  }, [contentLayout]);
+
+  useEffect(() => {
+    document.documentElement.dataset.themePreset = themePreset;
+    setCookie(THEME_PRESET_COOKIE, themePreset);
+  }, [themePreset]);
 
   if (isLogin) {
     return <main className="min-h-screen bg-background">{children}</main>;
@@ -171,12 +58,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen bg-background">
-      <aside className="hidden w-[240px] border-r md:block">
-        <SidebarContent />
+      <aside className={cn('hidden border-r transition-all duration-150 md:block', sidebarMode === 'icon' ? 'w-[72px]' : 'w-[240px]')}>
+        <Sidebar compact={sidebarMode === 'icon'} />
       </aside>
       <main className="min-w-0 flex-1">
-        <HeaderBar />
-        <div className="p-4 md:p-6">{children}</div>
+        <HeaderBar
+          contentLayout={contentLayout}
+          onToggleContentLayout={() => setContentLayout((prev) => (prev === 'full' ? 'centered' : 'full'))}
+          onToggleSidebarMode={() => setSidebarMode((prev) => (prev === 'full' ? 'icon' : 'full'))}
+          themePreset={themePreset}
+          onThemePresetChange={setThemePreset}
+        />
+        <div className={cn('p-4 md:p-6', contentLayout === 'centered' ? 'mx-auto w-full max-w-6xl' : 'w-full')}>{children}</div>
       </main>
     </div>
   );
