@@ -1,25 +1,25 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, WidgetType } from '@prisma/client';
 
 export interface CreateDashboardDto {
   name: string;
-  layout?: Prisma.InputJsonValue;
+  layout?: Record<string, unknown>;
 }
 
 export interface UpdateDashboardDto {
   name?: string;
-  layout?: Prisma.InputJsonValue;
+  layout?: Record<string, unknown>;
 }
 
 export interface CreateWidgetDto {
-  type: string;
-  config?: Prisma.InputJsonValue;
+  type: WidgetType;
+  config?: Record<string, unknown>;
   position: { x: number; y: number; w: number; h: number };
 }
 
 export interface UpdateWidgetDto {
-  config?: Prisma.InputJsonValue;
+  config?: Record<string, unknown>;
   position?: { x: number; y: number; w: number; h: number };
 }
 
@@ -32,7 +32,7 @@ export class DashboardsService {
       data: {
         userId,
         name: dto.name,
-        layout: dto.layout || {},
+        layout: (dto.layout || {}) as Prisma.InputJsonValue,
       },
       include: {
         widgets: true,
@@ -66,38 +66,34 @@ export class DashboardsService {
   }
 
   async updateDashboard(userId: string, dashboardId: string, dto: UpdateDashboardDto) {
-    const dashboard = await this.prisma.dashboard.findFirst({
+    // Atomic update with ownership check to prevent TOCTOU race condition
+    const result = await this.prisma.dashboard.updateMany({
       where: { id: dashboardId, userId },
+      data: {
+        name: dto.name,
+        layout: dto.layout as Prisma.InputJsonValue,
+      },
     });
 
-    if (!dashboard) {
+    if (result.count === 0) {
       throw new NotFoundException('Dashboard not found');
     }
 
-    return this.prisma.dashboard.update({
+    return this.prisma.dashboard.findUnique({
       where: { id: dashboardId },
-      data: {
-        name: dto.name,
-        layout: dto.layout,
-      },
-      include: {
-        widgets: true,
-      },
+      include: { widgets: true },
     });
   }
 
   async deleteDashboard(userId: string, dashboardId: string) {
-    const dashboard = await this.prisma.dashboard.findFirst({
+    // Atomic delete with ownership check to prevent TOCTOU race condition
+    const result = await this.prisma.dashboard.deleteMany({
       where: { id: dashboardId, userId },
     });
 
-    if (!dashboard) {
+    if (result.count === 0) {
       throw new NotFoundException('Dashboard not found');
     }
-
-    await this.prisma.dashboard.delete({
-      where: { id: dashboardId },
-    });
 
     return { success: true };
   }
@@ -109,43 +105,72 @@ export class DashboardsService {
     return this.prisma.widget.create({
       data: {
         dashboardId,
-        type: dto.type as WidgetType,
-        config: dto.config || {},
+        type: dto.type,
+        config: (dto.config || {}) as Prisma.InputJsonValue,
         position: dto.position,
       },
     });
   }
 
-  async updateWidget(userId: string, dashboardId: string, widgetId: string, dto: UpdateWidgetDto) {
-    await this.requireDashboardOwnership(userId, dashboardId);
-    await this.requireWidgetExists(widgetId, dashboardId);
-
-    return this.prisma.widget.update({
-      where: { id: widgetId },
+  async updateWidget(
+    userId: string,
+    dashboardId: string,
+    widgetId: string,
+    dto: UpdateWidgetDto,
+  ) {
+    // Atomic update with ownership check via relation filter to prevent TOCTOU
+    const result = await this.prisma.widget.updateMany({
+      where: {
+        id: widgetId,
+        dashboardId,
+        dashboard: { userId },
+      },
       data: {
-        config: dto.config,
+        config: dto.config as Prisma.InputJsonValue,
         position: dto.position,
       },
+    });
+
+    if (result.count === 0) {
+      throw new NotFoundException('Widget not found');
+    }
+
+    return this.prisma.widget.findUnique({
+      where: { id: widgetId },
     });
   }
 
   async deleteWidget(userId: string, dashboardId: string, widgetId: string) {
-    await this.requireDashboardOwnership(userId, dashboardId);
-    await this.requireWidgetExists(widgetId, dashboardId);
-
-    await this.prisma.widget.delete({
-      where: { id: widgetId },
+    // Atomic delete with ownership check via relation filter to prevent TOCTOU
+    const result = await this.prisma.widget.deleteMany({
+      where: {
+        id: widgetId,
+        dashboardId,
+        dashboard: { userId },
+      },
     });
+
+    if (result.count === 0) {
+      throw new NotFoundException('Widget not found');
+    }
 
     return { success: true };
   }
 
-  async updateLayout(userId: string, dashboardId: string, layout: Prisma.InputJsonValue) {
-    await this.requireDashboardOwnership(userId, dashboardId);
+  async updateLayout(userId: string, dashboardId: string, layout: Record<string, unknown>) {
+    // Atomic update with ownership check to prevent TOCTOU race condition
+    const result = await this.prisma.dashboard.updateMany({
+      where: { id: dashboardId, userId },
+      data: { layout: layout as Prisma.InputJsonValue },
+    });
 
-    return this.prisma.dashboard.update({
+    if (result.count === 0) {
+      throw new NotFoundException('Dashboard not found');
+    }
+
+    return this.prisma.dashboard.findUnique({
       where: { id: dashboardId },
-      data: { layout },
+      include: { widgets: true },
     });
   }
 
@@ -159,20 +184,16 @@ export class DashboardsService {
     }
   }
 
-  private async requireWidgetExists(widgetId: string, dashboardId: string) {
-    const widget = await this.prisma.widget.findFirst({
-      where: { id: widgetId, dashboardId },
-    });
-
-    if (!widget) {
-      throw new NotFoundException('Widget not found');
-    }
-  }
-
-  private validateWidgetType(type: string) {
-    const validTypes = ['TASK_COMPLETION', 'PROGRESS_CHART', 'TEAM_LOAD', 'OVERDUE_ALERTS', 'RECENT_ACTIVITY'];
+  private validateWidgetType(type: WidgetType) {
+    const validTypes: WidgetType[] = [
+      'TASK_COMPLETION',
+      'PROGRESS_CHART',
+      'TEAM_LOAD',
+      'OVERDUE_ALERTS',
+      'RECENT_ACTIVITY',
+    ];
     if (!validTypes.includes(type)) {
-      throw new ForbiddenException('Invalid widget type');
+      throw new BadRequestException('Invalid widget type');
     }
   }
 }

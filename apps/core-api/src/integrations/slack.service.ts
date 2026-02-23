@@ -76,9 +76,13 @@ export class SlackService {
     }
   }
 
+  private escapeSlackText(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
   private formatTaskMessage(task: TaskWithAssignee, event: string): string {
     const assigneeName = task.assignee?.displayName || 'Unassigned';
-    return `${event}: ${task.title} (Assignee: ${assigneeName})`;
+    return `${this.escapeSlackText(event)}: ${this.escapeSlackText(task.title)} (Assignee: ${this.escapeSlackText(assigneeName)})`;
   }
 
   private buildTaskBlocks(
@@ -91,6 +95,9 @@ export class SlackService {
     elements?: Array<{ type: string; text: string }>;
   }> {
     const assigneeName = task.assignee?.displayName || 'Unassigned';
+    const escapedTitle = this.escapeSlackText(task.title);
+    const escapedEvent = this.escapeSlackText(event);
+    const escapedAssignee = this.escapeSlackText(assigneeName);
 
     const blocks: Array<{
       type: string;
@@ -102,8 +109,8 @@ export class SlackService {
         text: {
           type: 'mrkdwn',
           text: taskUrl
-            ? `*${event}*\n<${taskUrl}|${task.title}>`
-            : `*${event}*\n${task.title}`,
+            ? `*${escapedEvent}*\n<${taskUrl}|${escapedTitle}>`
+            : `*${escapedEvent}*\n${escapedTitle}`,
         },
       },
       {
@@ -111,7 +118,7 @@ export class SlackService {
         elements: [
           {
             type: 'mrkdwn',
-            text: `Assignee: ${assigneeName}`,
+            text: `Assignee: ${escapedAssignee}`,
           },
         ],
       },

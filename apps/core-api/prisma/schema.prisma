@@ -65,6 +65,7 @@ model User {
   workspaceMemberships WorkspaceMembership[]
   projectMemberships   ProjectMembership[]
   invitationsCreated   Invitation[] @relation("InvitationCreatedBy")
+  dashboards           Dashboard[]
 }
 
 model WorkspaceMembership {
@@ -353,6 +354,7 @@ model Dashboard {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   widgets Widget[]
 
   @@index([userId])

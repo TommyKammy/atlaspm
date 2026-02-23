@@ -3,11 +3,19 @@ import {
   Post,
   Body,
   Headers,
+  Req,
   UnauthorizedException,
   BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { SlackService } from './slack.service';
+import type { Request } from 'express';
+import * as crypto from 'crypto';
+
+interface RawBodyRequest extends Request {
+  rawBody?: Buffer;
+}
 
 interface SlackEvent {
   type: string;
@@ -23,6 +31,54 @@ interface SlackEvent {
   challenge?: string;
 }
 
+const SLACK_MAX_SKEW_SECONDS = 300; // 5 minutes
+
+/**
+ * Verify Slack webhook signature to prevent forged requests
+ * https://api.slack.com/authentication/verifying-requests-from-slack
+ */
+function verifySlackSignature(
+  signingSecret: string,
+  signatureHeader: string | undefined,
+  timestampHeader: string | undefined,
+  rawBody: Buffer | undefined,
+): void {
+  if (!signatureHeader || !timestampHeader) {
+    throw new UnauthorizedException('Missing Slack signature headers');
+  }
+
+  if (!rawBody || !Buffer.isBuffer(rawBody)) {
+    throw new UnauthorizedException('Raw body not available');
+  }
+
+  // Replay protection: verify timestamp is within 5 minutes
+  const now = Math.floor(Date.now() / 1000);
+  const timestamp = Number.parseInt(timestampHeader, 10);
+  if (!Number.isFinite(timestamp) || Math.abs(now - timestamp) > SLACK_MAX_SKEW_SECONDS) {
+    throw new UnauthorizedException('Stale Slack request (possible replay)');
+  }
+
+  // Slack signature format: "v0=hex"
+  if (!signatureHeader.startsWith('v0=')) {
+    throw new UnauthorizedException('Unsupported Slack signature version');
+  }
+
+  const baseString = `v0:${timestampHeader}:${rawBody.toString('utf8')}`;
+  const computedHash = crypto
+    .createHmac('sha256', signingSecret)
+    .update(baseString, 'utf8')
+    .digest('hex');
+  const computedSignature = `v0=${computedHash}`;
+
+  // Constant-time comparison to prevent timing attacks
+  const computedBuf = Buffer.from(computedSignature, 'utf8');
+  const receivedBuf = Buffer.from(signatureHeader, 'utf8');
+  
+  if (computedBuf.length !== receivedBuf.length || !crypto.timingSafeEqual(computedBuf, receivedBuf)) {
+    throw new UnauthorizedException('Invalid Slack signature');
+  }
+}
+
 @Controller('webhooks/slack')
 export class SlackWebhookController {
   private readonly logger = new Logger(SlackWebhookController.name);
@@ -30,13 +86,24 @@ export class SlackWebhookController {
   constructor(private readonly slackService: SlackService) {}
 
   @Post('events')
+  @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   async handleEvent(
+    @Req() req: RawBodyRequest,
     @Body() payload: SlackEvent,
     @Headers('x-slack-signature') signature?: string,
     @Headers('x-slack-request-timestamp') timestamp?: string,
   ): Promise<{ challenge?: string; ok?: boolean }> {
     this.logger.debug('Received Slack event', { type: payload.type });
 
+    // Verify signature BEFORE processing anything (including challenge)
+    const signingSecret = process.env.SLACK_SIGNING_SECRET;
+    if (signingSecret) {
+      verifySlackSignature(signingSecret, signature, timestamp, req.rawBody);
+    } else {
+      this.logger.warn('SLACK_SIGNING_SECRET not configured, skipping signature verification');
+    }
+
+    // Now safe to return challenge
     if (payload.challenge) {
       return { challenge: payload.challenge };
     }

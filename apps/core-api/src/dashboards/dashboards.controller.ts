@@ -18,21 +18,29 @@ import {
   CreateWidgetDto,
   UpdateWidgetDto,
 } from './dashboards.service';
-import { IsString, IsOptional, ValidateNested } from 'class-validator';
+import { IsString, IsOptional, ValidateNested, IsInt, Min, Max, IsEnum, IsObject } from 'class-validator';
 import { Type } from 'class-transformer';
-import { Prisma } from '@prisma/client';
+import { Prisma, WidgetType } from '@prisma/client';
 
 class PositionDto {
-  @IsString()
+  @IsInt()
+  @Min(0)
+  @Max(10000)
   x!: number;
 
-  @IsString()
+  @IsInt()
+  @Min(0)
+  @Max(10000)
   y!: number;
 
-  @IsString()
+  @IsInt()
+  @Min(1)
+  @Max(10000)
   w!: number;
 
-  @IsString()
+  @IsInt()
+  @Min(1)
+  @Max(10000)
   h!: number;
 }
 
@@ -41,7 +49,8 @@ class CreateDashboardBody implements CreateDashboardDto {
   name!: string;
 
   @IsOptional()
-  layout?: Prisma.InputJsonValue;
+  @IsObject()
+  layout?: Record<string, unknown>;
 }
 
 class UpdateDashboardBody implements UpdateDashboardDto {
@@ -50,15 +59,17 @@ class UpdateDashboardBody implements UpdateDashboardDto {
   name?: string;
 
   @IsOptional()
-  layout?: Prisma.InputJsonValue;
+  @IsObject()
+  layout?: Record<string, unknown>;
 }
 
 class CreateWidgetBody implements CreateWidgetDto {
-  @IsString()
-  type!: string;
+  @IsEnum(WidgetType)
+  type!: WidgetType;
 
   @IsOptional()
-  config?: Prisma.InputJsonValue;
+  @IsObject()
+  config?: Record<string, unknown>;
 
   @ValidateNested()
   @Type(() => PositionDto)
@@ -67,7 +78,8 @@ class CreateWidgetBody implements CreateWidgetDto {
 
 class UpdateWidgetBody implements UpdateWidgetDto {
   @IsOptional()
-  config?: Prisma.InputJsonValue;
+  @IsObject()
+  config?: Record<string, unknown>;
 
   @IsOptional()
   @ValidateNested()
@@ -76,7 +88,8 @@ class UpdateWidgetBody implements UpdateWidgetDto {
 }
 
 class UpdateLayoutBody {
-  layout!: Prisma.InputJsonValue;
+  @IsObject()
+  layout!: Record<string, unknown>;
 }
 
 @Controller('dashboards')
