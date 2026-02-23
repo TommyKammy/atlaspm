@@ -3,10 +3,15 @@
   "private": true,
   "version": "0.1.0",
   "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": "9.15.4"
+  },
   "scripts": {
     "dev": "pnpm -r --parallel --if-present dev",
     "build": "pnpm -r --if-present build",
     "lint": "pnpm -r --if-present lint",
+    "type-check": "pnpm -r --if-present type-check",
     "test": "pnpm -r --if-present test",
     "e2e:up": "./scripts/e2e-up.sh",
     "e2e": "./scripts/run-e2e.sh",

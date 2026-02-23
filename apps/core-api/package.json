@@ -8,6 +8,7 @@
     "build": "nest build",
     "start": "node dist/main.js",
     "lint": "eslint src --ext .ts",
+    "type-check": "tsc --noEmit",
     "test": "pnpm prisma:generate && DATABASE_URL=${DATABASE_URL:-postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public} pnpm prisma:migrate && DATABASE_URL=${DATABASE_URL:-postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public} vitest run",
     "test:watch": "vitest",
     "prisma:generate": "prisma generate",

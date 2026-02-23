@@ -38,6 +38,3 @@ ALTER TABLE "Invitation" ADD CONSTRAINT "Invitation_workspaceId_fkey" FOREIGN KE
 
 -- AddForeignKey
 ALTER TABLE "Invitation" ADD CONSTRAINT "Invitation_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- RenameIndex
-ALTER INDEX "task_mentions_task_id_mentioned_user_id_source_type_source_id_k" RENAME TO "task_mentions_task_id_mentioned_user_id_source_type_source__key";
