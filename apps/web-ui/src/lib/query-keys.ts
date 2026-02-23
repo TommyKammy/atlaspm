@@ -16,4 +16,8 @@ export const queryKeys = {
   taskAudit: (taskId: string) => ['task', taskId, 'audit'] as const,
   taskMentions: (taskId: string) => ['task', taskId, 'mentions'] as const,
   taskAttachments: (taskId: string) => ['task', taskId, 'attachments'] as const,
+  customFields: {
+    definitions: (projectId: string) => ['project', projectId, 'custom-fields', 'definitions'] as const,
+    values: (taskId: string) => ['task', taskId, 'custom-fields', 'values'] as const,
+  },
 };

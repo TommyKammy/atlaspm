@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import TaskDescriptionEditor from '@/components/editor/TaskDescriptionEditor';
 import { Textarea } from '@/components/ui/textarea';
+import CustomFieldsEditor from '@/components/custom-fields-editor';
 
 function formatAuditEvent(event: AuditEvent) {
   const action = event.action;
@@ -236,6 +237,7 @@ export default function TaskDetailDrawer({
                   ))}
                 </div>
               </section>
+{taskId ? <CustomFieldsEditor projectId={projectId} taskId={taskId} members={members} /> : null}
             </div>
           ) : null}
 

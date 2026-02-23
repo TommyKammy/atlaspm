@@ -139,7 +139,7 @@ export default function TimelineView({ tasks, sections, onTaskClick, onTaskDateC
           {(['day', 'week', 'month'] as ZoomLevel[]).map((level) => (
             <Button
               key={level}
-              variant={zoom === level ? 'secondary' : 'ghost'}
+              variant={zoom === level ? 'default' : 'ghost'}
               size="sm"
               onClick={() => setZoom(level)}
               className="text-xs capitalize"

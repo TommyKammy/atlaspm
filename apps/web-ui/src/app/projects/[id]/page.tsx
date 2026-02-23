@@ -7,9 +7,10 @@ import { useMemo, useState } from 'react';
 import ProjectBoard from '@/components/project-board';
 import CalendarView from '@/components/calendar-view';
 import TimelineView from '@/components/timeline-view';
+import CustomFieldsDialog from '@/components/custom-fields-dialog';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { Project, Section, SectionTaskGroup, Task } from '@/lib/types';
+import type { Project, ProjectMember, Section, SectionTaskGroup, Task } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +25,7 @@ export default function ProjectPage() {
   const [priorityFilter, setPriorityFilter] = useState<'ALL' | NonNullable<Task['priority']>>('ALL');
   const [view, setView] = useState<'List' | 'Board' | 'Calendar' | 'Timeline'>('List');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const queryClient = useQueryClient();
 
   const projectsQuery = useQuery<Project[]>({
@@ -48,6 +50,17 @@ export default function ProjectPage() {
     enabled: Boolean(projectId) && (view === 'Calendar' || view === 'Timeline'),
   });
 
+  const membersQuery = useQuery<ProjectMember[]>({
+    queryKey: queryKeys.projectMembers(projectId),
+    queryFn: () => api(`/projects/${projectId}/members`),
+    enabled: Boolean(projectId),
+  });
+
+  const meQuery = useQuery<{ id: string }>({
+    queryKey: queryKeys.me,
+    queryFn: () => api('/me'),
+  });
+
   const projectProgress = useMemo(() => {
     if (!allTasksQuery.data?.length) return 0;
     const totalProgress = allTasksQuery.data.reduce((sum, task) => sum + task.progressPercent, 0);
@@ -64,6 +77,13 @@ export default function ProjectPage() {
       total: allTasksQuery.data.length,
     };
   }, [allTasksQuery.data]);
+
+  useMemo(() => {
+    if (membersQuery.data && meQuery.data) {
+      const myMembership = membersQuery.data.find(m => m.userId === meQuery.data.id);
+      setIsAdmin(myMembership?.role === 'ADMIN');
+    }
+  }, [membersQuery.data, meQuery.data]);
 
   const createSection = useMutation({
     mutationFn: (name: string) =>
@@ -103,6 +123,7 @@ export default function ProjectPage() {
               <Link href={`/projects/${projectId}/rules`} data-testid="rules-page-link">
                 <Button variant="outline" size="sm">Rules</Button>
               </Link>
+              <CustomFieldsDialog projectId={projectId} isAdmin={isAdmin} />
             </div>
             {allTasksQuery.data && allTasksQuery.data.length > 0 && (
               <div className="flex items-center gap-3 text-xs">

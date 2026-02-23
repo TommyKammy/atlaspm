@@ -12,9 +12,9 @@ const locales = {
 };
 
 const localizer = dateFnsLocalizer({
-  format,
-  parse,
-  startOfWeek,
+  format: (date, formatStr, options) => format(date, formatStr, options as Parameters<typeof format>[2]),
+  parse: (dateStr, formatStr, referenceDate, options) => parse(dateStr, formatStr, referenceDate, options as Parameters<typeof parse>[3]),
+  startOfWeek: (date, options) => startOfWeek(date, options as Parameters<typeof startOfWeek>[1]),
   getDay,
   locales,
 });

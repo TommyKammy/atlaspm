@@ -103,7 +103,8 @@ model Project {
   sections    Section[]
   tasks       Task[]
   rules       Rule[]
-  webhooks    Webhook[]
+  webhooks         Webhook[]
+  customFields     CustomFieldDefinition[]
 }
 
 model ProjectMembership {

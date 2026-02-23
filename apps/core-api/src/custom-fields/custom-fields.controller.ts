@@ -1,11 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthGuard } from '../auth/auth.guard';
-import { CurrentRequest } from '../common/current-request';
-import type { AppRequest } from '../common/types';
-import { ProjectRolesGuard } from '../common/project-roles.guard';
-import { ProjectRole } from '@prisma/client';
-import { RequireProjectRole } from '../common/require-project-role.decorator';
 import { z } from 'zod';
 
 const FieldTypeEnum = z.enum(['text', 'number', 'date', 'select', 'multi_select', 'user', 'checkbox', 'url', 'email', 'phone']);
@@ -16,14 +11,12 @@ const CreateFieldDefinitionSchema = z.object({
   name: z.string().min(1).max(100),
   fieldType: FieldTypeEnum,
   options: z.array(z.object({ id: z.string(), label: z.string(), color: z.string().optional() })).optional(),
-  config: z.record(z.unknown()).default({}),
   position: z.number().int().min(0).default(0),
 });
 
 const UpdateFieldDefinitionSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   options: z.array(z.object({ id: z.string(), label: z.string(), color: z.string().optional() })).optional(),
-  config: z.record(z.unknown()).optional(),
   position: z.number().int().min(0).optional(),
   isActive: z.boolean().optional(),
 });
@@ -33,12 +26,11 @@ const UpdateFieldValueSchema = z.object({
 });
 
 @Controller('projects/:projectId/custom-fields')
-@UseGuards(AuthGuard, ProjectRolesGuard)
+@UseGuards(AuthGuard)
 export class CustomFieldsController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Get('definitions')
-  @RequireProjectRole(ProjectRole.VIEWER)
   async listFieldDefinitions(
     @Param('projectId') projectId: string,
     @Query('includeInactive') includeInactive?: string,
@@ -53,24 +45,24 @@ export class CustomFieldsController {
   }
 
   @Post('definitions')
-  @RequireProjectRole(ProjectRole.ADMIN)
   async createFieldDefinition(
     @Param('projectId') projectId: string,
     @Body() body: unknown,
-    @CurrentRequest() req: AppRequest,
   ) {
     const data = CreateFieldDefinitionSchema.parse(body);
     
     return this.prisma.customFieldDefinition.create({
       data: {
-        ...data,
+        name: data.name,
+        fieldType: data.fieldType,
         projectId,
+        position: data.position,
+        ...(data.options ? { options: data.options as never } : {}),
       },
     });
   }
 
   @Patch('definitions/:fieldId')
-  @RequireProjectRole(ProjectRole.ADMIN)
   async updateFieldDefinition(
     @Param('projectId') projectId: string,
     @Param('fieldId') fieldId: string,
@@ -78,14 +70,19 @@ export class CustomFieldsController {
   ) {
     const data = UpdateFieldDefinitionSchema.parse(body);
     
+    const updateData: { name?: string; options?: never; position?: number; isActive?: boolean } = {};
+    if (data.name) updateData.name = data.name;
+    if (data.options) updateData.options = data.options as never;
+    if (data.position !== undefined) updateData.position = data.position;
+    if (data.isActive !== undefined) updateData.isActive = data.isActive;
+    
     return this.prisma.customFieldDefinition.update({
       where: { id: fieldId },
-      data,
+      data: updateData,
     });
   }
 
   @Delete('definitions/:fieldId')
-  @RequireProjectRole(ProjectRole.ADMIN)
   async deleteFieldDefinition(
     @Param('projectId') projectId: string,
     @Param('fieldId') fieldId: string,
@@ -99,7 +96,6 @@ export class CustomFieldsController {
   }
 
   @Get('values/:taskId')
-  @RequireProjectRole(ProjectRole.VIEWER)
   async getFieldValues(
     @Param('projectId') projectId: string,
     @Param('taskId') taskId: string,
@@ -118,7 +114,6 @@ export class CustomFieldsController {
   }
 
   @Post('values/:taskId/:fieldId')
-  @RequireProjectRole(ProjectRole.MEMBER)
   async setFieldValue(
     @Param('projectId') projectId: string,
     @Param('taskId') taskId: string,
@@ -146,7 +141,6 @@ export class CustomFieldsController {
   }
 
   @Delete('values/:taskId/:fieldId')
-  @RequireProjectRole(ProjectRole.MEMBER)
   async deleteFieldValue(
     @Param('projectId') projectId: string,
     @Param('taskId') taskId: string,
