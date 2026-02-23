@@ -61,22 +61,24 @@ function RuleEditor({
     });
   };
 
+  const fieldBase = 'h-8 rounded border bg-background px-2 text-xs';
+
   return (
-    <div className="mt-3 space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+    <div className="mt-3 space-y-3 rounded-md border bg-card p-3">
       <div className="grid gap-2 md:grid-cols-2">
-        <label className="text-sm text-slate-600">
+        <label className="space-y-1 text-xs text-muted-foreground">
           Rule name
           <input
-            className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+            className={fieldBase}
             value={name}
             data-testid={`rule-name-input-${rule.id}`}
             onChange={(e) => setName(e.target.value)}
           />
         </label>
-        <label className="text-sm text-slate-600">
+        <label className="space-y-1 text-xs text-muted-foreground">
           Trigger
           <select
-            className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+            className={fieldBase}
             value={trigger}
             onChange={(e) => setTrigger(e.target.value as RuleDefinition['trigger'])}
           >
@@ -88,10 +90,10 @@ function RuleEditor({
       </div>
 
       <div className="grid gap-2 md:grid-cols-4">
-        <label className="text-sm text-slate-600">
+        <label className="space-y-1 text-xs text-muted-foreground">
           Condition op
           <select
-            className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+            className={fieldBase}
             value={condition.op}
             onChange={(e) =>
               setCondition((prev) => ({ ...prev, op: e.target.value as RuleCondition['op'] }))
@@ -107,19 +109,19 @@ function RuleEditor({
         </label>
         {condition.op === 'between' ? (
           <>
-            <label className="text-sm text-slate-600">
+            <label className="space-y-1 text-xs text-muted-foreground">
               Min
               <input
-                className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                className={fieldBase}
                 type="number"
                 value={condition.min ?? 0}
                 onChange={(e) => setCondition((prev) => ({ ...prev, min: Number(e.target.value) }))}
               />
             </label>
-            <label className="text-sm text-slate-600">
+            <label className="space-y-1 text-xs text-muted-foreground">
               Max
               <input
-                className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                className={fieldBase}
                 type="number"
                 value={condition.max ?? 100}
                 onChange={(e) => setCondition((prev) => ({ ...prev, max: Number(e.target.value) }))}
@@ -127,20 +129,20 @@ function RuleEditor({
             </label>
           </>
         ) : (
-          <label className="text-sm text-slate-600">
+          <label className="space-y-1 text-xs text-muted-foreground">
             Value
             <input
-              className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+              className={fieldBase}
               type="number"
               value={condition.value ?? 0}
               onChange={(e) => setCondition((prev) => ({ ...prev, value: Number(e.target.value) }))}
             />
           </label>
         )}
-        <label className="text-sm text-slate-600">
+        <label className="space-y-1 text-xs text-muted-foreground">
           Set status
           <select
-            className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+            className={fieldBase}
             value={actionStatus}
             onChange={(e) => setActionStatus(e.target.value as 'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED')}
           >
@@ -152,21 +154,21 @@ function RuleEditor({
         </label>
       </div>
 
-      <div className="flex items-center gap-5 text-sm text-slate-700">
+      <div className="flex items-center gap-4 text-xs text-muted-foreground-foreground">
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={setNow} onChange={(e) => setSetNow(e.target.checked)} />
-          Set completedAt now
+          completedAt now
         </label>
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={setNull} onChange={(e) => setSetNull(e.target.checked)} />
-          Set completedAt null
+          completedAt null
         </label>
       </div>
 
       <div className="flex gap-2">
         <button
           type="button"
-          className="rounded bg-slate-900 px-3 py-1 text-sm text-white"
+          className="h-8 rounded bg-primary px-3 text-xs font-medium text-primary-foreground"
           data-testid={`rule-save-${rule.id}`}
           onClick={() => void save()}
         >
@@ -174,7 +176,7 @@ function RuleEditor({
         </button>
         <button
           type="button"
-          className="rounded border border-slate-300 px-3 py-1 text-sm"
+          className="h-8 rounded border bg-background px-3 text-xs text-muted-foreground-foreground hover:text-foreground"
           onClick={onCancel}
         >
           Cancel
@@ -223,30 +225,30 @@ export default function RulesPage() {
 
   return (
     <div className="space-y-3">
-      <header className="rounded-xl border border-slate-200 bg-white p-4">
-        <h1 className="text-2xl font-semibold text-slate-900">Rules</h1>
-        <p className="mt-1 text-sm text-slate-500">Edit rule names and definitions for progress automation.</p>
-      </header>
-
       {rules.map((rule) => (
-        <article key={rule.id} className="rounded-xl border border-slate-200 bg-white p-4" data-testid={`rule-card-${rule.id}`}>
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <article
+          key={rule.id}
+          data-testid={`rule-card-${rule.id}`}
+          className="relative overflow-hidden rounded-lg border bg-muted/40 p-4"
+        >
+          {rule.enabled ? <div className="absolute inset-y-0 left-0 w-1 bg-primary" /> : null}
+          <div className="ml-1 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="font-medium text-slate-900" data-testid={`rule-name-${rule.id}`}>{rule.name}</div>
-              <div className="text-xs text-slate-500">template: {rule.templateKey} | cooldown: {rule.cooldownSec}s</div>
+              <div className="font-medium" data-testid={`rule-name-${rule.id}`}>{rule.name}</div>
+              <div className="text-[11px] text-muted-foreground-foreground">template: {rule.templateKey} | cooldown: {rule.cooldownSec}s</div>
             </div>
             <div className="flex gap-2">
               <button
                 type="button"
-                className="rounded border border-slate-300 px-3 py-1 text-sm"
-                onClick={() => setEditingRuleId(rule.id)}
                 data-testid={`rule-edit-${rule.id}`}
+                className="h-8 rounded border bg-background px-3 text-xs text-muted-foreground-foreground hover:text-foreground"
+                onClick={() => setEditingRuleId(rule.id)}
               >
                 Edit
               </button>
               <button
                 type="button"
-                className="rounded border border-slate-300 px-3 py-1 text-sm"
+                className="h-8 rounded border bg-background px-3 text-xs text-muted-foreground-foreground hover:text-foreground"
                 onClick={() => toggleMutation.mutate({ id: rule.id, enabled: rule.enabled })}
               >
                 {rule.enabled ? 'Disable' : 'Enable'}
@@ -255,19 +257,21 @@ export default function RulesPage() {
           </div>
 
           {editingRuleId === rule.id ? (
-            <RuleEditor
-              rule={rule}
-              onCancel={() => setEditingRuleId(null)}
-              onSave={async (patch) => {
-                await patchMutation.mutateAsync({ id: rule.id, patch });
-              }}
-            />
+            <div className="ml-1">
+              <RuleEditor
+                rule={rule}
+                onCancel={() => setEditingRuleId(null)}
+                onSave={async (patch) => {
+                  await patchMutation.mutateAsync({ id: rule.id, patch });
+                }}
+              />
+            </div>
           ) : null}
         </article>
       ))}
 
       {!rules.length ? (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500">No rules found.</div>
+        <div className="rounded-lg border border-dashed bg-card p-6 text-sm text-muted-foreground-foreground">No rules found.</div>
       ) : null}
     </div>
   );

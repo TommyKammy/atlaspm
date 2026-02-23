@@ -7,12 +7,19 @@ import { useMemo, useState } from 'react';
 import ProjectBoard from '@/components/project-board';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { Project, Section, SectionTaskGroup } from '@/lib/types';
+import type { Project, Section, SectionTaskGroup, Task } from '@/lib/types';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 
 export default function ProjectPage() {
   const params = useParams<{ id: string }>();
   const projectId = params.id;
   const [newSection, setNewSection] = useState('');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | Task['status']>('ALL');
+  const [priorityFilter, setPriorityFilter] = useState<'ALL' | NonNullable<Task['priority']>>('ALL');
+  const [view, setView] = useState('List');
   const queryClient = useQueryClient();
 
   const projectsQuery = useQuery<Project[]>({
@@ -52,50 +59,106 @@ export default function ProjectPage() {
   if (!projectId) return <div>Loading...</div>;
 
   return (
-    <div className="space-y-5">
-      <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">{project?.name ?? 'Project'}</h1>
-          <p className="mt-1 text-sm text-slate-500">Manage sections, tasks, assignees, and rules in one list view.</p>
+    <div className="space-y-4">
+      <header className="rounded-lg border bg-card p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold">{project?.name ?? 'Project'}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Task list grouped by sections with manual ordering.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge>{sectionsQuery.data?.length ?? 0} sections</Badge>
+            <Link href={`/projects/${projectId}/rules`} data-testid="rules-page-link">
+              <Button variant="outline" size="sm">Rules</Button>
+            </Link>
+          </div>
         </div>
-        <Link
-          className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-          href={`/projects/${projectId}/rules`}
-          data-testid="rules-page-link"
-        >
-          Open Rules
-        </Link>
       </header>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-4">
+      <section className="rounded-lg border bg-card p-4">
+        <div className="grid gap-2 md:grid-cols-6">
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search tasks..."
+            className="md:col-span-2"
+          />
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as 'ALL' | Task['status'])}
+            className="h-9 rounded-md border bg-background px-3 text-sm"
+            data-testid="status-filter"
+          >
+            <option value="ALL">Status: All</option>
+            <option value="TODO">TODO</option>
+            <option value="IN_PROGRESS">IN_PROGRESS</option>
+            <option value="DONE">DONE</option>
+            <option value="BLOCKED">BLOCKED</option>
+          </select>
+          <select
+            value={priorityFilter}
+            onChange={(e) => setPriorityFilter(e.target.value as 'ALL' | NonNullable<Task['priority']>)}
+            className="h-9 rounded-md border bg-background px-3 text-sm"
+            data-testid="priority-filter"
+          >
+            <option value="ALL">Priority: All</option>
+            <option value="LOW">LOW</option>
+            <option value="MEDIUM">MEDIUM</option>
+            <option value="HIGH">HIGH</option>
+            <option value="URGENT">URGENT</option>
+          </select>
+          <select
+            value={view}
+            onChange={(e) => setView(e.target.value)}
+            className="h-9 rounded-md border bg-background px-3 text-sm"
+          >
+            <option>List</option>
+            <option>Board</option>
+          </select>
+          <Button
+            className="md:justify-self-end"
+            onClick={() => {
+              const el = sectionsQuery.data?.[0]?.id
+                ? document.querySelector(`[data-testid="quick-add-open-${sectionsQuery.data[0].id}"]`) as HTMLButtonElement | null
+                : null;
+              el?.click();
+            }}
+          >
+            Add Task
+          </Button>
+        </div>
+      </section>
+
+      <section className="rounded-lg border bg-card p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <input
-            className="min-w-64 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+          <Input
             value={newSection}
             onChange={(e) => setNewSection(e.target.value)}
             placeholder="Section name"
             data-testid="new-section-input"
+            className="min-w-56 flex-1"
             onKeyDown={(e) => {
               if (e.key === 'Enter' && newSection.trim() && !createSection.isPending) {
                 void createSection.mutateAsync(newSection.trim());
               }
             }}
           />
-          <button
-            className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+          <Button
             data-testid="create-section-btn"
             onClick={() => void createSection.mutateAsync(newSection.trim())}
             disabled={!newSection.trim() || createSection.isPending}
           >
             {createSection.isPending ? 'Adding...' : 'Add Section'}
-          </button>
-          <span className="text-xs text-slate-500">
-            {sectionsQuery.data?.length ?? 0} sections
-          </span>
+          </Button>
         </div>
       </section>
 
-      <ProjectBoard projectId={projectId} />
+      <ProjectBoard
+        projectId={projectId}
+        search={search}
+        statusFilter={statusFilter}
+        priorityFilter={priorityFilter}
+      />
     </div>
   );
 }

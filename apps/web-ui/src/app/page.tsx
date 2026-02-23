@@ -6,6 +6,8 @@ import { useState } from 'react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { Project } from '@/lib/types';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 export default function HomePage() {
   const [name, setName] = useState('');
@@ -34,23 +36,22 @@ export default function HomePage() {
   const activeWorkspaceId = workspaceId || workspaces[0]?.id || '';
 
   return (
-    <div className="space-y-6">
-      <header className="rounded-xl border border-slate-200 bg-white p-5">
-        <h1 className="text-3xl font-semibold text-slate-900">AtlasPM</h1>
-        <p className="mt-2 text-sm text-slate-500">Asana-like list planning powered by AtlasPM core APIs.</p>
+    <div className="space-y-4">
+      <header className="rounded-lg border bg-card p-4">
+        <h1 className="text-xl font-semibold">AtlasPM</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Asana-like list planning powered by AtlasPM core APIs.</p>
       </header>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="text-lg font-semibold text-slate-900">Create Project</h2>
+      <section className="rounded-lg border bg-card p-4">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.1em] text-muted-foreground">Create Project</h2>
         <div className="mt-3 grid gap-2 md:grid-cols-3">
-          <input
-            className="rounded-md border border-slate-300 px-3 py-2"
+          <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Project name"
           />
           <select
-            className="rounded-md border border-slate-300 px-3 py-2"
+            className="h-9 rounded-md border bg-background px-3 text-sm"
             value={activeWorkspaceId}
             onChange={(e) => setWorkspaceId(e.target.value)}
           >
@@ -58,26 +59,25 @@ export default function HomePage() {
               <option key={w.id} value={w.id}>{w.name}</option>
             ))}
           </select>
-          <button
-            className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+          <Button
             onClick={() => createProject.mutate({ workspaceId: activeWorkspaceId, name })}
             disabled={!name.trim() || !activeWorkspaceId || createProject.isPending}
             data-testid="create-project-btn"
           >
             {createProject.isPending ? 'Creating...' : 'Create Project'}
-          </button>
+          </Button>
         </div>
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="text-lg font-semibold text-slate-900">Project Board</h2>
+      <section className="rounded-lg border bg-card p-4">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.1em] text-muted-foreground">Project Board</h2>
         {projects.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-500">No projects yet. Create one to start planning.</p>
+          <p className="mt-3 text-sm text-muted-foreground">No projects yet. Create one to start planning.</p>
         ) : (
           <ul className="mt-3 space-y-2">
             {projects.map((p) => (
               <li key={p.id}>
-                <Link className="text-sm font-medium text-sky-700 hover:text-sky-900" href={`/projects/${p.id}`}>
+                <Link className="text-sm font-medium hover:text-primary" href={`/projects/${p.id}`}>
                   {p.name}
                 </Link>
               </li>
@@ -86,7 +86,7 @@ export default function HomePage() {
         )}
       </section>
 
-      <Link className="text-xs text-slate-500 hover:text-slate-700" href="/login">
+      <Link className="text-xs text-muted-foreground hover:text-foreground" href="/login">
         Switch login identity
       </Link>
     </div>

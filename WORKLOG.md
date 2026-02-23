@@ -127,3 +127,53 @@
   - `pnpm e2e:rebuild`
 - Risks/known gaps:
   - Cross-section task move remains API-covered in E2E for deterministic stability; UI drag between sections needs further hardening to be fully deterministic in Playwright.
+
+## 2026-02-23 - Modern Dark UI Refresh (Linear/Vercel-inspired)
+- What changed:
+  - Added dark design tokens and global styling defaults in `/apps/web-ui/src/app/globals.css`:
+    - required color tokens, Inter font usage, base font size 14px.
+  - Introduced persistent shell component at `/apps/web-ui/src/components/layout/AppShell.tsx`:
+    - 240px sidebar, active project highlight, sticky header with project context/actions.
+    - mobile drawer slide animation with subtle motion.
+  - Modernized task list UI in `/apps/web-ui/src/components/project-board.tsx`:
+    - 44px rows, muted hover, thin borders, compact controls.
+    - progress bar (4px) with accent/success fill.
+    - section header uppercase styling + task count badge.
+    - assignee avatar trigger (24px), hover tooltip, dark combobox dropdown.
+  - Restyled rules page in `/apps/web-ui/src/app/projects/[id]/rules/page.tsx`:
+    - surface-muted cards, enabled accent rail, compact editor form.
+  - Added UI design reference doc `/docs/ui-design.md`.
+- Why:
+  - Align AtlasPM UI with modern startup visual language while preserving API-driven architecture and existing behavior.
+- How tested:
+  - `pnpm lint`
+  - `pnpm test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Style refresh introduces broader visual change; final fit/finish should still be validated in manual browser QA across desktop/mobile breakpoints.
+
+## 2026-02-23 - shadcn Tasks-style UX + Theme Persistence
+- What changed:
+  - Adopted shadcn token/theming baseline:
+    - `next-themes` provider with class-based dark mode
+    - Tailwind `darkMode: [\"class\"]`
+    - shadcn-style `:root/.dark` HSL tokens in `globals.css`
+  - Added/used shadcn-style UI primitives (`button`, `input`, `badge`, `table`, `popover`, `command`, `tooltip`, `dropdown-menu`, `sheet`, `scroll-area`, `separator`).
+  - Rebuilt persistent app shell with project sidebar + top header and theme toggle.
+  - Refined project page toward shadcn Tasks structure:
+    - toolbar (search/status/priority/view/add)
+    - dense table rows grouped by sections
+    - section header + count badge + inline quick add
+  - Updated assignee picker to Popover + Command combobox pattern with member suggestions.
+  - Kept rules editing available with compact card/editor style.
+  - Standardized query key conventions to project-scoped keys (`['project', id, ...]`).
+  - Extended Playwright E2E with theme toggle persistence (dark/light survives reload).
+- Why:
+  - Align AtlasPM UX with shadcn Tasks aesthetics while preserving existing behavior, API boundaries, and no-refresh interactions.
+- How tested:
+  - `pnpm lint`
+  - `docker compose -f infra/docker/docker-compose.yml up -d postgres && pnpm test`
+  - `pnpm e2e:rebuild`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - The table/toolbar are intentionally minimal; additional task-view controls can be expanded later without changing API contracts.

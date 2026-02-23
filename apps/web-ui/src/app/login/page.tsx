@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { setToken } from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,24 +27,25 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="mx-auto max-w-lg rounded-xl border border-slate-200 bg-white p-6">
-      <h1 className="mb-4 text-2xl font-semibold">Login</h1>
-      <div className="space-y-3">
-        <input
-          className="w-full rounded border p-2"
-          value={sub}
-          onChange={(e) => setSub(e.target.value)}
-          placeholder="OIDC sub"
-        />
-        <input
-          className="w-full rounded border p-2"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="Email"
-        />
-        <button className="rounded bg-slate-900 px-4 py-2 text-white" onClick={login}>
-          Dev Login
-        </button>
+    <div className="mx-auto flex min-h-screen max-w-lg items-center">
+      <div className="w-full rounded-lg border bg-card p-6">
+        <h1 className="mb-1 text-xl font-semibold">Login</h1>
+        <p className="mb-4 text-sm text-muted-foreground">Dev auth mode for local testing.</p>
+        <div className="space-y-3">
+          <Input
+            value={sub}
+            onChange={(e) => setSub(e.target.value)}
+            placeholder="OIDC sub"
+          />
+          <Input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Email"
+          />
+          <Button onClick={login}>
+            Dev Login
+          </Button>
+        </div>
       </div>
     </div>
   );

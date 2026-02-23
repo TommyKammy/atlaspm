@@ -12,10 +12,26 @@ import {
 import { useSortable, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { Check, Plus, User } from 'lucide-react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { ProjectMember, SectionTaskGroup, Task } from '@/lib/types';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 
 function sortByPosition(tasks: Task[]) {
   return [...tasks].sort((a, b) => a.position - b.position);
@@ -68,10 +84,30 @@ function moveTaskPreview(
 }
 
 function resolveAssigneeLabel(task: Task, members: ProjectMember[]) {
-  if (!task.assigneeUserId) return '';
+  if (!task.assigneeUserId) return 'Unassigned';
   const member = members.find((item) => item.userId === task.assigneeUserId);
   if (!member) return task.assigneeUserId;
   return member.user.displayName || member.user.email || member.userId;
+}
+
+function initials(label: string) {
+  const pieces = label.trim().split(/\s+/).slice(0, 2);
+  return pieces.map((piece) => piece.charAt(0).toUpperCase()).join('') || 'U';
+}
+
+function ProgressBar({ value }: { value: number }) {
+  const clamped = Math.max(0, Math.min(100, value));
+  return (
+    <div className="w-full space-y-1">
+      <div className="h-1 w-full overflow-hidden rounded bg-muted">
+        <div
+          className={cn('h-full rounded transition-all', clamped >= 100 ? 'bg-green-500' : 'bg-primary')}
+          style={{ width: `${clamped}%` }}
+        />
+      </div>
+      <p className="text-[11px] text-muted-foreground">{clamped}%</p>
+    </div>
+  );
 }
 
 function AssigneeCombobox({
@@ -84,81 +120,68 @@ function AssigneeCombobox({
   onSelect: (assigneeUserId: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [debounced, setDebounced] = useState('');
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(query.trim().toLowerCase()), 120);
-    return () => window.clearTimeout(timer);
-  }, [query]);
-
-  const selectedLabel = resolveAssigneeLabel(task, members);
-  const candidates = useMemo(() => {
-    if (!debounced) return members;
-    return members.filter((member) => {
-      const name = (member.user.displayName || '').toLowerCase();
-      const email = (member.user.email || '').toLowerCase();
-      return name.includes(debounced) || email.includes(debounced);
-    });
-  }, [debounced, members]);
+  const selected = resolveAssigneeLabel(task, members);
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-left text-sm text-slate-700"
-        data-testid={`assignee-trigger-${task.id}`}
-        onClick={() => {
-          setOpen((v) => !v);
-          setQuery('');
-        }}
-      >
-        {selectedLabel || 'Unassigned'}
-      </button>
-      {open ? (
-        <div className="absolute z-20 mt-1 w-64 rounded-md border border-slate-200 bg-white shadow-lg">
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="w-full border-b border-slate-200 px-2 py-2 text-sm outline-none"
-            placeholder="Search assignee"
-            data-testid={`assignee-search-${task.id}`}
-          />
-          <button
-            type="button"
-            className="block w-full px-2 py-2 text-left text-sm hover:bg-slate-100"
-            onClick={() => {
-              onSelect(null);
-              setOpen(false);
-            }}
-          >
-            Unassigned
-          </button>
-          <div className="max-h-48 overflow-auto">
-            {candidates.map((member) => {
-              const label = member.user.displayName || member.user.email || member.user.id;
-              const sub = member.user.email || member.user.id;
-              return (
-                <button
-                  type="button"
-                  key={member.id}
-                  className="block w-full px-2 py-2 text-left text-sm hover:bg-slate-100"
-                  data-testid={`assignee-option-${task.id}-${member.userId}`}
-                  onClick={() => {
-                    onSelect(member.userId);
-                    setOpen(false);
-                  }}
-                >
-                  <div className="font-medium text-slate-800">{label}</div>
-                  <div className="text-xs text-slate-500">{sub}</div>
-                </button>
-              );
-            })}
-            {!candidates.length ? <div className="px-2 py-2 text-sm text-slate-500">No members found.</div> : null}
-          </div>
-        </div>
-      ) : null}
-    </div>
+    <Popover open={open} onOpenChange={setOpen}>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                data-testid={`assignee-trigger-${task.id}`}
+                className="h-6 w-6 rounded-full border"
+              >
+                {selected === 'Unassigned' ? <Plus className="h-3 w-3" /> : <span className="text-[10px]">{initials(selected)}</span>}
+              </Button>
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent>{selected}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      <PopoverContent className="w-64 p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search assignee..." data-testid={`assignee-search-${task.id}`} />
+          <CommandList>
+            <CommandEmpty>No members found.</CommandEmpty>
+            <CommandGroup>
+              <CommandItem
+                value="unassigned"
+                onSelect={() => {
+                  onSelect(null);
+                  setOpen(false);
+                }}
+              >
+                <User className="h-4 w-4" />
+                <span>Unassigned</span>
+              </CommandItem>
+              {members.map((member) => {
+                const label = member.user.displayName || member.user.email || member.user.id;
+                return (
+                  <CommandItem
+                    key={member.id}
+                    value={`${label} ${member.user.email ?? ''}`}
+                    data-testid={`assignee-option-${task.id}-${member.userId}`}
+                    onSelect={() => {
+                      onSelect(member.userId);
+                      setOpen(false);
+                    }}
+                  >
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border text-[10px]">
+                      {initials(label)}
+                    </span>
+                    <span className="flex-1 truncate">{label}</span>
+                    {task.assigneeUserId === member.userId ? <Check className="h-4 w-4" /> : null}
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -179,61 +202,74 @@ function TaskRow({
   });
 
   return (
-    <div
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      className="grid grid-cols-5 items-center gap-2 border-b border-slate-100 bg-white px-3 py-2 hover:bg-slate-50"
+    <tr
+      ref={setNodeRef as never}
+      style={{ transform: CSS.Transform.toString(transform), transition: transition || 'transform 150ms ease' }}
+      className="h-11 border-b transition-colors hover:bg-muted/60"
       data-testid={`task-${task.id}`}
       data-task-title={task.title}
     >
-      <div className="flex items-center gap-2">
-        <button
-          className="cursor-grab rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 active:cursor-grabbing"
-          data-testid={`drag-handle-${task.id}`}
-          aria-label={`Drag ${task.title}`}
-          type="button"
-          {...attributes}
-          {...listeners}
+      <TableCell>
+        <div className="flex items-center gap-2">
+          <button
+            className="cursor-grab rounded-sm border px-1.5 py-0.5 text-[11px] text-muted-foreground active:cursor-grabbing"
+            data-testid={`drag-handle-${task.id}`}
+            aria-label={`Drag ${task.title}`}
+            type="button"
+            {...attributes}
+            {...listeners}
+          >
+            Drag
+          </button>
+          <span className="truncate text-sm">{task.title}</span>
+        </div>
+      </TableCell>
+      <TableCell>
+        <AssigneeCombobox
+          task={task}
+          members={members}
+          onSelect={(assigneeUserId) => onEdit(task.id, { assigneeUserId, version: task.version })}
+        />
+      </TableCell>
+      <TableCell>
+        <Input
+          type="date"
+          value={task.dueAt ? String(task.dueAt).slice(0, 10) : ''}
+          onChange={(e) =>
+            onEdit(task.id, {
+              dueAt: e.target.value ? new Date(e.target.value).toISOString() : null,
+              version: task.version,
+            })
+          }
+          className="h-8"
+        />
+      </TableCell>
+      <TableCell>
+        <div className="space-y-1">
+          <Input
+            type="number"
+            min={0}
+            max={100}
+            value={task.progressPercent}
+            onChange={(e) => onEdit(task.id, { progressPercent: Number(e.target.value), version: task.version })}
+            className="h-8"
+          />
+          <ProgressBar value={task.progressPercent} />
+        </div>
+      </TableCell>
+      <TableCell>
+        <select
+          className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+          value={task.status}
+          onChange={(e) => onEdit(task.id, { status: e.target.value as Task['status'], version: task.version })}
         >
-          Drag
-        </button>
-        <span className="text-sm text-slate-800">{task.title}</span>
-      </div>
-      <AssigneeCombobox
-        task={task}
-        members={members}
-        onSelect={(assigneeUserId) => onEdit(task.id, { assigneeUserId, version: task.version })}
-      />
-      <input
-        type="date"
-        className="rounded border border-slate-300 p-1 text-sm"
-        value={task.dueAt ? String(task.dueAt).slice(0, 10) : ''}
-        onChange={(e) =>
-          onEdit(task.id, {
-            dueAt: e.target.value ? new Date(e.target.value).toISOString() : null,
-            version: task.version,
-          })
-        }
-      />
-      <input
-        type="number"
-        className="rounded border border-slate-300 p-1 text-sm"
-        min={0}
-        max={100}
-        value={task.progressPercent}
-        onChange={(e) => onEdit(task.id, { progressPercent: Number(e.target.value), version: task.version })}
-      />
-      <select
-        className="rounded border border-slate-300 p-1 text-sm"
-        value={task.status}
-        onChange={(e) => onEdit(task.id, { status: e.target.value as Task['status'], version: task.version })}
-      >
-        <option value="TODO">TODO</option>
-        <option value="IN_PROGRESS">IN_PROGRESS</option>
-        <option value="DONE">DONE</option>
-        <option value="BLOCKED">BLOCKED</option>
-      </select>
-    </div>
+          <option value="TODO">TODO</option>
+          <option value="IN_PROGRESS">IN_PROGRESS</option>
+          <option value="DONE">DONE</option>
+          <option value="BLOCKED">BLOCKED</option>
+        </select>
+      </TableCell>
+    </tr>
   );
 }
 
@@ -248,12 +284,6 @@ function QuickAddTask({
   const [title, setTitle] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => {
-    if (open) {
-      window.setTimeout(() => inputRef.current?.focus(), 0);
-    }
-  }, [open]);
-
   const submit = async () => {
     const trimmed = title.trim();
     if (!trimmed) return;
@@ -264,20 +294,24 @@ function QuickAddTask({
 
   if (!open) {
     return (
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="sm"
         data-testid={`quick-add-open-${sectionId}`}
-        className="w-full rounded-md px-3 py-2 text-left text-sm text-slate-600 hover:bg-slate-100"
-        onClick={() => setOpen(true)}
+        className="justify-start px-0 text-muted-foreground"
+        onClick={() => {
+          setOpen(true);
+          setTimeout(() => inputRef.current?.focus(), 0);
+        }}
       >
         + Add task
-      </button>
+      </Button>
     );
   }
 
   return (
-    <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white p-2">
-      <input
+    <div className="flex items-center gap-2 py-2">
+      <Input
         ref={inputRef}
         value={title}
         onChange={(e) => setTitle(e.target.value)}
@@ -291,41 +325,24 @@ function QuickAddTask({
             setTitle('');
           }
         }}
-        className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
         placeholder="Task name"
         data-testid={`quick-add-input-${sectionId}`}
       />
-      <button
-        type="button"
-        className="rounded bg-slate-900 px-3 py-1 text-sm text-white"
-        data-testid={`quick-add-submit-${sectionId}`}
-        onClick={() => void submit()}
-      >
+      <Button size="sm" data-testid={`quick-add-submit-${sectionId}`} onClick={() => void submit()}>
         Add
-      </button>
+      </Button>
     </div>
   );
 }
 
-function SectionDropTarget({
-  sectionId,
-  children,
-}: {
-  sectionId: string;
-  children: ReactNode;
-}) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: `section-drop-${sectionId}`,
-    data: { sectionId },
-  });
+function SectionDropTarget({ sectionId, children }: { sectionId: string; children: ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `section-drop-${sectionId}`, data: { sectionId } });
 
   return (
     <section
       ref={setNodeRef}
-      className={`rounded-xl border bg-white transition ${
-        isOver ? 'border-sky-400 ring-2 ring-sky-100' : 'border-slate-200'
-      }`}
       data-testid={`section-${sectionId}`}
+      className={cn('rounded-lg border bg-card', isOver && 'ring-1 ring-ring')}
     >
       {children}
     </section>
@@ -333,25 +350,30 @@ function SectionDropTarget({
 }
 
 function SectionDropZone({ sectionId }: { sectionId: string }) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: `section-drop-zone-${sectionId}`,
-    data: { sectionId },
-  });
+  const { setNodeRef, isOver } = useDroppable({ id: `section-drop-zone-${sectionId}`, data: { sectionId } });
 
   return (
     <div
       ref={setNodeRef}
       data-testid={`section-drop-zone-${sectionId}`}
-      className={`rounded-md border border-dashed px-3 py-2 text-xs transition ${
-        isOver ? 'border-sky-400 bg-sky-50 text-sky-700' : 'border-slate-300 text-slate-500'
-      }`}
+      className={cn('rounded-md border border-dashed px-2 py-1 text-[11px] text-muted-foreground', isOver && 'border-ring text-foreground')}
     >
       Drop tasks here
     </div>
   );
 }
 
-export default function ProjectBoard({ projectId }: { projectId: string }) {
+export default function ProjectBoard({
+  projectId,
+  search,
+  statusFilter,
+  priorityFilter,
+}: {
+  projectId: string;
+  search: string;
+  statusFilter: 'ALL' | Task['status'];
+  priorityFilter: 'ALL' | NonNullable<Task['priority']>;
+}) {
   const sensors = useSensors(useSensor(PointerSensor));
   const queryClient = useQueryClient();
 
@@ -382,9 +404,8 @@ export default function ProjectBoard({ projectId }: { projectId: string }) {
       return { previous };
     },
     onError: (_error, _variables, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(queryKeys.projectTasksGrouped(projectId), context.previous);
-      }
+      if (context?.previous) queryClient.setQueryData(queryKeys.projectTasksGrouped(projectId), context.previous);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
     },
     onSuccess: (updated) => {
       queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) => {
@@ -407,25 +428,8 @@ export default function ProjectBoard({ projectId }: { projectId: string }) {
   });
 
   const reorderTask = useMutation({
-    mutationFn: ({
-      taskId,
-      toSectionId,
-      beforeTaskId,
-      afterTaskId,
-    }: {
-      taskId: string;
-      toSectionId: string;
-      beforeTaskId: string | null;
-      afterTaskId: string | null;
-    }) =>
-      api(`/sections/${toSectionId}/tasks/reorder`, {
-        method: 'POST',
-        body: {
-          taskId,
-          beforeTaskId,
-          afterTaskId,
-        },
-      }),
+    mutationFn: ({ taskId, toSectionId, beforeTaskId, afterTaskId }: { taskId: string; toSectionId: string; beforeTaskId: string | null; afterTaskId: string | null; }) =>
+      api(`/sections/${toSectionId}/tasks/reorder`, { method: 'POST', body: { taskId, beforeTaskId, afterTaskId } }),
     onMutate: async ({ taskId, toSectionId, afterTaskId }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
       const previous = queryClient.getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId));
@@ -435,9 +439,7 @@ export default function ProjectBoard({ projectId }: { projectId: string }) {
       return { previous };
     },
     onError: (_error, _variables, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(queryKeys.projectTasksGrouped(projectId), context.previous);
-      }
+      if (context?.previous) queryClient.setQueryData(queryKeys.projectTasksGrouped(projectId), context.previous);
     },
     onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
@@ -447,75 +449,95 @@ export default function ProjectBoard({ projectId }: { projectId: string }) {
   const groups = groupsQuery.data ?? [];
   const members = membersQuery.data ?? [];
 
+  const filteredGroups = useMemo(() => {
+    return groups.map((group) => ({
+      ...group,
+      tasks: group.tasks.filter((task) => {
+        const bySearch = !search.trim() || task.title.toLowerCase().includes(search.trim().toLowerCase());
+        const byStatus = statusFilter === 'ALL' || task.status === statusFilter;
+        const byPriority = priorityFilter === 'ALL' || task.priority === priorityFilter;
+        return bySearch && byStatus && byPriority;
+      }),
+    }));
+  }, [groups, search, statusFilter, priorityFilter]);
+
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over) return;
 
     const activeTaskId = String(active.id);
     const overTaskId = String(over.id);
-    const droppedOnSection =
-      overTaskId.startsWith('section-drop-') || overTaskId.startsWith('section-drop-zone-');
+    const droppedOnSection = overTaskId.startsWith('section-drop-') || overTaskId.startsWith('section-drop-zone-');
     const overSectionIdFromId = overTaskId.startsWith('section-drop-zone-')
       ? overTaskId.replace('section-drop-zone-', '')
       : overTaskId.startsWith('section-drop-')
         ? overTaskId.replace('section-drop-', '')
         : '';
-    const fallbackSectionId =
-      groups.find((group) => group.tasks.some((task) => task.id === overTaskId))?.section.id ?? '';
+    const fallbackSectionId = groups.find((group) => group.tasks.some((task) => task.id === overTaskId))?.section.id ?? '';
     const toSectionId = String(over.data.current?.sectionId ?? overSectionIdFromId ?? fallbackSectionId);
     if (!toSectionId) return;
 
     const targetGroup = groups.find((group) => group.section.id === toSectionId);
     const targetTasks = targetGroup?.tasks ?? [];
     const overIndex = droppedOnSection ? -1 : targetTasks.findIndex((task) => task.id === overTaskId);
-
     const beforeTaskId = overIndex > 0 ? targetTasks[overIndex - 1]?.id ?? null : null;
     const afterTaskId = overIndex >= 0 ? targetTasks[overIndex]?.id ?? null : null;
-
     reorderTask.mutate({ taskId: activeTaskId, toSectionId, beforeTaskId, afterTaskId });
   };
 
   const onEdit = (taskId: string, patch: Partial<Task> & { version: number }) => {
-    patchTask.mutate({ taskId, patch });
+    const groupsSnapshot = queryClient.getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId)) ?? [];
+    const cachedTask = groupsSnapshot.flatMap((group) => group.tasks).find((task) => task.id === taskId);
+    const nextPatch = { ...patch, version: cachedTask?.version ?? patch.version };
+    patchTask.mutate({ taskId, patch: nextPatch });
   };
 
   if (groupsQuery.isLoading) {
-    return <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500">Loading tasks...</div>;
+    return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">Loading tasks...</div>;
   }
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-      <div className="space-y-5">
-        {groups.map((group) => (
+      <div className="space-y-4">
+        {filteredGroups.map((group) => (
           <SectionDropTarget key={group.section.id} sectionId={group.section.id}>
-            <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-              <h2 className="text-sm font-semibold text-slate-800">{group.section.name}</h2>
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{group.tasks.length}</span>
+            <header className="flex items-center justify-between border-b px-4 py-2">
+              <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground">{group.section.name}</h3>
+              <Badge>{group.tasks.length}</Badge>
             </header>
-            <div className="grid grid-cols-5 gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              <div>Name</div>
-              <div>Assignee</div>
-              <div>Due date</div>
-              <div>Progress</div>
-              <div>Status</div>
-            </div>
-            <SortableContext items={group.tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
-              {group.tasks.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  sectionId={group.section.id}
-                  onEdit={onEdit}
-                  members={members}
-                />
-              ))}
-            </SortableContext>
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Assignee</TableHead>
+                  <TableHead>Due date</TableHead>
+                  <TableHead>Progress</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <SortableContext items={group.tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
+                  {group.tasks.map((task) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      sectionId={group.section.id}
+                      onEdit={onEdit}
+                      members={members}
+                    />
+                  ))}
+                </SortableContext>
+              </TableBody>
+            </Table>
+
             {!group.tasks.length ? (
-              <div className="px-3 py-3 text-sm text-slate-500" data-testid={`empty-section-${group.section.id}`}>
+              <div className="px-4 py-3 text-sm text-muted-foreground" data-testid={`empty-section-${group.section.id}`}>
                 No tasks in this section.
               </div>
             ) : null}
-            <div className="border-t border-slate-100 px-3 py-2">
+
+            <div className="space-y-2 border-t px-4 py-2">
               <SectionDropZone sectionId={group.section.id} />
               <QuickAddTask
                 sectionId={group.section.id}
@@ -526,8 +548,9 @@ export default function ProjectBoard({ projectId }: { projectId: string }) {
             </div>
           </SectionDropTarget>
         ))}
-        {!groups.length ? (
-          <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-500">
+
+        {!filteredGroups.length ? (
+          <div className="rounded-lg border border-dashed bg-card p-6 text-center text-sm text-muted-foreground">
             No sections yet. Add a section to start planning tasks.
           </div>
         ) : null}

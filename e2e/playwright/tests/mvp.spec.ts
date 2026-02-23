@@ -33,6 +33,26 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await page.click('button:has-text("Dev Login")');
   await page.waitForURL('**/');
 
+  await page.click('[data-testid="theme-toggle"]');
+  await page.click('text=Dark');
+  await expect
+    .poll(async () => page.evaluate(() => document.documentElement.classList.contains('dark')))
+    .toBeTruthy();
+  await page.reload();
+  await expect
+    .poll(async () => page.evaluate(() => document.documentElement.classList.contains('dark')))
+    .toBeTruthy();
+
+  await page.click('[data-testid="theme-toggle"]');
+  await page.click('text=Light');
+  await expect
+    .poll(async () => page.evaluate(() => document.documentElement.classList.contains('dark')))
+    .toBeFalsy();
+  await page.reload();
+  await expect
+    .poll(async () => page.evaluate(() => document.documentElement.classList.contains('dark')))
+    .toBeFalsy();
+
   const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
   expect(token).toBeTruthy();
 
