@@ -15,9 +15,10 @@ import { CycleDetectionService } from './tasks/cycle-detection.service';
 import { PublicAttachmentsController } from './tasks/public-attachments.controller';
 import { CollabController } from './collab/collab.controller';
 import { WorkspaceAdminController } from './workspaces/workspace-admin.controller';
+import { SearchModule } from './search/search.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, SearchModule],
   controllers: [
     WorkspacesController,
     ProjectsController,

@@ -6,6 +6,7 @@ import { useTheme } from 'next-themes';
 import { usePathname } from 'next/navigation';
 import { useMemo } from 'react';
 import { MobileNavSheet } from '@/components/layout/MobileNavSheet';
+import { GlobalSearch } from '@/components/global-search';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import type { ThemePreset } from '@/lib/layout-preferences';
@@ -69,6 +70,11 @@ export function HeaderBar({
           <h1 className="text-sm font-medium">{title}</h1>
         </div>
       </div>
+      
+      <div className="flex-1 max-w-md mx-4">
+        <GlobalSearch />
+      </div>
+      
       <div className="flex items-center gap-2">
         {onToggleSidebarMode ? (
           <Button variant="outline" size="sm" onClick={onToggleSidebarMode} data-testid="sidebar-mode-toggle">
