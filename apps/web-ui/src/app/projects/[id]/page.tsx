@@ -5,12 +5,15 @@ import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import ProjectBoard from '@/components/project-board';
+import CalendarView from '@/components/calendar-view';
+import TimelineView from '@/components/timeline-view';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { Project, Section, SectionTaskGroup, Task } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 
 export default function ProjectPage() {
   const params = useParams<{ id: string }>();
@@ -19,7 +22,8 @@ export default function ProjectPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | Task['status']>('ALL');
   const [priorityFilter, setPriorityFilter] = useState<'ALL' | NonNullable<Task['priority']>>('ALL');
-  const [view, setView] = useState('List');
+  const [view, setView] = useState<'List' | 'Board' | 'Calendar' | 'Timeline'>('List');
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const projectsQuery = useQuery<Project[]>({
@@ -37,6 +41,29 @@ export default function ProjectPage() {
     () => projectsQuery.data?.find((item) => item.id === projectId) ?? null,
     [projectId, projectsQuery.data],
   );
+
+  const allTasksQuery = useQuery<Task[]>({
+    queryKey: queryKeys.projectTasks(projectId),
+    queryFn: () => api(`/projects/${projectId}/tasks`),
+    enabled: Boolean(projectId) && (view === 'Calendar' || view === 'Timeline'),
+  });
+
+  const projectProgress = useMemo(() => {
+    if (!allTasksQuery.data?.length) return 0;
+    const totalProgress = allTasksQuery.data.reduce((sum, task) => sum + task.progressPercent, 0);
+    return Math.round(totalProgress / allTasksQuery.data.length);
+  }, [allTasksQuery.data]);
+
+  const taskStats = useMemo(() => {
+    if (!allTasksQuery.data) return { todo: 0, inProgress: 0, done: 0, blocked: 0, total: 0 };
+    return {
+      todo: allTasksQuery.data.filter(t => t.status === 'TODO').length,
+      inProgress: allTasksQuery.data.filter(t => t.status === 'IN_PROGRESS').length,
+      done: allTasksQuery.data.filter(t => t.status === 'DONE').length,
+      blocked: allTasksQuery.data.filter(t => t.status === 'BLOCKED').length,
+      total: allTasksQuery.data.length,
+    };
+  }, [allTasksQuery.data]);
 
   const createSection = useMutation({
     mutationFn: (name: string) =>
@@ -66,14 +93,31 @@ export default function ProjectPage() {
             <h2 className="text-base font-semibold">{project?.name ?? 'Project'}</h2>
             <p className="mt-1 text-sm text-muted-foreground">Task list grouped by sections with manual ordering.</p>
           </div>
-          <div className="flex items-center gap-2">
-            <Badge>{sectionsQuery.data?.length ?? 0} sections</Badge>
-            <Link href={`/projects/${projectId}/members`}>
-              <Button variant="outline" size="sm" data-testid="project-members-page-link">Members</Button>
-            </Link>
-            <Link href={`/projects/${projectId}/rules`} data-testid="rules-page-link">
-              <Button variant="outline" size="sm">Rules</Button>
-            </Link>
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex items-center gap-2">
+              <Badge>{sectionsQuery.data?.length ?? 0} sections</Badge>
+              <Badge variant="secondary">{taskStats.total} tasks</Badge>
+              <Link href={`/projects/${projectId}/members`}>
+                <Button variant="outline" size="sm" data-testid="project-members-page-link">Members</Button>
+              </Link>
+              <Link href={`/projects/${projectId}/rules`} data-testid="rules-page-link">
+                <Button variant="outline" size="sm">Rules</Button>
+              </Link>
+            </div>
+            {allTasksQuery.data && allTasksQuery.data.length > 0 && (
+              <div className="flex items-center gap-3 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <Progress value={projectProgress} className="w-24 h-1.5" />
+                  <span className="text-muted-foreground">{projectProgress}%</span>
+                </div>
+                <div className="flex gap-2">
+                  {taskStats.todo > 0 && <span className="text-gray-500">● {taskStats.todo} todo</span>}
+                  {taskStats.inProgress > 0 && <span className="text-blue-500">● {taskStats.inProgress} in progress</span>}
+                  {taskStats.done > 0 && <span className="text-green-500">● {taskStats.done} done</span>}
+                  {taskStats.blocked > 0 && <span className="text-red-500">● {taskStats.blocked} blocked</span>}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -112,11 +156,13 @@ export default function ProjectPage() {
           </select>
           <select
             value={view}
-            onChange={(e) => setView(e.target.value)}
+            onChange={(e) => setView(e.target.value as typeof view)}
             className="h-9 rounded-md border bg-background px-3 text-sm"
           >
-            <option>List</option>
-            <option>Board</option>
+            <option value="List">List</option>
+            <option value="Board">Board</option>
+            <option value="Calendar">Calendar</option>
+            <option value="Timeline">Timeline</option>
           </select>
           <Button
             className="md:justify-self-end"
@@ -156,12 +202,25 @@ export default function ProjectPage() {
         </div>
       </section>
 
-      <ProjectBoard
-        projectId={projectId}
-        search={search}
-        statusFilter={statusFilter}
-        priorityFilter={priorityFilter}
-      />
+      {view === 'List' || view === 'Board' ? (
+        <ProjectBoard
+          projectId={projectId}
+          search={search}
+          statusFilter={statusFilter}
+          priorityFilter={priorityFilter}
+        />
+      ) : view === 'Calendar' ? (
+        <CalendarView
+          tasks={allTasksQuery.data ?? []}
+          onTaskClick={setSelectedTaskId}
+        />
+      ) : (
+        <TimelineView
+          tasks={allTasksQuery.data ?? []}
+          sections={sectionsQuery.data ?? []}
+          onTaskClick={setSelectedTaskId}
+        />
+      )}
     </div>
   );
 }
