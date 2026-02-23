@@ -1,0 +1,12 @@
+[data-theme-preset='tangerine'] {
+  --primary: 24 95% 56%;
+  --ring: 24 95% 56%;
+  --accent: 24 95% 56%;
+}
+
+.dark[data-theme-preset='tangerine'],
+[data-theme-preset='tangerine'] .dark {
+  --primary: 24 100% 64%;
+  --ring: 24 100% 64%;
+  --accent: 24 100% 64%;
+}
