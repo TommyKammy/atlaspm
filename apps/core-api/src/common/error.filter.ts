@@ -4,14 +4,17 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 
 @Catch()
 export class GlobalErrorFilter implements ExceptionFilter {
+  private readonly logger = new Logger(GlobalErrorFilter.name);
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
-    const req = ctx.getRequest<Request & { correlationId?: string }>();
+    const req = ctx.getRequest<Request & { correlationId?: string; user?: { sub?: string } }>();
     const res = ctx.getResponse<Response>();
     const correlationId = req.correlationId ?? 'unknown';
 
@@ -33,6 +36,23 @@ export class GlobalErrorFilter implements ExceptionFilter {
       });
       return;
     }
+
+    const errorMessage = exception instanceof Error ? exception.message : 'Unknown error';
+    const errorStack = exception instanceof Error ? exception.stack : undefined;
+    
+    this.logger.error({
+      message: 'Internal Server Error',
+      path: req.url,
+      method: req.method,
+      body: req.body,
+      query: req.query,
+      params: req.params,
+      user: req.user?.sub ?? 'anonymous',
+      error: errorMessage,
+      stack: errorStack,
+      correlationId,
+      timestamp: new Date().toISOString(),
+    });
 
     res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       error: {

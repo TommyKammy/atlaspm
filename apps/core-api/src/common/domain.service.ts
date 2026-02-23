@@ -52,24 +52,45 @@ export class DomainService {
   }
 
   async ensureDefaultWorkspaceForUser(sub: string) {
-    let membership = await this.prisma.workspaceMembership.findFirst({ where: { userId: sub } });
-    if (!membership) {
-      const ws = await this.prisma.workspace.create({ data: { name: 'Default Workspace' } });
-      membership = await this.prisma.workspaceMembership.create({
-        data: { workspaceId: ws.id, userId: sub, role: WorkspaceRole.WS_ADMIN },
-      });
-    } else {
-      const hasAdminRole = await this.prisma.workspaceMembership.findFirst({
-        where: { userId: sub, role: WorkspaceRole.WS_ADMIN },
-      });
-      if (!hasAdminRole) {
-        membership = await this.prisma.workspaceMembership.update({
-          where: { id: membership.id },
-          data: { role: WorkspaceRole.WS_ADMIN },
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        let membership = await tx.workspaceMembership.findFirst({
+          where: { userId: sub },
+          include: { workspace: true },
         });
+
+        if (!membership) {
+          const ws = await tx.workspace.create({ data: { name: 'Default Workspace' } });
+          membership = await tx.workspaceMembership.create({
+            data: { workspaceId: ws.id, userId: sub, role: WorkspaceRole.WS_ADMIN },
+            include: { workspace: true },
+          });
+        } else if (membership.role !== WorkspaceRole.WS_ADMIN) {
+          membership = await tx.workspaceMembership.update({
+            where: { id: membership.id },
+            data: { role: WorkspaceRole.WS_ADMIN },
+            include: { workspace: true },
+          });
+        }
+
+        return membership.workspace;
+      }, {
+        maxWait: 5000,
+        timeout: 10000,
+        isolationLevel: 'Serializable',
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('serialization')) {
+        const membership = await this.prisma.workspaceMembership.findFirst({
+          where: { userId: sub },
+          include: { workspace: true },
+        });
+        if (membership) {
+          return membership.workspace;
+        }
       }
+      throw error;
     }
-    return this.prisma.workspace.findUniqueOrThrow({ where: { id: membership.workspaceId } });
   }
 
   async requireWorkspaceRole(workspaceId: string, userId: string, min: WorkspaceRole) {
