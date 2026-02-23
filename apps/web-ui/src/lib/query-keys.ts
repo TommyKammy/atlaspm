@@ -15,4 +15,15 @@ export const queryKeys = {
   taskAudit: (taskId: string) => ['task', taskId, 'audit'] as const,
   taskMentions: (taskId: string) => ['task', taskId, 'mentions'] as const,
   taskAttachments: (taskId: string) => ['task', taskId, 'attachments'] as const,
+
+  // Subtask keys
+  taskSubtasks: (taskId: string) => ['task', taskId, 'subtasks'] as const,
+  taskSubtaskTree: (taskId: string) => ['task', taskId, 'subtasks', 'tree'] as const,
+  taskBreadcrumbs: (taskId: string) => ['task', taskId, 'breadcrumbs'] as const,
+
+  // Dependency keys
+  taskDependencies: (taskId: string) => ['task', taskId, 'dependencies'] as const,
+  taskDependents: (taskId: string) => ['task', taskId, 'dependents'] as const,
+  taskBlocked: (taskId: string) => ['task', taskId, 'blocked'] as const,
+  projectDependencyGraph: (projectId: string) => ['project', projectId, 'dependency-graph'] as const,
 };

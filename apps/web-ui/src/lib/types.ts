@@ -159,3 +159,57 @@ export type Rule = {
   cooldownSec: number;
   definition?: RuleDefinition;
 };
+
+
+// Subtask types
+export type Subtask = Task & {
+  parentId: string | null;
+  depth: number;
+};
+
+export type TaskBreadcrumb = {
+  id: string;
+  title: string;
+  depth: number;
+};
+
+export type TaskTree = Task & {
+  parentId: string | null;
+  children: TaskTree[];
+};
+
+// Dependency types
+export type DependencyType = 'BLOCKS' | 'BLOCKED_BY' | 'RELATES_TO';
+
+export type TaskDependency = {
+  id: string;
+  taskId: string;
+  dependsOnId: string;
+  type: DependencyType;
+  createdAt: string;
+  dependsOnTask?: Task;
+};
+
+export type BlockedStatus = {
+  isBlocked: boolean;
+  blockers: TaskDependency[];
+};
+
+export type DependencyGraphNode = {
+  id: string;
+  title: string;
+  status: Task['status'];
+  x?: number;
+  y?: number;
+};
+
+export type DependencyGraphEdge = {
+  source: string;
+  target: string;
+  type: DependencyType;
+};
+
+export type DependencyGraph = {
+  nodes: DependencyGraphNode[];
+  edges: DependencyGraphEdge[];
+};

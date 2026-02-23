@@ -2,11 +2,13 @@
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Paperclip, X } from 'lucide-react';
+import { Paperclip, X, GitBranch, Link2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { api, apiBaseUrl } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { AuditEvent, ProjectMember, SectionTaskGroup, Task, TaskAttachment, TaskComment } from '@/lib/types';
+import { SubtaskList } from '@/components/subtask-list';
+import { DependencyManager } from '@/components/dependency-manager';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
@@ -236,6 +238,20 @@ export default function TaskDetailDrawer({
                   ))}
                 </div>
               </section>
+
+              {taskId && (
+                <>
+                  <SubtaskList
+                    taskId={taskId}
+                    projectId={projectId}
+                    onTaskClick={(newTaskId) => {
+                      queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(newTaskId) });
+                      window.location.href = `/projects/${projectId}?task=${newTaskId}`;
+                    }}
+                  />
+                  <DependencyManager taskId={taskId} projectId={projectId} />
+                </>
+              )}
             </div>
           ) : null}
 
