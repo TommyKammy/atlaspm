@@ -33,7 +33,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
-import { Prisma, Priority, ProjectRole, TaskStatus } from '@prisma/client';
+import { Prisma, Priority, ProjectRole, TaskStatus, DependencyType } from '@prisma/client';
+import { SubtaskService } from './subtask.service';
+import { CycleDetectionService } from './cycle-detection.service';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { promises as fs } from 'node:fs';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -259,6 +261,48 @@ class CompleteAttachmentDto {
   attachmentId!: string;
 }
 
+class CreateSubtaskDto {
+  @IsString()
+  title!: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsEnum(TaskStatus)
+  status?: TaskStatus;
+
+  @IsOptional()
+  @IsEnum(Priority)
+  priority?: Priority;
+
+  @IsOptional()
+  @IsString()
+  assigneeUserId?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  startAt?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  dueAt?: string;
+
+  @IsOptional()
+  @IsArray()
+  tags?: string[];
+}
+
+class AddDependencyDto {
+  @IsUUID()
+  dependsOnId!: string;
+
+  @IsOptional()
+  @IsEnum(DependencyType)
+  type?: DependencyType;
+}
+
 const MAX_DESCRIPTION_DOC_BYTES = 200_000;
 const MAX_DESCRIPTION_TEXT_LENGTH = 20_000;
 const MAX_COMMENT_BODY_LENGTH = 5000;
@@ -271,6 +315,7 @@ export class TasksController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(SubtaskService) private readonly subtaskService: SubtaskService,
   ) {}
 
   @Get('projects/:id/tasks')
@@ -986,6 +1031,91 @@ export class TasksController {
       });
       return { task: updated, sectionTasks };
     });
+  }
+
+  // Subtask endpoints
+  @Post('tasks/:id/subtasks')
+  async createSubtask(@Param('id') parentId: string, @Body() body: CreateSubtaskDto, @CurrentRequest() req: AppRequest) {
+    const parentTask = await this.prisma.task.findUniqueOrThrow({ where: { id: parentId } });
+    await this.domain.requireProjectRole(parentTask.projectId, req.user.sub, ProjectRole.MEMBER);
+
+    const topTask = await this.prisma.task.findFirst({
+      where: { projectId: parentTask.projectId, sectionId: parentTask.sectionId },
+      orderBy: { position: 'asc' },
+    });
+    const position = (topTask?.position ?? 1000) - 1000;
+
+    return this.subtaskService.createSubtask(parentId, {
+      ...body,
+      projectId: parentTask.projectId,
+      sectionId: parentTask.sectionId,
+      position,
+    });
+  }
+
+  @Get('tasks/:id/subtasks')
+  async getSubtasks(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    return this.subtaskService.getSubtasks(taskId);
+  }
+
+  @Get('tasks/:id/subtasks/tree')
+  async getSubtaskTree(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    return this.subtaskService.getSubtaskTree(taskId);
+  }
+
+  @Get('tasks/:id/breadcrumbs')
+  async getBreadcrumbs(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    return this.subtaskService.getBreadcrumbPath(taskId);
+  }
+
+  // Dependency endpoints
+  @Post('tasks/:id/dependencies')
+  async addDependency(@Param('id') taskId: string, @Body() body: AddDependencyDto, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    return this.subtaskService.addDependency(taskId, body.dependsOnId, body.type);
+  }
+
+  @Delete('tasks/:id/dependencies/:dependsOnId')
+  async removeDependency(@Param('id') taskId: string, @Param('dependsOnId') dependsOnId: string, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.subtaskService.removeDependency(taskId, dependsOnId);
+    return { success: true };
+  }
+
+  @Get('tasks/:id/dependencies')
+  async getDependencies(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    return this.subtaskService.getDependencies(taskId);
+  }
+
+  @Get('tasks/:id/dependents')
+  async getDependents(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    return this.subtaskService.getDependents(taskId);
+  }
+
+  @Get('tasks/:id/blocked')
+  async isBlocked(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    const blocked = await this.subtaskService.isBlocked(taskId);
+    return { blocked };
+  }
+
+  @Get('projects/:id/dependency-graph')
+  async getDependencyGraph(@Param('id') projectId: string, @CurrentRequest() req: AppRequest) {
+    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+    return this.subtaskService.getDependencyGraph(projectId);
   }
 
   private validateDescriptionDoc(descriptionDoc: Record<string, unknown>) {
