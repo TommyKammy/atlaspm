@@ -213,3 +213,27 @@ export type DependencyGraph = {
   nodes: DependencyGraphNode[];
   edges: DependencyGraphEdge[];
 };
+
+
+
+// Search types
+export type TaskSearchHit = {
+  objectID: string;
+  title: string;
+  description?: string | null;
+  projectId: string;
+  assigneeId?: string | null;
+  status: Task['status'];
+  priority?: Task['priority'];
+  dueAt?: string | null;
+  startAt?: string | null;
+  tags: string[];
+  parentId?: string | null;
+  depth: number;
+  createdAt: string;
+  updatedAt: string;
+  _highlightResult?: {
+    title?: { value: string };
+    description?: { value: string };
+  };
+};

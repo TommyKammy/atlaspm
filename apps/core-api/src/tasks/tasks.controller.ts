@@ -36,6 +36,7 @@ import type { AppRequest } from '../common/types';
 import { Prisma, Priority, ProjectRole, TaskStatus, DependencyType } from '@prisma/client';
 import { SubtaskService } from './subtask.service';
 import { CycleDetectionService } from './cycle-detection.service';
+import { SearchService } from '../search/search.service';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { promises as fs } from 'node:fs';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -316,6 +317,7 @@ export class TasksController {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(DomainService) private readonly domain: DomainService,
     @Inject(SubtaskService) private readonly subtaskService: SubtaskService,
+    @Inject(SearchService) private readonly searchService: SearchService,
   ) {}
 
   @Get('projects/:id/tasks')
@@ -410,6 +412,9 @@ export class TasksController {
       });
       await this.applyProgressRules(tx, task.id, req.correlationId);
       return task;
+    }).then((task) => {
+      void this.searchService.indexTask(task);
+      return task;
     });
   }
 
@@ -454,6 +459,9 @@ export class TasksController {
         payload: updated,
       });
       await this.applyProgressRules(tx, id, req.correlationId);
+      return updated;
+    }).then((updated) => {
+      void this.searchService.indexTask(updated);
       return updated;
     });
   }
