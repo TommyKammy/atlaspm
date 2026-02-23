@@ -107,6 +107,10 @@ model Task {
   sectionId       String
   title          String
   description    String?
+  descriptionDoc Json?      @map("description_doc")
+  descriptionText String?   @map("description_text")
+  descriptionUpdatedAt DateTime? @map("description_updated_at")
+  descriptionVersion Int    @default(0) @map("description_version")
   status         TaskStatus @default(TODO)
   progressPercent Int       @default(0)
   priority       Priority?
@@ -122,8 +126,60 @@ model Task {
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   section Section @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+  comments TaskComment[]
+  mentions TaskMention[]
+  attachments TaskAttachment[]
 
   @@index([projectId, sectionId, position])
+}
+
+model TaskComment {
+  id           String   @id @default(uuid())
+  taskId       String   @map("task_id")
+  authorUserId String   @map("author_user_id")
+  body         String
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+  @@map("task_comments")
+}
+
+model TaskMention {
+  id              String   @id @default(uuid())
+  taskId          String   @map("task_id")
+  mentionedUserId String   @map("mentioned_user_id")
+  sourceType      String   @map("source_type")
+  sourceId        String   @default("") @map("source_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, sourceType, sourceId])
+  @@unique([taskId, mentionedUserId, sourceType, sourceId])
+  @@map("task_mentions")
+}
+
+model TaskAttachment {
+  id             String   @id @default(uuid())
+  taskId         String   @map("task_id")
+  uploaderUserId String   @map("uploader_user_id")
+  fileName       String   @map("file_name")
+  mimeType       String   @map("mime_type")
+  sizeBytes      Int      @map("size_bytes")
+  storageKey     String   @map("storage_key")
+  uploadToken    String?  @map("upload_token")
+  completedAt    DateTime? @map("completed_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  deletedAt      DateTime? @map("deleted_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+  @@map("task_attachments")
 }
 
 model Rule {

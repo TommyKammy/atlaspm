@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import path from 'node:path';
 
 const API = process.env.E2E_CORE_API_URL ?? 'http://localhost:3001';
 
@@ -161,8 +162,91 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   const assignedTask = doingAfterAssign.tasks.find((t: any) => t.id === movedTask.id);
   expect(assignedTask.assigneeUserId).toBe(sub);
 
-  const progressInput = page.locator(`[data-testid="task-${movedTask.id}"] input[type="number"]`).first();
-  await progressInput.fill('50');
+  await page.click(`[data-testid="open-task-${movedTask.id}"]`);
+  const editor = page.locator('[data-testid="task-description-content"]');
+  await expect(editor).toBeVisible();
+  await editor.click();
+  await editor.fill('Detailed implementation plan for this task.');
+
+  await editor.type('\n/quo');
+  await expect(page.locator('[data-testid="slash-menu"]')).toBeVisible();
+  await page.click('[data-testid="slash-item-quote"]');
+  await editor.type('Quote block from slash menu');
+
+  await editor.type('\n/cod');
+  await page.click('[data-testid="slash-item-code"]');
+  await editor.type('const phaseTwo = true;');
+
+  await editor.type('\nMention ');
+  await editor.type('@');
+  await expect(page.locator('[data-testid="mention-menu"]')).toBeVisible();
+  await page.click(`[data-testid="mention-option-${sub}"]`);
+
+  await editor.type(' LinkText');
+  await editor.type(' https://example.com/atlas ');
+  await page.keyboard.down('Shift');
+  for (let i = 0; i < 8; i += 1) await page.keyboard.press('ArrowLeft');
+  await page.keyboard.up('Shift');
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.keyboard.press(`${mod}+KeyK`);
+  await page.fill('input[placeholder="https://example.com"]', 'https://example.com/atlas');
+  await page.click('button:has-text("Save")');
+
+  await editor.type('\n/image');
+  await page.click('[data-testid="slash-item-image"]');
+  const fixturePath = path.resolve(process.cwd(), 'fixtures/pixel.png');
+  await page.setInputFiles('[data-testid="description-image-input"]', fixturePath);
+  await expect(editor.locator('img')).toBeVisible();
+
+  await expect
+    .poll(async () => {
+      const detail = await api(`/tasks/${movedTask.id}`, token);
+      const content = JSON.stringify(detail.descriptionDoc ?? {});
+      return {
+        version: detail.descriptionVersion,
+        hasQuote: content.includes('blockquote'),
+        hasCode: content.includes('codeBlock'),
+        hasMention: content.includes(`\"id\":\"${sub}\"`),
+        hasImage: content.includes('/public/attachments/'),
+      };
+    })
+    .toEqual({
+      version: expect.any(Number),
+      hasQuote: true,
+      hasCode: true,
+      hasMention: true,
+      hasImage: true,
+    });
+
+  await page.click('button:has-text("Comments")');
+  await page.fill('[data-testid="comment-composer"]', `First comment from e2e @[${sub}|${sub}]`);
+  await page.click('[data-testid="add-comment-btn"]');
+  await expect(page.getByText('First comment from e2e')).toBeVisible();
+  await expect(page.locator('[data-testid^="comment-mention-pill-"]').first()).toBeVisible();
+
+  await page.click('button:has-text("Edit")');
+  await page.fill('div[data-testid^="comment-"] input', `Edited comment from e2e @[${sub}|${sub}]`);
+  await page.click('button:has-text("Save")');
+  await expect(page.getByText('Edited comment from e2e')).toBeVisible();
+
+  await page.reload();
+  await page.click(`[data-testid="open-task-${movedTask.id}"]`);
+  await expect(page.locator('[data-testid="task-description-content"] img')).toBeVisible();
+  await page.click('button:has-text("Comments")');
+  await expect(page.getByText('Edited comment from e2e')).toBeVisible();
+  await expect(page.locator('[data-testid^="comment-mention-pill-"]').first()).toBeVisible();
+  await page.click('button:has-text("Activity")');
+  await expect(page.getByText(/updated description/i).first()).toBeVisible();
+  await expect(page.getByText(/added a comment/i).first()).toBeVisible();
+  await expect(page.getByText(/added an attachment/i).first()).toBeVisible();
+  await expect(page.getByText(/added a mention/i).first()).toBeVisible();
+  await page.click('button[aria-label="Close task detail"]');
+
+  const groupedBeforeProgress = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
+  const taskBeforeProgress = groupedBeforeProgress
+    .find((g: any) => g.section.id === doing.id)
+    .tasks.find((t: any) => t.id === movedTask.id);
+  await api(`/tasks/${movedTask.id}`, token, 'PATCH', { progressPercent: 50, version: taskBeforeProgress.version });
   await expect
     .poll(async () => {
       const task = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
@@ -171,7 +255,11 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
     })
     .toBe('IN_PROGRESS');
 
-  await progressInput.fill('100');
+  const groupedBeforeDone = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
+  const taskBeforeDone = groupedBeforeDone
+    .find((g: any) => g.section.id === doing.id)
+    .tasks.find((t: any) => t.id === movedTask.id);
+  await api(`/tasks/${movedTask.id}`, token, 'PATCH', { progressPercent: 100, version: taskBeforeDone.version });
   await expect
     .poll(async () => {
       const task = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);

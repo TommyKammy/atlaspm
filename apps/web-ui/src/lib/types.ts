@@ -14,6 +14,10 @@ export type Task = {
   sectionId: string;
   title: string;
   description?: string | null;
+  descriptionDoc?: Record<string, unknown> | null;
+  descriptionText?: string | null;
+  descriptionUpdatedAt?: string | null;
+  descriptionVersion?: number;
   status: 'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED';
   progressPercent: number;
   priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT' | null;
@@ -23,6 +27,60 @@ export type Task = {
   completedAt?: string | null;
   version: number;
   position: number;
+};
+
+export type TaskComment = {
+  id: string;
+  taskId: string;
+  authorUserId: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  author?: {
+    id: string;
+    displayName?: string | null;
+    email?: string | null;
+  };
+};
+
+export type TaskMention = {
+  id: string;
+  taskId: string;
+  mentionedUserId: string;
+  sourceType: 'description' | 'comment';
+  sourceId: string;
+  createdAt: string;
+  user?: {
+    id: string;
+    displayName?: string | null;
+    email?: string | null;
+  } | null;
+};
+
+export type TaskAttachment = {
+  id: string;
+  taskId: string;
+  uploaderUserId: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  url: string;
+  createdAt: string;
+  completedAt?: string | null;
+  deletedAt?: string | null;
+};
+
+export type AuditEvent = {
+  id: string;
+  actor: string;
+  entityType: string;
+  entityId: string;
+  action: string;
+  beforeJson?: Record<string, unknown> | null;
+  afterJson?: Record<string, unknown> | null;
+  correlationId: string;
+  createdAt: string;
 };
 
 export type SectionTaskGroup = {
@@ -38,6 +96,7 @@ export type ProjectMember = {
     id: string;
     email?: string | null;
     displayName?: string | null;
+    avatarUrl?: string | null;
   };
 };
 

@@ -43,6 +43,43 @@
   - targeted invalidation for affected project-scoped keys.
 - No full app reload is used for create/edit flows; UI reflects writes immediately and then reconciles with server truth.
 
+## Task Internals (Phase 1)
+- Description storage:
+  - `Task.descriptionDoc` (JSON / ProseMirror document) is the source of truth.
+  - `Task.descriptionText` stores extracted plain text for future search.
+  - `Task.descriptionVersion` provides optimistic concurrency for editor saves.
+- Description API protocol:
+  - `PATCH /tasks/:id/description` requires `{ descriptionDoc, expectedVersion }`.
+  - Server returns `409` on stale version with latest description metadata.
+- Comments:
+  - `TaskComment` supports create/update and soft delete (`deletedAt`).
+  - Endpoints: list/create on task, patch/delete by comment id.
+- Audit/outbox:
+  - Description updates emit `task.description.updated`.
+  - Comment mutations emit `task.comment.created|updated|deleted`.
+
+## Task Internals (Phase 2)
+- Editor model:
+  - Description authoring keeps ProseMirror JSON as the canonical representation.
+  - Additional blocks supported in UI: quote, code block, divider, image, table, headings/lists/checklist.
+  - Slash command menu inserts these blocks without introducing HTML storage.
+- Mentions:
+  - Description mentions are stored as ProseMirror `mention` nodes (`id`, `label`).
+  - Comments use token syntax `@[userId|label]` in Phase 2.
+  - Server normalizes mentions into `task_mentions` (`task_id`, `mentioned_user_id`, `source_type`, `source_id`).
+  - Mention sync runs on description save and comment create/update/delete.
+- Attachments:
+  - Metadata is stored in `task_attachments`.
+  - Upload flow:
+    1. `POST /tasks/:id/attachments/initiate`
+    2. `POST /attachments/:id/upload?token=...` (multipart)
+    3. `POST /tasks/:id/attachments/complete`
+  - Public signed read URL (`/public/attachments/:id/:token`) is used for inline image rendering.
+  - Attachment deletion is soft delete and audited.
+- Audit/outbox additions:
+  - `task.mention.created`, `task.mention.deleted`
+  - `task.attachment.initiated`, `task.attachment.created`, `task.attachment.deleted`
+
 ## Future readiness
 - `packages/domain` and `packages/rule-engine` provide extraction boundaries for phase 2.
 - Task model includes `startAt`/`dueAt` for future Gantt/Timeline support.

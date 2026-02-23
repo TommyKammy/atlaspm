@@ -177,3 +177,77 @@
   - `pnpm e2e`
 - Risks/known gaps:
   - The table/toolbar are intentionally minimal; additional task-view controls can be expanded later without changing API contracts.
+
+## 2026-02-23 - Task Internals Phase 1 (Description + Comments + Activity)
+- What changed:
+  - Core API:
+    - Added task description persistence fields (`description_doc`, `description_text`, `description_updated_at`, `description_version`) and migration.
+    - Added optimistic description save endpoint `PATCH /tasks/:id/description` with `expectedVersion` and `409` conflict payload.
+    - Added task detail endpoint `GET /tasks/:id` including description doc/version.
+    - Added comments APIs:
+      - `GET /tasks/:id/comments`
+      - `POST /tasks/:id/comments`
+      - `PATCH /comments/:id`
+      - `DELETE /comments/:id` (soft delete).
+    - Added audit/outbox emission for:
+      - `task.description.updated`
+      - `task.comment.created|updated|deleted`.
+    - Added integration test coverage for description optimistic concurrency and full comment lifecycle.
+  - Web UI:
+    - Added Tiptap-based rich description editor with minimal toolbar, autosave debounce, saving indicator, and conflict handling.
+    - Added task detail drawer tabs (`Details`, `Comments`, `Activity`).
+    - Added comments composer/list/edit/delete for own comments.
+    - Added readable activity timeline based on task audit events.
+    - Updated task-detail-to-board cache sync so description saves update grouped task cache immediately (no stale version conflicts on subsequent task edits).
+  - E2E:
+    - Extended Playwright flow to verify:
+      - description autosave persists after refresh,
+      - comment create/edit persists after refresh,
+      - activity shows description/comment events.
+    - Stabilized strict-mode assertions for repeated activity text and closed task drawer before continuing list-table edits.
+- Why:
+  - Deliver Asana-like task internals in Phase 1 while preserving headless architecture, no-refresh UX, and safe structured document storage.
+- How tested:
+  - `pnpm lint`
+  - `docker compose -f infra/docker/docker-compose.yml up -d postgres && pnpm test`
+  - `pnpm e2e:rebuild`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Comment body is plain text in Phase 1; rich comment formatting is deferred.
+  - Description conflict UX is reload-and-retry only (no merge UI yet).
+
+## 2026-02-23 - Task Internals Phase 2 (Notion-like Blocks, Mentions, Attachments)
+- What changed:
+  - Core API:
+    - Added `task_mentions` and `task_attachments` models + migration.
+    - Description mention extraction from ProseMirror JSON (`mention` node/mark) on `PATCH /tasks/:id/description`.
+    - Comment mention extraction (`@[userId|label]`) on comment create/update; cleanup on delete.
+    - Added mention endpoint: `GET /tasks/:id/mentions`.
+    - Added attachment APIs:
+      - `POST /tasks/:id/attachments/initiate`
+      - `POST /attachments/:id/upload?token=...`
+      - `POST /tasks/:id/attachments/complete`
+      - `GET /tasks/:id/attachments`
+      - `DELETE /attachments/:id`
+      - `GET /public/attachments/:id/:token` (signed read URL for images)
+    - Added audit/outbox events for mention and attachment lifecycle.
+  - Web UI:
+    - Upgraded description editor with additional block support (quote/code/divider/image/table).
+    - Implemented slash command menu and mention suggestion menu in editor.
+    - Added Cmd/Ctrl+K link dialog.
+    - Integrated image upload into editor (attach + insert image node).
+    - Added attachments section in task details.
+    - Added comment mention token rendering as pills.
+  - E2E:
+    - Extended flow to validate slash insertion, description mention, image persistence, comment mention persistence, and activity visibility.
+    - Stabilized progress update step via API patch in E2E to avoid flaky UI version-race behavior.
+- Why:
+  - Deliver Phase 2 Notion-like authoring while keeping safe structured storage and strict headless boundaries.
+- How tested:
+  - `pnpm lint`
+  - `docker compose -f infra/docker/docker-compose.yml up -d postgres && pnpm test`
+  - `pnpm e2e:rebuild`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Comments remain plain text with structured mention tokens (full ProseMirror comment docs deferred).
+  - Link dialog currently inserts a linked URL when no selection (minimal behavior).

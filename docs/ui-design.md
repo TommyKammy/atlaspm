@@ -57,3 +57,33 @@
 - Use targeted optimistic updates for inline edits and reorder.
 - Invalidate only affected keys on settle/error.
 - No page reloads required for section/task create, edits, or reorder.
+
+## Task Detail Internals (Phase 1)
+- Task detail opens in a right-side drawer with tabs:
+  - `Details`: rich description editor (Tiptap)
+  - `Comments`: comment thread + edit/delete for own comments
+  - `Activity`: readable task audit timeline
+- Description editor:
+  - Source of truth is ProseMirror JSON (`descriptionDoc`)
+  - autosave debounce ~900ms
+  - optimistic version protocol (`expectedVersion`)
+  - conflict banner + reload-latest action on `409`
+- Safety:
+  - no raw HTML stored as source-of-truth
+  - read/write pipeline operates on structured JSON + plain text extraction
+
+## Task Detail Internals (Phase 2)
+- Description editor:
+  - Slash menu (`/`) for block insertion: heading, lists, checklist, quote, code block, divider, image, table.
+  - Mention suggestions (`@`) backed by project members.
+  - Cmd/Ctrl+K opens a minimal link dialog.
+  - Image uploads flow through core-api attachment APIs and insert image nodes into the document.
+- Comments:
+  - Composer supports mention token insertion (`@[userId|label]`) and renders mention pills in thread UI.
+- Attachments:
+  - Details tab includes attachment list with delete action.
+  - Inline description images render from signed public URLs returned by core-api.
+- Reliability:
+  - Autosave debounce remains ~900ms.
+  - `409` conflict shows non-blocking reload-latest banner.
+  - Query invalidation is task-scoped (`taskDetail`, `taskAudit`, `taskAttachments`) to avoid full-page reload.

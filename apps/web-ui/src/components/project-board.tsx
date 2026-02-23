@@ -32,6 +32,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import TaskDetailDrawer from '@/components/task-detail-drawer';
 
 function sortByPosition(tasks: Task[]) {
   return [...tasks].sort((a, b) => a.position - b.position);
@@ -190,11 +191,13 @@ function TaskRow({
   sectionId,
   onEdit,
   members,
+  onOpen,
 }: {
   task: Task;
   sectionId: string;
   onEdit: (taskId: string, patch: Partial<Task> & { version: number }) => void;
   members: ProjectMember[];
+  onOpen: (taskId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
     id: task.id,
@@ -221,7 +224,14 @@ function TaskRow({
           >
             Drag
           </button>
-          <span className="truncate text-sm">{task.title}</span>
+          <button
+            type="button"
+            className="truncate text-left text-sm hover:underline"
+            onClick={() => onOpen(task.id)}
+            data-testid={`open-task-${task.id}`}
+          >
+            {task.title}
+          </button>
         </div>
       </TableCell>
       <TableCell>
@@ -376,6 +386,7 @@ export default function ProjectBoard({
 }) {
   const sensors = useSensors(useSensor(PointerSensor));
   const queryClient = useQueryClient();
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const groupsQuery = useQuery<SectionTaskGroup[]>({
     queryKey: queryKeys.projectTasksGrouped(projectId),
@@ -525,6 +536,7 @@ export default function ProjectBoard({
                       sectionId={group.section.id}
                       onEdit={onEdit}
                       members={members}
+                      onOpen={setSelectedTaskId}
                     />
                   ))}
                 </SortableContext>
@@ -554,6 +566,15 @@ export default function ProjectBoard({
             No sections yet. Add a section to start planning tasks.
           </div>
         ) : null}
+
+        <TaskDetailDrawer
+          taskId={selectedTaskId}
+          open={Boolean(selectedTaskId)}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setSelectedTaskId(null);
+          }}
+          projectId={projectId}
+        />
       </div>
     </DndContext>
   );

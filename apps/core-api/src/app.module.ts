@@ -10,6 +10,7 @@ import { RulesController } from './rules/rules.controller';
 import { WebhooksController } from './webhooks/webhooks.controller';
 import { AuditController } from './audit/audit.controller';
 import { DomainService } from './common/domain.service';
+import { PublicAttachmentsController } from './tasks/public-attachments.controller';
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule],
@@ -21,6 +22,7 @@ import { DomainService } from './common/domain.service';
     RulesController,
     WebhooksController,
     AuditController,
+    PublicAttachmentsController,
   ],
   providers: [PrismaService, DomainService],
 })
