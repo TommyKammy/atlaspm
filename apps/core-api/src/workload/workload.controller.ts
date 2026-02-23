@@ -5,7 +5,7 @@ import type { AppRequest } from '../common/types';
 import { WorkloadService, WorkloadFilters } from './workload.service';
 import { IsOptional, IsString, IsDateString } from 'class-validator';
 
-class WorkloadQueryDto implements WorkloadFilters {
+class WorkloadQueryDto {
   @IsOptional()
   @IsDateString()
   startDate?: string;

@@ -17,7 +17,7 @@ export interface WeeklyLoad {
     id: string;
     title: string;
     dueAt: Date | null;
-    priority: string;
+    priority: string | null;
     status: string;
   }>;
 }
@@ -163,7 +163,7 @@ export class WorkloadService {
     return workloads.filter((w): w is UserWorkload => w !== null);
   }
 
-  private getDefaultDateRange(filters: WorkloadFilters): Required<WorkloadFilters> {
+  private getDefaultDateRange(filters: WorkloadFilters): { startDate: Date; endDate: Date; projectId?: string } {
     const now = new Date();
     const defaultStart = new Date(now);
     defaultStart.setDate(now.getDate() - now.getDay());
@@ -185,7 +185,7 @@ export class WorkloadService {
       id: string;
       title: string;
       dueAt: Date | null;
-      priority: string;
+      priority: string | null;
       status: string;
     }>,
     startDate: Date,

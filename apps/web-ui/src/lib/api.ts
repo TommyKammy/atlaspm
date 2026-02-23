@@ -1,4 +1,6 @@
 const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL ?? 'http://localhost:3001';
+
+import { useQuery } from '@tanstack/react-query';
 export const apiBaseUrl = API_URL;
 
 export type ApiOptions = {
@@ -39,4 +41,15 @@ export async function api(path: string, options: ApiOptions = {}) {
   const contentType = res.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) return null;
   return res.json();
+}
+
+
+
+// Project API
+export function useProjects(workspaceId: string) {
+  return useQuery({
+    queryKey: ['workspace', workspaceId, 'projects'],
+    queryFn: () => api(`/workspaces/${workspaceId}/projects`),
+    enabled: !!workspaceId,
+  });
 }
