@@ -9,3 +9,5 @@ dist
 coverage
 playwright-report
 test-results
+
+apps/core-api/storage/attachments/
