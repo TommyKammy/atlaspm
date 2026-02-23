@@ -92,6 +92,7 @@ export class ProjectsController {
         id: member.user.id,
         email: member.user.email,
         displayName: member.user.displayName ?? member.user.email ?? member.user.id,
+        avatarUrl: null,
       },
     }));
   }

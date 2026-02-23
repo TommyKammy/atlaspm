@@ -251,3 +251,24 @@
 - Risks/known gaps:
   - Comments remain plain text with structured mention tokens (full ProseMirror comment docs deferred).
   - Link dialog currently inserts a linked URL when no selection (minimal behavior).
+
+## 2026-02-23 - Phase 3 Collab Stabilization (Editor re-init + Activity mapping)
+- What changed:
+  - Fixed realtime sync/presence regression in `/apps/web-ui/src/components/editor/TaskDescriptionEditor.tsx` by making Tiptap reinitialize when collab session state changes (provider/ydoc/read-only mode).
+  - This ensures collaboration extensions (`Collaboration`, `CollaborationCursor`) are actually mounted after token/provider setup, enabling true multi-client Yjs sync and awareness.
+  - Added activity label compatibility in `/apps/web-ui/src/components/task-detail-drawer.tsx`:
+    - map `task.description.snapshot_saved` to human-readable `updated description` so timeline remains consistent after collab snapshot-based persistence.
+- Why:
+  - E2E was failing because editor instances remained in non-collab mode after async token/provider setup, so updates never propagated and presence stayed at `1 users`.
+  - Snapshot-based audit action changed the action name surfaced in Activity and broke expected UX wording.
+- How tested:
+  - `pnpm lint`
+  - `docker compose -f infra/docker/docker-compose.yml up -d postgres`
+  - `pnpm test`
+  - `pnpm e2e:up`
+  - `pnpm e2e`
+  - `pnpm e2e:down`
+  - additionally: `pnpm --filter @atlaspm/playwright e2e tests/collab.spec.ts --reporter=list`
+- Risks/known gaps:
+  - `pnpm e2e:up` currently performs `--build`, which is reliable but slower than pure `up` loops.
+  - Next.js lint still warns about missing Next ESLint plugin wiring (non-blocking, existing project-wide warning).

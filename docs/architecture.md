@@ -83,3 +83,21 @@
 ## Future readiness
 - `packages/domain` and `packages/rule-engine` provide extraction boundaries for phase 2.
 - Task model includes `startAt`/`dueAt` for future Gantt/Timeline support.
+
+## Collaboration (Phase 3)
+- New app boundary:
+  - `apps/collab-server` handles Yjs websocket collaboration and presence only.
+  - `web-ui` talks to `collab-server` via websocket and to `core-api` via HTTP.
+  - `collab-server` talks to `core-api` via HTTP for loading/persisting snapshots.
+- Authorization model:
+  - `core-api` issues short-lived collab JWT per task room (`task:<taskId>:description`).
+  - `collab-server` verifies token claims and room binding.
+  - Roles:
+    - `VIEWER` => readonly
+    - `MEMBER`/`ADMIN` => readwrite
+- Persistence model:
+  - Canonical description state remains in `Task.descriptionDoc` / `Task.descriptionText`.
+  - Snapshot writes happen on cadence (idle/interval/disconnect), not per keystroke.
+  - Snapshot writes emit:
+    - audit action `task.description.snapshot_saved`
+    - outbox type `task.description.snapshot_saved`

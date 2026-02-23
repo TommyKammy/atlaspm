@@ -87,3 +87,13 @@
   - Autosave debounce remains ~900ms.
   - `409` conflict shows non-blocking reload-latest banner.
   - Query invalidation is task-scoped (`taskDetail`, `taskAudit`, `taskAttachments`) to avoid full-page reload.
+
+## Collaboration UI (Phase 3)
+- Description editor can run in collaborative mode when `NEXT_PUBLIC_COLLAB_ENABLED=true`.
+- Minimal collaboration chrome:
+  - small presence badge (`N users`)
+  - readonly banner for VIEWER sessions
+  - fallback banner when websocket collaboration is unavailable
+- Visual style remains consistent with existing shadcn tokens and compact task detail layout.
+- Fallback behavior:
+  - when collab token/ws fails, editor gracefully switches to snapshot mode without full refresh.

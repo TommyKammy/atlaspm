@@ -11,6 +11,7 @@ import { WebhooksController } from './webhooks/webhooks.controller';
 import { AuditController } from './audit/audit.controller';
 import { DomainService } from './common/domain.service';
 import { PublicAttachmentsController } from './tasks/public-attachments.controller';
+import { CollabController } from './collab/collab.controller';
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule],
@@ -23,6 +24,7 @@ import { PublicAttachmentsController } from './tasks/public-attachments.controll
     WebhooksController,
     AuditController,
     PublicAttachmentsController,
+    CollabController,
   ],
   providers: [PrismaService, DomainService],
 })

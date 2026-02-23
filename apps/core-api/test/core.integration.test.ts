@@ -14,6 +14,9 @@ describe('Core API Integration', () => {
   beforeAll(async () => {
     process.env.DEV_AUTH_ENABLED = 'true';
     process.env.DEV_AUTH_SECRET = 'dev-secret-change-me';
+    process.env.COLLAB_JWT_SECRET = 'collab-jwt-secret';
+    process.env.COLLAB_SERVICE_TOKEN = 'collab-service-secret';
+    process.env.COLLAB_SERVER_URL = 'ws://localhost:18080';
     process.env.DATABASE_URL =
       process.env.DATABASE_URL ?? 'postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public';
 
@@ -52,11 +55,22 @@ describe('Core API Integration', () => {
       .send({ userId: 'member-1', role: 'MEMBER' })
       .expect(201);
 
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/members`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 'viewer-1', role: 'VIEWER' })
+      .expect(201);
+
     const membersRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/members`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(membersRes.body.some((m: any) => m.user?.id === 'member-1')).toBe(true);
+
+    const auth = app.get(AuthService);
+    const memberToken = await auth.mintDevToken('member-1', 'member-1@example.com', 'Member One');
+    const viewerToken = await auth.mintDevToken('viewer-1', 'viewer-1@example.com', 'Viewer One');
+    const outsiderToken = await auth.mintDevToken('outsider-1', 'outsider-1@example.com', 'Outsider One');
 
     const sectionsRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/sections`)
@@ -86,6 +100,24 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ title: 'Task 2', sectionId: secA.body.id })
       .expect(201);
+
+    const memberCollabToken = await request(app.getHttpServer())
+      .post(`/tasks/${t1.body.id}/collab-token`)
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(201);
+    expect(memberCollabToken.body.mode).toBe('readwrite');
+    expect(memberCollabToken.body.roomId).toBe(`task:${t1.body.id}:description`);
+
+    const viewerCollabToken = await request(app.getHttpServer())
+      .post(`/tasks/${t1.body.id}/collab-token`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(201);
+    expect(viewerCollabToken.body.mode).toBe('readonly');
+
+    await request(app.getHttpServer())
+      .post(`/tasks/${t1.body.id}/collab-token`)
+      .set('Authorization', `Bearer ${outsiderToken}`)
+      .expect(404);
 
     const p50 = await request(app.getHttpServer())
       .patch(`/tasks/${t1.body.id}`)

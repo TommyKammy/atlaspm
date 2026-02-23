@@ -16,6 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 function formatAuditEvent(event: AuditEvent) {
   const action = event.action;
   if (action === 'task.description.updated') return 'updated description';
+  if (action === 'task.description.snapshot_saved') return 'updated description';
   if (action === 'task.comment.created') return 'added a comment';
   if (action === 'task.comment.updated') return 'edited a comment';
   if (action === 'task.comment.deleted') return 'deleted a comment';

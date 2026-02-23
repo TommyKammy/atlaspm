@@ -6,9 +6,9 @@ cd "$ROOT_DIR"
 
 pushd infra/docker >/dev/null
 if [[ "${E2E_REBUILD:-0}" == "1" ]]; then
-  docker compose build core-api web-ui
+  docker compose build core-api collab-server web-ui
 fi
-docker compose up -d postgres core-api web-ui
+docker compose up -d postgres core-api collab-server web-ui
 popd >/dev/null
 
 cleanup() {

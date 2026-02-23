@@ -8,7 +8,9 @@
     "build": "pnpm -r --if-present build",
     "lint": "pnpm -r --if-present lint",
     "test": "pnpm -r --if-present test",
+    "e2e:up": "./scripts/e2e-up.sh",
     "e2e": "./scripts/run-e2e.sh",
+    "e2e:down": "./scripts/e2e-down.sh",
     "e2e:rebuild": "E2E_REBUILD=1 ./scripts/run-e2e.sh",
     "db:migrate": "pnpm --filter @atlaspm/core-api prisma:migrate",
     "db:seed": "pnpm --filter @atlaspm/core-api db:seed"

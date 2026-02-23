@@ -25,6 +25,7 @@ export function createTaskDescriptionExtensions() {
   return [
     StarterKit.configure({
       heading: { levels: [1, 2, 3] },
+      history: false,
     }),
     Link.configure({
       openOnClick: false,

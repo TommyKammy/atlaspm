@@ -22,6 +22,10 @@ services:
       DATABASE_URL: postgresql://atlaspm:atlaspm@postgres:5432/atlaspm?schema=public
       DEV_AUTH_ENABLED: 'true'
       DEV_AUTH_SECRET: dev-secret-change-me
+      COLLAB_JWT_SECRET: collab-jwt-secret-change-me
+      COLLAB_SERVICE_TOKEN: collab-service-token-change-me
+      COLLAB_SERVER_URL: ws://localhost:18080
+      COLLAB_TOKEN_TTL_SEC: 600
       OIDC_ISSUER: https://example.okta.com/oauth2/default
       OIDC_AUDIENCE: atlaspm
       OIDC_JWKS_URI: https://example.okta.com/oauth2/default/v1/keys
@@ -38,6 +42,9 @@ services:
         NEXT_PUBLIC_CORE_API_URL: http://localhost:3001
         NEXT_PUBLIC_DEV_AUTH_ENABLED: 'true'
         NEXT_PUBLIC_DEV_TOKEN_ENDPOINT: http://localhost:3001/dev-auth/token
+        NEXT_PUBLIC_COLLAB_ENABLED: 'true'
+        NEXT_PUBLIC_COLLAB_SERVER_URL: ws://localhost:18080
+        NEXT_PUBLIC_COLLAB_DEV_MODE: 'false'
     container_name: atlaspm-web-ui
     environment:
       NODE_ENV: development
@@ -45,10 +52,31 @@ services:
       NEXT_PUBLIC_CORE_API_URL: http://localhost:3001
       NEXT_PUBLIC_DEV_AUTH_ENABLED: 'true'
       NEXT_PUBLIC_DEV_TOKEN_ENDPOINT: http://localhost:3001/dev-auth/token
+      NEXT_PUBLIC_COLLAB_ENABLED: 'true'
+      NEXT_PUBLIC_COLLAB_SERVER_URL: ws://localhost:18080
+      NEXT_PUBLIC_COLLAB_DEV_MODE: 'false'
+    depends_on:
+      - core-api
+      - collab-server
+    ports:
+      - '3000:3000'
+
+  collab-server:
+    build:
+      context: ../..
+      dockerfile: apps/collab-server/Dockerfile
+    container_name: atlaspm-collab-server
+    environment:
+      NODE_ENV: development
+      COLLAB_PORT: 8080
+      CORE_API_URL: http://core-api:3001
+      COLLAB_JWT_SECRET: collab-jwt-secret-change-me
+      COLLAB_SERVICE_TOKEN: collab-service-token-change-me
+      COLLAB_DEV_MODE: 'false'
     depends_on:
       - core-api
     ports:
-      - '3000:3000'
+      - '18080:8080'
 
 volumes:
   atlaspm_pg_data:

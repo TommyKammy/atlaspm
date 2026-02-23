@@ -7,6 +7,7 @@ It strictly separates domain logic from UI and exposes all functionality via sec
 
 - `apps/core-api`: NestJS + Prisma + PostgreSQL
 - `apps/web-ui`: Next.js + Tailwind + shadcn/ui
+- `apps/collab-server`: Hocuspocus (Yjs) realtime collaboration server
 - `packages/shared-types`: shared type contracts only
 - `packages/domain`: domain layer seed
 - `packages/rule-engine`: rules boundary seed
@@ -25,6 +26,7 @@ It strictly separates domain logic from UI and exposes all functionality via sec
 pnpm install
 cp apps/core-api/.env.example apps/core-api/.env
 cp apps/web-ui/.env.example apps/web-ui/.env.local
+cp apps/collab-server/.env.example apps/collab-server/.env
 ```
 
 ## API Docs
@@ -37,7 +39,9 @@ cp apps/web-ui/.env.example apps/web-ui/.env.local
 pnpm dev
 pnpm lint
 pnpm test
+pnpm e2e:up
 pnpm e2e
+pnpm e2e:down
 pnpm e2e:rebuild
 pnpm db:migrate
 pnpm db:seed
@@ -46,6 +50,8 @@ pnpm db:seed
 - `pnpm test` expects local Postgres on `localhost:55432` (start with `docker compose -f infra/docker/docker-compose.yml up -d postgres`).
 - `pnpm e2e` reuses existing Docker images for speed.
 - `pnpm e2e:rebuild` forces `core-api` and `web-ui` image rebuilds after app code changes.
+- `pnpm e2e:up` starts postgres + core-api + collab-server + web-ui.
+- `pnpm e2e:down` tears down the docker compose stack.
 
 ## E2E (Mac + Colima)
 
@@ -54,7 +60,7 @@ colima start
 pnpm e2e
 ```
 
-`pnpm e2e` runs `infra/docker/docker-compose.yml` (postgres + core-api + web-ui) and executes Playwright against the running stack.
+`pnpm e2e` runs `infra/docker/docker-compose.yml` (postgres + core-api + collab-server + web-ui) and executes Playwright against the running stack.
 
 - Fast loop (default): `pnpm e2e` reuses existing images.
 - Rebuild when app code changes: `pnpm e2e:rebuild`
@@ -72,3 +78,7 @@ docker compose up -d --build
 
 - OIDC JWT verification via JWKS by default.
 - Dev auth mode is disabled by default and only enabled via `DEV_AUTH_ENABLED=true`.
+- Collaboration JWT/service secrets:
+  - `COLLAB_JWT_SECRET`
+  - `COLLAB_SERVICE_TOKEN`
+- Collaboration in web-ui is feature-gated and off by default: `NEXT_PUBLIC_COLLAB_ENABLED=false`.
