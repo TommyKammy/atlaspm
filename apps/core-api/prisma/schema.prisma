@@ -51,6 +51,7 @@ model Workspace {
   projects    Project[]
   memberships WorkspaceMembership[]
   invitations Invitation[]
+  portfolios  Portfolio[]
 }
 
 model User {
@@ -110,6 +111,7 @@ model Project {
   tasks       Task[]
   rules       Rule[]
   webhooks    Webhook[]
+  portfolios  PortfolioProject[]
 }
 
 model ProjectMembership {
@@ -312,4 +314,33 @@ model TaskDependency {
   @@unique([taskId, dependsOnId])
   @@index([taskId])
   @@index([dependsOnId])
+}
+
+
+model Portfolio {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  name        String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  projects  PortfolioProject[]
+
+  @@index([workspaceId])
+  @@map("portfolios")
+}
+
+model PortfolioProject {
+  portfolioId String @map("portfolio_id")
+  projectId   String @map("project_id")
+  
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  @@id([portfolioId, projectId])
+  @@index([portfolioId])
+  @@index([projectId])
+  @@map("portfolio_projects")
 }

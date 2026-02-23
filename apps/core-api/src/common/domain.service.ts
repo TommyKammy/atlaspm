@@ -103,6 +103,14 @@ export class DomainService {
     return membership;
   }
 
+  async requireWorkspaceMembership(workspaceId: string, userId: string) {
+    const membership = await this.prisma.workspaceMembership.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId } },
+    });
+    if (!membership) throw new NotFoundException('Workspace membership not found');
+    return membership;
+  }
+
   async requireProjectRole(projectId: string, userId: string, min: ProjectRole) {
     const membership = await this.prisma.projectMembership.findUnique({
       where: { projectId_userId: { projectId, userId } },
