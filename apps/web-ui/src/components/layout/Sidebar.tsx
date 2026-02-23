@@ -86,6 +86,16 @@ export function Sidebar({ onNavigate, compact = false }: SidebarProps) {
           >
             {compact ? 'W' : 'Workload'}
           </Link>
+          <Link
+            href="/dashboards"
+            onClick={handleNavigate}
+            className={cn(
+              'block rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+              pathname === '/dashboards' && 'bg-muted text-foreground',
+            )}
+          >
+            {compact ? 'D' : 'Dashboards'}
+          </Link>
         </nav>
         {isWorkspaceAdmin ? (
           <>
