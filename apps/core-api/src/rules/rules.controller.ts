@@ -5,7 +5,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
-import { ProjectRole } from '@prisma/client';
+import { Prisma, ProjectRole } from '@prisma/client';
+import { parseRuleDefinition, templateDefinition } from './rule-definition';
 
 class CreateRuleDto {
   @IsString()
@@ -22,6 +23,9 @@ class CreateRuleDto {
   @IsInt()
   @Min(1)
   cooldownSec?: number;
+
+  @IsOptional()
+  definition?: unknown;
 }
 
 class PatchRuleDto {
@@ -33,6 +37,9 @@ class PatchRuleDto {
   @IsInt()
   @Min(1)
   cooldownSec?: number;
+
+  @IsOptional()
+  definition?: unknown;
 }
 
 @Controller()
@@ -58,6 +65,9 @@ export class RulesController {
           projectId,
           name: body.name,
           templateKey: body.templateKey,
+          definition: (body.definition
+            ? parseRuleDefinition(body.definition)
+            : templateDefinition(body.templateKey)) as Prisma.InputJsonValue,
           enabled: body.enabled ?? true,
           cooldownSec: body.cooldownSec ?? 60,
         },
@@ -81,9 +91,17 @@ export class RulesController {
   async patch(@Param('id') id: string, @Body() body: PatchRuleDto, @CurrentRequest() req: AppRequest) {
     const rule = await this.prisma.rule.findUniqueOrThrow({ where: { id } });
     await this.domain.requireProjectRole(rule.projectId, req.user.sub, ProjectRole.MEMBER);
+    const definition = body.definition ? parseRuleDefinition(body.definition) : undefined;
 
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.rule.update({ where: { id }, data: body });
+      const updated = await tx.rule.update({
+        where: { id },
+        data: {
+          name: body.name,
+          cooldownSec: body.cooldownSec,
+          definition: definition as Prisma.InputJsonValue | undefined,
+        },
+      });
       await this.domain.appendAuditOutbox({
         tx,
         actor: req.user.sub,

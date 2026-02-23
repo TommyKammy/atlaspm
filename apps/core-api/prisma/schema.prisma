@@ -131,6 +131,7 @@ model Rule {
   projectId   String
   name        String
   templateKey String
+  definition  Json?
   enabled     Boolean  @default(true)
   cooldownSec Int      @default(60)
   createdAt   DateTime @default(now())

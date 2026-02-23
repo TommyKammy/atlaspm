@@ -77,7 +77,23 @@ export class ProjectsController {
   @Get(':id/members')
   async members(@Param('id') projectId: string, @CurrentRequest() req: AppRequest) {
     await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
-    return this.prisma.projectMembership.findMany({ where: { projectId }, orderBy: { createdAt: 'asc' } });
+    const members = await this.prisma.projectMembership.findMany({
+      where: { projectId },
+      include: { user: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return members.map((member) => ({
+      id: member.id,
+      projectId: member.projectId,
+      userId: member.userId,
+      role: member.role,
+      createdAt: member.createdAt,
+      user: {
+        id: member.user.id,
+        email: member.user.email,
+        displayName: member.user.displayName ?? member.user.email ?? member.user.id,
+      },
+    }));
   }
 
   @Post(':id/members')

@@ -88,3 +88,42 @@
   - `pnpm e2e` (pass, 1 test passed).
 - Risks/known gaps:
   - `pnpm e2e` without rebuild may use stale images after code changes; use `pnpm e2e:rebuild` when changing backend/frontend code.
+
+## 2026-02-23 - Asana-like UX Sprint (Sidebar, Cache Fixes, Rules Edit, Assignee Picker)
+- What changed:
+  - Core API:
+    - Added `Rule.definition` JSON field (Prisma schema + migration).
+    - Added rule definition validation/parsing (`task.progress.changed`, progress conditions, status/completedAt actions).
+    - Extended `PATCH /rules/:id` to edit `name`, `cooldownSec`, and `definition`.
+    - Updated default template creation to persist validated `definition`.
+    - Updated task rule execution to evaluate persisted rule definitions.
+    - Enhanced `GET /projects/:id/members` response to include minimal `user` profile (`id`, `email`, `displayName` fallback).
+    - Added integration coverage for rule update + outbox and member profile payload.
+  - Web UI:
+    - Introduced TanStack Query provider and project-scoped query keys.
+    - Added persistent app shell sidebar with project navigation.
+    - Reworked home/project/rules flows to query + mutation patterns with targeted cache updates.
+    - Fixed “Add Section” to appear immediately without refresh.
+    - Implemented section quick-add task UX (`+ Add task`, Enter for rapid create) without refresh.
+    - Added assignee autocomplete picker from project members with search and persisted PATCH updates.
+    - Added rules editor UI (name + trigger/condition/action definition) with save/cancel and enable/disable.
+    - Improved board visuals (section headers, counts, hover states, empty states, consistent controls).
+  - E2E:
+    - Replaced old flow with Asana-like UX assertions:
+      - sidebar project navigation
+      - add section/task immediate reflection + persistence
+      - DnD reorder within section
+      - assignee autocomplete persistence
+      - progress rule transitions (50 => IN_PROGRESS, 100 => DONE/completedAt)
+      - rule edit persistence
+      - audit/outbox checks
+- Why:
+  - Address critical UX complaints (no-refresh correctness, editability gaps, navigation, and assignee UX) while preserving strict core/UI API boundaries.
+- How tested:
+  - `pnpm install --no-frozen-lockfile`
+  - `pnpm lint`
+  - `docker compose -f infra/docker/docker-compose.yml up -d postgres && pnpm test`
+  - `pnpm e2e`
+  - `pnpm e2e:rebuild`
+- Risks/known gaps:
+  - Cross-section task move remains API-covered in E2E for deterministic stability; UI drag between sections needs further hardening to be fully deterministic in Playwright.

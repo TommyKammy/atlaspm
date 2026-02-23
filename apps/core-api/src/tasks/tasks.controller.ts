@@ -28,6 +28,11 @@ import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { Priority, ProjectRole, TaskStatus } from '@prisma/client';
+import {
+  parseRuleDefinition,
+  templateDefinition,
+  type RuleDefinition,
+} from '../rules/rule-definition';
 
 class TaskQuery {
   @IsOptional()
@@ -481,15 +486,35 @@ export class TasksController {
       });
       if (recentRun) continue;
 
-      let patch: any = null;
-      if (rule.templateKey === 'progress_to_done' && task.progressPercent === 100) {
-        if (!(task.status === TaskStatus.DONE && task.completedAt)) {
-          patch = { status: TaskStatus.DONE, completedAt: task.completedAt ?? new Date(), version: { increment: 1 } };
+      const definition = this.resolveRuleDefinition(rule);
+      const conditionsMatched = definition.conditions.every((condition) => {
+        const value = task.progressPercent;
+        if (condition.op === 'between') {
+          return value >= Number(condition.min) && value <= Number(condition.max);
         }
-      }
-      if (rule.templateKey === 'progress_to_in_progress' && task.progressPercent >= 0 && task.progressPercent < 100) {
-        if (!(task.status === TaskStatus.IN_PROGRESS && task.completedAt === null)) {
-          patch = { status: TaskStatus.IN_PROGRESS, completedAt: null, version: { increment: 1 } };
+        if (condition.op === 'eq') return value === Number(condition.value);
+        if (condition.op === 'lt') return value < Number(condition.value);
+        if (condition.op === 'lte') return value <= Number(condition.value);
+        if (condition.op === 'gt') return value > Number(condition.value);
+        if (condition.op === 'gte') return value >= Number(condition.value);
+        return false;
+      });
+
+      let patch: any = null;
+      if (conditionsMatched) {
+        const next: Record<string, unknown> = {};
+        for (const action of definition.actions) {
+          if (action.type === 'setStatus' && action.status) next.status = action.status;
+          if (action.type === 'setCompletedAtNow') next.completedAt = task.completedAt ?? new Date();
+          if (action.type === 'setCompletedAtNull') next.completedAt = null;
+        }
+        if (Object.keys(next).length) {
+          const statusUnchanged = next.status === undefined || next.status === task.status;
+          const completedUnchanged =
+            next.completedAt === undefined || String(next.completedAt) === String(task.completedAt);
+          if (!(statusUnchanged && completedUnchanged)) {
+            patch = { ...next, version: { increment: 1 } };
+          }
         }
       }
 
@@ -516,5 +541,10 @@ export class TasksController {
 
       await tx.ruleRun.update({ where: { id: run.id }, data: { finishedAt: new Date() } });
     }
+  }
+
+  private resolveRuleDefinition(rule: { definition: unknown; templateKey: string }): RuleDefinition {
+    if (rule.definition) return parseRuleDefinition(rule.definition);
+    return templateDefinition(rule.templateKey);
   }
 }

@@ -6,30 +6,6 @@ export type ApiOptions = {
   token?: string;
 };
 
-export async function api(path: string, options: ApiOptions = {}) {
-  const init: RequestInit = {
-    method: options.method ?? 'GET',
-    headers: {
-      'content-type': 'application/json',
-      ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
-    },
-    cache: 'no-store',
-  };
-  if (options.body !== undefined) {
-    init.body = JSON.stringify(options.body);
-  }
-
-  const res = await fetch(`${API_URL}${path}`, {
-    ...init,
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`API ${res.status}: ${text}`);
-  }
-  return res.json();
-}
-
 export function getToken() {
   if (typeof window === 'undefined') return '';
   return localStorage.getItem('atlaspm_token') ?? '';
@@ -37,4 +13,26 @@ export function getToken() {
 
 export function setToken(token: string) {
   if (typeof window !== 'undefined') localStorage.setItem('atlaspm_token', token);
+}
+
+export async function api(path: string, options: ApiOptions = {}) {
+  const token = options.token ?? getToken();
+  const init: RequestInit = {
+    method: options.method ?? 'GET',
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    cache: 'no-store',
+  };
+  if (options.body !== undefined) {
+    init.body = JSON.stringify(options.body);
+  }
+
+  const res = await fetch(`${API_URL}${path}`, init);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  return res.json();
 }

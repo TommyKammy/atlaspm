@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException, NotFoundException, ConflictException, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, ProjectRole, TaskStatus } from '@prisma/client';
+import { templateDefinition } from '../rules/rule-definition';
 
 @Injectable()
 export class DomainService {
@@ -106,12 +107,21 @@ export class DomainService {
     const templates = [
       { name: 'Progress to Done', templateKey: 'progress_to_done' },
       { name: 'Progress to In Progress', templateKey: 'progress_to_in_progress' },
-    ];
+    ] as const;
     for (const tpl of templates) {
       const rule = await tx.rule.upsert({
         where: { projectId_templateKey: { projectId, templateKey: tpl.templateKey } },
-        create: { projectId, name: tpl.name, templateKey: tpl.templateKey, enabled: true, cooldownSec: 60 },
-        update: {},
+        create: {
+          projectId,
+          name: tpl.name,
+          templateKey: tpl.templateKey,
+          definition: templateDefinition(tpl.templateKey) as Prisma.InputJsonValue,
+          enabled: true,
+          cooldownSec: 60,
+        },
+        update: {
+          definition: templateDefinition(tpl.templateKey) as Prisma.InputJsonValue,
+        },
       });
       await this.appendAuditOutbox({
         tx,
@@ -154,14 +164,29 @@ export class DomainService {
     const templates = [
       { name: 'Progress to Done', templateKey: 'progress_to_done' },
       { name: 'Progress to In Progress', templateKey: 'progress_to_in_progress' },
-    ];
+    ] as const;
     for (const tpl of templates) {
       const existing = await tx.rule.findUnique({
         where: { projectId_templateKey: { projectId, templateKey: tpl.templateKey } },
       });
-      if (existing) continue;
+      if (existing) {
+        if (!existing.definition) {
+          await tx.rule.update({
+            where: { id: existing.id },
+            data: { definition: templateDefinition(tpl.templateKey) as Prisma.InputJsonValue },
+          });
+        }
+        continue;
+      }
       const rule = await tx.rule.create({
-        data: { projectId, name: tpl.name, templateKey: tpl.templateKey, enabled: true, cooldownSec: 60 },
+        data: {
+          projectId,
+          name: tpl.name,
+          templateKey: tpl.templateKey,
+          definition: templateDefinition(tpl.templateKey) as Prisma.InputJsonValue,
+          enabled: true,
+          cooldownSec: 60,
+        },
       });
       await this.appendAuditOutbox({
         tx,

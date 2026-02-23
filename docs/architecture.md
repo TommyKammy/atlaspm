@@ -21,6 +21,11 @@
   - progress=100 => status DONE + completedAt set
   - 0<=progress<100 => status IN_PROGRESS + completedAt null
 - Loop prevention via cooldown and no-op detection.
+- Rule definition schema (stored as `Rule.definition` JSON):
+  - `trigger`: `task.progress.changed`
+  - `conditions[]`: currently `field=progressPercent` with `op` in `eq|lt|lte|gt|gte|between`
+  - `actions[]`: `setStatus`, `setCompletedAtNow`, `setCompletedAtNull`
+  - Server validates definition on create/patch and falls back to template defaults when missing.
 
 ## Ordering Model + Concurrency
 - Manual task ordering uses sparse integer positions (`position`), default gap 1000.
@@ -29,6 +34,14 @@
 - Optimistic concurrency via task `version`; conflict returns 409 and server order snapshot.
 - New task placement defaults to top of section (lowest position first).
 - Temporary sort query (`dueAt`, `progressPercent`, `updatedAt`) is read-only and never rewrites manual positions.
+
+## Web Cache Strategy
+- `web-ui` uses TanStack Query for all core data reads (`projects`, `sections`, grouped `tasks`, `rules`, `members`).
+- Mutation policy:
+  - optimistic cache update for inline task patch and within-section reorder,
+  - targeted cache updates for section/task/rule create+patch,
+  - targeted invalidation for affected project-scoped keys.
+- No full app reload is used for create/edit flows; UI reflects writes immediately and then reconciles with server truth.
 
 ## Future readiness
 - `packages/domain` and `packages/rule-engine` provide extraction boundaries for phase 2.

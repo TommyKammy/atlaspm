@@ -43,6 +43,10 @@ pnpm db:migrate
 pnpm db:seed
 ```
 
+- `pnpm test` expects local Postgres on `localhost:55432` (start with `docker compose -f infra/docker/docker-compose.yml up -d postgres`).
+- `pnpm e2e` reuses existing Docker images for speed.
+- `pnpm e2e:rebuild` forces `core-api` and `web-ui` image rebuilds after app code changes.
+
 ## E2E (Mac + Colima)
 
 ```bash

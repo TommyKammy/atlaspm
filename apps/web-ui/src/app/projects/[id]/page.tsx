@@ -1,83 +1,99 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
 import ProjectBoard from '@/components/project-board';
-import { api, getToken } from '@/lib/api';
+import { api } from '@/lib/api';
+import { queryKeys } from '@/lib/query-keys';
+import type { Project, Section, SectionTaskGroup } from '@/lib/types';
 
 export default function ProjectPage() {
   const params = useParams<{ id: string }>();
   const projectId = params.id;
-  const [project, setProject] = useState<any>(null);
-  const [sections, setSections] = useState<any[]>([]);
   const [newSection, setNewSection] = useState('');
-  const [newTaskTitle, setNewTaskTitle] = useState('');
-  const [taskSectionId, setTaskSectionId] = useState('');
+  const queryClient = useQueryClient();
 
-  const token = getToken();
+  const projectsQuery = useQuery<Project[]>({
+    queryKey: queryKeys.projects,
+    queryFn: () => api('/projects'),
+  });
 
-  const load = async () => {
-    const projects = await api('/projects', { token });
-    setProject(projects.find((p: any) => p.id === projectId));
-    const sec = await api(`/projects/${projectId}/sections`, { token });
-    setSections(sec);
-    if (!taskSectionId && sec.length && sec[0]) setTaskSectionId(sec[0].id);
-  };
+  const sectionsQuery = useQuery<Section[]>({
+    queryKey: queryKeys.projectSections(projectId),
+    queryFn: () => api(`/projects/${projectId}/sections`),
+    enabled: Boolean(projectId),
+  });
 
-  useEffect(() => {
-    if (!projectId) return;
-    void load();
-  }, [projectId]);
+  const project = useMemo(
+    () => projectsQuery.data?.find((item) => item.id === projectId) ?? null,
+    [projectId, projectsQuery.data],
+  );
+
+  const createSection = useMutation({
+    mutationFn: (name: string) =>
+      api(`/projects/${projectId}/sections`, { method: 'POST', body: { name } }) as Promise<Section>,
+    onSuccess: (created) => {
+      queryClient.setQueryData<Section[]>(queryKeys.projectSections(projectId), (current = []) => {
+        if (current.some((item) => item.id === created.id)) return current;
+        return [...current, created].sort((a, b) => a.position - b.position);
+      });
+      queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) => {
+        if (current.some((group) => group.section.id === created.id)) return current;
+        return [...current, { section: created, tasks: [] }].sort(
+          (a, b) => a.section.position - b.section.position,
+        );
+      });
+      setNewSection('');
+    },
+  });
 
   if (!projectId) return <div>Loading...</div>;
 
-  const createSection = async () => {
-    await api(`/projects/${projectId}/sections`, { method: 'POST', token, body: { name: newSection } });
-    setNewSection('');
-    await load();
-  };
-
-  const createTask = async () => {
-    await api(`/projects/${projectId}/tasks`, {
-      method: 'POST',
-      token,
-      body: { title: newTaskTitle, sectionId: taskSectionId },
-    });
-    setNewTaskTitle('');
-    await load();
-  };
-
   return (
-    <div className="space-y-4">
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">{project?.name ?? 'Project'}</h1>
-        <Link className="text-blue-700 underline" href={`/projects/${projectId}/rules`}>
-          Rules Page
+    <div className="space-y-5">
+      <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">{project?.name ?? 'Project'}</h1>
+          <p className="mt-1 text-sm text-slate-500">Manage sections, tasks, assignees, and rules in one list view.</p>
+        </div>
+        <Link
+          className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          href={`/projects/${projectId}/rules`}
+          data-testid="rules-page-link"
+        >
+          Open Rules
         </Link>
       </header>
 
-      <div className="grid gap-3 rounded-xl border bg-white p-4 md:grid-cols-2">
-        <div className="space-y-2">
-          <h2 className="font-semibold">Create Section</h2>
-          <input className="w-full rounded border p-2" value={newSection} onChange={(e) => setNewSection(e.target.value)} />
-          <button className="rounded bg-slate-900 px-3 py-2 text-white" onClick={createSection} data-testid="create-section-btn">
-            Add Section
+      <section className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            className="min-w-64 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+            value={newSection}
+            onChange={(e) => setNewSection(e.target.value)}
+            placeholder="Section name"
+            data-testid="new-section-input"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && newSection.trim() && !createSection.isPending) {
+                void createSection.mutateAsync(newSection.trim());
+              }
+            }}
+          />
+          <button
+            className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+            data-testid="create-section-btn"
+            onClick={() => void createSection.mutateAsync(newSection.trim())}
+            disabled={!newSection.trim() || createSection.isPending}
+          >
+            {createSection.isPending ? 'Adding...' : 'Add Section'}
           </button>
+          <span className="text-xs text-slate-500">
+            {sectionsQuery.data?.length ?? 0} sections
+          </span>
         </div>
-        <div className="space-y-2">
-          <h2 className="font-semibold">Create Task</h2>
-          <input className="w-full rounded border p-2" value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} />
-          <select className="w-full rounded border p-2" value={taskSectionId} onChange={(e) => setTaskSectionId(e.target.value)}>
-            {sections.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-          <button className="rounded bg-slate-900 px-3 py-2 text-white" onClick={createTask} data-testid="create-task-btn">
-            Add Task
-          </button>
-        </div>
-      </div>
+      </section>
 
       <ProjectBoard projectId={projectId} />
     </div>

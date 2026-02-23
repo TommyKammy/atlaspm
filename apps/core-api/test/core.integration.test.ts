@@ -52,6 +52,12 @@ describe('Core API Integration', () => {
       .send({ userId: 'member-1', role: 'MEMBER' })
       .expect(201);
 
+    const membersRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/members`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(membersRes.body.some((m: any) => m.user?.id === 'member-1')).toBe(true);
+
     const sectionsRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/sections`)
       .set('Authorization', `Bearer ${token}`)
@@ -122,11 +128,33 @@ describe('Core API Integration', () => {
       .expect(200);
     expect(taskAudit.body.length).toBeGreaterThan(0);
 
+    const rulesRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/rules`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const editableRule = rulesRes.body.find((r: any) => r.templateKey === 'progress_to_done');
+    expect(editableRule).toBeTruthy();
+
+    const ruleUpdated = await request(app.getHttpServer())
+      .patch(`/rules/${editableRule.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: 'Progress to Done (Edited)',
+        definition: {
+          trigger: 'task.progress.changed',
+          conditions: [{ field: 'progressPercent', op: 'eq', value: 100 }],
+          actions: [{ type: 'setStatus', status: 'DONE' }, { type: 'setCompletedAtNow' }],
+        },
+      })
+      .expect(200);
+    expect(ruleUpdated.body.name).toBe('Progress to Done (Edited)');
+
     const outbox = await request(app.getHttpServer())
       .get('/outbox')
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(outbox.body.some((e: any) => e.type === 'task.reordered')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'rule.updated')).toBe(true);
 
     expect(defaultSection).toBeTruthy();
   });
