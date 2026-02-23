@@ -24,7 +24,7 @@ export default function ProjectPage() {
   const [statusFilter, setStatusFilter] = useState<'ALL' | Task['status']>('ALL');
   const [priorityFilter, setPriorityFilter] = useState<'ALL' | NonNullable<Task['priority']>>('ALL');
   const [view, setView] = useState<'List' | 'Board' | 'Calendar' | 'Timeline'>('List');
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [, setSelectedTaskId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const queryClient = useQueryClient();
 

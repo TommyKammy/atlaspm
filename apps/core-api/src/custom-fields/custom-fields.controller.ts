@@ -9,8 +9,6 @@ import { ProjectRole, Prisma } from '@prisma/client';
 
 const FieldTypeEnum = z.enum(['text', 'number', 'date', 'select', 'multi_select', 'user', 'checkbox', 'url', 'email', 'phone']);
 
-type FieldType = z.infer<typeof FieldTypeEnum>;
-
 const CreateFieldDefinitionSchema = z.object({
   name: z.string().min(1).max(100),
   fieldType: FieldTypeEnum,

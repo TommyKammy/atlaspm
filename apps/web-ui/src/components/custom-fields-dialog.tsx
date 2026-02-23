@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, GripVertical, X, Settings } from 'lucide-react';
+import { Plus, X, Settings } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';

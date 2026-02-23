@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, useRef } from 'react';
-import { format, addDays, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, differenceInDays, min, max } from 'date-fns';
+import { format, addDays, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, differenceInDays } from 'date-fns';
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-react';
 import type { Task, Section } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -23,14 +23,9 @@ const statusColors: Record<Task['status'], string> = {
   BLOCKED: 'bg-red-500',
 };
 
-const statusBgColors: Record<Task['status'], string> = {
-  TODO: 'bg-gray-500/20',
-  IN_PROGRESS: 'bg-blue-500/20',
-  DONE: 'bg-green-500/20',
-  BLOCKED: 'bg-red-500/20',
-};
 
-export default function TimelineView({ tasks, sections, onTaskClick, onTaskDateChange }: TimelineViewProps) {
+
+export default function TimelineView({ tasks, sections, onTaskClick }: TimelineViewProps) {
   const [zoom, setZoom] = useState<ZoomLevel>('week');
   const [currentDate, setCurrentDate] = useState(new Date());
   const containerRef = useRef<HTMLDivElement>(null);

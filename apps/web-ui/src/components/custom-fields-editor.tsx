@@ -127,13 +127,15 @@ export default function CustomFieldsEditor({ projectId, taskId, members }: Custo
     switch (field.fieldType) {
       case 'checkbox':
         return value ? '✓ Yes' : '✗ No';
-      case 'user':
+      case 'user': {
         const user = members.find((m) => m.userId === (value as string));
         return user?.user.displayName ?? user?.user.email ?? (value as string);
-      case 'select':
+      }
+      case 'select': {
         const option = field.options?.find((o) => o.id === value);
         return option?.label ?? (value as string);
-      case 'multi_select':
+      }
+      case 'multi_select': {
         const selectedIds = value as string[];
         const selectedOptions = field.options?.filter((o) => selectedIds.includes(o.id));
         return (
@@ -145,6 +147,7 @@ export default function CustomFieldsEditor({ projectId, taskId, members }: Custo
             ))}
           </div>
         );
+      }
       case 'url': {
         const safeUrl = sanitizeUrl(value as string, 'url');
         return (
@@ -222,7 +225,7 @@ export default function CustomFieldsEditor({ projectId, taskId, members }: Custo
             {value ? '✓ Checked' : '☐ Unchecked'}
           </Button>
         );
-      case 'select':
+      case 'select': {
         const selectedOption = field.options?.find((o) => o.id === value);
         return (
           <DropdownMenu>
@@ -241,7 +244,8 @@ export default function CustomFieldsEditor({ projectId, taskId, members }: Custo
             </DropdownMenuContent>
           </DropdownMenu>
         );
-      case 'multi_select':
+      }
+      case 'multi_select': {
         const selectedIds = (value as string[]) ?? [];
         return (
           <div className="space-y-2">
@@ -267,7 +271,8 @@ export default function CustomFieldsEditor({ projectId, taskId, members }: Custo
             </div>
           </div>
         );
-      case 'user':
+      }
+      case 'user': {
         const selectedUser = members.find((m) => m.userId === (value as string));
         return (
           <DropdownMenu>
@@ -286,6 +291,7 @@ export default function CustomFieldsEditor({ projectId, taskId, members }: Custo
             </DropdownMenuContent>
           </DropdownMenu>
         );
+      }
       default:
         return <Input value={String(value ?? '')} onChange={(e) => setEditValue(e.target.value)} />;
     }

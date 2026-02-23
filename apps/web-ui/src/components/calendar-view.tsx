@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import { Calendar as BigCalendar, dateFnsLocalizer, type Event as CalendarEvent } from 'react-big-calendar';
-import { format, parse, startOfWeek, getDay, addMonths, subMonths } from 'date-fns';
+import { format, parse, startOfWeek, getDay } from 'date-fns';
 import { enUS } from 'date-fns/locale';
 import type { Task } from '@/lib/types';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
