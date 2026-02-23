@@ -344,3 +344,40 @@ model PortfolioProject {
   @@index([projectId])
   @@map("portfolio_projects")
 }
+
+model Dashboard {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  name        String
+  layout      Json     // Widget positions
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  widgets Widget[]
+
+  @@index([userId])
+  @@map("dashboards")
+}
+
+model Widget {
+  id          String @id @default(uuid())
+  dashboardId String @map("dashboard_id")
+  type        WidgetType
+  config      Json
+  position    Json // { x, y, w, h }
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  dashboard Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+
+  @@index([dashboardId])
+  @@map("widgets")
+}
+
+enum WidgetType {
+  TASK_COMPLETION
+  PROGRESS_CHART
+  TEAM_LOAD
+  OVERDUE_ALERTS
+  RECENT_ACTIVITY
+}

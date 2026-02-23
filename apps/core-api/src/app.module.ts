@@ -18,9 +18,10 @@ import { WorkspaceAdminController } from './workspaces/workspace-admin.controlle
 import { SearchModule } from './search/search.module';
 import { PortfoliosModule } from './portfolios/portfolios.module';
 import { WorkloadModule } from './workload/workload.module';
+import { DashboardsModule } from './dashboards/dashboards.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, SearchModule, PortfoliosModule, WorkloadModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, SearchModule, PortfoliosModule, WorkloadModule, DashboardsModule],
   controllers: [
     WorkspacesController,
     ProjectsController,
