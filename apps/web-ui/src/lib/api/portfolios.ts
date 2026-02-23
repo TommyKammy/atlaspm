@@ -34,7 +34,13 @@ export interface PortfolioProgress {
   progress: number;
 }
 
-export interface PortfolioDetail extends Portfolio {
+export interface PortfolioDetail {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+  projects: PortfolioProject[];
   progress: PortfolioProgress[];
 }
 

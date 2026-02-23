@@ -67,7 +67,7 @@ export default function WorkloadPage() {
                 <SelectValue placeholder="Select a project" />
               </SelectTrigger>
               <SelectContent>
-                {projects?.map((project) => (
+                {projects?.map((project: { id: string; name: string }) => (
                   <SelectItem key={project.id} value={project.id}>
                     {project.name}
                   </SelectItem>

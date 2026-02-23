@@ -83,7 +83,7 @@ export default function PortfolioDetailPage() {
   };
 
   const availableProjects = allProjects?.filter(
-    (project) => !portfolio.projects.some((p) => p.projectId === project.id),
+    (project: { id: string }) => !portfolio.projects.some((p) => p.projectId === project.id),
   );
 
   const totalTasks = portfolio.progress?.reduce((sum, p) => sum + p.totalTasks, 0) || 0;
@@ -169,7 +169,7 @@ export default function PortfolioDetailPage() {
               <CommandInput placeholder="Search projects..." />
               <CommandEmpty>No projects available.</CommandEmpty>
               <CommandGroup>
-                {availableProjects?.map((project) => (
+                {availableProjects?.map((project: { id: string; name: string }) => (
                   <CommandItem
                     key={project.id}
                     onSelect={() => handleAddProject(project.id)}
