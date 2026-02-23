@@ -92,6 +92,10 @@ export default function CustomFieldsDialog({ projectId, isAdmin }: { projectId: 
       resetCreateForm();
       setShowCreateForm(false);
     },
+    onError: (error: Error) => {
+      console.error('Failed to create field:', error);
+      alert(`Failed to create field: ${error.message}`);
+    },
   });
 
   const updateMutation = useMutation({
@@ -104,6 +108,10 @@ export default function CustomFieldsDialog({ projectId, isAdmin }: { projectId: 
       queryClient.invalidateQueries({ queryKey: queryKeys.customFields.definitions(projectId) });
       setEditingField(null);
     },
+    onError: (error: Error) => {
+      console.error('Failed to update field:', error);
+      alert(`Failed to update field: ${error.message}`);
+    },
   });
 
   const deleteMutation = useMutation({
@@ -113,6 +121,10 @@ export default function CustomFieldsDialog({ projectId, isAdmin }: { projectId: 
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.customFields.definitions(projectId) });
+    },
+    onError: (error: Error) => {
+      console.error('Failed to archive field:', error);
+      alert(`Failed to archive field: ${error.message}`);
     },
   });
 

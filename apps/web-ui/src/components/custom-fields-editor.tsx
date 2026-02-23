@@ -14,6 +14,34 @@ import {
 } from '@/components/ui/dropdown-menu';
 import type { FieldType } from './custom-fields-dialog';
 
+// XSS protection: Sanitize URLs to prevent javascript: and data: protocol attacks
+function sanitizeUrl(url: string, type: 'url' | 'email' | 'phone'): string {
+  if (!url || typeof url !== 'string') return '';
+  
+  const trimmed = url.trim();
+  
+  if (type === 'url') {
+    const lower = trimmed.toLowerCase();
+    if (lower.startsWith('javascript:') || lower.startsWith('data:') || lower.startsWith('vbscript:')) {
+      return '#';
+    }
+    if (!lower.startsWith('http://') && !lower.startsWith('https://') && !lower.startsWith('mailto:')) {
+      return `https://${trimmed}`;
+    }
+    return trimmed;
+  }
+  
+  if (type === 'email') {
+    return trimmed.replace(/[<>"']/g, '');
+  }
+  
+  if (type === 'phone') {
+    return trimmed.replace(/[^0-9+\-()\s]/g, '');
+  }
+  
+  return trimmed;
+}
+
 interface CustomFieldValue {
   fieldDefinitionId: string;
   fieldName: string;
@@ -60,6 +88,10 @@ export default function CustomFieldsEditor({ projectId, taskId, members }: Custo
       queryClient.invalidateQueries({ queryKey: queryKeys.customFields.values(taskId) });
       setEditingFieldId(null);
     },
+    onError: (error: Error) => {
+      console.error('Failed to set field value:', error);
+      alert(`Failed to save: ${error.message}`);
+    },
   });
 
   const deleteFieldValue = useMutation({
@@ -69,6 +101,10 @@ export default function CustomFieldsEditor({ projectId, taskId, members }: Custo
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.customFields.values(taskId) });
+    },
+    onError: (error: Error) => {
+      console.error('Failed to clear field value:', error);
+      alert(`Failed to clear: ${error.message}`);
     },
   });
 
@@ -109,10 +145,11 @@ export default function CustomFieldsEditor({ projectId, taskId, members }: Custo
             ))}
           </div>
         );
-      case 'url':
+      case 'url': {
+        const safeUrl = sanitizeUrl(value as string, 'url');
         return (
           <a
-            href={value as string}
+            href={safeUrl}
             target="_blank"
             rel="noreferrer"
             className="text-blue-600 hover:underline"
@@ -120,18 +157,23 @@ export default function CustomFieldsEditor({ projectId, taskId, members }: Custo
             {value as string}
           </a>
         );
-      case 'email':
+      }
+      case 'email': {
+        const safeEmail = sanitizeUrl(value as string, 'email');
         return (
-          <a href={`mailto:${value}`} className="text-blue-600 hover:underline">
-            {value as string}
+          <a href={`mailto:${safeEmail}`} className="text-blue-600 hover:underline">
+            {safeEmail}
           </a>
         );
-      case 'phone':
+      }
+      case 'phone': {
+        const safePhone = sanitizeUrl(value as string, 'phone');
         return (
-          <a href={`tel:${value}`} className="text-blue-600 hover:underline">
-            {value as string}
+          <a href={`tel:${safePhone}`} className="text-blue-600 hover:underline">
+            {safePhone}
           </a>
         );
+      }
       default:
         return String(value);
     }
