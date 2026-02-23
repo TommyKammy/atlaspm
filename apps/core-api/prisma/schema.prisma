@@ -37,6 +37,12 @@ enum Priority {
   URGENT
 }
 
+enum DependencyType {
+  BLOCKS
+  BLOCKED_BY
+  RELATES_TO
+}
+
 model Workspace {
   id          String   @id @default(uuid())
   name        String
@@ -162,8 +168,18 @@ model Task {
   comments TaskComment[]
   mentions TaskMention[]
   attachments TaskAttachment[]
+  
+  // Subtask hierarchy (up to 5 levels)
+  parentId String?
+  parent   Task?    @relation("TaskHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children Task[]   @relation("TaskHierarchy")
+  
+  // Dependencies
+  dependencies TaskDependency[] @relation("TaskDependencies")
+  dependents   TaskDependency[] @relation("TaskDependents")
 
   @@index([projectId, sectionId, position])
+  @@index([parentId])
 }
 
 model TaskComment {
@@ -279,4 +295,21 @@ model Webhook {
   createdAt   DateTime @default(now())
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+
+model TaskDependency {
+  id          String @id @default(uuid())
+  taskId      String
+  dependsOnId String
+  type        DependencyType @default(BLOCKS)
+  
+  task      Task @relation("TaskDependencies", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOn Task @relation("TaskDependents", fields: [dependsOnId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  
+  @@unique([taskId, dependsOnId])
+  @@index([taskId])
+  @@index([dependsOnId])
 }

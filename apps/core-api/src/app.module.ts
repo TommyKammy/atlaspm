@@ -10,6 +10,8 @@ import { RulesController } from './rules/rules.controller';
 import { WebhooksController } from './webhooks/webhooks.controller';
 import { AuditController } from './audit/audit.controller';
 import { DomainService } from './common/domain.service';
+import { SubtaskService } from './tasks/subtask.service';
+import { CycleDetectionService } from './tasks/cycle-detection.service';
 import { PublicAttachmentsController } from './tasks/public-attachments.controller';
 import { CollabController } from './collab/collab.controller';
 import { WorkspaceAdminController } from './workspaces/workspace-admin.controller';
@@ -28,6 +30,6 @@ import { WorkspaceAdminController } from './workspaces/workspace-admin.controlle
     CollabController,
     WorkspaceAdminController,
   ],
-  providers: [PrismaService, DomainService],
+  providers: [PrismaService, DomainService, SubtaskService, CycleDetectionService],
 })
 export class AppModule {}
