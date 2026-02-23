@@ -1,6 +1,9 @@
 export const queryKeys = {
   me: ['me'] as const,
   workspaces: ['workspaces'] as const,
+  workspaceUsers: (workspaceId: string, params: { query?: string; status?: string }) =>
+    ['workspace', workspaceId, 'users', params] as const,
+  workspaceInvitations: (workspaceId: string) => ['workspace', workspaceId, 'invitations'] as const,
   projects: ['projects'] as const,
   projectSections: (projectId: string) => ['project', projectId, 'sections'] as const,
   projectTasksGrouped: (projectId: string) =>

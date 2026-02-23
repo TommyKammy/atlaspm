@@ -68,6 +68,9 @@ export default function ProjectPage() {
           </div>
           <div className="flex items-center gap-2">
             <Badge>{sectionsQuery.data?.length ?? 0} sections</Badge>
+            <Link href={`/projects/${projectId}/members`}>
+              <Button variant="outline" size="sm" data-testid="project-members-page-link">Members</Button>
+            </Link>
             <Link href={`/projects/${projectId}/rules`} data-testid="rules-page-link">
               <Button variant="outline" size="sm">Rules</Button>
             </Link>

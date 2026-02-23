@@ -1,17 +1,53 @@
 import { Injectable, ForbiddenException, NotFoundException, ConflictException, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma, ProjectRole, TaskStatus } from '@prisma/client';
+import { Prisma, ProjectRole, TaskStatus, UserStatus, WorkspaceRole } from '@prisma/client';
 import { templateDefinition } from '../rules/rule-definition';
+import type { AuthUser } from './types';
 
 @Injectable()
 export class DomainService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async ensureUser(sub: string, email?: string, name?: string) {
-    return this.prisma.user.upsert({
+    const existing = await this.prisma.user.findUnique({ where: { id: sub } });
+    if (!existing) {
+      return this.prisma.user.create({
+        data: { id: sub, email, displayName: name, status: UserStatus.ACTIVE },
+      });
+    }
+    return this.prisma.user.update({
       where: { id: sub },
-      create: { id: sub, email, displayName: name },
-      update: { email, displayName: name },
+      data: {
+        email,
+        displayName: existing.displayName ?? name,
+      },
+    });
+  }
+
+  async syncAuthenticatedUser(user: AuthUser) {
+    const existing = await this.prisma.user.findUnique({ where: { id: user.sub } });
+    const now = new Date();
+    if (!existing) {
+      return this.prisma.user.create({
+        data: {
+          id: user.sub,
+          email: user.email,
+          displayName: user.name,
+          status: UserStatus.ACTIVE,
+          lastSeenAt: now,
+        },
+      });
+    }
+    if (existing.status === UserStatus.SUSPENDED) {
+      throw new ForbiddenException('User is suspended');
+    }
+    return this.prisma.user.update({
+      where: { id: user.sub },
+      data: {
+        email: user.email,
+        displayName: existing.displayName ?? user.name,
+        lastSeenAt: now,
+      },
     });
   }
 
@@ -20,10 +56,30 @@ export class DomainService {
     if (!membership) {
       const ws = await this.prisma.workspace.create({ data: { name: 'Default Workspace' } });
       membership = await this.prisma.workspaceMembership.create({
-        data: { workspaceId: ws.id, userId: sub },
+        data: { workspaceId: ws.id, userId: sub, role: WorkspaceRole.WS_ADMIN },
       });
+    } else {
+      const hasAdminRole = await this.prisma.workspaceMembership.findFirst({
+        where: { userId: sub, role: WorkspaceRole.WS_ADMIN },
+      });
+      if (!hasAdminRole) {
+        membership = await this.prisma.workspaceMembership.update({
+          where: { id: membership.id },
+          data: { role: WorkspaceRole.WS_ADMIN },
+        });
+      }
     }
     return this.prisma.workspace.findUniqueOrThrow({ where: { id: membership.workspaceId } });
+  }
+
+  async requireWorkspaceRole(workspaceId: string, userId: string, min: WorkspaceRole) {
+    const membership = await this.prisma.workspaceMembership.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId } },
+    });
+    if (!membership) throw new NotFoundException('Workspace membership not found');
+    const rank: Record<WorkspaceRole, number> = { WS_MEMBER: 1, WS_ADMIN: 2 };
+    if (rank[membership.role] < rank[min]) throw new ForbiddenException('Insufficient workspace role');
+    return membership;
   }
 
   async requireProjectRole(projectId: string, userId: string, min: ProjectRole) {

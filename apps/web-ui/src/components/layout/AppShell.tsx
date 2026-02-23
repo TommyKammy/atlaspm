@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo, type ReactNode } from 'react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { Project } from '@/lib/types';
+import type { Project, Workspace } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -44,6 +44,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     queryKey: queryKeys.projects,
     queryFn: () => api('/projects'),
   });
+  const { data: workspaces = [] } = useQuery<Workspace[]>({
+    queryKey: queryKeys.workspaces,
+    queryFn: () => api('/workspaces'),
+  });
+  const isWorkspaceAdmin = workspaces.some((workspace) => workspace.role === 'WS_ADMIN');
 
   const handleNavigate = () => {
     onNavigate?.();
@@ -85,6 +90,25 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             );
           })}
         </nav>
+        {isWorkspaceAdmin ? (
+          <>
+            <Separator className="my-3" />
+            <p className="px-2 text-[11px] uppercase tracking-wider text-muted-foreground">Admin</p>
+            <nav className="mt-2 space-y-1">
+              <Link
+                href="/admin/users"
+                onClick={handleNavigate}
+                data-testid="sidebar-admin-users"
+                className={cn(
+                  'block rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+                  pathname === '/admin/users' && 'bg-muted text-foreground',
+                )}
+              >
+                Users
+              </Link>
+            </nav>
+          </>
+        ) : null}
       </ScrollArea>
     </div>
   );

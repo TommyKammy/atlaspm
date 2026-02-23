@@ -1,5 +1,36 @@
 export type Project = { id: string; workspaceId: string; name: string };
 
+export type Workspace = {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  role: 'WS_ADMIN' | 'WS_MEMBER';
+};
+
+export type WorkspaceUserRow = {
+  id: string;
+  email?: string | null;
+  displayName?: string | null;
+  status: 'ACTIVE' | 'SUSPENDED' | 'INVITED';
+  lastSeenAt?: string | null;
+  createdAt: string;
+  workspaceRole: 'WS_ADMIN' | 'WS_MEMBER';
+  invitationStatus?: 'PENDING' | null;
+  invitationId?: string;
+  invitationExpiresAt?: string;
+};
+
+export type Invitation = {
+  id: string;
+  email: string;
+  role: 'WS_ADMIN' | 'WS_MEMBER';
+  expiresAt: string;
+  acceptedAt?: string | null;
+  revokedAt?: string | null;
+  createdAt: string;
+};
+
 export type Section = {
   id: string;
   projectId: string;

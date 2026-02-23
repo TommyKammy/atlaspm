@@ -19,6 +19,7 @@
 - Sidebar:
   - project navigation from `GET /projects`
   - active project highlighting
+  - admin section (`Admin > Users`) shown only for `WS_ADMIN`
   - mobile via sheet drawer
 - Header:
   - current project title context
@@ -97,3 +98,17 @@
 - Visual style remains consistent with existing shadcn tokens and compact task detail layout.
 - Fallback behavior:
   - when collab token/ws fails, editor gracefully switches to snapshot mode without full refresh.
+
+## Admin UI (Phase 3+)
+- Workspace user admin:
+  - route: `/admin/users`
+  - table with search + status filter
+  - invite dialog (email + workspace role + copyable invite link)
+  - row actions: edit display name, suspend/unsuspend, revoke invite
+- Project members admin:
+  - route: `/projects/:id/members`
+  - add member dialog using searchable workspace-user combobox
+  - inline role selector + remove action
+- State management:
+  - TanStack Query targeted invalidation for `workspaceUsers`, `workspaceInvitations`, `projectMembers`
+  - no full browser refresh for admin actions

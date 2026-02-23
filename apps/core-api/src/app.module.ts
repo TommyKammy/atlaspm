@@ -12,6 +12,7 @@ import { AuditController } from './audit/audit.controller';
 import { DomainService } from './common/domain.service';
 import { PublicAttachmentsController } from './tasks/public-attachments.controller';
 import { CollabController } from './collab/collab.controller';
+import { WorkspaceAdminController } from './workspaces/workspace-admin.controller';
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule],
@@ -25,6 +26,7 @@ import { CollabController } from './collab/collab.controller';
     AuditController,
     PublicAttachmentsController,
     CollabController,
+    WorkspaceAdminController,
   ],
   providers: [PrismaService, DomainService],
 })

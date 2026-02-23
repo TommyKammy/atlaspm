@@ -1,11 +1,11 @@
-import { Body, Controller, Get, Inject, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, ConflictException, Controller, Delete, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { IsEnum, IsString, IsUUID } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
-import { ProjectRole } from '@prisma/client';
+import { ProjectRole, WorkspaceRole } from '@prisma/client';
 
 class CreateProjectDto {
   @IsUUID()
@@ -19,6 +19,11 @@ class AddMemberDto {
   @IsString()
   userId!: string;
 
+  @IsEnum(ProjectRole)
+  role!: ProjectRole;
+}
+
+class UpdateProjectMemberDto {
   @IsEnum(ProjectRole)
   role!: ProjectRole;
 }
@@ -41,13 +46,13 @@ export class ProjectsController {
 
   @Post()
   async create(@Body() body: CreateProjectDto, @CurrentRequest() req: AppRequest) {
-    await this.domain.ensureUser(req.user.sub, req.user.email, req.user.name);
+    await this.domain.requireWorkspaceRole(body.workspaceId, req.user.sub, WorkspaceRole.WS_MEMBER);
     const wsMembership = await this.prisma.workspaceMembership.findUnique({
       where: { workspaceId_userId: { workspaceId: body.workspaceId, userId: req.user.sub } },
     });
     if (!wsMembership) {
       await this.prisma.workspaceMembership.create({
-        data: { workspaceId: body.workspaceId, userId: req.user.sub },
+        data: { workspaceId: body.workspaceId, userId: req.user.sub, role: WorkspaceRole.WS_MEMBER },
       });
     }
 
@@ -104,7 +109,15 @@ export class ProjectsController {
     @CurrentRequest() req: AppRequest,
   ) {
     await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.ADMIN);
-    await this.domain.ensureUser(body.userId);
+    const project = await this.prisma.project.findUniqueOrThrow({ where: { id: projectId } });
+    const workspaceMembership = await this.prisma.workspaceMembership.findUnique({
+      where: {
+        workspaceId_userId: { workspaceId: project.workspaceId, userId: body.userId },
+      },
+    });
+    if (!workspaceMembership) {
+      throw new ConflictException('User is not a member of the workspace');
+    }
     return this.prisma.$transaction(async (tx) => {
       const membership = await tx.projectMembership.upsert({
         where: { projectId_userId: { projectId, userId: body.userId } },
@@ -116,13 +129,72 @@ export class ProjectsController {
         actor: req.user.sub,
         entityType: 'ProjectMembership',
         entityId: membership.id,
-        action: 'project.member.upsert',
+        action: 'project.member.added',
         afterJson: membership,
         correlationId: req.correlationId,
-        outboxType: 'project.member.updated',
+        outboxType: 'project.member.added',
         payload: membership,
       });
       return membership;
+    });
+  }
+
+  @Patch(':id/members/:userId')
+  async updateMember(
+    @Param('id') projectId: string,
+    @Param('userId') userId: string,
+    @Body() body: UpdateProjectMemberDto,
+    @CurrentRequest() req: AppRequest,
+  ) {
+    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.ADMIN);
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.projectMembership.findUniqueOrThrow({
+        where: { projectId_userId: { projectId, userId } },
+      });
+      const updated = await tx.projectMembership.update({
+        where: { id: existing.id },
+        data: { role: body.role },
+      });
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'ProjectMembership',
+        entityId: existing.id,
+        action: 'project.member.role_changed',
+        beforeJson: existing,
+        afterJson: updated,
+        correlationId: req.correlationId,
+        outboxType: 'project.member.role_changed',
+        payload: updated,
+      });
+      return updated;
+    });
+  }
+
+  @Delete(':id/members/:userId')
+  async removeMember(
+    @Param('id') projectId: string,
+    @Param('userId') userId: string,
+    @CurrentRequest() req: AppRequest,
+  ) {
+    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.ADMIN);
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.projectMembership.findUniqueOrThrow({
+        where: { projectId_userId: { projectId, userId } },
+      });
+      await tx.projectMembership.delete({ where: { id: existing.id } });
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'ProjectMembership',
+        entityId: existing.id,
+        action: 'project.member.removed',
+        beforeJson: existing,
+        correlationId: req.correlationId,
+        outboxType: 'project.member.removed',
+        payload: { projectId, userId },
+      });
+      return { ok: true };
     });
   }
 }

@@ -42,12 +42,109 @@ describe('Core API Integration', () => {
       .expect(200);
     const workspaceId = wsRes.body[0].id;
 
+    const invitationRes = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ email: 'invited-1@example.com', role: 'WS_MEMBER' })
+      .expect(201);
+    expect(invitationRes.body.inviteLink).toContain('inviteToken=');
+
+    const invitationsList = await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(invitationsList.body.length).toBeGreaterThan(0);
+
+    const usersWithInvited = await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}/users?status=INVITED`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(usersWithInvited.body.some((u: any) => u.email === 'invited-1@example.com')).toBe(true);
+
+    const auth = app.get(AuthService);
+    const invitedToken = await auth.mintDevToken('invited-1', 'invited-1@example.com', 'Invited One');
+    const inviteToken = String(invitationRes.body.inviteLink).split('inviteToken=')[1];
+    await request(app.getHttpServer())
+      .post('/invitations/accept')
+      .set('Authorization', `Bearer ${invitedToken}`)
+      .send({ token: inviteToken })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}/users`)
+      .set('Authorization', `Bearer ${invitedToken}`)
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .patch('/users/invited-1')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, status: 'SUSPENDED' })
+      .expect(200);
+    await request(app.getHttpServer())
+      .patch('/users/invited-1')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, status: 'ACTIVE' })
+      .expect(200);
+
+    const revokedInvite = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ email: 'revoked-1@example.com', role: 'WS_MEMBER' })
+      .expect(201);
+    const revokedInvitationId = revokedInvite.body.invitationId;
+    const revokedToken = String(revokedInvite.body.inviteLink).split('inviteToken=')[1];
+    await request(app.getHttpServer())
+      .delete(`/invitations/${revokedInvitationId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const revokedUserToken = await auth.mintDevToken('revoked-1', 'revoked-1@example.com', 'Revoked One');
+    await request(app.getHttpServer())
+      .post('/invitations/accept')
+      .set('Authorization', `Bearer ${revokedUserToken}`)
+      .send({ token: revokedToken })
+      .expect(400);
+
+    const expiredInvite = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ email: 'expired-1@example.com', role: 'WS_MEMBER' })
+      .expect(201);
+    await prisma.invitation.update({
+      where: { id: expiredInvite.body.invitationId },
+      data: { expiresAt: new Date(Date.now() - 60_000) },
+    });
+    const expiredToken = String(expiredInvite.body.inviteLink).split('inviteToken=')[1];
+    const expiredUserToken = await auth.mintDevToken('expired-1', 'expired-1@example.com', 'Expired One');
+    await request(app.getHttpServer())
+      .post('/invitations/accept')
+      .set('Authorization', `Bearer ${expiredUserToken}`)
+      .send({ token: expiredToken })
+      .expect(400);
+
     const projectRes = await request(app.getHttpServer())
       .post('/projects')
       .set('Authorization', `Bearer ${token}`)
       .send({ workspaceId, name: 'Integration Project' })
       .expect(201);
     const projectId = projectRes.body.id;
+
+    for (const userId of ['member-1', 'viewer-1', 'project-admin-1']) {
+      await prisma.user.upsert({
+        where: { id: userId },
+        create: {
+          id: userId,
+          email: `${userId}@example.com`,
+          displayName: userId,
+          status: 'ACTIVE',
+        },
+        update: {},
+      });
+      await prisma.workspaceMembership.upsert({
+        where: { workspaceId_userId: { workspaceId, userId } },
+        create: { workspaceId, userId, role: 'WS_MEMBER' },
+        update: {},
+      });
+    }
 
     await request(app.getHttpServer())
       .post(`/projects/${projectId}/members`)
@@ -61,16 +158,45 @@ describe('Core API Integration', () => {
       .send({ userId: 'viewer-1', role: 'VIEWER' })
       .expect(201);
 
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/members`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 'project-admin-1', role: 'ADMIN' })
+      .expect(201);
+
     const membersRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/members`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(membersRes.body.some((m: any) => m.user?.id === 'member-1')).toBe(true);
 
-    const auth = app.get(AuthService);
     const memberToken = await auth.mintDevToken('member-1', 'member-1@example.com', 'Member One');
     const viewerToken = await auth.mintDevToken('viewer-1', 'viewer-1@example.com', 'Viewer One');
+    const projectAdminToken = await auth.mintDevToken('project-admin-1', 'project-admin-1@example.com', 'Project Admin');
     const outsiderToken = await auth.mintDevToken('outsider-1', 'outsider-1@example.com', 'Outsider One');
+
+    await request(app.getHttpServer())
+      .patch(`/projects/${projectId}/members/member-1`)
+      .set('Authorization', `Bearer ${projectAdminToken}`)
+      .send({ role: 'VIEWER' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/projects/${projectId}/members/member-1`)
+      .set('Authorization', `Bearer ${memberToken}`)
+      .send({ role: 'MEMBER' })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .delete(`/projects/${projectId}/members/member-1`)
+      .set('Authorization', `Bearer ${projectAdminToken}`)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/members`)
+      .set('Authorization', `Bearer ${projectAdminToken}`)
+      .send({ userId: 'member-1', role: 'MEMBER' })
+      .expect(201);
 
     const sectionsRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/sections`)

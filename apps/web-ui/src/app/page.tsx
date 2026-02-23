@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { Project } from '@/lib/types';
+import type { Project, Workspace } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -14,7 +14,7 @@ export default function HomePage() {
   const [workspaceId, setWorkspaceId] = useState('');
   const queryClient = useQueryClient();
 
-  const { data: workspaces = [] } = useQuery<any[]>({
+  const { data: workspaces = [] } = useQuery<Workspace[]>({
     queryKey: queryKeys.workspaces,
     queryFn: () => api('/workspaces'),
   });

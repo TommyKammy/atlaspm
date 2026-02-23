@@ -15,18 +15,25 @@ export class WorkspacesController {
 
   @Get('me')
   async me(@CurrentRequest() req: AppRequest) {
-    const user = await this.domain.ensureUser(req.user.sub, req.user.email, req.user.name);
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: req.user.sub } });
     await this.domain.ensureDefaultWorkspaceForUser(user.id);
     return user;
   }
 
   @Get('workspaces')
   async workspaces(@CurrentRequest() req: AppRequest) {
-    await this.domain.ensureUser(req.user.sub, req.user.email, req.user.name);
     await this.domain.ensureDefaultWorkspaceForUser(req.user.sub);
-    return this.prisma.workspace.findMany({
-      where: { memberships: { some: { userId: req.user.sub } } },
+    const memberships = await this.prisma.workspaceMembership.findMany({
+      where: { userId: req.user.sub },
+      include: { workspace: true },
       orderBy: { createdAt: 'asc' },
     });
+    return memberships.map((membership) => ({
+      id: membership.workspace.id,
+      name: membership.workspace.name,
+      createdAt: membership.workspace.createdAt,
+      updatedAt: membership.workspace.updatedAt,
+      role: membership.role,
+    }));
   }
 }

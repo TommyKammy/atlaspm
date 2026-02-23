@@ -13,6 +13,16 @@ enum ProjectRole {
   VIEWER
 }
 
+enum WorkspaceRole {
+  WS_ADMIN
+  WS_MEMBER
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
 enum TaskStatus {
   TODO
   IN_PROGRESS
@@ -34,28 +44,51 @@ model Workspace {
   updatedAt   DateTime @updatedAt
   projects    Project[]
   memberships WorkspaceMembership[]
+  invitations Invitation[]
 }
 
 model User {
   id          String   @id
   email       String?
   displayName String?
+  status      UserStatus @default(ACTIVE)
+  lastSeenAt  DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   workspaceMemberships WorkspaceMembership[]
   projectMemberships   ProjectMembership[]
+  invitationsCreated   Invitation[] @relation("InvitationCreatedBy")
 }
 
 model WorkspaceMembership {
   id          String   @id @default(uuid())
   workspaceId String
   userId      String
+  role        WorkspaceRole @default(WS_MEMBER)
   createdAt   DateTime @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, userId])
+}
+
+model Invitation {
+  id              String   @id @default(uuid())
+  workspaceId     String
+  email           String
+  role            WorkspaceRole @default(WS_MEMBER)
+  tokenHash       String   @unique
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  revokedAt       DateTime?
+  createdByUserId String
+  createdAt       DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User @relation("InvitationCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, email])
 }
 
 model Project {

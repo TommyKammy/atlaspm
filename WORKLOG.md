@@ -272,3 +272,63 @@
 - Risks/known gaps:
   - `pnpm e2e:up` currently performs `--build`, which is reliable but slower than pure `up` loops.
   - Next.js lint still warns about missing Next ESLint plugin wiring (non-blocking, existing project-wide warning).
+
+## 2026-02-23 - Phase 3 Admin UX (Workspace Users + Invitations + Project Members)
+- What changed:
+  - Core API data model:
+    - Added `WorkspaceRole` (`WS_ADMIN`, `WS_MEMBER`) and role column on `workspace_memberships`.
+    - Added `UserStatus` (`ACTIVE`, `SUSPENDED`) + `lastSeenAt` on `users`.
+    - Added `invitations` table with hash-only token storage (`tokenHash`), lifecycle fields (`expiresAt`, `acceptedAt`, `revokedAt`), and creator tracking.
+    - Prisma migration added: `20260223071744_workspace_admin_user_mgmt`.
+  - Core API authz and endpoints:
+    - Added workspace role guard helper (`requireWorkspaceRole`) and default workspace role bootstrap (`WS_ADMIN` for first workspace owner).
+    - Auth guard now updates `lastSeenAt`, preserves displayName override, and blocks suspended users.
+    - Added workspace admin controller endpoints:
+      - `GET /workspaces/:id/users`
+      - `POST /workspaces/:id/invitations`
+      - `GET /workspaces/:id/invitations`
+      - `DELETE /invitations/:id`
+      - `POST /invitations/accept`
+      - `PATCH /users/:id`
+    - Added project member admin endpoints:
+      - `PATCH /projects/:id/members/:userId`
+      - `DELETE /projects/:id/members/:userId`
+    - Tightened project member add policy: target user must already be a workspace member.
+    - Added audit/outbox emission for invitation/user/project-member admin actions.
+  - Web UI:
+    - Sidebar now shows `Admin > Users` only for `WS_ADMIN`.
+    - Added `/admin/users` page:
+      - search + status filter
+      - invite dialog with role select and copyable invite link
+      - displayName edit dialog
+      - suspend/unsuspend actions
+      - invite revoke action
+    - Added `/projects/[id]/members` page:
+      - add member from workspace users combobox
+      - role change selector
+      - remove member action
+    - Added link from project page header to members page.
+  - Tests:
+    - Extended core integration flow with admin/invitation scenarios:
+      - WS_ADMIN invitation create/list/accept/revoke/expire
+      - non-admin access denied for workspace admin list
+      - user suspend/unsuspend
+      - project admin role change/remove; non-admin denied
+    - Added Playwright E2E `tests/admin.spec.ts` for admin users + project members end-to-end flow.
+    - Updated collab E2E to satisfy new workspace-membership prerequisite before adding project members.
+  - Docs:
+    - Added `docs/admin.md` (roles, invitation lifecycle, security policy).
+    - Updated `docs/architecture.md` with admin architecture and event taxonomy.
+    - Updated `docs/ui-design.md` with admin UI conventions.
+    - Updated README with admin UX and invite base URL config.
+- Why:
+  - Deliver workspace/project admin UX while preserving OIDC identity source-of-truth, strict authz, and auditability.
+  - Ensure invitation acceptance is secure (hash storage + strict email match).
+- How tested:
+  - `pnpm lint`
+  - `pnpm test`
+  - `pnpm e2e:rebuild`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Invite delivery is currently link-copy only (no SMTP integration yet).
+  - `PATCH /users/:id` requires `workspaceId` in admin flows for explicit authorization context.

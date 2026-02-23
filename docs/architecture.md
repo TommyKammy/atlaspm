@@ -101,3 +101,22 @@
   - Snapshot writes emit:
     - audit action `task.description.snapshot_saved`
     - outbox type `task.description.snapshot_saved`
+
+## Admin User Management
+- Workspace-level admin model:
+  - Workspace roles: `WS_ADMIN`, `WS_MEMBER`.
+  - `WS_ADMIN` can manage workspace users and invitations.
+- Invitation model:
+  - Invitation token is generated raw once and persisted as `tokenHash` only.
+  - Acceptance requires logged-in OIDC user and strict email match with invitation email.
+  - Invitation lifecycle states: pending, accepted, revoked, expired.
+- User account state:
+  - AtlasPM tracks internal user status (`ACTIVE` / `SUSPENDED`).
+  - Suspended users are blocked at auth guard.
+- Project member management:
+  - `Project.ADMIN` can add/remove/change project members.
+  - Added users must already be workspace members.
+- Admin audit/outbox events:
+  - `workspace.invite.created|accepted|revoked`
+  - `workspace.user.suspended|unsuspended|display_name_updated`
+  - `project.member.added|removed|role_changed`

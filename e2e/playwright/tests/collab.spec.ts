@@ -33,7 +33,22 @@ async function setupTaskForProject(page: Page, projectName: string, sectionName:
   const project = await api('/projects', token, 'POST', { workspaceId, name: projectName });
   const section = await api(`/projects/${project.id}/sections`, token, 'POST', { name: sectionName });
   const task = await api(`/projects/${project.id}/tasks`, token, 'POST', { title: taskTitle, sectionId: section.id });
-  return { token, project, section, task };
+  return { token, workspaceId, project, section, task };
+}
+
+async function inviteAndAcceptWorkspaceMember(
+  adminToken: string,
+  workspaceId: string,
+  inviteEmail: string,
+  invitedUserToken: string,
+) {
+  const invitation = await api(`/workspaces/${workspaceId}/invitations`, adminToken, 'POST', {
+    email: inviteEmail,
+    role: 'WS_MEMBER',
+  });
+  const inviteToken = String(invitation.inviteLink).split('inviteToken=')[1];
+  if (!inviteToken) throw new Error('Missing invite token');
+  await api('/invitations/accept', invitedUserToken, 'POST', { token: inviteToken });
 }
 
 async function openTask(page: Page, projectId: string, taskId: string) {
@@ -47,16 +62,22 @@ test('collab authz: MEMBER edits, VIEWER observes read-only', async ({ browser, 
   const viewerSub = `viewer-${Date.now()}`;
 
   await login(page, ownerSub, `${ownerSub}@example.com`);
-  const { token, project, task } = await setupTaskForProject(page, `Collab Auth ${Date.now()}`, 'Realtime', 'Shared Task');
-
-  await api(`/projects/${project.id}/members`, token, 'POST', {
-    userId: viewerSub,
-    role: 'VIEWER',
-  });
+  const { token, workspaceId, project, task } = await setupTaskForProject(
+    page,
+    `Collab Auth ${Date.now()}`,
+    'Realtime',
+    'Shared Task',
+  );
 
   const viewerContext = await browser.newContext();
   const viewerPage = await viewerContext.newPage();
   await login(viewerPage, viewerSub, `${viewerSub}@example.com`);
+  const viewerToken = await tokenFrom(viewerPage);
+  await inviteAndAcceptWorkspaceMember(token, workspaceId, `${viewerSub}@example.com`, viewerToken);
+  await api(`/projects/${project.id}/members`, token, 'POST', {
+    userId: viewerSub,
+    role: 'VIEWER',
+  });
 
   await openTask(page, project.id, task.id);
   await openTask(viewerPage, project.id, task.id);
@@ -93,16 +114,22 @@ test('collab multi-member sync + snapshot persistence + presence', async ({ brow
   const memberBSub = `member-b-${Date.now()}`;
 
   await login(page, memberASub, `${memberASub}@example.com`);
-  const { token, project, task } = await setupTaskForProject(page, `Collab Persist ${Date.now()}`, 'Realtime', 'Persistent Task');
-
-  await api(`/projects/${project.id}/members`, token, 'POST', {
-    userId: memberBSub,
-    role: 'MEMBER',
-  });
+  const { token, workspaceId, project, task } = await setupTaskForProject(
+    page,
+    `Collab Persist ${Date.now()}`,
+    'Realtime',
+    'Persistent Task',
+  );
 
   const memberBContext = await browser.newContext();
   const memberBPage = await memberBContext.newPage();
   await login(memberBPage, memberBSub, `${memberBSub}@example.com`);
+  const memberBToken = await tokenFrom(memberBPage);
+  await inviteAndAcceptWorkspaceMember(token, workspaceId, `${memberBSub}@example.com`, memberBToken);
+  await api(`/projects/${project.id}/members`, token, 'POST', {
+    userId: memberBSub,
+    role: 'MEMBER',
+  });
 
   await openTask(page, project.id, task.id);
   await openTask(memberBPage, project.id, task.id);

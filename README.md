@@ -78,7 +78,18 @@ docker compose up -d --build
 
 - OIDC JWT verification via JWKS by default.
 - Dev auth mode is disabled by default and only enabled via `DEV_AUTH_ENABLED=true`.
+- Workspace/project admin operations are authorization-enforced server-side.
 - Collaboration JWT/service secrets:
   - `COLLAB_JWT_SECRET`
   - `COLLAB_SERVICE_TOKEN`
+- Invitation link base URL:
+  - `INVITE_BASE_URL` (defaults to `http://localhost:3000/login`)
 - Collaboration in web-ui is feature-gated and off by default: `NEXT_PUBLIC_COLLAB_ENABLED=false`.
+
+## Admin UX
+
+- Workspace admin page: `/admin/users`
+  - invite users (copy invite link), search/filter users, suspend/unsuspend, edit display name.
+- Project members page: `/projects/:id/members`
+  - add workspace users to project, change role, remove member.
+- Admin design/behavior docs: `docs/admin.md`
