@@ -162,6 +162,7 @@ model Task {
   comments TaskComment[]
   mentions TaskMention[]
   attachments TaskAttachment[]
+  customFieldValues CustomFieldValue[]
 
   @@index([projectId, sectionId, position])
 }
@@ -279,4 +280,42 @@ model Webhook {
   createdAt   DateTime @default(now())
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+
+model CustomFieldDefinition {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  name        String
+  fieldType   String   @map("field_type")
+  options     Json?
+  config      Json     @default("{}")
+  position    Int      @default(0)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  project Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  values  CustomFieldValue[]
+
+  @@index([projectId])
+  @@index([projectId, isActive])
+  @@map("custom_field_definitions")
+}
+
+model CustomFieldValue {
+  id                String @id @default(uuid())
+  fieldDefinitionId String @map("field_definition_id")
+  taskId            String @map("task_id")
+  value             Json
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  fieldDefinition CustomFieldDefinition @relation(fields: [fieldDefinitionId], references: [id], onDelete: Cascade)
+  task            Task                  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([fieldDefinitionId, taskId])
+  @@index([fieldDefinitionId])
+  @@index([taskId])
+  @@map("custom_field_values")
 }

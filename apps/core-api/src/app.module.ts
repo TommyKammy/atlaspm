@@ -13,6 +13,7 @@ import { DomainService } from './common/domain.service';
 import { PublicAttachmentsController } from './tasks/public-attachments.controller';
 import { CollabController } from './collab/collab.controller';
 import { WorkspaceAdminController } from './workspaces/workspace-admin.controller';
+import { CustomFieldsController } from './custom-fields/custom-fields.controller';
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule],
@@ -27,6 +28,7 @@ import { WorkspaceAdminController } from './workspaces/workspace-admin.controlle
     PublicAttachmentsController,
     CollabController,
     WorkspaceAdminController,
+    CustomFieldsController,
   ],
   providers: [PrismaService, DomainService],
 })
