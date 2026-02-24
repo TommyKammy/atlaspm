@@ -9,8 +9,10 @@ import type { Workspace, WorkspaceUserRow } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { useI18n } from '@/lib/i18n';
 
 export default function AdminUsersPage() {
+  const { t } = useI18n();
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<'ALL' | 'ACTIVE' | 'SUSPENDED' | 'INVITED'>('ALL');
   const [inviteEmail, setInviteEmail] = useState('');
@@ -79,14 +81,14 @@ export default function AdminUsersPage() {
   });
 
   if (!workspaceId) {
-    return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">No workspace found.</div>;
+    return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">{t('noWorkspaceFound')}</div>;
   }
 
   return (
     <div className="space-y-4">
       <header className="rounded-lg border bg-card p-4">
         <h2 className="text-base font-semibold">Admin Users</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Manage workspace users, invitations, and account status.</p>
+        <p className="mt-1 text-sm text-muted-foreground">{t('manageWorkspaceUsers')}</p>
       </header>
 
       <section className="rounded-lg border bg-card p-4">
@@ -94,7 +96,7 @@ export default function AdminUsersPage() {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search name or email"
+            placeholder={t('searchNameOrEmail')}
             data-testid="admin-users-search"
             className="md:col-span-2"
           />
@@ -104,20 +106,20 @@ export default function AdminUsersPage() {
             className="h-9 rounded-md border bg-background px-3 text-sm"
             data-testid="admin-users-status-filter"
           >
-            <option value="ALL">All status</option>
-            <option value="ACTIVE">Active</option>
-            <option value="SUSPENDED">Suspended</option>
-            <option value="INVITED">Invited</option>
+            <option value="ALL">{t('allStatus')}</option>
+            <option value="ACTIVE">{t('active')}</option>
+            <option value="SUSPENDED">{t('suspended')}</option>
+            <option value="INVITED">{t('invited')}</option>
           </select>
 
           <Dialog.Root>
             <Dialog.Trigger asChild>
-              <Button data-testid="invite-user-open">Invite user</Button>
+              <Button data-testid="invite-user-open">{t('inviteUser')}</Button>
             </Dialog.Trigger>
             <Dialog.Portal>
               <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/50" />
               <Dialog.Content className="fixed left-1/2 top-1/2 z-[80] w-[480px] max-w-[95vw] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-background p-4">
-                <Dialog.Title className="text-sm font-semibold">Invite user</Dialog.Title>
+                <Dialog.Title className="text-sm font-semibold">{t('inviteUser')}</Dialog.Title>
                 <div className="mt-3 space-y-3">
                   <Input
                     value={inviteEmail}
@@ -139,12 +141,12 @@ export default function AdminUsersPage() {
                     disabled={!inviteEmail.trim() || inviteMutation.isPending}
                     data-testid="invite-submit"
                   >
-                    {inviteMutation.isPending ? 'Inviting...' : 'Create invite'}
+                    {inviteMutation.isPending ? t('inviting') : t('createInvite')}
                   </Button>
 
                   {inviteLink ? (
                     <div className="rounded-md border bg-muted/30 p-2">
-                      <p className="text-xs text-muted-foreground">Invite link</p>
+                      <p className="text-xs text-muted-foreground">{t('inviteLink')}</p>
                       <p className="break-all text-xs" data-testid="invite-link-value">{inviteLink}</p>
                       <Button
                         className="mt-2"
@@ -155,7 +157,7 @@ export default function AdminUsersPage() {
                           await navigator.clipboard.writeText(inviteLink);
                         }}
                       >
-                        Copy
+                        {t('copy')}
                       </Button>
                     </div>
                   ) : null}
@@ -170,12 +172,12 @@ export default function AdminUsersPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Last Seen</TableHead>
-              <TableHead>Created</TableHead>
-              <TableHead>Actions</TableHead>
+              <TableHead>{t('name')}</TableHead>
+              <TableHead>{t('email')}</TableHead>
+              <TableHead>{t('status')}</TableHead>
+              <TableHead>{t('lastSeen')}</TableHead>
+              <TableHead>{t('created')}</TableHead>
+              <TableHead>{t('actions')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -200,17 +202,17 @@ export default function AdminUsersPage() {
                           }}
                         >
                           <Dialog.Trigger asChild>
-                            <Button size="sm" variant="outline" data-testid={`admin-user-edit-${row.id}`}>Edit</Button>
+                            <Button size="sm" variant="outline" data-testid={`admin-user-edit-${row.id}`}>{t('edit')}</Button>
                           </Dialog.Trigger>
                           <Dialog.Portal>
                             <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/50" />
                             <Dialog.Content className="fixed left-1/2 top-1/2 z-[80] w-[420px] max-w-[95vw] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-background p-4">
-                              <Dialog.Title className="text-sm font-semibold">Edit user</Dialog.Title>
+                              <Dialog.Title className="text-sm font-semibold">{t('edit')}</Dialog.Title>
                               <div className="mt-3 space-y-3">
                                 <Input
                                   value={displayName}
                                   onChange={(e) => setDisplayName(e.target.value)}
-                                  placeholder="Display name"
+                                  placeholder={t('displayName')}
                                   data-testid={`admin-user-display-name-${row.id}`}
                                 />
                                 <Button
@@ -220,7 +222,7 @@ export default function AdminUsersPage() {
                                   }}
                                   data-testid={`admin-user-save-${row.id}`}
                                 >
-                                  Save
+                                  {t('save')}
                                 </Button>
                               </div>
                             </Dialog.Content>
@@ -240,7 +242,7 @@ export default function AdminUsersPage() {
                             })
                           }
                         >
-                          {row.status === 'SUSPENDED' ? 'Unsuspend' : 'Suspend'}
+                          {row.status === 'SUSPENDED' ? t('unsuspend') : t('suspend')}
                         </Button>
                       ) : null}
 
@@ -251,7 +253,7 @@ export default function AdminUsersPage() {
                           data-testid={`admin-invite-revoke-${row.invitationId}`}
                           onClick={() => revokeInviteMutation.mutate(row.invitationId!)}
                         >
-                          Revoke
+                          {t('revoke')}
                         </Button>
                       ) : null}
                     </div>

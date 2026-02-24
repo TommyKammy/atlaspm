@@ -58,7 +58,10 @@ export default function AppShell({
 
   return (
     <div className="flex min-h-screen bg-background">
-      <aside className={cn('hidden border-r transition-all duration-150 md:block', sidebarMode === 'icon' ? 'w-[72px]' : 'w-[240px]')}>
+      <aside
+        className={cn('hidden border-r transition-all duration-150 md:block', sidebarMode === 'icon' ? 'w-[72px]' : 'w-[240px]')}
+        style={{ borderColor: 'hsl(var(--sidebar-border))' }}
+      >
         <Sidebar compact={sidebarMode === 'icon'} />
       </aside>
       <main className="min-w-0 flex-1">

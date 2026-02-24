@@ -13,6 +13,7 @@ import type { Project, Section, SectionTaskGroup, Task } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { useI18n } from '@/lib/i18n';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,6 +22,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 export default function ProjectPage() {
+  const { t } = useI18n();
   const params = useParams<{ id: string }>();
   const projectId = params.id;
   const [newSection, setNewSection] = useState('');
@@ -95,30 +97,35 @@ export default function ProjectPage() {
       <header className="rounded-lg border bg-card p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold">{project?.name ?? 'Project'}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Task list grouped by sections with manual ordering.</p>
+            <h2 className="text-base font-semibold">{project?.name ?? t('project')}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{t('taskListGroupedBySections')}</p>
             <div className="mt-3 flex items-center gap-1">
-              {(['List', 'Board', 'Calendar', 'Files'] as const).map((tab) => (
+              {([
+                { key: 'List', label: t('list') },
+                { key: 'Board', label: t('board') },
+                { key: 'Calendar', label: t('calendar') },
+                { key: 'Files', label: t('files') },
+              ] as const).map((tab) => (
                 <Button
-                  key={tab}
-                  variant={view === tab ? 'default' : 'ghost'}
+                  key={tab.key}
+                  variant={view === tab.key ? 'default' : 'ghost'}
                   size="sm"
-                  onClick={() => setView(tab)}
+                  onClick={() => setView(tab.key)}
                   className="h-8 px-3"
-                  data-testid={`project-view-${tab.toLowerCase()}`}
+                  data-testid={`project-view-${tab.key.toLowerCase()}`}
                 >
-                  {tab}
+                  {tab.label}
                 </Button>
               ))}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Badge>{sectionsQuery.data?.length ?? 0} sections</Badge>
+            <Badge>{sectionsQuery.data?.length ?? 0} {t('sections')}</Badge>
             <Link href={`/projects/${projectId}/members`}>
-              <Button variant="outline" size="sm" data-testid="project-members-page-link">Members</Button>
+              <Button variant="outline" size="sm" data-testid="project-members-page-link">{t('members')}</Button>
             </Link>
             <Link href={`/projects/${projectId}/rules`} data-testid="rules-page-link">
-              <Button variant="outline" size="sm">Rules</Button>
+              <Button variant="outline" size="sm">{t('rules')}</Button>
             </Link>
           </div>
         </div>
@@ -130,7 +137,7 @@ export default function ProjectPage() {
             ref={searchInputRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search tasks..."
+            placeholder={t('searchTasks')}
             className="md:col-span-2"
             data-testid="project-search-input"
           />
@@ -140,7 +147,7 @@ export default function ProjectPage() {
             className="h-9 rounded-md border bg-background px-3 text-sm"
             data-testid="status-filter"
           >
-            <option value="ALL">Status: All</option>
+            <option value="ALL">{t('statusAll')}</option>
             <option value="TODO">TODO</option>
             <option value="IN_PROGRESS">IN_PROGRESS</option>
             <option value="DONE">DONE</option>
@@ -152,7 +159,7 @@ export default function ProjectPage() {
             className="h-9 rounded-md border bg-background px-3 text-sm"
             data-testid="priority-filter"
           >
-            <option value="ALL">Priority: All</option>
+            <option value="ALL">{t('priorityAll')}</option>
             <option value="LOW">LOW</option>
             <option value="MEDIUM">MEDIUM</option>
             <option value="HIGH">HIGH</option>
@@ -163,14 +170,14 @@ export default function ProjectPage() {
             onChange={(e) => setView(e.target.value as 'List' | 'Board' | 'Calendar' | 'Files')}
             className="h-9 rounded-md border bg-background px-3 text-sm"
           >
-            <option>List</option>
-            <option>Board</option>
+            <option>{t('list')}</option>
+            <option>{t('board')}</option>
           </select>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button className="md:justify-self-end" data-testid="add-new-trigger">
                 <Plus className="mr-1 h-4 w-4" />
-                Add new
+                {t('addNew')}
                 <ChevronDown className="ml-1 h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
@@ -185,7 +192,7 @@ export default function ProjectPage() {
                   el?.click();
                 }}
               >
-                Add task
+                {t('addTask')}
               </DropdownMenuItem>
               <DropdownMenuItem
                 data-testid="add-new-section"
@@ -194,7 +201,7 @@ export default function ProjectPage() {
                   setTimeout(() => addSectionInputRef.current?.focus(), 0);
                 }}
               >
-                Add section
+                {t('addSection')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -205,7 +212,7 @@ export default function ProjectPage() {
               ref={addSectionInputRef}
               value={newSection}
               onChange={(e) => setNewSection(e.target.value)}
-              placeholder="Section name"
+              placeholder={t('sectionName')}
               data-testid="new-section-input"
               className="min-w-56 flex-1"
               onKeyDown={(e) => {
@@ -223,7 +230,7 @@ export default function ProjectPage() {
               onClick={() => void createSection.mutateAsync(newSection.trim())}
               disabled={!newSection.trim() || createSection.isPending}
             >
-              {createSection.isPending ? 'Adding...' : 'Add Section'}
+              {createSection.isPending ? t('adding') : t('addSection')}
             </Button>
             <Button
               variant="ghost"
@@ -232,7 +239,7 @@ export default function ProjectPage() {
                 setNewSection('');
               }}
             >
-              Cancel
+              {t('cancel')}
             </Button>
           </div>
         ) : null}
@@ -269,7 +276,7 @@ export default function ProjectPage() {
         />
       ) : (
         <section className="rounded-lg border border-dashed bg-card p-8 text-center text-sm text-muted-foreground">
-          {view} view is planned. Use List view for full editing and ordering.
+          {view} {t('listViewIsPlanned')}
         </section>
       )}
     </div>

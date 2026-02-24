@@ -8,8 +8,10 @@ import { queryKeys } from '@/lib/query-keys';
 import type { Project, Workspace } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useI18n } from '@/lib/i18n';
 
 export default function HomePage() {
+  const { t } = useI18n();
   const [name, setName] = useState('');
   const [workspaceId, setWorkspaceId] = useState('');
   const queryClient = useQueryClient();
@@ -43,12 +45,12 @@ export default function HomePage() {
       </header>
 
       <section className="rounded-lg border bg-card p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-[0.1em] text-muted-foreground">Create Project</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-[0.1em] text-muted-foreground">{t('createProject')}</h2>
         <div className="mt-3 grid gap-2 md:grid-cols-3">
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Project name"
+            placeholder={t('projectName')}
           />
           <select
             className="h-9 rounded-md border bg-background px-3 text-sm"
@@ -64,15 +66,15 @@ export default function HomePage() {
             disabled={!name.trim() || !activeWorkspaceId || createProject.isPending}
             data-testid="create-project-btn"
           >
-            {createProject.isPending ? 'Creating...' : 'Create Project'}
+            {createProject.isPending ? t('creating') : t('createProjectAction')}
           </Button>
         </div>
       </section>
 
       <section className="rounded-lg border bg-card p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-[0.1em] text-muted-foreground">Project Board</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-[0.1em] text-muted-foreground">{t('projectBoard')}</h2>
         {projects.length === 0 ? (
-          <p className="mt-3 text-sm text-muted-foreground">No projects yet. Create one to start planning.</p>
+          <p className="mt-3 text-sm text-muted-foreground">{t('noProjectsYet')}</p>
         ) : (
           <ul className="mt-3 space-y-2">
             {projects.map((p) => (
@@ -87,7 +89,7 @@ export default function HomePage() {
       </section>
 
       <Link className="text-xs text-muted-foreground hover:text-foreground" href="/login">
-        Switch login identity
+        {t('switchLoginIdentity')}
       </Link>
     </div>
   );

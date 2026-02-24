@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { api, apiBaseUrl } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { SectionTaskGroup, Task, TaskAttachment } from '@/lib/types';
+import { useI18n } from '@/lib/i18n';
 
 function flattenTasks(groups: SectionTaskGroup[]) {
   return groups.flatMap((group) => group.tasks.map((task) => ({ task, section: group.section })));
@@ -39,6 +40,7 @@ export function ProjectBoardView({
   statusFilter: 'ALL' | Task['status'];
   priorityFilter: 'ALL' | NonNullable<Task['priority']>;
 }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
@@ -67,14 +69,14 @@ export function ProjectBoardView({
     () =>
       groups.map((group) => ({
         ...group,
-        sectionLabel: group.section.isDefault ? 'Tasks' : group.section.name,
+        sectionLabel: group.section.isDefault ? t('tasks') : group.section.name,
         tasks: group.tasks.filter((task) => taskMatchesFilters(task, search, statusFilter, priorityFilter)),
       })),
-    [groups, search, statusFilter, priorityFilter],
+    [groups, search, statusFilter, priorityFilter, t],
   );
 
   if (groupsQuery.isLoading) {
-    return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">Loading board...</div>;
+    return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">{t('loadingBoard')}</div>;
   }
 
   return (
@@ -103,17 +105,17 @@ export function ProjectBoardView({
                     <p className="truncate text-sm font-medium">{task.title}</p>
                     <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
                       <span>{task.status}</span>
-                      <span>{task.dueAt ? String(task.dueAt).slice(0, 10) : 'No due date'}</span>
+                      <span>{task.dueAt ? String(task.dueAt).slice(0, 10) : t('noDueDate')}</span>
                     </div>
                   </button>
                 ))
               ) : (
-                <p className="text-xs text-muted-foreground">No tasks.</p>
+                <p className="text-xs text-muted-foreground">{t('noTasks')}</p>
               )}
 
               <div className="flex items-center gap-2 pt-1">
                 <Input
-                  placeholder="Add task..."
+                  placeholder={t('addTask')}
                   value={draftBySection[group.section.id] ?? ''}
                   onChange={(event) =>
                     setDraftBySection((current) => ({ ...current, [group.section.id]: event.target.value }))
@@ -137,7 +139,7 @@ export function ProjectBoardView({
                     });
                   }}
                 >
-                  Add
+                  {t('add')}
                 </Button>
               </div>
             </div>
@@ -168,6 +170,7 @@ export function ProjectCalendarView({
   statusFilter: 'ALL' | Task['status'];
   priorityFilter: 'ALL' | NonNullable<Task['priority']>;
 }) {
+  const { t } = useI18n();
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
@@ -199,7 +202,7 @@ export function ProjectCalendarView({
   });
 
   if (groupsQuery.isLoading) {
-    return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">Loading calendar...</div>;
+    return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">{t('loadingCalendar')}</div>;
   }
 
   return (
@@ -260,9 +263,9 @@ export function ProjectCalendarView({
       </div>
 
       <section className="rounded-lg border bg-card p-3">
-        <h4 className="mb-2 text-sm font-medium">No due date</h4>
+        <h4 className="mb-2 text-sm font-medium">{t('noDueDate')}</h4>
         {!noDueTasks.length ? (
-          <p className="text-xs text-muted-foreground">All tasks have due dates.</p>
+          <p className="text-xs text-muted-foreground">{t('allTasksHaveDueDates')}</p>
         ) : (
           <div className="flex flex-wrap gap-2">
             {noDueTasks.map((task) => (
@@ -310,6 +313,7 @@ export function ProjectFilesView({
   statusFilter: 'ALL' | Task['status'];
   priorityFilter: 'ALL' | NonNullable<Task['priority']>;
 }) {
+  const { t } = useI18n();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const groupsQuery = useQuery<SectionTaskGroup[]>({
     queryKey: queryKeys.projectTasksGrouped(projectId),
@@ -340,40 +344,40 @@ export function ProjectFilesView({
           ...attachment,
           taskId: row.task.id,
           taskTitle: row.task.title,
-          sectionName: row.section.isDefault ? 'Tasks' : row.section.name,
+          sectionName: row.section.isDefault ? t('tasks') : row.section.name,
           status: row.task.status,
           priority: row.task.priority,
         });
       });
     });
     return rows.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
-  }, [attachmentQueries, filteredTaskRows]);
+  }, [attachmentQueries, filteredTaskRows, t]);
 
   if (groupsQuery.isLoading || loadingAttachments) {
-    return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">Loading files...</div>;
+    return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">{t('loadingFiles')}</div>;
   }
 
   return (
     <div className="space-y-4">
       <section className="rounded-lg border bg-card">
         <header className="flex items-center justify-between border-b px-4 py-2">
-          <h3 className="text-sm font-medium">Project files</h3>
+          <h3 className="text-sm font-medium">{t('projectFiles')}</h3>
           <Badge variant="secondary">{files.length}</Badge>
         </header>
         {!files.length ? (
           <div className="px-4 py-8 text-center text-sm text-muted-foreground">
             <Paperclip className="mx-auto mb-2 h-5 w-5" />
-            No files yet. Upload images/files from a task detail panel.
+            {t('noFilesYet')}
           </div>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>File</TableHead>
-                <TableHead>Task</TableHead>
-                <TableHead>Section</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Added</TableHead>
+                <TableHead>{t('file')}</TableHead>
+                <TableHead>{t('task')}</TableHead>
+                <TableHead>{t('section')}</TableHead>
+                <TableHead>{t('status')}</TableHead>
+                <TableHead>{t('added')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

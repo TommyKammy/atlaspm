@@ -33,6 +33,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import TaskDetailDrawer from '@/components/task-detail-drawer';
+import { useI18n } from '@/lib/i18n';
 
 function sortByPosition(tasks: Task[]) {
   return [...tasks].sort((a, b) => a.position - b.position);
@@ -85,7 +86,7 @@ function moveTaskPreview(
 }
 
 function resolveAssigneeLabel(task: Task, members: ProjectMember[]) {
-  if (!task.assigneeUserId) return 'Unassigned';
+  if (!task.assigneeUserId) return 'unassigned';
   const member = members.find((item) => item.userId === task.assigneeUserId);
   if (!member) return task.assigneeUserId;
   return member.user.displayName || member.user.email || member.userId;
@@ -166,8 +167,10 @@ function AssigneeCombobox({
   members: ProjectMember[];
   onSelect: (assigneeUserId: string | null) => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const selected = resolveAssigneeLabel(task, members);
+  const selectedLabel = selected === 'unassigned' ? t('unassigned') : selected;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -181,16 +184,16 @@ function AssigneeCombobox({
                 data-testid={`assignee-trigger-${task.id}`}
                 className="h-6 w-6 rounded-full border"
               >
-                {selected === 'Unassigned' ? <Plus className="h-3 w-3" /> : <span className="text-[10px]">{initials(selected)}</span>}
+                {selected === 'unassigned' ? <Plus className="h-3 w-3" /> : <span className="text-[10px]">{initials(selectedLabel)}</span>}
               </Button>
             </PopoverTrigger>
           </TooltipTrigger>
-          <TooltipContent>{selected}</TooltipContent>
+          <TooltipContent>{selectedLabel}</TooltipContent>
         </Tooltip>
       </TooltipProvider>
       <PopoverContent className="w-64 p-0" align="start">
         <Command>
-          <CommandInput placeholder="Search assignee..." data-testid={`assignee-search-${task.id}`} />
+          <CommandInput placeholder={`${t('assignee')}...`} data-testid={`assignee-search-${task.id}`} />
           <CommandList>
             <CommandEmpty>No members found.</CommandEmpty>
             <CommandGroup>
@@ -202,7 +205,7 @@ function AssigneeCombobox({
                 }}
               >
                 <User className="h-4 w-4" />
-                <span>Unassigned</span>
+                <span>{t('unassigned')}</span>
               </CommandItem>
               {members.map((member) => {
                 const label = member.user.displayName || member.user.email || member.user.id;
@@ -257,6 +260,7 @@ function TaskRow({
   onToggleCollapse: (taskId: string) => void;
   draggable: boolean;
 }) {
+  const { t } = useI18n();
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
     id: task.id,
     data: { sectionId },
@@ -298,7 +302,7 @@ function TaskRow({
             type="button"
             {...(draggable ? attributes : {})}
             {...(draggable ? listeners : {})}
-            title={draggable ? 'Drag to reorder' : 'Nested tasks cannot be dragged from list view'}
+            title={draggable ? t('dragToReorder') : t('nestedTasksCannotBeDragged')}
           >
             Drag
           </button>
@@ -363,7 +367,7 @@ function TaskRow({
         </Badge>
       </TableCell>
       <TableCell className="text-xs text-muted-foreground">-</TableCell>
-      <TableCell className="text-xs text-muted-foreground">Private</TableCell>
+      <TableCell className="text-xs text-muted-foreground">{t('private')}</TableCell>
       <TableCell>
         {task.assigneeUserId ? (
           <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border text-[10px]">
@@ -384,6 +388,7 @@ function QuickAddTask({
   sectionId: string;
   onCreate: (sectionId: string, title: string) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -408,7 +413,7 @@ function QuickAddTask({
           setTimeout(() => inputRef.current?.focus(), 0);
         }}
       >
-        + Add task
+        + {t('addTask')}
       </Button>
     );
   }
@@ -429,11 +434,11 @@ function QuickAddTask({
             setTitle('');
           }
         }}
-        placeholder="Task name"
+        placeholder={t('taskName')}
         data-testid={`quick-add-input-${sectionId}`}
       />
       <Button size="sm" data-testid={`quick-add-submit-${sectionId}`} onClick={() => void submit()}>
-        Add
+        {t('add')}
       </Button>
     </div>
   );
@@ -465,6 +470,7 @@ function SectionDropTarget({
 }
 
 function SectionDropZone({ sectionId }: { sectionId: string }) {
+  const { t } = useI18n();
   const { setNodeRef, isOver } = useDroppable({ id: `section-drop-zone-${sectionId}`, data: { sectionId } });
 
   return (
@@ -473,7 +479,7 @@ function SectionDropZone({ sectionId }: { sectionId: string }) {
       data-testid={`section-drop-zone-${sectionId}`}
       className={cn('rounded-md border border-dashed px-2 py-1 text-[11px] text-muted-foreground', isOver && 'border-ring text-foreground')}
     >
-      Drop tasks here
+      {t('dropTasksHere')}
     </div>
   );
 }
@@ -491,6 +497,7 @@ export default function ProjectBoard({
   statusFilter: 'ALL' | Task['status'];
   priorityFilter: 'ALL' | NonNullable<Task['priority']>;
 }) {
+  const { t } = useI18n();
   const sensors = useSensors(useSensor(PointerSensor));
   const queryClient = useQueryClient();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -625,7 +632,7 @@ export default function ProjectBoard({
   };
 
   if (groupsQuery.isLoading) {
-    return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">Loading tasks...</div>;
+    return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">{t('loadingTasks')}</div>;
   }
 
   return (
@@ -645,15 +652,15 @@ export default function ProjectBoard({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Assignee</TableHead>
-                  <TableHead>Due date</TableHead>
-                  <TableHead>Progress</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Projects</TableHead>
-                  <TableHead>Dependencies</TableHead>
-                  <TableHead>Visibility</TableHead>
-                  <TableHead>Collaborators</TableHead>
+                  <TableHead>{t('name')}</TableHead>
+                  <TableHead>{t('assignee')}</TableHead>
+                  <TableHead>{t('dueDate')}</TableHead>
+                  <TableHead>{t('progress')}</TableHead>
+                  <TableHead>{t('status')}</TableHead>
+                  <TableHead>{t('projects')}</TableHead>
+                  <TableHead>{t('dependencies')}</TableHead>
+                  <TableHead>{t('visibility')}</TableHead>
+                  <TableHead>{t('collaborators')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -687,7 +694,7 @@ export default function ProjectBoard({
 
             {!group.tasks.length ? (
               <div className="px-4 py-3 text-sm text-muted-foreground" data-testid={`empty-section-${group.section.id}`}>
-                No tasks in this section.
+                {t('noTasksInSection')}
               </div>
             ) : null}
 
@@ -705,7 +712,7 @@ export default function ProjectBoard({
 
         {!filteredGroups.length ? (
           <div className="rounded-lg border border-dashed bg-card p-6 text-center text-sm text-muted-foreground">
-            No sections yet. Add a section to start planning tasks.
+            {t('noSectionsYet')}
           </div>
         ) : null}
 

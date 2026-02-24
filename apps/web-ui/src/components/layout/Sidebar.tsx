@@ -10,6 +10,7 @@ import type { Project, Workspace } from '@/lib/types';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/lib/i18n';
 
 type SidebarProps = {
   onNavigate?: () => void;
@@ -17,6 +18,7 @@ type SidebarProps = {
 };
 
 export function Sidebar({ onNavigate, compact = false }: SidebarProps) {
+  const { t } = useI18n();
   const pathname = usePathname();
   const { data: projects = [] } = useQuery<Project[]>({
     queryKey: queryKeys.projects,
@@ -31,23 +33,23 @@ export function Sidebar({ onNavigate, compact = false }: SidebarProps) {
   const handleNavigate = () => onNavigate?.();
 
   const topLinks = [
-    { href: '/', label: 'Home', icon: Home, compact: 'H', active: pathname === '/' && !pathname.includes('view=') },
-    { href: '/?view=my-tasks', label: 'My tasks', icon: CheckCircle2, compact: 'M', active: pathname === '/' && pathname.includes('view=my-tasks') },
-    { href: '/?view=inbox', label: 'Inbox', icon: Inbox, compact: 'I', active: pathname === '/' && pathname.includes('view=inbox') },
+    { href: '/', label: t('home'), icon: Home, compact: 'H', active: pathname === '/' && !pathname.includes('view=') },
+    { href: '/?view=my-tasks', label: t('myTasks'), icon: CheckCircle2, compact: 'M', active: pathname === '/' && pathname.includes('view=my-tasks') },
+    { href: '/?view=inbox', label: t('inbox'), icon: Inbox, compact: 'I', active: pathname === '/' && pathname.includes('view=inbox') },
   ];
 
   const insightLinks = [
     {
       href: activeWorkspaceId ? `/workspaces/${activeWorkspaceId}/workload` : '/',
-      label: 'Workload',
+      label: t('workload'),
       icon: Users,
       compact: 'W',
       active: pathname.includes('/workload'),
     },
-    { href: '/dashboards', label: 'Dashboards', icon: BarChart3, compact: 'D', active: pathname === '/dashboards' },
+    { href: '/dashboards', label: t('dashboards'), icon: BarChart3, compact: 'D', active: pathname === '/dashboards' },
     {
       href: activeWorkspaceId ? `/workspaces/${activeWorkspaceId}/portfolios` : '/',
-      label: 'Portfolios',
+      label: t('portfolios'),
       icon: FolderKanban,
       compact: 'P',
       active: pathname.includes('/portfolios'),
@@ -55,11 +57,19 @@ export function Sidebar({ onNavigate, compact = false }: SidebarProps) {
   ];
 
   return (
-    <div className={cn('flex h-full flex-col bg-card', compact ? 'w-[72px]' : 'w-[240px]')}>
+    <div
+      className={cn('flex h-full flex-col', compact ? 'w-[72px]' : 'w-[240px]')}
+      style={{
+        backgroundColor: 'hsl(var(--sidebar-background))',
+        color: 'hsl(var(--sidebar-foreground))',
+      }}
+    >
       <div className="px-3 py-3">
-        <p className="text-[11px] uppercase tracking-wider text-muted-foreground">{compact ? 'Nav' : 'Workspace'}</p>
+        <p className="text-[11px] uppercase tracking-wider" style={{ color: 'hsl(var(--sidebar-muted-foreground))' }}>
+          {compact ? t('nav') : t('workspace')}
+        </p>
       </div>
-      <Separator />
+      <Separator style={{ backgroundColor: 'hsl(var(--sidebar-border))' }} />
       <ScrollArea className="flex-1 px-2 py-2">
         <nav className="space-y-1">
           {topLinks.map((item) => {
@@ -70,9 +80,18 @@ export function Sidebar({ onNavigate, compact = false }: SidebarProps) {
                 href={item.href}
                 onClick={handleNavigate}
                 className={cn(
-                  'flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-                  item.active && 'bg-muted text-foreground',
+                  'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
                 )}
+                style={{
+                  color: item.active ? 'hsl(var(--sidebar-foreground))' : 'hsl(var(--sidebar-muted-foreground))',
+                  backgroundColor: item.active ? 'hsl(var(--sidebar-active))' : 'transparent',
+                }}
+                onMouseEnter={(event) => {
+                  if (!item.active) event.currentTarget.style.backgroundColor = 'hsl(var(--sidebar-hover))';
+                }}
+                onMouseLeave={(event) => {
+                  if (!item.active) event.currentTarget.style.backgroundColor = 'transparent';
+                }}
                 title={item.label}
               >
                 {compact ? (
@@ -88,8 +107,10 @@ export function Sidebar({ onNavigate, compact = false }: SidebarProps) {
           })}
         </nav>
 
-        <Separator className="my-3" />
-        <p className="px-2 text-[11px] uppercase tracking-wider text-muted-foreground">{compact ? 'In' : 'Insights'}</p>
+        <Separator className="my-3" style={{ backgroundColor: 'hsl(var(--sidebar-border))' }} />
+        <p className="px-2 text-[11px] uppercase tracking-wider" style={{ color: 'hsl(var(--sidebar-muted-foreground))' }}>
+          {compact ? t('insights').slice(0, 2) : t('insights')}
+        </p>
         <nav className="mt-2 space-y-1">
           {insightLinks.map((item) => {
             const Icon = item.icon;
@@ -99,9 +120,18 @@ export function Sidebar({ onNavigate, compact = false }: SidebarProps) {
                 href={item.href}
                 onClick={handleNavigate}
                 className={cn(
-                  'flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-                  item.active && 'bg-muted text-foreground',
+                  'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
                 )}
+                style={{
+                  color: item.active ? 'hsl(var(--sidebar-foreground))' : 'hsl(var(--sidebar-muted-foreground))',
+                  backgroundColor: item.active ? 'hsl(var(--sidebar-active))' : 'transparent',
+                }}
+                onMouseEnter={(event) => {
+                  if (!item.active) event.currentTarget.style.backgroundColor = 'hsl(var(--sidebar-hover))';
+                }}
+                onMouseLeave={(event) => {
+                  if (!item.active) event.currentTarget.style.backgroundColor = 'transparent';
+                }}
                 title={item.label}
               >
                 {compact ? (
@@ -117,8 +147,10 @@ export function Sidebar({ onNavigate, compact = false }: SidebarProps) {
           })}
         </nav>
 
-        <Separator className="my-3" />
-        <p className="px-2 text-[11px] uppercase tracking-wider text-muted-foreground">{compact ? 'Pr' : 'Projects'}</p>
+        <Separator className="my-3" style={{ backgroundColor: 'hsl(var(--sidebar-border))' }} />
+        <p className="px-2 text-[11px] uppercase tracking-wider" style={{ color: 'hsl(var(--sidebar-muted-foreground))' }}>
+          {compact ? t('projects').slice(0, 2) : t('projects')}
+        </p>
         <nav className="mt-2 space-y-1">
           {projects.map((project) => {
             const active = pathname === `/projects/${project.id}` || pathname.startsWith(`/projects/${project.id}/`);
@@ -129,9 +161,18 @@ export function Sidebar({ onNavigate, compact = false }: SidebarProps) {
                 onClick={handleNavigate}
                 data-testid={`sidebar-project-${project.id}`}
                 className={cn(
-                  'block rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-                  active && 'bg-muted text-foreground',
+                  'block rounded-md px-3 py-2 text-sm transition-colors',
                 )}
+                style={{
+                  color: active ? 'hsl(var(--sidebar-foreground))' : 'hsl(var(--sidebar-muted-foreground))',
+                  backgroundColor: active ? 'hsl(var(--sidebar-active))' : 'transparent',
+                }}
+                onMouseEnter={(event) => {
+                  if (!active) event.currentTarget.style.backgroundColor = 'hsl(var(--sidebar-hover))';
+                }}
+                onMouseLeave={(event) => {
+                  if (!active) event.currentTarget.style.backgroundColor = 'transparent';
+                }}
                 title={project.name}
               >
                 {compact ? project.name.slice(0, 2).toUpperCase() : project.name}
@@ -141,20 +182,35 @@ export function Sidebar({ onNavigate, compact = false }: SidebarProps) {
         </nav>
         {isWorkspaceAdmin ? (
           <>
-            <Separator className="my-3" />
-            <p className="px-2 text-[11px] uppercase tracking-wider text-muted-foreground">{compact ? 'A' : 'Admin'}</p>
+            <Separator className="my-3" style={{ backgroundColor: 'hsl(var(--sidebar-border))' }} />
+            <p className="px-2 text-[11px] uppercase tracking-wider" style={{ color: 'hsl(var(--sidebar-muted-foreground))' }}>
+              {compact ? t('admin').slice(0, 1) : t('admin')}
+            </p>
             <nav className="mt-2 space-y-1">
               <Link
                 href="/admin/users"
                 onClick={handleNavigate}
                 data-testid="sidebar-admin-users"
                 className={cn(
-                  'block rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-                  pathname === '/admin/users' && 'bg-muted text-foreground',
+                  'block rounded-md px-3 py-2 text-sm transition-colors',
                 )}
+                style={{
+                  color:
+                    pathname === '/admin/users'
+                      ? 'hsl(var(--sidebar-foreground))'
+                      : 'hsl(var(--sidebar-muted-foreground))',
+                  backgroundColor:
+                    pathname === '/admin/users' ? 'hsl(var(--sidebar-active))' : 'transparent',
+                }}
+                onMouseEnter={(event) => {
+                  if (pathname !== '/admin/users') event.currentTarget.style.backgroundColor = 'hsl(var(--sidebar-hover))';
+                }}
+                onMouseLeave={(event) => {
+                  if (pathname !== '/admin/users') event.currentTarget.style.backgroundColor = 'transparent';
+                }}
                 title="Users"
               >
-                {compact ? 'U' : 'Users'}
+                {compact ? 'U' : t('users')}
               </Link>
             </nav>
           </>

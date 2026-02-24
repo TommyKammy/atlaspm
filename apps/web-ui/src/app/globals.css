@@ -23,6 +23,12 @@
   --input: 214.3 31.8% 91.4%;
   --ring: 221 83% 53%;
   --radius: 0.6rem;
+  --sidebar-background: 220 9% 13%;
+  --sidebar-foreground: 210 9% 92%;
+  --sidebar-muted-foreground: 215 8% 68%;
+  --sidebar-hover: 220 8% 22%;
+  --sidebar-active: 220 8% 28%;
+  --sidebar-border: 220 8% 24%;
 }
 
 .dark {
@@ -45,6 +51,12 @@
   --border: 223 20% 20%;
   --input: 223 20% 20%;
   --ring: 221 100% 67%;
+  --sidebar-background: 220 9% 13%;
+  --sidebar-foreground: 210 9% 92%;
+  --sidebar-muted-foreground: 215 8% 68%;
+  --sidebar-hover: 220 8% 22%;
+  --sidebar-active: 220 8% 28%;
+  --sidebar-border: 220 8% 24%;
 }
 
 @theme inline {
