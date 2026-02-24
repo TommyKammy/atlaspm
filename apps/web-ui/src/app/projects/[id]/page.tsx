@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ProjectBoard from '@/components/project-board';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
@@ -19,7 +19,8 @@ export default function ProjectPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | Task['status']>('ALL');
   const [priorityFilter, setPriorityFilter] = useState<'ALL' | NonNullable<Task['priority']>>('ALL');
-  const [view, setView] = useState('List');
+  const [view, setView] = useState<'List' | 'Board' | 'Calendar' | 'Files'>('List');
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
 
   const projectsQuery = useQuery<Project[]>({
@@ -58,6 +59,26 @@ export default function ProjectPage() {
 
   if (!projectId) return <div>Loading...</div>;
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isInputLike = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable;
+      if (event.key === '/' && !isInputLike) {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+      }
+      if ((event.key === 'c' || event.key === 'C') && !isInputLike) {
+        const quickAddSectionId = sectionsQuery.data?.[0]?.id;
+        if (!quickAddSectionId) return;
+        event.preventDefault();
+        const trigger = document.querySelector(`[data-testid="quick-add-open-${quickAddSectionId}"]`) as HTMLButtonElement | null;
+        trigger?.click();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [sectionsQuery.data]);
+
   return (
     <div className="space-y-4">
       <header className="rounded-lg border bg-card p-4">
@@ -65,6 +86,20 @@ export default function ProjectPage() {
           <div>
             <h2 className="text-base font-semibold">{project?.name ?? 'Project'}</h2>
             <p className="mt-1 text-sm text-muted-foreground">Task list grouped by sections with manual ordering.</p>
+            <div className="mt-3 flex items-center gap-1">
+              {(['List', 'Board', 'Calendar', 'Files'] as const).map((tab) => (
+                <Button
+                  key={tab}
+                  variant={view === tab ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setView(tab)}
+                  className="h-8 px-3"
+                  data-testid={`project-view-${tab.toLowerCase()}`}
+                >
+                  {tab}
+                </Button>
+              ))}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <Badge>{sectionsQuery.data?.length ?? 0} sections</Badge>
@@ -81,10 +116,12 @@ export default function ProjectPage() {
       <section className="rounded-lg border bg-card p-4">
         <div className="grid gap-2 md:grid-cols-6">
           <Input
+            ref={searchInputRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search tasks..."
             className="md:col-span-2"
+            data-testid="project-search-input"
           />
           <select
             value={statusFilter}
@@ -112,7 +149,7 @@ export default function ProjectPage() {
           </select>
           <select
             value={view}
-            onChange={(e) => setView(e.target.value)}
+            onChange={(e) => setView(e.target.value as 'List' | 'Board' | 'Calendar' | 'Files')}
             className="h-9 rounded-md border bg-background px-3 text-sm"
           >
             <option>List</option>
@@ -156,12 +193,19 @@ export default function ProjectPage() {
         </div>
       </section>
 
-      <ProjectBoard
-        projectId={projectId}
-        search={search}
-        statusFilter={statusFilter}
-        priorityFilter={priorityFilter}
-      />
+      {view === 'List' ? (
+        <ProjectBoard
+          projectId={projectId}
+          projectName={project?.name ?? 'Project'}
+          search={search}
+          statusFilter={statusFilter}
+          priorityFilter={priorityFilter}
+        />
+      ) : (
+        <section className="rounded-lg border border-dashed bg-card p-8 text-center text-sm text-muted-foreground">
+          {view} view is planned. Use List view for full editing and ordering.
+        </section>
+      )}
     </div>
   );
 }

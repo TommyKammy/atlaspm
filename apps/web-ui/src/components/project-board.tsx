@@ -238,6 +238,7 @@ function TaskRow({
   onEdit,
   members,
   onOpen,
+  projectName,
   depth,
   hasChildren,
   collapsed,
@@ -249,6 +250,7 @@ function TaskRow({
   onEdit: (taskId: string, patch: Partial<Task> & { version: number }) => void;
   members: ProjectMember[];
   onOpen: (taskId: string) => void;
+  projectName: string;
   depth: number;
   hasChildren: boolean;
   collapsed: boolean;
@@ -355,6 +357,22 @@ function TaskRow({
           <option value="BLOCKED">BLOCKED</option>
         </select>
       </TableCell>
+      <TableCell>
+        <Badge variant="secondary" className="max-w-40 truncate">
+          {projectName}
+        </Badge>
+      </TableCell>
+      <TableCell className="text-xs text-muted-foreground">-</TableCell>
+      <TableCell className="text-xs text-muted-foreground">Private</TableCell>
+      <TableCell>
+        {task.assigneeUserId ? (
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border text-[10px]">
+            {initials(resolveAssigneeLabel(task, members))}
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">-</span>
+        )}
+      </TableCell>
     </tr>
   );
 }
@@ -451,11 +469,13 @@ function SectionDropZone({ sectionId }: { sectionId: string }) {
 
 export default function ProjectBoard({
   projectId,
+  projectName = 'Project',
   search,
   statusFilter,
   priorityFilter,
 }: {
   projectId: string;
+  projectName?: string;
   search: string;
   statusFilter: 'ALL' | Task['status'];
   priorityFilter: 'ALL' | NonNullable<Task['priority']>;
@@ -615,6 +635,10 @@ export default function ProjectBoard({
                   <TableHead>Due date</TableHead>
                   <TableHead>Progress</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Projects</TableHead>
+                  <TableHead>Dependencies</TableHead>
+                  <TableHead>Visibility</TableHead>
+                  <TableHead>Collaborators</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -627,6 +651,7 @@ export default function ProjectBoard({
                       onEdit={onEdit}
                       members={members}
                       onOpen={setSelectedTaskId}
+                      projectName={projectName}
                       depth={row.depth}
                       hasChildren={row.hasChildren}
                       collapsed={collapsedTaskIds.has(row.task.id)}

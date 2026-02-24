@@ -332,3 +332,47 @@
 - Risks/known gaps:
   - Invite delivery is currently link-copy only (no SMTP integration yet).
   - `PATCH /users/:id` requires `workspaceId` in admin flows for explicit authorization context.
+
+## 2026-02-25 - Asana-like UI Phase 0 Baseline (P0-1/P0-2)
+- What changed:
+  - Added parity rubric doc at `docs/ui/asana-parity-rubric.md` with measurable visual/UX targets and release gate.
+  - Added QA gate doc at `docs/ui/qa-regression-gates.md` with mandatory commands, required E2E coverage, smoke checklist, and flake policy.
+  - Updated `README.md` to link new planning docs and added issue bootstrap script usage.
+  - Added `scripts/create-asana-ui-issues.sh` to create milestones/labels and Asana-like UI epic + phase issues.
+- Why:
+  - Start implementation from the safest phase by fixing acceptance criteria and regression gates first, then execute changes against an explicit rubric.
+- How tested:
+  - `./scripts/create-asana-ui-issues.sh` (issues and milestones created)
+  - `gh issue list --repo TommyKammy/atlaspm --state open --limit 50` (epic + phase issues confirmed)
+- Risks/known gaps:
+  - Phase 0 defines targets only; UI behavior changes begin in next phase implementation tickets.
+
+## 2026-02-25 - Asana-like UI Phases P1-P6 (safe convergence)
+- What changed:
+  - Implemented Asana-like navigation structure in sidebar with grouped areas (workspace nav, insights, projects, admin) while preserving existing routes and permissions.
+  - Enhanced project page header and toolbar:
+    - Added Asana-style view tabs (`List/Board/Calendar/Files`) with safe fallback placeholders for non-list views.
+    - Added keyboard shortcuts: `/` focuses project search, `C` opens quick-add on first section.
+  - Upgraded list table density/structure in `ProjectBoard`:
+    - Added Asana-like columns (`Projects`, `Dependencies`, `Visibility`, `Collaborators`) without changing API contracts.
+    - Kept existing inline edit and ordering behavior.
+  - Added phase docs and regression docs:
+    - `docs/ui/asana-parity-rubric.md`
+    - `docs/ui/qa-regression-gates.md`
+    - `docs/ui/visual-regression.md`
+  - Added helper scripts:
+    - `scripts/create-asana-ui-issues.sh` (labels/milestones/issues bootstrap, idempotent)
+    - `scripts/capture-ui-baseline.sh` (manual visual-baseline capture helper)
+  - Updated `docs/ui-design.md` and `README.md` to reference new planning/regression assets.
+- Why:
+  - Execute all Asana-like UI phases in a low-risk order: first acceptance criteria and QA gates, then UI convergence with strict regression checks.
+- How tested (exact commands):
+  - `pnpm -r --if-present lint`
+  - `pnpm -r --if-present type-check`
+  - `pnpm test`
+  - `pnpm -r --if-present build`
+  - `pnpm --filter @atlaspm/playwright e2e -- tests/dependencies.spec.ts tests/search.spec.ts tests/subtasks.spec.ts tests/slack.spec.ts`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Non-list views are intentionally placeholder-only in project detail; list view remains source of truth for full editing/reordering.
+  - Visual regression remains review-driven (artifact/manual baseline) rather than cross-OS pixel snapshots in CI.
