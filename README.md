@@ -93,3 +93,17 @@ docker compose up -d --build
 - Project members page: `/projects/:id/members`
   - add workspace users to project, change role, remove member.
 - Admin design/behavior docs: `docs/admin.md`
+
+## UI Planning Docs
+
+- Asana parity rubric: `docs/ui/asana-parity-rubric.md`
+- QA regression gates: `docs/ui/qa-regression-gates.md`
+- Dashboard migration notes: `docs/ui/dashboard-migration.md`
+
+## Issue Bootstrap Script
+
+```bash
+./scripts/create-asana-ui-issues.sh
+```
+
+Creates/updates labels and milestones and then creates the Asana-like UI epic + phase issues.

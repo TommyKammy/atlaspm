@@ -26,7 +26,8 @@
   - theme toggle dropdown
 
 ## Task List Structure
-- Toolbar: search, status filter, priority filter, view selector, add action.
+- Header tabs: `List / Board / Calendar / Files` (non-list views are placeholder unless implemented).
+- Toolbar: search, status filter, priority filter, add action.
 - Section groups:
   - uppercase section header + task count badge
   - section-scoped quick add row
@@ -35,6 +36,8 @@
   - hover highlight
   - thin separators
   - progress bar (4px, success color at 100%)
+  - extended columns for Asana-like density:
+    - `Projects`, `Dependencies`, `Visibility`, `Collaborators`
 
 ## Assignee UX
 - Popover + Command combobox pattern.
@@ -58,6 +61,14 @@
 - Use targeted optimistic updates for inline edits and reorder.
 - Invalidate only affected keys on settle/error.
 - No page reloads required for section/task create, edits, or reorder.
+
+## Keyboard Shortcuts
+- `/`: focus project search input (when not typing in an input/editor).
+- `C`: open quick-add task on first section (when not typing in an input/editor).
+
+## Visual Regression
+- Process doc: `docs/ui/visual-regression.md`
+- Manual helper: `scripts/capture-ui-baseline.sh`
 
 ## Task Detail Internals (Phase 1)
 - Task detail opens in a right-side drawer with tabs:
