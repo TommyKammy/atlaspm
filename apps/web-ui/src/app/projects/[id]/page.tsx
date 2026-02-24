@@ -4,13 +4,21 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, Plus } from 'lucide-react';
 import ProjectBoard from '@/components/project-board';
+import { ProjectBoardView, ProjectCalendarView, ProjectFilesView } from '@/components/project-alt-views';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { Project, Section, SectionTaskGroup, Task } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 export default function ProjectPage() {
   const params = useParams<{ id: string }>();
@@ -20,7 +28,9 @@ export default function ProjectPage() {
   const [statusFilter, setStatusFilter] = useState<'ALL' | Task['status']>('ALL');
   const [priorityFilter, setPriorityFilter] = useState<'ALL' | NonNullable<Task['priority']>>('ALL');
   const [view, setView] = useState<'List' | 'Board' | 'Calendar' | 'Files'>('List');
+  const [showAddSectionInput, setShowAddSectionInput] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const addSectionInputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
 
   const projectsQuery = useQuery<Project[]>({
@@ -54,6 +64,7 @@ export default function ProjectPage() {
         );
       });
       setNewSection('');
+      setShowAddSectionInput(false);
     },
   });
 
@@ -155,48 +166,103 @@ export default function ProjectPage() {
             <option>List</option>
             <option>Board</option>
           </select>
-          <Button
-            className="md:justify-self-end"
-            onClick={() => {
-              const el = sectionsQuery.data?.[0]?.id
-                ? document.querySelector(`[data-testid="quick-add-open-${sectionsQuery.data[0].id}"]`) as HTMLButtonElement | null
-                : null;
-              el?.click();
-            }}
-          >
-            Add Task
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button className="md:justify-self-end" data-testid="add-new-trigger">
+                <Plus className="mr-1 h-4 w-4" />
+                Add new
+                <ChevronDown className="ml-1 h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                data-testid="add-new-task"
+                onClick={() => {
+                  const sectionId = sectionsQuery.data?.find((section) => !section.isDefault)?.id ?? sectionsQuery.data?.[0]?.id;
+                  const el = sectionId
+                    ? (document.querySelector(`[data-testid="quick-add-open-${sectionId}"]`) as HTMLButtonElement | null)
+                    : null;
+                  el?.click();
+                }}
+              >
+                Add task
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                data-testid="add-new-section"
+                onClick={() => {
+                  setShowAddSectionInput(true);
+                  setTimeout(() => addSectionInputRef.current?.focus(), 0);
+                }}
+              >
+                Add section
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-      </section>
-
-      <section className="rounded-lg border bg-card p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            value={newSection}
-            onChange={(e) => setNewSection(e.target.value)}
-            placeholder="Section name"
-            data-testid="new-section-input"
-            className="min-w-56 flex-1"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && newSection.trim() && !createSection.isPending) {
-                void createSection.mutateAsync(newSection.trim());
-              }
-            }}
-          />
-          <Button
-            data-testid="create-section-btn"
-            onClick={() => void createSection.mutateAsync(newSection.trim())}
-            disabled={!newSection.trim() || createSection.isPending}
-          >
-            {createSection.isPending ? 'Adding...' : 'Add Section'}
-          </Button>
-        </div>
+        {showAddSectionInput ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
+            <Input
+              ref={addSectionInputRef}
+              value={newSection}
+              onChange={(e) => setNewSection(e.target.value)}
+              placeholder="Section name"
+              data-testid="new-section-input"
+              className="min-w-56 flex-1"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newSection.trim() && !createSection.isPending) {
+                  void createSection.mutateAsync(newSection.trim());
+                }
+                if (e.key === 'Escape') {
+                  setShowAddSectionInput(false);
+                  setNewSection('');
+                }
+              }}
+            />
+            <Button
+              data-testid="create-section-btn"
+              onClick={() => void createSection.mutateAsync(newSection.trim())}
+              disabled={!newSection.trim() || createSection.isPending}
+            >
+              {createSection.isPending ? 'Adding...' : 'Add Section'}
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setShowAddSectionInput(false);
+                setNewSection('');
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        ) : null}
       </section>
 
       {view === 'List' ? (
         <ProjectBoard
           projectId={projectId}
           projectName={project?.name ?? 'Project'}
+          search={search}
+          statusFilter={statusFilter}
+          priorityFilter={priorityFilter}
+        />
+      ) : view === 'Board' ? (
+        <ProjectBoardView
+          projectId={projectId}
+          search={search}
+          statusFilter={statusFilter}
+          priorityFilter={priorityFilter}
+        />
+      ) : view === 'Calendar' ? (
+        <ProjectCalendarView
+          projectId={projectId}
+          search={search}
+          statusFilter={statusFilter}
+          priorityFilter={priorityFilter}
+        />
+      ) : view === 'Files' ? (
+        <ProjectFilesView
+          projectId={projectId}
           search={search}
           statusFilter={statusFilter}
           priorityFilter={priorityFilter}

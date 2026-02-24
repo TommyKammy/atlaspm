@@ -439,14 +439,25 @@ function QuickAddTask({
   );
 }
 
-function SectionDropTarget({ sectionId, children }: { sectionId: string; children: ReactNode }) {
+function SectionDropTarget({
+  sectionId,
+  children,
+  frameless = false,
+}: {
+  sectionId: string;
+  children: ReactNode;
+  frameless?: boolean;
+}) {
   const { setNodeRef, isOver } = useDroppable({ id: `section-drop-${sectionId}`, data: { sectionId } });
 
   return (
     <section
       ref={setNodeRef}
       data-testid={`section-${sectionId}`}
-      className={cn('rounded-lg border bg-card', isOver && 'ring-1 ring-ring')}
+      className={cn(
+        frameless ? 'bg-transparent' : 'rounded-lg border bg-card',
+        isOver && 'ring-1 ring-ring',
+      )}
     >
       {children}
     </section>
@@ -620,12 +631,16 @@ export default function ProjectBoard({
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <div className="space-y-4">
-        {groupedVisibleRows.map(({ group, rows }) => (
-          <SectionDropTarget key={group.section.id} sectionId={group.section.id}>
-            <header className="flex items-center justify-between border-b px-4 py-2">
-              <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground">{group.section.name}</h3>
-              <Badge>{group.tasks.length}</Badge>
-            </header>
+        {groupedVisibleRows.map(({ group, rows }) => {
+          const isNoSection = group.section.isDefault || group.section.name.toLowerCase() === 'no section';
+          return (
+          <SectionDropTarget key={group.section.id} sectionId={group.section.id} frameless={isNoSection}>
+            {!isNoSection ? (
+              <header className="flex items-center justify-between border-b px-4 py-2">
+                <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground">{group.section.name}</h3>
+                <Badge>{group.tasks.length}</Badge>
+              </header>
+            ) : null}
 
             <Table>
               <TableHeader>
@@ -676,7 +691,7 @@ export default function ProjectBoard({
               </div>
             ) : null}
 
-            <div className="space-y-2 border-t px-4 py-2">
+            <div className={cn('space-y-2 px-4 py-2', !isNoSection && 'border-t')}>
               <SectionDropZone sectionId={group.section.id} />
               <QuickAddTask
                 sectionId={group.section.id}
@@ -686,7 +701,7 @@ export default function ProjectBoard({
               />
             </div>
           </SectionDropTarget>
-        ))}
+        )})}
 
         {!filteredGroups.length ? (
           <div className="rounded-lg border border-dashed bg-card p-6 text-center text-sm text-muted-foreground">

@@ -84,10 +84,14 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await sidebar.getByRole('link', { name: projectName1 }).click();
   await page.waitForURL(`**/projects/${projectA.id}`);
 
+  await page.click('[data-testid="add-new-trigger"]');
+  await page.click('[data-testid="add-new-section"]');
   await page.fill('[data-testid="new-section-input"]', 'Backlog');
   await page.click('[data-testid="create-section-btn"]');
   await expect(page.getByRole('heading', { name: 'Backlog' })).toBeVisible();
 
+  await page.click('[data-testid="add-new-trigger"]');
+  await page.click('[data-testid="add-new-section"]');
   await page.fill('[data-testid="new-section-input"]', 'Doing');
   await page.click('[data-testid="create-section-btn"]');
   await expect(page.getByRole('heading', { name: 'Doing' })).toBeVisible();
