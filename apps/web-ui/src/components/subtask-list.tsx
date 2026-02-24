@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronRight, ChevronDown, Plus, Trash2, Link } from 'lucide-react';
+import { ChevronRight, ChevronDown, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
@@ -15,12 +15,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 
 type CreateSubtaskInput = {
   title: string;
@@ -207,7 +201,7 @@ export function SubtaskList({
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   
-  const subtasksQuery = useQuery<TaskTree>({
+  const subtasksQuery = useQuery<TaskTree[]>({
     queryKey: queryKeys.taskSubtaskTree(taskId),
     queryFn: () => api(`/tasks/${taskId}/subtasks/tree`),
   });
@@ -229,9 +223,9 @@ export function SubtaskList({
     });
   };
 
-  const tree = subtasksQuery.data;
+  const tree = subtasksQuery.data ?? [];
   const breadcrumbs = breadcrumbsQuery.data ?? [];
-  const hasSubtasks = tree && (tree.children?.length ?? 0) > 0;
+  const hasSubtasks = tree.length > 0;
 
   return (
     <div className="space-y-3">
@@ -266,14 +260,17 @@ export function SubtaskList({
         <div className="text-sm text-muted-foreground">Loading subtasks...</div>
       ) : hasSubtasks ? (
         <div className="rounded-lg border bg-card">
-          <SubtaskItem
-            task={tree!}
-            projectId={projectId}
-            depth={-1}
-            onTaskClick={onTaskClick}
-            expanded={expanded}
-            onToggle={toggleExpanded}
-          />
+          {tree.map((child) => (
+            <SubtaskItem
+              key={child.id}
+              task={child}
+              projectId={projectId}
+              depth={0}
+              onTaskClick={onTaskClick}
+              expanded={expanded}
+              onToggle={toggleExpanded}
+            />
+          ))}
         </div>
       ) : (
         <div className="text-sm text-muted-foreground py-4 text-center border rounded-lg bg-card">

@@ -16,9 +16,13 @@ import { PublicAttachmentsController } from './tasks/public-attachments.controll
 import { CollabController } from './collab/collab.controller';
 import { WorkspaceAdminController } from './workspaces/workspace-admin.controller';
 import { SearchModule } from './search/search.module';
+import { PortfoliosModule } from './portfolios/portfolios.module';
+import { WorkloadModule } from './workload/workload.module';
+import { DashboardsModule } from './dashboards/dashboards.module';
+import { IntegrationsModule } from './integrations/integrations.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, SearchModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, SearchModule, PortfoliosModule, WorkloadModule, DashboardsModule, IntegrationsModule],
   controllers: [
     WorkspacesController,
     ProjectsController,

@@ -52,45 +52,56 @@ export class DomainService {
   }
 
   async ensureDefaultWorkspaceForUser(sub: string) {
-    try {
-      return await this.prisma.$transaction(async (tx) => {
-        let membership = await tx.workspaceMembership.findFirst({
-          where: { userId: sub },
-          include: { workspace: true },
-        });
-
-        if (!membership) {
-          const ws = await tx.workspace.create({ data: { name: 'Default Workspace' } });
-          membership = await tx.workspaceMembership.create({
-            data: { workspaceId: ws.id, userId: sub, role: WorkspaceRole.WS_ADMIN },
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(async (tx) => {
+          let membership = await tx.workspaceMembership.findFirst({
+            where: { userId: sub },
             include: { workspace: true },
           });
-        } else if (membership.role !== WorkspaceRole.WS_ADMIN) {
-          membership = await tx.workspaceMembership.update({
-            where: { id: membership.id },
-            data: { role: WorkspaceRole.WS_ADMIN },
-            include: { workspace: true },
-          });
-        }
 
-        return membership.workspace;
-      }, {
-        maxWait: 5000,
-        timeout: 10000,
-        isolationLevel: 'Serializable',
-      });
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('serialization')) {
-        const membership = await this.prisma.workspaceMembership.findFirst({
-          where: { userId: sub },
-          include: { workspace: true },
-        });
-        if (membership) {
+          if (!membership) {
+            const ws = await tx.workspace.create({ data: { name: 'Default Workspace' } });
+            membership = await tx.workspaceMembership.create({
+              data: { workspaceId: ws.id, userId: sub, role: WorkspaceRole.WS_ADMIN },
+              include: { workspace: true },
+            });
+          } else if (membership.role !== WorkspaceRole.WS_ADMIN) {
+            membership = await tx.workspaceMembership.update({
+              where: { id: membership.id },
+              data: { role: WorkspaceRole.WS_ADMIN },
+              include: { workspace: true },
+            });
+          }
+
           return membership.workspace;
+        }, {
+          maxWait: 5000,
+          timeout: 10000,
+          isolationLevel: 'Serializable',
+        });
+      } catch (error) {
+        const maybePrismaError = error as { code?: string; message?: string };
+        const isRetryableTxnConflict =
+          maybePrismaError.code === 'P2034' ||
+          maybePrismaError.message?.includes('write conflict') ||
+          maybePrismaError.message?.includes('deadlock') ||
+          maybePrismaError.message?.includes('serialization');
+
+        if (!isRetryableTxnConflict || attempt === 2) {
+          const membership = await this.prisma.workspaceMembership.findFirst({
+            where: { userId: sub },
+            include: { workspace: true },
+          });
+          if (membership) {
+            return membership.workspace;
+          }
+          throw error;
         }
       }
-      throw error;
     }
+
+    throw new ConflictException('Failed to ensure default workspace');
   }
 
   async requireWorkspaceRole(workspaceId: string, userId: string, min: WorkspaceRole) {
@@ -100,6 +111,14 @@ export class DomainService {
     if (!membership) throw new NotFoundException('Workspace membership not found');
     const rank: Record<WorkspaceRole, number> = { WS_MEMBER: 1, WS_ADMIN: 2 };
     if (rank[membership.role] < rank[min]) throw new ForbiddenException('Insufficient workspace role');
+    return membership;
+  }
+
+  async requireWorkspaceMembership(workspaceId: string, userId: string) {
+    const membership = await this.prisma.workspaceMembership.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId } },
+    });
+    if (!membership) throw new NotFoundException('Workspace membership not found');
     return membership;
   }
 

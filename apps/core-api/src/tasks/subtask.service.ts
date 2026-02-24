@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CycleDetectionService } from './cycle-detection.service';
 import { Prisma, DependencyType, type Task } from '@prisma/client';
@@ -136,7 +136,7 @@ export class SubtaskService {
     // Check for cycles
     const wouldCreateCycle = await this.cycleDetection.wouldCreateCycle(taskId, dependsOnId);
     if (wouldCreateCycle) {
-      throw new Error('Cannot create dependency: would create a circular dependency');
+      throw new BadRequestException('Cannot create dependency: would create a circular dependency');
     }
 
     const dependency = await this.prisma.taskDependency.create({

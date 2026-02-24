@@ -4,7 +4,6 @@ import {
   Post,
   Query,
   UseGuards,
-  BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
@@ -61,18 +60,74 @@ export class SearchController {
   @Get()
   async search(
     @Query() query: SearchQueryDto,
-    @CurrentRequest() req: AppRequest
+    @CurrentRequest() req: AppRequest,
   ) {
-    if (!this.searchService.isSearchEnabled()) {
-      throw new BadRequestException('Search is not configured');
-    }
-
     const filters: SearchFilters = {
       projectId: query.projectId,
       assigneeId: query.assigneeId,
       status: query.status,
       priority: query.priority,
     };
+
+    if (!this.searchService.isSearchEnabled()) {
+      const page = query.page ?? 0;
+      const hitsPerPage = query.hitsPerPage ?? 20;
+      const projectMemberships = await this.prisma.projectMembership.findMany({
+        where: { userId: req.user.sub },
+        select: { projectId: true },
+      });
+      const allowedProjectIds = projectMemberships.map((membership) => membership.projectId);
+      if (!allowedProjectIds.length) {
+        return { hits: [], total: 0, page, totalPages: 0 };
+      }
+
+      const where: Record<string, unknown> = {
+        projectId: {
+          in: filters.projectId
+            ? allowedProjectIds.filter((projectId) => projectId === filters.projectId)
+            : allowedProjectIds,
+        },
+      };
+      if (filters.assigneeId) where.assigneeUserId = filters.assigneeId;
+      if (filters.status) where.status = filters.status;
+      if (filters.priority) where.priority = filters.priority;
+      if (query.q?.trim()) {
+        where.OR = [
+          { title: { contains: query.q.trim(), mode: 'insensitive' } },
+          { description: { contains: query.q.trim(), mode: 'insensitive' } },
+          { tags: { has: query.q.trim() } },
+        ];
+      }
+
+      const total = await this.prisma.task.count({ where });
+      const hits = await this.prisma.task.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        skip: page * hitsPerPage,
+        take: hitsPerPage,
+      });
+      return {
+        hits: hits.map((task) => ({
+          objectID: task.id,
+          title: task.title,
+          description: task.description,
+          projectId: task.projectId,
+          assigneeId: task.assigneeUserId,
+          status: task.status,
+          priority: task.priority,
+          dueAt: task.dueAt,
+          startAt: task.startAt,
+          tags: task.tags,
+          parentId: task.parentId,
+          depth: 0,
+          createdAt: task.createdAt,
+          updatedAt: task.updatedAt,
+        })),
+        total,
+        page,
+        totalPages: total === 0 ? 0 : Math.ceil(total / hitsPerPage),
+      };
+    }
 
     const result = await this.searchService.searchTasks(query.q, filters, {
       page: query.page,
@@ -89,10 +144,6 @@ export class SearchController {
 
   @Post('reindex')
   async reindexAll(@CurrentRequest() req: AppRequest) {
-    if (!this.searchService.isSearchEnabled()) {
-      throw new BadRequestException('Search is not configured');
-    }
-
     // Only allow workspace admins to trigger full reindex
     const adminMembership = await this.prisma.workspaceMembership.findFirst({
       where: {
@@ -103,6 +154,14 @@ export class SearchController {
 
     if (!adminMembership) {
       throw new ForbiddenException('Admin access required');
+    }
+
+    if (!this.searchService.isSearchEnabled()) {
+      return {
+        success: true,
+        message: 'Search backend is disabled; skipped reindex',
+        count: 0,
+      };
     }
 
     const tasks = await this.prisma.task.findMany();

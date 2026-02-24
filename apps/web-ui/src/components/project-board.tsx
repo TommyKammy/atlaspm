@@ -13,7 +13,7 @@ import { useSortable, SortableContext, verticalListSortingStrategy } from '@dnd-
 import { CSS } from '@dnd-kit/utilities';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
-import { Check, Plus, User } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Plus, User } from 'lucide-react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { ProjectMember, SectionTaskGroup, Task } from '@/lib/types';
@@ -94,6 +94,52 @@ function resolveAssigneeLabel(task: Task, members: ProjectMember[]) {
 function initials(label: string) {
   const pieces = label.trim().split(/\s+/).slice(0, 2);
   return pieces.map((piece) => piece.charAt(0).toUpperCase()).join('') || 'U';
+}
+
+type TaskTreeNode = {
+  task: Task;
+  children: TaskTreeNode[];
+};
+
+function buildSectionTaskTree(tasks: Task[]): TaskTreeNode[] {
+  const byId = new Map<string, TaskTreeNode>();
+  for (const task of tasks) byId.set(task.id, { task, children: [] });
+
+  const roots: TaskTreeNode[] = [];
+  for (const task of tasks) {
+    const node = byId.get(task.id);
+    if (!node) continue;
+    const parentId = task.parentId;
+    if (!parentId) {
+      roots.push(node);
+      continue;
+    }
+    const parentNode = byId.get(parentId);
+    if (!parentNode) {
+      roots.push(node);
+      continue;
+    }
+    parentNode.children.push(node);
+  }
+
+  const sortNodes = (nodes: TaskTreeNode[]) => {
+    nodes.sort((a, b) => a.task.position - b.task.position);
+    for (const node of nodes) sortNodes(node.children);
+  };
+  sortNodes(roots);
+  return roots;
+}
+
+function flattenVisibleTasks(nodes: TaskTreeNode[], collapsedTaskIds: Set<string>, depth = 0): Array<{ task: Task; depth: number; hasChildren: boolean }> {
+  const rows: Array<{ task: Task; depth: number; hasChildren: boolean }> = [];
+  for (const node of nodes) {
+    const hasChildren = node.children.length > 0;
+    rows.push({ task: node.task, depth, hasChildren });
+    if (hasChildren && !collapsedTaskIds.has(node.task.id)) {
+      rows.push(...flattenVisibleTasks(node.children, collapsedTaskIds, depth + 1));
+    }
+  }
+  return rows;
 }
 
 function ProgressBar({ value }: { value: number }) {
@@ -192,16 +238,27 @@ function TaskRow({
   onEdit,
   members,
   onOpen,
+  depth,
+  hasChildren,
+  collapsed,
+  onToggleCollapse,
+  draggable,
 }: {
   task: Task;
   sectionId: string;
   onEdit: (taskId: string, patch: Partial<Task> & { version: number }) => void;
   members: ProjectMember[];
   onOpen: (taskId: string) => void;
+  depth: number;
+  hasChildren: boolean;
+  collapsed: boolean;
+  onToggleCollapse: (taskId: string) => void;
+  draggable: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
     id: task.id,
     data: { sectionId },
+    disabled: !draggable,
   });
 
   return (
@@ -213,14 +270,33 @@ function TaskRow({
       data-task-title={task.title}
     >
       <TableCell>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" style={{ paddingLeft: `${depth * 16}px` }}>
           <button
-            className="cursor-grab rounded-sm border px-1.5 py-0.5 text-[11px] text-muted-foreground active:cursor-grabbing"
+            type="button"
+            className={cn(
+              'inline-flex h-6 w-6 items-center justify-center rounded border text-muted-foreground',
+              hasChildren ? 'opacity-100' : 'pointer-events-none opacity-0',
+            )}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (hasChildren) onToggleCollapse(task.id);
+            }}
+            aria-label={collapsed ? `Expand ${task.title}` : `Collapse ${task.title}`}
+            data-testid={`task-collapse-${task.id}`}
+          >
+            {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            className={cn(
+              'rounded-sm border px-1.5 py-0.5 text-[11px] text-muted-foreground',
+              draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed opacity-50',
+            )}
             data-testid={`drag-handle-${task.id}`}
             aria-label={`Drag ${task.title}`}
             type="button"
-            {...attributes}
-            {...listeners}
+            {...(draggable ? attributes : {})}
+            {...(draggable ? listeners : {})}
+            title={draggable ? 'Drag to reorder' : 'Nested tasks cannot be dragged from list view'}
           >
             Drag
           </button>
@@ -387,6 +463,7 @@ export default function ProjectBoard({
   const sensors = useSensors(useSensor(PointerSensor));
   const queryClient = useQueryClient();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [collapsedTaskIds, setCollapsedTaskIds] = useState<Set<string>>(new Set());
 
   const groupsQuery = useQuery<SectionTaskGroup[]>({
     queryKey: queryKeys.projectTasksGrouped(projectId),
@@ -472,11 +549,24 @@ export default function ProjectBoard({
     }));
   }, [groups, search, statusFilter, priorityFilter]);
 
+  const groupedVisibleRows = useMemo(() => {
+    return filteredGroups.map((group) => {
+      const tree = buildSectionTaskTree(group.tasks);
+      const rows = flattenVisibleTasks(tree, collapsedTaskIds);
+      return { group, rows };
+    });
+  }, [filteredGroups, collapsedTaskIds]);
+
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over) return;
 
     const activeTaskId = String(active.id);
+    const activeTask = groups.flatMap((group) => group.tasks).find((task) => task.id === activeTaskId);
+    if (!activeTask) return;
+    const activeHasChildren = groups.some((group) => group.tasks.some((task) => task.parentId === activeTaskId));
+    if (activeTask.parentId || activeHasChildren) return;
+
     const overTaskId = String(over.id);
     const droppedOnSection = overTaskId.startsWith('section-drop-') || overTaskId.startsWith('section-drop-zone-');
     const overSectionIdFromId = overTaskId.startsWith('section-drop-zone-')
@@ -510,7 +600,7 @@ export default function ProjectBoard({
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <div className="space-y-4">
-        {filteredGroups.map((group) => (
+        {groupedVisibleRows.map(({ group, rows }) => (
           <SectionDropTarget key={group.section.id} sectionId={group.section.id}>
             <header className="flex items-center justify-between border-b px-4 py-2">
               <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground">{group.section.name}</h3>
@@ -528,15 +618,27 @@ export default function ProjectBoard({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                <SortableContext items={group.tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
-                  {group.tasks.map((task) => (
+                <SortableContext items={rows.map((row) => row.task.id)} strategy={verticalListSortingStrategy}>
+                  {rows.map((row) => (
                     <TaskRow
-                      key={task.id}
-                      task={task}
+                      key={row.task.id}
+                      task={row.task}
                       sectionId={group.section.id}
                       onEdit={onEdit}
                       members={members}
                       onOpen={setSelectedTaskId}
+                      depth={row.depth}
+                      hasChildren={row.hasChildren}
+                      collapsed={collapsedTaskIds.has(row.task.id)}
+                      draggable={!row.task.parentId && !row.hasChildren}
+                      onToggleCollapse={(taskId) => {
+                        setCollapsedTaskIds((current) => {
+                          const next = new Set(current);
+                          if (next.has(taskId)) next.delete(taskId);
+                          else next.add(taskId);
+                          return next;
+                        });
+                      }}
                     />
                   ))}
                 </SortableContext>

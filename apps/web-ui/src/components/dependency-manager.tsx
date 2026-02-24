@@ -1,11 +1,11 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, Link2, Trash2, Plus, XCircle } from 'lucide-react';
+import { AlertCircle, Link2, Trash2, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { TaskDependency, Task, DependencyType, BlockedStatus } from '@/lib/types';
+import type { TaskDependency, DependencyType, BlockedStatus } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -24,10 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
-  Tooltip,
-  TooltipContent,
   TooltipProvider,
-  TooltipTrigger,
 } from '@/components/ui/tooltip';
 
 type AddDependencyInput = {
@@ -44,12 +41,10 @@ const dependencyTypeLabels: Record<DependencyType, { label: string; color: strin
 function DependencyItem({
   dependency,
   taskId,
-  projectId,
   isIncoming = false,
 }: {
   dependency: TaskDependency;
   taskId: string;
-  projectId: string;
   isIncoming?: boolean;
 }) {
   const queryClient = useQueryClient();
@@ -96,12 +91,10 @@ function DependencyItem({
 
 function AddDependencyDialog({
   taskId,
-  projectId,
   existingTaskIds,
   children,
 }: {
   taskId: string;
-  projectId: string;
   existingTaskIds: string[];
   children: React.ReactNode;
 }) {
@@ -188,10 +181,8 @@ function AddDependencyDialog({
 
 export function DependencyManager({
   taskId,
-  projectId,
 }: {
   taskId: string;
-  projectId: string;
 }) {
   const dependenciesQuery = useQuery<TaskDependency[]>({
     queryKey: queryKeys.taskDependencies(taskId),
@@ -210,8 +201,14 @@ export function DependencyManager({
 
   const dependencies = dependenciesQuery.data ?? [];
   const dependents = dependentsQuery.data ?? [];
-  const isBlocked = blockedQuery.data?.isBlocked ?? false;
-  const blockers = blockedQuery.data?.blockers ?? [];
+  const isBlocked = (blockedQuery.data as { isBlocked?: boolean; blocked?: boolean } | undefined)?.isBlocked
+    ?? (blockedQuery.data as { blocked?: boolean } | undefined)?.blocked
+    ?? false;
+  const unresolvedBlockers = dependencies.filter(
+    (dep) =>
+      (dep.type === 'BLOCKS' || dep.type === 'BLOCKED_BY') &&
+      dep.dependsOnTask?.status !== 'DONE',
+  );
 
   const existingTaskIds = [
     ...dependencies.map((d) => d.dependsOnId),
@@ -227,7 +224,7 @@ export function DependencyManager({
             <div className="flex-1">
               <p className="text-sm font-medium text-red-800">This task is blocked</p>
               <p className="text-xs text-red-600">
-                {blockers.length} blocking task{blockers.length !== 1 ? 's' : ''} must be completed first.
+                {unresolvedBlockers.length} blocking task{unresolvedBlockers.length !== 1 ? 's' : ''} must be completed first.
               </p>
             </div>
           </div>
@@ -243,7 +240,6 @@ export function DependencyManager({
           </div>
           <AddDependencyDialog
             taskId={taskId}
-            projectId={projectId}
             existingTaskIds={existingTaskIds}
           >
             <Button size="sm" variant="outline">
@@ -266,7 +262,6 @@ export function DependencyManager({
                 key={dep.id}
                 dependency={dep}
                 taskId={taskId}
-                projectId={projectId}
               />
             ))}
             {dependents.map((dep) => (
@@ -274,7 +269,6 @@ export function DependencyManager({
                 key={dep.id}
                 dependency={dep}
                 taskId={taskId}
-                projectId={projectId}
                 isIncoming
               />
             ))}

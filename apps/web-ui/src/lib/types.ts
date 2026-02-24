@@ -43,6 +43,7 @@ export type Task = {
   id: string;
   projectId: string;
   sectionId: string;
+  parentId?: string | null;
   title: string;
   description?: string | null;
   descriptionDoc?: Record<string, unknown> | null;

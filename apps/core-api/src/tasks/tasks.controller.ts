@@ -35,7 +35,6 @@ import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { Prisma, Priority, ProjectRole, TaskStatus, DependencyType } from '@prisma/client';
 import { SubtaskService } from './subtask.service';
-import { CycleDetectionService } from './cycle-detection.service';
 import { SearchService } from '../search/search.service';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { promises as fs } from 'node:fs';
@@ -463,6 +462,31 @@ export class TasksController {
     }).then((updated) => {
       void this.searchService.indexTask(updated);
       return updated;
+    });
+  }
+
+  @Delete('tasks/:id')
+  async remove(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findUniqueOrThrow({ where: { id } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+
+    return this.prisma.$transaction(async (tx) => {
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'Task',
+        entityId: id,
+        action: 'task.deleted',
+        beforeJson: task,
+        correlationId: req.correlationId,
+        outboxType: 'task.deleted',
+        payload: { taskId: id, projectId: task.projectId, sectionId: task.sectionId },
+      });
+      await tx.task.delete({ where: { id } });
+      return { success: true };
+    }).then((result) => {
+      void this.searchService.removeTask(id);
+      return result;
     });
   }
 

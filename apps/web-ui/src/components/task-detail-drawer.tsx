@@ -2,7 +2,7 @@
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Paperclip, X, GitBranch, Link2 } from 'lucide-react';
+import { Paperclip, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { api, apiBaseUrl } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
@@ -249,7 +249,7 @@ export default function TaskDetailDrawer({
                       window.location.href = `/projects/${projectId}?task=${newTaskId}`;
                     }}
                   />
-                  <DependencyManager taskId={taskId} projectId={projectId} />
+                  <DependencyManager taskId={taskId} />
                 </>
               )}
             </div>

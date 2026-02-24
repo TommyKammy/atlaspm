@@ -7,7 +7,7 @@ import { GlobalErrorFilter } from './common/error.filter';
 import { RequestLoggingMiddleware } from './common/request-logging.middleware';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   app.use(new CorrelationIdMiddleware().use);
   app.use(new RequestLoggingMiddleware().use);
   app.useGlobalPipes(
