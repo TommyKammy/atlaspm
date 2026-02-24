@@ -1,9 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useParams } from 'next/navigation';
-
-const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:3001';
+import { api } from '@/lib/api';
 
 export interface Portfolio {
   id: string;
@@ -45,65 +43,43 @@ export interface PortfolioDetail {
 }
 
 async function fetchPortfolios(workspaceId: string): Promise<Portfolio[]> {
-  const res = await fetch(`${API_URL}/workspaces/${workspaceId}/portfolios`, {
-    credentials: 'include',
-  });
-  if (!res.ok) throw new Error('Failed to fetch portfolios');
-  return res.json();
+  return (await api(`/workspaces/${workspaceId}/portfolios`)) as Portfolio[];
 }
 
 async function fetchPortfolio(workspaceId: string, portfolioId: string): Promise<PortfolioDetail> {
-  const res = await fetch(`${API_URL}/workspaces/${workspaceId}/portfolios/${portfolioId}`, {
-    credentials: 'include',
-  });
-  if (!res.ok) throw new Error('Failed to fetch portfolio');
-  return res.json();
+  return (await api(`/workspaces/${workspaceId}/portfolios/${portfolioId}`)) as PortfolioDetail;
 }
 
 async function createPortfolio(workspaceId: string, data: { name: string; description?: string; projectIds?: string[] }): Promise<Portfolio> {
-  const res = await fetch(`${API_URL}/workspaces/${workspaceId}/portfolios`, {
+  return (await api(`/workspaces/${workspaceId}/portfolios`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error('Failed to create portfolio');
-  return res.json();
+    body: data,
+  })) as Portfolio;
 }
 
 async function updatePortfolio(workspaceId: string, portfolioId: string, data: { name?: string; description?: string }): Promise<Portfolio> {
-  const res = await fetch(`${API_URL}/workspaces/${workspaceId}/portfolios/${portfolioId}`, {
+  return (await api(`/workspaces/${workspaceId}/portfolios/${portfolioId}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error('Failed to update portfolio');
-  return res.json();
+    body: data,
+  })) as Portfolio;
 }
 
 async function deletePortfolio(workspaceId: string, portfolioId: string): Promise<void> {
-  const res = await fetch(`${API_URL}/workspaces/${workspaceId}/portfolios/${portfolioId}`, {
+  await api(`/workspaces/${workspaceId}/portfolios/${portfolioId}`, {
     method: 'DELETE',
-    credentials: 'include',
   });
-  if (!res.ok) throw new Error('Failed to delete portfolio');
 }
 
 async function addProjectToPortfolio(workspaceId: string, portfolioId: string, projectId: string): Promise<void> {
-  const res = await fetch(`${API_URL}/workspaces/${workspaceId}/portfolios/${portfolioId}/projects/${projectId}`, {
+  await api(`/workspaces/${workspaceId}/portfolios/${portfolioId}/projects/${projectId}`, {
     method: 'POST',
-    credentials: 'include',
   });
-  if (!res.ok) throw new Error('Failed to add project to portfolio');
 }
 
 async function removeProjectFromPortfolio(workspaceId: string, portfolioId: string, projectId: string): Promise<void> {
-  const res = await fetch(`${API_URL}/workspaces/${workspaceId}/portfolios/${portfolioId}/projects/${projectId}`, {
+  await api(`/workspaces/${workspaceId}/portfolios/${portfolioId}/projects/${projectId}`, {
     method: 'DELETE',
-    credentials: 'include',
   });
-  if (!res.ok) throw new Error('Failed to remove project from portfolio');
 }
 
 export function usePortfolios(workspaceId: string) {

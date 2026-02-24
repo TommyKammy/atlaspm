@@ -108,13 +108,17 @@ export class SlackWebhookController {
       return { challenge: payload.challenge };
     }
 
-    if (!this.slackService.isConfigured()) {
-      this.logger.warn('Slack service not configured, ignoring event');
-      return { ok: true };
+    if (payload.type === 'event_callback' && !payload.event) {
+      throw new BadRequestException('Missing event payload');
     }
 
     if (!payload.event) {
-      throw new BadRequestException('Missing event payload');
+      return { ok: true };
+    }
+
+    if (!this.slackService.isConfigured()) {
+      this.logger.warn('Slack service not configured, ignoring event');
+      return { ok: true };
     }
 
     const event = payload.event;

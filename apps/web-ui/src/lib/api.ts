@@ -1,12 +1,14 @@
-const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL ?? 'http://localhost:3001';
-
 import { useQuery } from '@tanstack/react-query';
+import type { Project } from '@/lib/types';
+
+const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL ?? 'http://localhost:3001';
 export const apiBaseUrl = API_URL;
 
 export type ApiOptions = {
   method?: string;
   body?: unknown | FormData;
   token?: string;
+  headers?: Record<string, string>;
 };
 
 export function getToken() {
@@ -26,6 +28,7 @@ export async function api(path: string, options: ApiOptions = {}) {
     headers: {
       ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...(isFormData ? {} : { 'content-type': 'application/json' }),
+      ...(options.headers ?? {}),
     },
     cache: 'no-store',
   };
@@ -49,7 +52,10 @@ export async function api(path: string, options: ApiOptions = {}) {
 export function useProjects(workspaceId: string) {
   return useQuery({
     queryKey: ['workspace', workspaceId, 'projects'],
-    queryFn: () => api(`/workspaces/${workspaceId}/projects`),
+    queryFn: async () => {
+      const projects = (await api('/projects')) as Project[];
+      return projects.filter((project) => project.workspaceId === workspaceId);
+    },
     enabled: !!workspaceId,
   });
 }

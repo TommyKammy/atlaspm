@@ -40,7 +40,7 @@ export class WorkloadController {
       projectId: query.projectId,
     };
 
-    return this.workloadService.getUserWorkload(workspaceId, req.user.sub, filters);
+    return this.workloadService.getUserWorkload(workspaceId, req.user.sub, filters, req.user.sub);
   }
 
   @Get('users/:userId')
@@ -60,7 +60,7 @@ export class WorkloadController {
       projectId: query.projectId,
     };
 
-    return this.workloadService.getUserWorkload(workspaceId, userId, filters);
+    return this.workloadService.getUserWorkload(workspaceId, userId, filters, req.user.sub);
   }
 
   @Get('team')
@@ -79,7 +79,7 @@ export class WorkloadController {
       projectId: query.projectId,
     };
 
-    return this.workloadService.getTeamWorkload(workspaceId, filters);
+    return this.workloadService.getTeamWorkload(workspaceId, filters, req.user.sub);
   }
 
   @Get('projects/:projectId')
@@ -98,6 +98,6 @@ export class WorkloadController {
       endDate: query.endDate ? new Date(query.endDate) : undefined,
     };
 
-    return this.workloadService.getProjectWorkload(workspaceId, projectId, filters);
+    return this.workloadService.getProjectWorkload(workspaceId, projectId, filters, req.user.sub);
   }
 }

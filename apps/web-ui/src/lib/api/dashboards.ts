@@ -1,8 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-
-const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:3001';
+import { api } from '@/lib/api';
 
 export interface Widget {
   id: string;
@@ -23,89 +22,58 @@ export interface Dashboard {
 }
 
 async function fetchDashboards(): Promise<Dashboard[]> {
-  const res = await fetch(`${API_URL}/dashboards`, {
-    credentials: 'include',
-  });
-  if (!res.ok) throw new Error('Failed to fetch dashboards');
-  return res.json();
+  return (await api('/dashboards')) as Dashboard[];
 }
 
 async function fetchDashboard(dashboardId: string): Promise<Dashboard> {
-  const res = await fetch(`${API_URL}/dashboards/${dashboardId}`, {
-    credentials: 'include',
-  });
-  if (!res.ok) throw new Error('Failed to fetch dashboard');
-  return res.json();
+  return (await api(`/dashboards/${dashboardId}`)) as Dashboard;
 }
 
 async function createDashboard(data: { name: string; layout?: Record<string, unknown> }): Promise<Dashboard> {
-  const res = await fetch(`${API_URL}/dashboards`, {
+  return (await api('/dashboards', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error('Failed to create dashboard');
-  return res.json();
+    body: data,
+  })) as Dashboard;
 }
 
 async function updateDashboard(dashboardId: string, data: { name?: string; layout?: Record<string, unknown> }): Promise<Dashboard> {
-  const res = await fetch(`${API_URL}/dashboards/${dashboardId}`, {
+  return (await api(`/dashboards/${dashboardId}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error('Failed to update dashboard');
-  return res.json();
+    body: data,
+  })) as Dashboard;
 }
 
 async function deleteDashboard(dashboardId: string): Promise<void> {
-  const res = await fetch(`${API_URL}/dashboards/${dashboardId}`, {
+  await api(`/dashboards/${dashboardId}`, {
     method: 'DELETE',
-    credentials: 'include',
   });
-  if (!res.ok) throw new Error('Failed to delete dashboard');
 }
 
 async function createWidget(dashboardId: string, data: { type: string; config?: Record<string, unknown>; position: { x: number; y: number; w: number; h: number } }): Promise<Widget> {
-  const res = await fetch(`${API_URL}/dashboards/${dashboardId}/widgets`, {
+  return (await api(`/dashboards/${dashboardId}/widgets`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error('Failed to create widget');
-  return res.json();
+    body: data,
+  })) as Widget;
 }
 
 async function updateWidget(dashboardId: string, widgetId: string, data: { config?: Record<string, unknown>; position?: { x: number; y: number; w: number; h: number } }): Promise<Widget> {
-  const res = await fetch(`${API_URL}/dashboards/${dashboardId}/widgets/${widgetId}`, {
+  return (await api(`/dashboards/${dashboardId}/widgets/${widgetId}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error('Failed to update widget');
-  return res.json();
+    body: data,
+  })) as Widget;
 }
 
 async function deleteWidget(dashboardId: string, widgetId: string): Promise<void> {
-  const res = await fetch(`${API_URL}/dashboards/${dashboardId}/widgets/${widgetId}`, {
+  await api(`/dashboards/${dashboardId}/widgets/${widgetId}`, {
     method: 'DELETE',
-    credentials: 'include',
   });
-  if (!res.ok) throw new Error('Failed to delete widget');
 }
 
 async function updateLayout(dashboardId: string, layout: Record<string, unknown>): Promise<void> {
-  const res = await fetch(`${API_URL}/dashboards/${dashboardId}/layout`, {
+  await api(`/dashboards/${dashboardId}/layout`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ layout }),
+    body: { layout },
   });
-  if (!res.ok) throw new Error('Failed to update layout');
 }
 
 export function useDashboards() {

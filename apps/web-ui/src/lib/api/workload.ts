@@ -1,8 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-
-const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:3001';
+import { api } from '@/lib/api';
 
 export interface WeeklyLoad {
   week: string;
@@ -46,14 +45,9 @@ async function fetchMyWorkload(workspaceId: string, filters?: WorkloadFilters): 
   if (filters?.endDate) params.append('endDate', filters.endDate);
   if (filters?.projectId) params.append('projectId', filters.projectId);
 
-  const res = await fetch(`${API_URL}/workload/me?${params}`, {
-    credentials: 'include',
-    headers: {
-      'x-workspace-id': workspaceId,
-    },
-  });
-  if (!res.ok) throw new Error('Failed to fetch workload');
-  return res.json();
+  return (await api(`/workload/me?${params.toString()}`, {
+    headers: { 'x-workspace-id': workspaceId },
+  })) as UserWorkload;
 }
 
 async function fetchUserWorkload(workspaceId: string, userId: string, filters?: WorkloadFilters): Promise<UserWorkload> {
@@ -62,14 +56,9 @@ async function fetchUserWorkload(workspaceId: string, userId: string, filters?: 
   if (filters?.endDate) params.append('endDate', filters.endDate);
   if (filters?.projectId) params.append('projectId', filters.projectId);
 
-  const res = await fetch(`${API_URL}/workload/users/${userId}?${params}`, {
-    credentials: 'include',
-    headers: {
-      'x-workspace-id': workspaceId,
-    },
-  });
-  if (!res.ok) throw new Error('Failed to fetch user workload');
-  return res.json();
+  return (await api(`/workload/users/${userId}?${params.toString()}`, {
+    headers: { 'x-workspace-id': workspaceId },
+  })) as UserWorkload;
 }
 
 async function fetchTeamWorkload(workspaceId: string, filters?: WorkloadFilters): Promise<UserWorkload[]> {
@@ -78,14 +67,9 @@ async function fetchTeamWorkload(workspaceId: string, filters?: WorkloadFilters)
   if (filters?.endDate) params.append('endDate', filters.endDate);
   if (filters?.projectId) params.append('projectId', filters.projectId);
 
-  const res = await fetch(`${API_URL}/workload/team?${params}`, {
-    credentials: 'include',
-    headers: {
-      'x-workspace-id': workspaceId,
-    },
-  });
-  if (!res.ok) throw new Error('Failed to fetch team workload');
-  return res.json();
+  return (await api(`/workload/team?${params.toString()}`, {
+    headers: { 'x-workspace-id': workspaceId },
+  })) as UserWorkload[];
 }
 
 async function fetchProjectWorkload(workspaceId: string, projectId: string, filters?: WorkloadFilters): Promise<UserWorkload[]> {
@@ -93,14 +77,9 @@ async function fetchProjectWorkload(workspaceId: string, projectId: string, filt
   if (filters?.startDate) params.append('startDate', filters.startDate);
   if (filters?.endDate) params.append('endDate', filters.endDate);
 
-  const res = await fetch(`${API_URL}/workload/projects/${projectId}?${params}`, {
-    credentials: 'include',
-    headers: {
-      'x-workspace-id': workspaceId,
-    },
-  });
-  if (!res.ok) throw new Error('Failed to fetch project workload');
-  return res.json();
+  return (await api(`/workload/projects/${projectId}?${params.toString()}`, {
+    headers: { 'x-workspace-id': workspaceId },
+  })) as UserWorkload[];
 }
 
 export function useMyWorkload(workspaceId: string, filters?: WorkloadFilters) {

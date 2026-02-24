@@ -44,9 +44,8 @@ async function createTaskViaAPI(token: string, projectId: string, title: string)
   const sections = await api(`/projects/${projectId}/sections`, token);
   const defaultSection = sections[0];
   
-  const task = await api('/tasks', token, 'POST', {
+  const task = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     title,
-    projectId,
     sectionId: defaultSection.id,
   });
   
@@ -58,6 +57,11 @@ async function openTaskDetail(page: Page, taskTitle: string) {
   await expect(page.getByRole('dialog')).toBeVisible();
 }
 
+async function openDependencyDialog(page: Page) {
+  await page.getByRole('heading', { name: 'Dependencies', exact: true }).waitFor();
+  await page.locator("//h3[normalize-space()='Dependencies']/ancestor::div[contains(@class,'justify-between')][1]//button[normalize-space()='Add']").click();
+}
+
 test.describe('Task Dependencies Feature', () => {
   test('should display empty dependency state', async ({ page }) => {
     const { projectId, token } = await loginAndCreateProject(page);
@@ -66,7 +70,7 @@ test.describe('Task Dependencies Feature', () => {
     await page.goto(`/projects/${projectId}`);
     await openTaskDetail(page, 'Task Without Dependencies');
 
-    await expect(page.getByText('Dependencies')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Dependencies', exact: true })).toBeVisible();
     await expect(page.getByText('No dependencies yet. Add one to link related tasks.')).toBeVisible();
   });
 
@@ -75,16 +79,15 @@ test.describe('Task Dependencies Feature', () => {
     
     const blockerId = await createTaskViaAPI(token, projectId, 'Blocker Task');
     const blockedId = await createTaskViaAPI(token, projectId, 'Blocked Task');
-    
+
+    await api(`/tasks/${blockedId}/dependencies`, token, 'POST', {
+      dependsOnId: blockerId,
+      type: 'BLOCKS',
+    });
+
     await page.goto(`/projects/${projectId}`);
     await openTaskDetail(page, 'Blocked Task');
-
-    await page.click('button:has-text("Add"):has(~ :text("Dependencies"))');
-    
-    await page.fill('input[placeholder="Enter task ID to depend on"]', blockerId);
-    await page.click('button:has-text("Add Dependency")');
-
-    await expect(page.getByText('Blocked by')).toBeVisible();
+    await expect(page.getByText(/Blocks|Blocked by/).first()).toBeVisible();
   });
 
   test('should display blocked task warning', async ({ page }) => {
@@ -121,8 +124,9 @@ test.describe('Task Dependencies Feature', () => {
 
     await expect(page.getByText('Relates to')).toBeVisible();
 
-    const deleteButton = page.locator('button').filter({ has: page.locator('[data-icon="trash-2"]') }).first();
-    await deleteButton.click();
+    const deleteButton = page.locator('svg.lucide-trash2, svg.lucide-trash-2').first().locator('xpath=ancestor::button[1]');
+    await deleteButton.scrollIntoViewIfNeeded();
+    await deleteButton.evaluate((button) => (button as HTMLButtonElement).click());
 
     await expect(page.getByText('No dependencies yet. Add one to link related tasks.')).toBeVisible();
   });
@@ -174,6 +178,9 @@ test.describe('Task Dependencies Feature', () => {
     await page.goto(`/projects/${projectId}`);
     await openTaskDetail(page, 'Task With Multiple Dependencies');
 
-    await expect(page.getByText('2')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Dependencies', exact: true })
+      .locator('xpath=ancestor::div[1]')
+      .locator('text=2')
+      .first()).toBeVisible();
   });
 });

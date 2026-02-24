@@ -75,6 +75,14 @@ export function GlobalSearch() {
             setQuery(e.target.value);
             setShowResults(true);
           }}
+          onKeyDown={(event) => {
+            const value = event.currentTarget.value.trim();
+            if (event.key === 'Enter' && value) {
+              event.preventDefault();
+              setShowResults(false);
+              router.push(`/search?q=${encodeURIComponent(value)}`);
+            }
+          }}
           onFocus={() => setShowResults(true)}
           className="pl-10 pr-10"
           data-testid="global-search-input"

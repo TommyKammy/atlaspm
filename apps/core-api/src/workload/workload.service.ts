@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
+import { WorkspaceRole } from '@prisma/client';
 
 export interface WorkloadFilters {
   startDate?: Date;
@@ -49,13 +50,17 @@ export class WorkloadService {
 
   async getUserWorkload(
     workspaceId: string,
-    userId: string,
+    targetUserId: string,
     filters: WorkloadFilters,
+    actorUserId: string,
   ): Promise<UserWorkload> {
-    await this.domain.requireWorkspaceMembership(workspaceId, userId);
+    await this.domain.requireWorkspaceMembership(workspaceId, actorUserId);
+    if (actorUserId !== targetUserId) {
+      await this.domain.requireWorkspaceRole(workspaceId, actorUserId, WorkspaceRole.WS_ADMIN);
+    }
 
     const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: targetUserId },
       select: { id: true, email: true, displayName: true },
     });
 
@@ -67,7 +72,7 @@ export class WorkloadService {
 
     const tasks = await this.prisma.task.findMany({
       where: {
-        assigneeUserId: userId,
+        assigneeUserId: targetUserId,
         dueAt: {
           gte: startDate,
           lte: endDate,
@@ -103,7 +108,10 @@ export class WorkloadService {
   async getTeamWorkload(
     workspaceId: string,
     filters: WorkloadFilters,
+    actorUserId: string,
   ): Promise<UserWorkload[]> {
+    await this.domain.requireWorkspaceMembership(workspaceId, actorUserId);
+
     const members = await this.prisma.workspaceMembership.findMany({
       where: { workspaceId },
       include: {
@@ -119,7 +127,7 @@ export class WorkloadService {
 
     const workloads = await Promise.all(
       members.map((member) =>
-        this.getUserWorkload(workspaceId, member.user.id, filters).catch(() => null),
+        this.getUserWorkload(workspaceId, member.user.id, filters, actorUserId).catch(() => null),
       ),
     );
 
@@ -130,7 +138,10 @@ export class WorkloadService {
     workspaceId: string,
     projectId: string,
     filters: WorkloadFilters,
+    actorUserId: string,
   ): Promise<UserWorkload[]> {
+    await this.domain.requireWorkspaceMembership(workspaceId, actorUserId);
+
     const project = await this.prisma.project.findFirst({
       where: { id: projectId, workspaceId },
     });
@@ -156,7 +167,7 @@ export class WorkloadService {
 
     const workloads = await Promise.all(
       members.map((member) =>
-        this.getUserWorkload(workspaceId, member.user.id, projectFilters).catch(() => null),
+        this.getUserWorkload(workspaceId, member.user.id, projectFilters, actorUserId).catch(() => null),
       ),
     );
 

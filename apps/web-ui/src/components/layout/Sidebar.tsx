@@ -26,6 +26,7 @@ export function Sidebar({ onNavigate, compact = false }: SidebarProps) {
     queryFn: () => api('/workspaces'),
   });
   const isWorkspaceAdmin = workspaces.some((workspace) => workspace.role === 'WS_ADMIN');
+  const activeWorkspaceId = workspaces[0]?.id;
   const handleNavigate = () => onNavigate?.();
 
   return (
@@ -67,21 +68,21 @@ export function Sidebar({ onNavigate, compact = false }: SidebarProps) {
             );
           })}
           <Link
-            href="/workspaces"
+            href={activeWorkspaceId ? `/workspaces/${activeWorkspaceId}/portfolios` : '/'}
             onClick={handleNavigate}
             className={cn(
               'block rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-              pathname === '/workspaces' && 'bg-muted text-foreground',
+              pathname.includes('/portfolios') && 'bg-muted text-foreground',
             )}
           >
             {compact ? 'P' : 'Portfolios'}
           </Link>
           <Link
-            href="/workspaces"
+            href={activeWorkspaceId ? `/workspaces/${activeWorkspaceId}/workload` : '/'}
             onClick={handleNavigate}
             className={cn(
               'block rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-              pathname === '/workspaces' && 'bg-muted text-foreground',
+              pathname.includes('/workload') && 'bg-muted text-foreground',
             )}
           >
             {compact ? 'W' : 'Workload'}

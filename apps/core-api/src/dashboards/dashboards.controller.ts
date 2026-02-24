@@ -20,7 +20,7 @@ import {
 } from './dashboards.service';
 import { IsString, IsOptional, ValidateNested, IsInt, Min, Max, IsEnum, IsObject } from 'class-validator';
 import { Type } from 'class-transformer';
-import { Prisma, WidgetType } from '@prisma/client';
+import { WidgetType } from '@prisma/client';
 
 class PositionDto {
   @IsInt()

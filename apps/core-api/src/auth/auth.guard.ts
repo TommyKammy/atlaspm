@@ -15,27 +15,22 @@ export class AuthGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<AppRequest>();
     req.user = await this.authService.verify(req.headers.authorization);
     const existing = await this.prisma.user.findUnique({ where: { id: req.user.sub } });
+    const now = new Date();
     if (existing?.status === UserStatus.SUSPENDED) throw new ForbiddenException('User is suspended');
-    if (!existing) {
-      await this.prisma.user.create({
-        data: {
-          id: req.user.sub,
-          email: req.user.email,
-          displayName: req.user.name,
-          status: UserStatus.ACTIVE,
-          lastSeenAt: new Date(),
-        },
-      });
-    } else {
-      await this.prisma.user.update({
-        where: { id: req.user.sub },
-        data: {
-          email: req.user.email,
-          displayName: existing.displayName ?? req.user.name,
-          lastSeenAt: new Date(),
-        },
-      });
-    }
+    await this.prisma.user.upsert({
+      where: { id: req.user.sub },
+      create: {
+        id: req.user.sub,
+        email: req.user.email,
+        displayName: req.user.name,
+        status: UserStatus.ACTIVE,
+        lastSeenAt: now,
+      },
+      update: {
+        email: req.user.email,
+        lastSeenAt: now,
+      },
+    });
     return true;
   };
 }

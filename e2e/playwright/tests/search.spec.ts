@@ -44,10 +44,9 @@ async function createTaskViaAPI(token: string, projectId: string, title: string,
   const sections = await api(`/projects/${projectId}/sections`, token);
   const defaultSection = sections[0];
   
-  const task = await api('/tasks', token, 'POST', {
+  const task = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     title,
     description,
-    projectId,
     sectionId: defaultSection.id,
   });
   
@@ -64,8 +63,9 @@ test.describe('Search Feature', () => {
   test('should navigate to search page from global search', async ({ page }) => {
     await loginAndCreateProject(page);
     
-    await page.fill('[data-testid="global-search-input"]', 'test query');
-    await page.keyboard.press('Enter');
+    const globalSearch = page.getByTestId('global-search-input');
+    await globalSearch.fill('test query');
+    await globalSearch.press('Enter');
     
     await page.waitForURL('**/search**');
     await expect(page.getByTestId('search-page-input')).toHaveValue('test query');
@@ -89,15 +89,21 @@ test.describe('Search Feature', () => {
     const task1Title = `Done Task ${Date.now()}`;
     const task2Title = `Todo Task ${Date.now()}`;
     
-    await createTaskViaAPI(token, projectId, task1Title);
+    const task1Id = await createTaskViaAPI(token, projectId, task1Title);
     await createTaskViaAPI(token, projectId, task2Title);
+    await api(`/tasks/${task1Id}`, token, 'PATCH', {
+      status: 'DONE',
+      progressPercent: 100,
+      version: 1,
+    });
     
     await page.goto('/search');
     await page.fill('[data-testid="search-page-input"]', 'Task');
     await page.selectOption('select', 'DONE');
     await page.click('button:has-text("Search")');
     
-    await expect(page.getByText('Found')).toBeVisible();
+    await expect(page.getByText(/Found \d+ result/)).toBeVisible();
+    await expect(page.getByText(task1Title)).toBeVisible();
   });
 
   test('should display no results message when search returns empty', async ({ page }) => {

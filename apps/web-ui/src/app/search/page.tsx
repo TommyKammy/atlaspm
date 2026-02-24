@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Search, Loader2, Filter } from 'lucide-react';
+import { Search, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { TaskSearchHit } from '@/lib/types';
 import { Input } from '@/components/ui/input';
