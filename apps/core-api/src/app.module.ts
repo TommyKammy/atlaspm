@@ -12,6 +12,7 @@ import { AuditController } from './audit/audit.controller';
 import { DomainService } from './common/domain.service';
 import { SubtaskService } from './tasks/subtask.service';
 import { CycleDetectionService } from './tasks/cycle-detection.service';
+import { ReminderDeliveryService } from './tasks/reminder-delivery.service';
 import { PublicAttachmentsController } from './tasks/public-attachments.controller';
 import { CollabController } from './collab/collab.controller';
 import { WorkspaceAdminController } from './workspaces/workspace-admin.controller';
@@ -35,6 +36,6 @@ import { IntegrationsModule } from './integrations/integrations.module';
     CollabController,
     WorkspaceAdminController,
   ],
-  providers: [PrismaService, DomainService, SubtaskService, CycleDetectionService],
+  providers: [PrismaService, DomainService, SubtaskService, CycleDetectionService, ReminderDeliveryService],
 })
 export class AppModule {}

@@ -11,7 +11,8 @@ CREATE TABLE "task_reminders" (
 );
 
 CREATE INDEX "task_reminders_task_id_user_id_idx" ON "task_reminders"("task_id", "user_id");
-CREATE UNIQUE INDEX "task_reminders_task_id_user_id_deleted_at_key" ON "task_reminders"("task_id", "user_id", "deleted_at");
+CREATE INDEX "task_reminders_task_id_user_id_deleted_at_idx" ON "task_reminders"("task_id", "user_id", "deleted_at");
+CREATE UNIQUE INDEX "task_reminders_active_unique" ON "task_reminders"("task_id", "user_id") WHERE "deleted_at" IS NULL;
 
 ALTER TABLE "task_reminders"
   ADD CONSTRAINT "task_reminders_task_id_fkey"

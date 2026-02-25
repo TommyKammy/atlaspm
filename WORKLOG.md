@@ -585,3 +585,36 @@
   - `pnpm e2e`
 - Risks/known gaps:
   - Link dialog keyboard shortcut path is no longer asserted in MVP E2E; link feature remains available but should be covered by a dedicated editor-focused test later.
+
+## 2026-02-25 - P1 Task Detail Enhancement (Phase C): Reminder Delivery Worker
+- What changed:
+  - Added `core-api` background reminder delivery worker:
+    - new service: `ReminderDeliveryService`
+    - scans due unsent reminders (`remindAt <= now`, `sentAt IS NULL`, `deletedAt IS NULL`)
+    - marks reminder as sent (`sentAt`) with optimistic claim update to prevent duplicate sends
+    - appends audit/outbox on delivery:
+      - audit action `task.reminder.sent` (actor `reminder-worker`)
+      - outbox type `task.reminder.sent`
+  - Registered worker in `AppModule` and added env controls:
+    - `REMINDER_WORKER_ENABLED`
+    - `REMINDER_WORKER_INTERVAL_MS`
+    - `REMINDER_WORKER_BATCH_SIZE`
+  - Strengthened reminder persistence model:
+    - added DB partial unique index to enforce one active reminder per (`task_id`, `user_id`) where `deleted_at IS NULL`
+  - Expanded integration test coverage:
+    - set past reminder, invoke worker, verify `sentAt` updated and outbox contains `task.reminder.sent`
+  - Updated docs/env examples:
+    - `docs/architecture.md`
+    - `README.md`
+    - `.env.example`, `apps/core-api/.env.example`
+  - Improved activity timeline readability for reminder sent events (`sent a reminder notification`).
+- Why:
+  - Complete #41 remaining scope by moving from reminder setting-only to actual deliverable execution path with auditable event trail.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Current delivery is outbox/audit-first; external notifier consumers (email/Slack/push) are still downstream responsibilities.

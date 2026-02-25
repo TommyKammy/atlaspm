@@ -68,6 +68,25 @@
   - Description updates emit `task.description.updated`.
   - Comment mutations emit `task.comment.created|updated|deleted`.
 
+## Task Reminder Delivery Worker
+- Persistence:
+  - Per-user reminder settings are stored in `task_reminders`.
+  - Active reminder uniqueness is enforced by a DB partial unique index on (`task_id`, `user_id`) where `deleted_at IS NULL`.
+- API:
+  - `GET /tasks/:id/reminder` (current user reminder)
+  - `PUT /tasks/:id/reminder` (set/update)
+  - `DELETE /tasks/:id/reminder` (soft clear)
+- Worker behavior:
+  - `core-api` runs a background reminder worker (env gated) that scans due unsent reminders and marks `sentAt`.
+  - Delivery action emits:
+    - audit action `task.reminder.sent` (actor: `reminder-worker`)
+    - outbox type `task.reminder.sent`
+  - Worker is idempotent via optimistic `sentAt IS NULL` claim update in transaction.
+- Worker controls:
+  - `REMINDER_WORKER_ENABLED=true|false`
+  - `REMINDER_WORKER_INTERVAL_MS`
+  - `REMINDER_WORKER_BATCH_SIZE`
+
 ## Task Internals (Phase 2)
 - Editor model:
   - Description authoring keeps ProseMirror JSON as the canonical representation.

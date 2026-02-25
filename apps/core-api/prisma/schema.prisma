@@ -204,7 +204,7 @@ model TaskReminder {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([taskId, userId])
-  @@unique([taskId, userId, deletedAt])
+  @@index([taskId, userId, deletedAt])
   @@map("task_reminders")
 }
 

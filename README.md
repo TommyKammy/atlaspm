@@ -82,6 +82,10 @@ docker compose up -d --build
 - Collaboration JWT/service secrets:
   - `COLLAB_JWT_SECRET`
   - `COLLAB_SERVICE_TOKEN`
+- Reminder worker controls:
+  - `REMINDER_WORKER_ENABLED` (default `true`)
+  - `REMINDER_WORKER_INTERVAL_MS` (default `30000`)
+  - `REMINDER_WORKER_BATCH_SIZE` (default `50`)
 - Invitation link base URL:
   - `INVITE_BASE_URL` (defaults to `http://localhost:3000/login`)
 - Collaboration in web-ui is feature-gated and off by default: `NEXT_PUBLIC_COLLAB_ENABLED=false`.

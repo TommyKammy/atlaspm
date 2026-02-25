@@ -5,11 +5,13 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { AuthService } from '../src/auth/auth.service';
+import { ReminderDeliveryService } from '../src/tasks/reminder-delivery.service';
 
 describe('Core API Integration', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let token: string;
+  let reminderWorker: ReminderDeliveryService;
 
   beforeAll(async () => {
     process.env.DEV_AUTH_ENABLED = 'true';
@@ -17,6 +19,7 @@ describe('Core API Integration', () => {
     process.env.COLLAB_JWT_SECRET = 'collab-jwt-secret';
     process.env.COLLAB_SERVICE_TOKEN = 'collab-service-secret';
     process.env.COLLAB_SERVER_URL = 'ws://localhost:18080';
+    process.env.REMINDER_WORKER_ENABLED = 'false';
     process.env.DATABASE_URL =
       process.env.DATABASE_URL ?? 'postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public';
 
@@ -24,6 +27,7 @@ describe('Core API Integration', () => {
     app = moduleRef.createNestApplication();
     await app.init();
     prisma = moduleRef.get(PrismaService);
+    reminderWorker = moduleRef.get(ReminderDeliveryService);
 
     await prisma.$connect();
     const auth = moduleRef.get(AuthService);
@@ -494,6 +498,22 @@ describe('Core API Integration', () => {
       .expect(200);
     expect(reminderAfterClear.body?.id).toBeUndefined();
 
+    const pastReminder = await request(app.getHttpServer())
+      .put(`/tasks/${t1.body.id}/reminder`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ remindAt: new Date(Date.now() - 60_000).toISOString() })
+      .expect(200);
+    expect(pastReminder.body.id).toBeTruthy();
+
+    const deliveredCount = await reminderWorker.processDueReminders(new Date());
+    expect(deliveredCount).toBeGreaterThan(0);
+
+    const reminderAfterSend = await request(app.getHttpServer())
+      .get(`/tasks/${t1.body.id}/reminder`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(Boolean(reminderAfterSend.body?.sentAt)).toBe(true);
+
     const rulesRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/rules`)
       .set('Authorization', `Bearer ${token}`)
@@ -531,6 +551,7 @@ describe('Core API Integration', () => {
     expect(outbox.body.some((e: any) => e.type === 'task.attachment.restored')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.reminder.set')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.reminder.cleared')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'task.reminder.sent')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.deleted')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.restored')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'rule.updated')).toBe(true);

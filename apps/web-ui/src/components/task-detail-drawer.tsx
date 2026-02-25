@@ -41,6 +41,7 @@ function formatAuditEvent(event: AuditEvent) {
   if (action === 'task.attachment.deleted') return 'deleted an attachment';
   if (action === 'task.reminder.set') return 'set a reminder';
   if (action === 'task.reminder.cleared') return 'cleared a reminder';
+  if (action === 'task.reminder.sent') return 'sent a reminder notification';
   if (action === 'rule.applied') return 'applied rule';
   return action;
 }
