@@ -42,6 +42,7 @@ pnpm test
 pnpm verify:ci
 pnpm e2e:up
 pnpm e2e
+pnpm e2e:stability
 pnpm e2e:down
 pnpm e2e:rebuild
 pnpm db:migrate
@@ -51,6 +52,7 @@ pnpm db:seed
 - `pnpm test` expects local Postgres on `localhost:55432` (start with `docker compose -f infra/docker/docker-compose.yml up -d postgres`).
 - `pnpm verify:ci` runs lint + type-check + tests + E2E in DoD order.
 - `pnpm e2e` reuses existing Docker images for speed.
+- `pnpm e2e:stability` runs the full E2E suite multiple times (`E2E_STABILITY_RUNS`, default `3`).
 - `pnpm e2e:rebuild` forces `core-api` and `web-ui` image rebuilds after app code changes.
 - `pnpm e2e:up` starts postgres + core-api + collab-server + web-ui.
 - `pnpm e2e:down` tears down the docker compose stack.

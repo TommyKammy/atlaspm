@@ -857,3 +857,20 @@
   - `pnpm e2e`
 - Risks/known gaps:
   - Webhook worker tests intentionally emit 500s for retry/DLQ verification; test logs include expected error entries from that synthetic path.
+
+## 2026-02-26 - P0 #36 Flaky Hardening Follow-up (Repeatable E2E Stability Gate)
+- What changed:
+  - Added repeatable stability runner script:
+    - `/Users/tomoakikawada/Dev/atlaspm/scripts/e2e-stability.sh`
+    - runs full `pnpm e2e` loop (`E2E_STABILITY_RUNS`, default `3`)
+  - Added package command:
+    - `pnpm e2e:stability` in `/Users/tomoakikawada/Dev/atlaspm/package.json`
+  - Updated README usage:
+    - `/Users/tomoakikawada/Dev/atlaspm/README.md`
+- Why:
+  - Make issue #36 acceptance (`pnpm e2e` x3) reproducible and easy to run before push/merge.
+- How tested (exact commands):
+  - `for i in 1 2 3; do pnpm e2e; done`
+  - Result: all 3 runs passed (`30/30` each run), no rerun dependency.
+- Risks/known gaps:
+  - Stability runner executes full dockerized E2E and is time-consuming by design; keep for pre-merge verification rather than every local edit cycle.

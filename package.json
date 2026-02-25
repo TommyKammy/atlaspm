@@ -19,6 +19,7 @@
     "type-check:collab-server": "pnpm --filter @atlaspm/collab-server type-check",
     "e2e:up": "./scripts/e2e-up.sh",
     "e2e": "./scripts/run-e2e.sh",
+    "e2e:stability": "./scripts/e2e-stability.sh",
     "e2e:down": "./scripts/e2e-down.sh",
     "e2e:rebuild": "E2E_REBUILD=1 ./scripts/run-e2e.sh",
     "db:migrate": "pnpm --filter @atlaspm/core-api prisma:migrate",
