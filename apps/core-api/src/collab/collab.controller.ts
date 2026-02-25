@@ -102,9 +102,10 @@ export class CollabController {
   async getInternalTaskDescription(
     @Param('id') taskId: string,
     @Headers('x-collab-service-token') serviceToken?: string,
+    @Headers('x-correlation-id') correlationId?: string,
   ) {
     this.assertServiceToken(serviceToken);
-    const cid = randomUUID();
+    const cid = (correlationId ?? randomUUID()).toString();
     const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
     this.logger.log(
       JSON.stringify({

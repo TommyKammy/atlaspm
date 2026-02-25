@@ -9,6 +9,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { AuthService } from '../src/auth/auth.service';
 import { ReminderDeliveryService } from '../src/tasks/reminder-delivery.service';
 import { WebhookDeliveryService } from '../src/webhooks/webhook-delivery.service';
+import { CorrelationIdMiddleware } from '../src/common/correlation.middleware';
 
 describe('Core API Integration', () => {
   let app: INestApplication;
@@ -34,6 +35,7 @@ describe('Core API Integration', () => {
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
+    app.use(new CorrelationIdMiddleware().use);
     await app.init();
     prisma = moduleRef.get(PrismaService);
     reminderWorker = moduleRef.get(ReminderDeliveryService);
@@ -303,11 +305,15 @@ describe('Core API Integration', () => {
       .send({ name: 'B' })
       .expect(201);
 
+    const createTaskCorrelationId = `it-task-create-${Date.now()}`;
     const t1 = await request(app.getHttpServer())
       .post(`/projects/${projectId}/tasks`)
       .set('Authorization', `Bearer ${token}`)
+      .set('x-correlation-id', createTaskCorrelationId)
       .send({ title: 'Task 1', sectionId: secA.body.id })
       .expect(201);
+    const observedCreateTaskCorrelationId = String(t1.headers['x-correlation-id'] ?? '');
+    expect(observedCreateTaskCorrelationId).toBe(createTaskCorrelationId);
     const t2 = await request(app.getHttpServer())
       .post(`/projects/${projectId}/tasks`)
       .set('Authorization', `Bearer ${token}`)
@@ -360,6 +366,9 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${outsiderToken}`)
       .expect(404);
 
+    const snapshotCorrelationId = `it-snapshot-${Date.now()}`;
+    const snapshotTaskId = t2.body.id;
+
     const p50 = await request(app.getHttpServer())
       .patch(`/tasks/${t1.body.id}`)
       .set('Authorization', `Bearer ${token}`)
@@ -375,6 +384,24 @@ describe('Core API Integration', () => {
       .expect(200);
     expect(p100.body.status).toBe('DONE');
     expect(p100.body.completedAt).toBeTruthy();
+
+    const snapshotSaved = await request(app.getHttpServer())
+      .post(`/tasks/${snapshotTaskId}/description/snapshot`)
+      .set('x-collab-service-token', 'collab-service-secret')
+      .set('x-correlation-id', snapshotCorrelationId)
+      .send({
+        roomId: `task:${snapshotTaskId}:description`,
+        descriptionDoc: {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'snapshot check' }] }],
+        },
+        descriptionText: 'snapshot check',
+        participants: [{ userId: 'member-1', mode: 'readwrite' }],
+        reason: 'idle',
+      })
+      .expect(201);
+    const observedSnapshotCorrelationId = String(snapshotSaved.headers['x-correlation-id'] ?? '');
+    expect(observedSnapshotCorrelationId).toBe(snapshotCorrelationId);
 
     await request(app.getHttpServer())
       .post(`/sections/${secA.body.id}/tasks/reorder`)
@@ -669,10 +696,45 @@ describe('Core API Integration', () => {
     expect(outbox.body.some((e: any) => e.type === 'notification.created')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'notification.read')).toBe(true);
 
+    const taskCreateOutbox = await prisma.outboxEvent.findFirst({
+      where: { type: 'task.created', correlationId: observedCreateTaskCorrelationId },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(taskCreateOutbox).toBeTruthy();
+    expect((taskCreateOutbox?.payload as any)?.id).toBe(t1.body.id);
+
+    const snapshotOutbox = await prisma.outboxEvent.findFirst({
+      where: { type: 'task.description.snapshot_saved', correlationId: observedSnapshotCorrelationId },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(snapshotOutbox).toBeTruthy();
+    expect((snapshotOutbox?.payload as any)?.taskId).toBe(snapshotTaskId);
+
     await request(app.getHttpServer())
       .get(`/outbox?projectId=${projectId}`)
       .set('Authorization', `Bearer ${outsiderToken}`)
       .expect(404);
+
+    const t1Audit = await request(app.getHttpServer())
+      .get(`/tasks/${t1.body.id}/audit`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(
+      t1Audit.body.some(
+        (e: any) => e.action === 'task.created' && e.correlationId === observedCreateTaskCorrelationId,
+      ),
+    ).toBe(true);
+    const t2Audit = await request(app.getHttpServer())
+      .get(`/tasks/${t2.body.id}/audit`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(
+      t2Audit.body.some(
+        (e: any) =>
+          e.action === 'task.description.snapshot_saved' &&
+          e.correlationId === observedSnapshotCorrelationId,
+      ),
+    ).toBe(true);
 
     expect(defaultSection).toBeTruthy();
   });

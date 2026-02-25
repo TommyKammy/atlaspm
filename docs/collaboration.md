@@ -50,7 +50,7 @@ Snapshot endpoint:
 ## Correlation and logs
 - `collab-server` generates a correlation id per snapshot attempt and includes it in:
   - request header `x-correlation-id` to `core-api`
-  - collab logs (`snapshot.saved`, `snapshot.save_failed`)
+  - collab logs (`snapshot.load_start`, `snapshot.load_success`, `snapshot.saved`, `snapshot.save_failed`)
 - `core-api` includes correlation id in:
   - request logs (`http.request.start`, `http.request.end`)
   - snapshot/audit/outbox writes (`task.description.snapshot_saved`, mention sync events)

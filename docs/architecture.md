@@ -25,6 +25,12 @@
   - `collab-server` emits auth/presence/snapshot logs with `correlationId`, `roomId`, and `taskId`.
 - Traceability target:
   - A single user action can be traced from HTTP request logs to audit/outbox entries and collab snapshot logs by `correlationId`.
+- Trace runbook (example):
+  1. Capture `x-correlation-id` from response headers (or provide it in request).
+  2. Find matching `http.request.start` / `http.request.end` logs in `core-api`.
+  3. Confirm matching `AuditEvent.correlationId` via `GET /tasks/:id/audit` (or project audit endpoint).
+  4. Confirm matching `OutboxEvent.correlationId` via `GET /outbox?projectId=...`.
+  5. For collaborative edits, match the same id in `collab-server` logs (`snapshot.load_*`, `snapshot.saved`) and `core-api` `task.description.snapshot_saved`.
 
 ## Rules Engine
 - Triggered on task write events.

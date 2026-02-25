@@ -69,6 +69,10 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
         where: { id: event.id },
         data: { deliveredAt: now, nextRetryAt: null, lastError: null },
       });
+      this.logEventInfo('webhook.delivery.skipped_no_project', {
+        eventId: event.id,
+        correlationId: event.correlationId,
+      });
       return true;
     }
 
@@ -80,6 +84,11 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
       await this.prisma.outboxEvent.update({
         where: { id: event.id },
         data: { deliveredAt: now, nextRetryAt: null, lastError: null },
+      });
+      this.logEventInfo('webhook.delivery.skipped_no_active_webhook', {
+        eventId: event.id,
+        correlationId: event.correlationId,
+        projectIds,
       });
       return true;
     }
@@ -116,9 +125,34 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
           signal: AbortSignal.timeout(this.getRequestTimeoutMs()),
         });
         if (!res.ok) {
+          this.logEventError('webhook.delivery.endpoint_failed', {
+            eventId: event.id,
+            correlationId: event.correlationId,
+            webhookId: webhook.id,
+            projectId: webhook.projectId,
+            targetUrl: webhook.targetUrl,
+            statusCode: res.status,
+          });
           failures.push(`${webhook.id}:${res.status}`);
+        } else {
+          this.logEventInfo('webhook.delivery.endpoint_succeeded', {
+            eventId: event.id,
+            correlationId: event.correlationId,
+            webhookId: webhook.id,
+            projectId: webhook.projectId,
+            targetUrl: webhook.targetUrl,
+            statusCode: res.status,
+          });
         }
       } catch (error) {
+        this.logEventError('webhook.delivery.endpoint_failed', {
+          eventId: event.id,
+          correlationId: event.correlationId,
+          webhookId: webhook.id,
+          projectId: webhook.projectId,
+          targetUrl: webhook.targetUrl,
+          error: error instanceof Error ? error.message : String(error),
+        });
         failures.push(`${webhook.id}:${error instanceof Error ? error.message : String(error)}`);
       }
     }
@@ -127,6 +161,11 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
       await this.prisma.outboxEvent.update({
         where: { id: event.id },
         data: { deliveredAt: now, nextRetryAt: null, lastError: null },
+      });
+      this.logEventInfo('webhook.delivery.event_delivered', {
+        eventId: event.id,
+        correlationId: event.correlationId,
+        webhookCount: webhooks.length,
       });
       return true;
     }
@@ -163,6 +202,13 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
           },
         });
       });
+      this.logEventError('webhook.delivery.dead_lettered', {
+        eventId: event.id,
+        correlationId: event.correlationId,
+        attempts,
+        maxAttempts: this.getMaxAttempts(),
+        error: errorText,
+      });
       return false;
     }
 
@@ -173,6 +219,13 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
         nextRetryAt: new Date(now.getTime() + this.getBackoffMs(attempts)),
         lastError: errorText,
       },
+    });
+    this.logEventInfo('webhook.delivery.retry_scheduled', {
+      eventId: event.id,
+      correlationId: event.correlationId,
+      attempts,
+      nextRetryAt: new Date(now.getTime() + this.getBackoffMs(attempts)).toISOString(),
+      error: errorText,
     });
     return false;
   }
@@ -286,5 +339,27 @@ export class WebhookDeliveryService implements OnModuleInit, OnModuleDestroy {
     const raw = Number(process.env.WEBHOOK_DELIVERY_LOCK_MS ?? 30_000);
     if (Number.isFinite(raw) && raw >= 1_000) return Math.floor(raw);
     return 30_000;
+  }
+
+  private logEventInfo(event: string, payload: Record<string, unknown>) {
+    this.logger.log(
+      JSON.stringify({
+        level: 'info',
+        source: 'core-api',
+        event,
+        ...payload,
+      }),
+    );
+  }
+
+  private logEventError(event: string, payload: Record<string, unknown>) {
+    this.logger.error(
+      JSON.stringify({
+        level: 'error',
+        source: 'core-api',
+        event,
+        ...payload,
+      }),
+    );
   }
 }

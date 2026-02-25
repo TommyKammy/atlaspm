@@ -816,3 +816,44 @@
   - `pnpm e2e`
 - Risks/known gaps:
   - CI runtime increases due to full E2E execution; if queue time becomes problematic, we should split smoke vs full suites while preserving branch protection on at least one full run.
+
+## 2026-02-26 - P0 #37 Observability Hardening (Correlation Trace Across API/Collab/Outbox)
+- What changed:
+  - `core-api`
+    - `CollabController` now propagates inbound `x-correlation-id` on internal snapshot load endpoint instead of generating a new unrelated id:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/collab/collab.controller.ts`
+    - Added structured webhook worker logs with correlation-aware success/failure/retry/DLQ events:
+      - `webhook.delivery.endpoint_succeeded`
+      - `webhook.delivery.endpoint_failed`
+      - `webhook.delivery.retry_scheduled`
+      - `webhook.delivery.dead_lettered`
+      - file: `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/webhooks/webhook-delivery.service.ts`
+    - Strengthened integration test coverage for correlation id propagation:
+      - request-supplied correlation id flows into `task.created` audit/outbox
+      - collab snapshot correlation id flows into `task.description.snapshot_saved` audit/outbox
+      - file: `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+      - test app bootstrap now installs correlation middleware for parity with runtime setup.
+  - `collab-server`
+    - Added explicit load-path logs with correlation id / room / task:
+      - `snapshot.load.start`
+      - `snapshot.load_success`
+      - `snapshot.load_failed`
+      - file: `/Users/tomoakikawada/Dev/atlaspm/apps/collab-server/src/index.ts`
+  - Docs
+    - Added concrete trace runbook steps in `/Users/tomoakikawada/Dev/atlaspm/docs/architecture.md`.
+    - Updated collaboration logging docs in `/Users/tomoakikawada/Dev/atlaspm/docs/collaboration.md`.
+- Why:
+  - Close remaining #37 acceptance gap by making one operation traceable with a single correlation id across:
+    - HTTP request logs
+    - collab load/save logs
+    - audit/outbox persistence
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/collab-server lint`
+  - `pnpm --filter @atlaspm/collab-server type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Webhook worker tests intentionally emit 500s for retry/DLQ verification; test logs include expected error entries from that synthetic path.

@@ -206,16 +206,25 @@ const server = Server.configure({
 
   async onLoadDocument(data) {
     const taskId = parseTaskIdFromRoom(data.documentName);
+    const cid = correlationId();
+    logInfo('snapshot.load.start', { correlationId: cid, roomId: data.documentName, taskId });
     const res = await fetch(`${CORE_API_URL}/internal/tasks/${taskId}/description`, {
-      headers: { 'x-collab-service-token': COLLAB_SERVICE_TOKEN, 'x-correlation-id': correlationId() },
+      headers: { 'x-collab-service-token': COLLAB_SERVICE_TOKEN, 'x-correlation-id': cid },
     }).catch(() => null);
 
     if (!res?.ok) {
+      logError('snapshot.load_failed', {
+        correlationId: cid,
+        roomId: data.documentName,
+        taskId,
+        statusCode: res?.status ?? null,
+      });
       return TiptapTransformer.toYdoc({ type: 'doc', content: [{ type: 'paragraph' }] }, 'default', extensions);
     }
 
     const json = (await res.json()) as { descriptionDoc?: Record<string, unknown> | null };
     const doc = json.descriptionDoc ?? { type: 'doc', content: [{ type: 'paragraph' }] };
+    logInfo('snapshot.load_success', { correlationId: cid, roomId: data.documentName, taskId });
     return TiptapTransformer.toYdoc(doc, 'default', extensions);
   },
 
