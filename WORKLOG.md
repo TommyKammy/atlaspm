@@ -443,3 +443,27 @@
   - `pnpm e2e`
 - Risks/known gaps:
   - Board DnD currently follows list constraints and skips nested-task dragging.
+
+## 2026-02-25 - P1 Calendar View Functional Editing
+- What changed:
+  - Added interactive due date editing in `ProjectCalendarView`:
+    - drag a task chip onto a calendar day cell to set `dueAt`
+    - drag a task chip into `No due date` area to clear `dueAt`
+  - Wired calendar edits to existing `PATCH /tasks/:id` endpoint with optimistic updates and rollback.
+  - Added calendar drop targets and drag metadata test ids:
+    - `calendar-day-YYYY-MM-DD`
+    - `calendar-no-due`
+    - `calendar-no-due-task-<taskId>`
+  - Extended MVP E2E flow:
+    - switch to Calendar view
+    - drag Task A from no-due area to a day cell
+    - verify persisted `dueAt` via API
+- Why:
+  - Move Calendar tab from passive visualization to real task planning/editing behavior.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Calendar currently supports drag-based due-date assignment/clear only; explicit in-cell date picker is not yet added.

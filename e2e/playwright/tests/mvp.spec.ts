@@ -32,6 +32,13 @@ async function dragBoardTaskToTask(page: Page, taskTitle: string, targetTitle: s
   await source.dragTo(target, { force: true });
 }
 
+function toIsoDate(value: Date) {
+  const year = value.getFullYear();
+  const month = `${value.getMonth() + 1}`.padStart(2, '0');
+  const day = `${value.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 test('AtlasPM Asana-like UX flow', async ({ page }) => {
   const sub = `e2e-user-${Date.now()}`;
   const email = `e2e-${Date.now()}@example.com`;
@@ -144,6 +151,25 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
       return doingGroup.tasks.some((task: any) => task.title === 'Task C');
     })
     .toBe(true);
+  await page.click('[data-testid="project-view-list"]');
+
+  await page.click('[data-testid="project-view-calendar"]');
+  const targetDate = toIsoDate(new Date());
+  const taskAData = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
+  const taskAId = taskAData.flatMap((g: any) => g.tasks).find((task: any) => task.title === 'Task A').id;
+  await expect(page.locator(`[data-testid="calendar-no-due-task-${taskAId}"]`)).toBeVisible();
+  await expect(page.locator(`[data-testid="calendar-day-${targetDate}"]`)).toBeVisible();
+  await page.locator(`[data-testid="calendar-no-due-task-${taskAId}"]`).dragTo(
+    page.locator(`[data-testid="calendar-day-${targetDate}"]`),
+    { force: true },
+  );
+  await expect
+    .poll(async () => {
+      const taskGroups = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
+      const taskAAfter = taskGroups.flatMap((g: any) => g.tasks).find((task: any) => task.id === taskAId);
+      return taskAAfter?.dueAt ? String(taskAAfter.dueAt).slice(0, 10) : null;
+    })
+    .toBe(targetDate);
   await page.click('[data-testid="project-view-list"]');
 
   await page.reload();
