@@ -47,6 +47,16 @@ Snapshot endpoint:
 - `task.description.snapshot_saved`
 - `task.mention.created` / `task.mention.deleted` (from snapshot mention sync)
 
+## Correlation and logs
+- `collab-server` generates a correlation id per snapshot attempt and includes it in:
+  - request header `x-correlation-id` to `core-api`
+  - collab logs (`snapshot.saved`, `snapshot.save_failed`)
+- `core-api` includes correlation id in:
+  - request logs (`http.request.start`, `http.request.end`)
+  - snapshot/audit/outbox writes (`task.description.snapshot_saved`, mention sync events)
+- Useful fields for debugging:
+  - `correlationId`, `roomId`, `taskId`, `reason`, `participantCount`, `statusCode` (on failures)
+
 ## Failure modes and fallback
 - If token issuance fails or WS cannot connect, `web-ui` falls back to snapshot editor mode.
 - UI shows: `Collaboration unavailable; using snapshot`.

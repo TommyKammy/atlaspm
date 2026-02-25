@@ -376,3 +376,51 @@
 - Risks/known gaps:
   - Non-list views are intentionally placeholder-only in project detail; list view remains source of truth for full editing/reordering.
   - Visual regression remains review-driven (artifact/manual baseline) rather than cross-OS pixel snapshots in CI.
+
+## 2026-02-25 - P0-1 Undo Recovery + P0-2 Flaky Hardening
+- What changed:
+  - Added delete undo UX in list view:
+    - shows a 10-second undo banner after task delete
+    - calls `POST /tasks/:id/restore` on undo
+    - invalidates grouped/deleted/sections query keys after restore
+  - Added dedicated deleted-task grouped query key (`projectTasksDeletedGrouped`).
+  - Hardened flaky E2E selectors in dependencies/search/subtasks:
+    - replaced brittle XPath and generic text selectors with `data-testid`-based selectors
+    - added stable test ids in dependency, subtask, and search components
+    - kept behavior unchanged while improving determinism
+- Why:
+  - P0 safety goal: reduce accidental data-loss impact and remove frequent E2E flakes in high-failure areas.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e`
+  - `pnpm e2e` (run 3 consecutive times, all green)
+- Risks/known gaps:
+  - Undo is currently in-memory banner state (per page session) and not persisted if user navigates away immediately.
+
+## 2026-02-25 - P0-3 Observability (Correlation Traceability)
+- What changed:
+  - `core-api` request logging middleware now emits structured start/end logs:
+    - `http.request.start`: method/path/query/correlationId
+    - `http.request.end`: method/path/statusCode/durationMs/userId/correlationId
+  - `collab-server` now emits structured logs with correlation IDs for:
+    - token auth (`auth.dev_mode`, `auth.success`)
+    - presence join/leave
+    - snapshot save success/failure with retry attempt and status code
+    - readonly write block events
+  - `core-api` collab controller now logs:
+    - `collab.token.issued`
+    - `collab.snapshot.load`
+    - `collab.snapshot.saved`
+    all with correlation IDs and room/task context.
+  - Updated docs:
+    - `docs/architecture.md` (Observability section)
+    - `docs/collaboration.md` (Correlation and logs section)
+- Why:
+  - Make a single action traceable across web request logs, collab snapshot flow, and audit/outbox records by shared correlation IDs.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api build`
+  - `pnpm --filter @atlaspm/collab-server build`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Structured logs are JSON to stdout; centralized aggregation/querying (e.g., Loki/OpenSearch) is not yet configured.

@@ -6,6 +6,7 @@ import {
   Get,
   Headers,
   Inject,
+  Logger,
   Param,
   Post,
   UnauthorizedException,
@@ -43,6 +44,8 @@ class SnapshotBodyDto {
 
 @Controller()
 export class CollabController {
+  private readonly logger = new Logger(CollabController.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(DomainService) private readonly domain: DomainService,
@@ -68,7 +71,7 @@ export class CollabController {
       .setExpirationTime(now + ttlSec)
       .sign(this.collabJwtKey());
 
-    return {
+    const response = {
       url: process.env.COLLAB_SERVER_URL ?? 'ws://localhost:18080',
       token,
       roomId,
@@ -79,6 +82,18 @@ export class CollabController {
         color: this.colorForUser(req.user.sub),
       },
     };
+    this.logger.log(
+      JSON.stringify({
+        event: 'collab.token.issued',
+        correlationId: req.correlationId ?? 'unknown',
+        taskId,
+        projectId: task.projectId,
+        roomId,
+        mode,
+        userId: req.user.sub,
+      }),
+    );
+    return response;
   }
 
   @Get('internal/tasks/:id/description')
@@ -87,7 +102,17 @@ export class CollabController {
     @Headers('x-collab-service-token') serviceToken?: string,
   ) {
     this.assertServiceToken(serviceToken);
+    const cid = randomUUID();
     const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    this.logger.log(
+      JSON.stringify({
+        event: 'collab.snapshot.load',
+        correlationId: cid,
+        taskId,
+        roomId: `task:${taskId}:description`,
+        descriptionVersion: task.descriptionVersion,
+      }),
+    );
     return {
       taskId,
       roomId: `task:${taskId}:description`,
@@ -153,10 +178,22 @@ export class CollabController {
         },
       });
 
-      return {
+      const result = {
         ok: true,
         descriptionVersion: updated.descriptionVersion,
       };
+      this.logger.log(
+        JSON.stringify({
+          event: 'collab.snapshot.saved',
+          correlationId: cid,
+          taskId,
+          roomId,
+          reason: body.reason,
+          participantCount: Array.isArray(body.participants) ? body.participants.length : 0,
+          descriptionVersion: updated.descriptionVersion,
+        }),
+      );
+      return result;
     });
   }
 

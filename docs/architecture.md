@@ -15,6 +15,16 @@
   - `AuditEvent`: actor, entity, action, before/after, timestamp, correlationId
   - `OutboxEvent`: type, payload, createdAt, correlationId, deliveredAt
 
+## Observability (P0-3)
+- Correlation id propagation:
+  - `core-api` accepts `x-correlation-id` (or generates one), stores it on request context, and returns it in response headers.
+  - `collab-server` sends `x-correlation-id` when loading/saving snapshots to `core-api`.
+- Structured logs:
+  - `core-api` emits request start/end logs with `method`, `path`, `statusCode`, `durationMs`, `userId`, and `correlationId`.
+  - `collab-server` emits auth/presence/snapshot logs with `correlationId`, `roomId`, and `taskId`.
+- Traceability target:
+  - A single user action can be traced from HTTP request logs to audit/outbox entries and collab snapshot logs by `correlationId`.
+
 ## Rules Engine
 - Triggered on task write events.
 - MVP templates (enabled by default per project):

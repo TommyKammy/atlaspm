@@ -54,6 +54,28 @@ function correlationId() {
   return randomUUID();
 }
 
+function logInfo(event: string, payload: Record<string, unknown>) {
+  console.info(
+    JSON.stringify({
+      level: 'info',
+      source: 'collab-server',
+      event,
+      ...payload,
+    }),
+  );
+}
+
+function logError(event: string, payload: Record<string, unknown>) {
+  console.error(
+    JSON.stringify({
+      level: 'error',
+      source: 'collab-server',
+      event,
+      ...payload,
+    }),
+  );
+}
+
 function parseTaskIdFromRoom(roomId: string) {
   const match = roomId.match(/^task:(.+):description$/);
   if (!match?.[1]) throw new Error('Invalid room id');
@@ -113,8 +135,25 @@ async function saveSnapshot(documentName: string, reason: 'idle' | 'interval' | 
     if (res?.ok) {
       state.dirty = false;
       state.lastSavedAt = Date.now();
+      logInfo('snapshot.saved', {
+        correlationId: cid,
+        roomId: documentName,
+        taskId,
+        reason,
+        participants: participants.length,
+        attempt,
+      });
       return;
     }
+
+    logError('snapshot.save_failed', {
+      correlationId: cid,
+      roomId: documentName,
+      taskId,
+      reason,
+      attempt,
+      statusCode: res?.status ?? null,
+    });
 
     if (attempt < 3) {
       await new Promise((resolve) => setTimeout(resolve, attempt * 500));
@@ -127,8 +166,10 @@ const server = Server.configure({
   timeout: 30000,
 
   async onAuthenticate(data) {
+    const cid = correlationId();
     if (COLLAB_DEV_MODE) {
       const roomId = data.documentName;
+      logInfo('auth.dev_mode', { correlationId: cid, roomId, userId: String(data.token ?? 'dev-user') });
       return {
         userId: String(data.token ?? 'dev-user'),
         mode: 'readwrite',
@@ -152,13 +193,15 @@ const server = Server.configure({
       throw new Error('Room mismatch');
     }
 
-    return {
+    const authPayload = {
       userId: String(payload.sub),
       mode: payload.mode === 'readonly' ? 'readonly' : 'readwrite',
       roomId: String(payload.roomId),
       taskId: String(payload.taskId ?? ''),
       projectId: String(payload.projectId ?? ''),
     };
+    logInfo('auth.success', { correlationId: cid, ...authPayload });
+    return authPayload;
   },
 
   async onLoadDocument(data) {
@@ -184,12 +227,28 @@ const server = Server.configure({
         userId: session.userId,
         mode: session.mode ?? 'readwrite',
       });
+      logInfo('presence.join', {
+        correlationId: correlationId(),
+        roomId: data.documentName,
+        socketId: data.socketId,
+        userId: session.userId,
+        mode: session.mode ?? 'readwrite',
+        participants: state.participants.size,
+      });
     }
   },
 
   async onDisconnect(data) {
     const state = stateForRoom(data.documentName);
+    const participant = state.participants.get(data.socketId);
     state.participants.delete(data.socketId);
+    logInfo('presence.leave', {
+      correlationId: correlationId(),
+      roomId: data.documentName,
+      socketId: data.socketId,
+      userId: participant?.userId ?? 'unknown',
+      participants: state.participants.size,
+    });
     if (state.dirty) {
       await saveSnapshot(data.documentName, 'disconnect', data.document);
     }
@@ -199,6 +258,11 @@ const server = Server.configure({
     const state = stateForRoom(data.documentName);
     const session = data.context as { mode?: 'readonly' | 'readwrite' };
     if (session?.mode === 'readonly') {
+      logError('readonly.write_blocked', {
+        correlationId: correlationId(),
+        roomId: data.documentName,
+        socketId: data.socketId,
+      });
       throw new Error('Readonly client cannot edit');
     }
 
