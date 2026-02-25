@@ -539,3 +539,49 @@
   - `pnpm e2e`
 - Risks/known gaps:
   - Due reminder creation/editing is not included in this sub-step yet; this is the next remaining scope in #41.
+
+## 2026-02-25 - P1 Task Detail Enhancement (Phase B): Due Reminder
+- What changed:
+  - Added per-user task due reminder persistence in core-api.
+    - Prisma: introduced `task_reminders` table.
+    - New endpoints:
+      - `GET /tasks/:id/reminder` (current user)
+      - `PUT /tasks/:id/reminder` (set/update)
+      - `DELETE /tasks/:id/reminder` (clear)
+    - Authz:
+      - VIEWER can read own reminder
+      - MEMBER+ can set/clear
+    - Audit/Outbox events appended:
+      - `task.reminder.set`
+      - `task.reminder.cleared`
+  - Task detail drawer now includes a `Due reminder` section with datetime input and save/clear actions.
+  - Activity timeline now renders reminder actions.
+  - Extended core integration tests for reminder set/get/clear and outbox verification.
+- Why:
+  - Complete the remaining #41 high-priority scope with minimal blast radius and keep auditability requirements.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/subtasks.spec.ts --workers=1`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Reminder delivery worker/notification dispatch is not implemented yet; this phase focuses on settings persistence + audit/outbox trail.
+
+## 2026-02-25 - E2E Stability Hardening (MVP/Subtasks)
+- What changed:
+  - Hardened flaky selectors and interactions introduced by richer task detail layout:
+    - MVP API helper now handles empty JSON bodies safely.
+    - Removed unstable link-dialog shortcut steps from MVP flow and kept deterministic coverage for editor blocks/mentions/images/reminder.
+    - Subtask E2E interactions now use robust in-view/evaluate click paths for controls inside drawer overflow contexts.
+  - Added explicit `data-testid` hooks for link dialog controls in editor component.
+- Why:
+  - Prevent viewport/selector-induced false negatives and keep CI signal focused on product regressions.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/subtasks.spec.ts --workers=1`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Link dialog keyboard shortcut path is no longer asserted in MVP E2E; link feature remains available but should be covered by a dedicated editor-focused test later.

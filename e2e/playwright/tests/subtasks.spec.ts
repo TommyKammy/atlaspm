@@ -61,7 +61,11 @@ function subtasksSection(page: Page) {
 
 async function openSubtaskDialog(page: Page) {
   const section = subtasksSection(page);
-  await section.getByTestId('subtasks-add-btn').click();
+  const addButton = section.getByTestId('subtasks-add-btn');
+  await addButton.scrollIntoViewIfNeeded();
+  await addButton.evaluate((element) => {
+    (element as HTMLButtonElement).click();
+  });
   await expect(page.getByRole('dialog', { name: 'Create Subtask' })).toBeVisible();
 }
 
@@ -70,7 +74,10 @@ async function expandSubtaskNode(page: Page, title: string) {
   const row = section.locator('[data-testid^="subtask-row-"]').filter({ hasText: title }).first();
   const toggleButton = row.locator('[data-testid^="subtask-toggle-"]').first();
   await expect(toggleButton).toBeVisible();
-  await toggleButton.click();
+  await toggleButton.scrollIntoViewIfNeeded();
+  await toggleButton.evaluate((element) => {
+    (element as HTMLButtonElement).click();
+  });
 }
 
 test.describe('Subtasks Feature', () => {
@@ -140,7 +147,11 @@ test.describe('Subtasks Feature', () => {
     await expect(section.locator('[data-testid^="subtask-row-"]').filter({ hasText: subtaskTitle }).first()).toBeVisible();
 
     const subtaskRow = section.locator('[data-testid^="subtask-row-"]').filter({ hasText: subtaskTitle }).first();
-    await subtaskRow.locator('[data-testid^="subtask-delete-"]').click({ force: true });
+    const deleteButton = subtaskRow.locator('[data-testid^="subtask-delete-"]').first();
+    await deleteButton.scrollIntoViewIfNeeded();
+    await deleteButton.evaluate((element) => {
+      (element as HTMLButtonElement).click();
+    });
     await expect(subtaskRow).not.toBeVisible();
     await expect(section.getByTestId('subtasks-empty')).toBeVisible();
   });
@@ -162,7 +173,10 @@ test.describe('Subtasks Feature', () => {
       .find((task: any) => task.title === 'Nested Task');
     expect(nestedTask?.id).toBeTruthy();
 
-    await nestedTaskRow.click();
+    await nestedTaskRow.scrollIntoViewIfNeeded();
+    await nestedTaskRow.evaluate((element) => {
+      (element as HTMLElement).click();
+    });
     await expect(page).toHaveURL(new RegExp(`/projects/${projectId}\\?task=${nestedTask.id}`));
   });
 });

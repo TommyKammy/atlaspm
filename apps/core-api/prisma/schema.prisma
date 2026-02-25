@@ -66,6 +66,7 @@ model User {
   projectMemberships   ProjectMembership[]
   invitationsCreated   Invitation[] @relation("InvitationCreatedBy")
   dashboards           Dashboard[]
+  reminders            TaskReminder[]
 }
 
 model WorkspaceMembership {
@@ -173,6 +174,7 @@ model Task {
   comments TaskComment[]
   mentions TaskMention[]
   attachments TaskAttachment[]
+  reminders TaskReminder[]
   
   // Subtask hierarchy (up to 5 levels)
   parentId String?
@@ -186,6 +188,24 @@ model Task {
   @@index([projectId, sectionId, position])
   @@index([parentId])
   @@index([projectId, deletedAt])
+}
+
+model TaskReminder {
+  id         String    @id @default(uuid())
+  taskId     String    @map("task_id")
+  userId     String    @map("user_id")
+  remindAt   DateTime  @map("remind_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  deletedAt  DateTime? @map("deleted_at")
+  sentAt     DateTime? @map("sent_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, userId])
+  @@unique([taskId, userId, deletedAt])
+  @@map("task_reminders")
 }
 
 model TaskComment {

@@ -470,6 +470,30 @@ describe('Core API Integration', () => {
       .expect(200);
     expect(attachmentsAfterRestore.body.some((a: any) => a.id === attachmentInit.body.attachmentId)).toBe(true);
 
+    const reminderSet = await request(app.getHttpServer())
+      .put(`/tasks/${t1.body.id}/reminder`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ remindAt: new Date(Date.now() + 86_400_000).toISOString() })
+      .expect(200);
+    expect(reminderSet.body.taskId).toBe(t1.body.id);
+
+    const reminderGet = await request(app.getHttpServer())
+      .get(`/tasks/${t1.body.id}/reminder`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(reminderGet.body.id).toBe(reminderSet.body.id);
+
+    await request(app.getHttpServer())
+      .delete(`/tasks/${t1.body.id}/reminder`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const reminderAfterClear = await request(app.getHttpServer())
+      .get(`/tasks/${t1.body.id}/reminder`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(reminderAfterClear.body?.id).toBeUndefined();
+
     const rulesRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/rules`)
       .set('Authorization', `Bearer ${token}`)
@@ -505,6 +529,8 @@ describe('Core API Integration', () => {
     expect(outbox.body.some((e: any) => e.type === 'task.attachment.created')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.attachment.deleted')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.attachment.restored')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'task.reminder.set')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'task.reminder.cleared')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.deleted')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.restored')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'rule.updated')).toBe(true);

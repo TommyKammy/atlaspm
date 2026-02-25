@@ -14,6 +14,7 @@ import type {
   TaskAttachment,
   TaskComment,
   TaskDependency,
+  TaskReminder,
   TaskTree,
 } from '@/lib/types';
 import { SubtaskList } from '@/components/subtask-list';
@@ -38,6 +39,8 @@ function formatAuditEvent(event: AuditEvent) {
   if (action === 'task.mention.deleted') return 'removed a mention';
   if (action === 'task.attachment.created') return 'added an attachment';
   if (action === 'task.attachment.deleted') return 'deleted an attachment';
+  if (action === 'task.reminder.set') return 'set a reminder';
+  if (action === 'task.reminder.cleared') return 'cleared a reminder';
   if (action === 'rule.applied') return 'applied rule';
   return action;
 }
@@ -80,6 +83,7 @@ export default function TaskDetailDrawer({
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingBody, setEditingBody] = useState('');
   const [commentMentionQuery, setCommentMentionQuery] = useState('');
+  const [reminderAtInput, setReminderAtInput] = useState('');
 
   const enabled = Boolean(taskId && open);
 
@@ -98,6 +102,11 @@ export default function TaskDetailDrawer({
   const attachmentsQuery = useQuery<TaskAttachment[]>({
     queryKey: taskId ? queryKeys.taskAttachments(taskId) : ['task', 'none', 'attachments'],
     queryFn: () => api(`/tasks/${taskId}/attachments`),
+    enabled,
+  });
+  const reminderQuery = useQuery<TaskReminder | null>({
+    queryKey: taskId ? queryKeys.taskReminder(taskId) : ['task', 'none', 'reminder'],
+    queryFn: () => api(`/tasks/${taskId}/reminder`),
     enabled,
   });
 
@@ -162,6 +171,20 @@ export default function TaskDetailDrawer({
       await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
     },
   });
+  const setReminder = useMutation({
+    mutationFn: (remindAt: string) => api(`/tasks/${taskId}/reminder`, { method: 'PUT', body: { remindAt } }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.taskReminder(taskId!) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
+    },
+  });
+  const clearReminder = useMutation({
+    mutationFn: () => api(`/tasks/${taskId}/reminder`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.taskReminder(taskId!) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
+    },
+  });
 
   const members = membersQuery.data ?? [];
   const mentionCandidates = members.filter((member) => {
@@ -199,6 +222,11 @@ export default function TaskDetailDrawer({
     }
     setCommentMentionQuery(match[1] ?? '');
   };
+
+  const reminderLocal = reminderQuery.data?.remindAt
+    ? new Date(reminderQuery.data.remindAt).toISOString().slice(0, 16)
+    : '';
+  const reminderInput = reminderAtInput || reminderLocal;
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -239,6 +267,42 @@ export default function TaskDetailDrawer({
                   </Badge>
                 </div>
               </div>
+              <section className="rounded-lg border bg-card p-3">
+                <div className="mb-2 text-sm font-medium">Due reminder</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    type="datetime-local"
+                    value={reminderInput}
+                    onChange={(event) => setReminderAtInput(event.target.value)}
+                    className="w-[240px]"
+                    data-testid="task-reminder-input"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const iso = new Date(reminderInput).toISOString();
+                      setReminder.mutate(iso);
+                      setReminderAtInput('');
+                    }}
+                    disabled={!reminderInput || setReminder.isPending}
+                    data-testid="task-reminder-save"
+                  >
+                    {setReminder.isPending ? 'Saving...' : 'Save reminder'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      clearReminder.mutate();
+                      setReminderAtInput('');
+                    }}
+                    disabled={!reminderQuery.data?.id || clearReminder.isPending}
+                    data-testid="task-reminder-clear"
+                  >
+                    Clear reminder
+                  </Button>
+                </div>
+              </section>
               {taskId ? (
                 <TaskDescriptionEditor
                   taskId={taskId}

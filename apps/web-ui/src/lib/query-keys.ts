@@ -18,6 +18,7 @@ export const queryKeys = {
   taskMentions: (taskId: string) => ['task', taskId, 'mentions'] as const,
   taskAttachments: (taskId: string, options?: { includeDeleted?: boolean }) =>
     ['task', taskId, 'attachments', options?.includeDeleted ? 'all' : 'active'] as const,
+  taskReminder: (taskId: string) => ['task', taskId, 'reminder'] as const,
 
   // Subtask keys
   taskSubtasks: (taskId: string) => ['task', taskId, 'subtasks'] as const,

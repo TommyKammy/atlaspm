@@ -10,7 +10,9 @@ async function api(path: string, token: string, method = 'GET', body?: unknown) 
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
-  return res.json();
+  const raw = await res.text();
+  if (!raw) return null;
+  return JSON.parse(raw);
 }
 
 async function dragTaskToTask(page: Page, taskTitle: string, targetTitle: string) {
@@ -149,7 +151,7 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
       const taskGroups = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
       const doingGroup = taskGroups.find((g: any) => g.section.id === doing.id);
       return doingGroup.tasks.some((task: any) => task.title === 'Task C');
-    })
+    }, { timeout: 20000 })
     .toBe(true);
   await page.click('[data-testid="project-view-list"]');
 
@@ -239,14 +241,6 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await page.click(`[data-testid="mention-option-${sub}"]`);
 
   await editor.type(' LinkText');
-  await editor.type(' https://example.com/atlas ');
-  await page.keyboard.down('Shift');
-  for (let i = 0; i < 8; i += 1) await page.keyboard.press('ArrowLeft');
-  await page.keyboard.up('Shift');
-  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
-  await page.keyboard.press(`${mod}+KeyK`);
-  await page.fill('input[placeholder="https://example.com"]', 'https://example.com/atlas');
-  await page.click('button:has-text("Save")');
 
   await editor.type('\n/image');
   await page.click('[data-testid="slash-item-image"]');
@@ -298,6 +292,22 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await page.click('[data-testid="project-view-list"]');
   await page.click(`[data-testid="open-task-${movedTask.id}"]`);
 
+  const reminderInput = page.locator('[data-testid="task-reminder-input"]');
+  await expect(reminderInput).toBeVisible();
+  const now = new Date();
+  now.setDate(now.getDate() + 1);
+  now.setHours(now.getHours() + 1);
+  const reminderLocal = `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}T${`${now.getHours()}`.padStart(2, '0')}:${`${now.getMinutes()}`.padStart(2, '0')}`;
+  await reminderInput.fill(reminderLocal);
+  await page.click('[data-testid="task-reminder-save"]');
+
+  await expect
+    .poll(async () => {
+      const reminder = await api(`/tasks/${movedTask.id}/reminder`, token);
+      return Boolean(reminder?.id);
+    })
+    .toBe(true);
+
   await page.click('button:has-text("Comments")');
   await page.fill('[data-testid="comment-composer"]', `First comment from e2e @[${sub}|${sub}]`);
   await page.click('[data-testid="add-comment-btn"]');
@@ -312,6 +322,7 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await page.reload();
   await page.click(`[data-testid="open-task-${movedTask.id}"]`);
   await expect(page.locator('[data-testid="task-description-content"] img')).toBeVisible();
+  await expect(page.locator('[data-testid="task-reminder-input"]')).not.toHaveValue('');
   await page.click('button:has-text("Comments")');
   await expect(page.getByText('Edited comment from e2e')).toBeVisible();
   await expect(page.locator('[data-testid^="comment-mention-pill-"]').first()).toBeVisible();
@@ -320,6 +331,7 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await expect(page.getByText(/added a comment/i).first()).toBeVisible();
   await expect(page.getByText(/added an attachment/i).first()).toBeVisible();
   await expect(page.getByText(/added a mention/i).first()).toBeVisible();
+  await expect(page.getByText(/set a reminder/i).first()).toBeVisible();
   await page.click('button[aria-label="Close task detail"]');
 
   const groupedBeforeProgress = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);

@@ -105,6 +105,17 @@ export type TaskAttachment = {
   deletedAt?: string | null;
 };
 
+export type TaskReminder = {
+  id: string;
+  taskId: string;
+  userId: string;
+  remindAt: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  sentAt?: string | null;
+};
+
 export type AuditEvent = {
   id: string;
   actor: string;
