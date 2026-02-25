@@ -301,13 +301,13 @@ describe('Core API Integration', () => {
     const secA = await request(app.getHttpServer())
       .post(`/projects/${projectId}/sections`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ name: 'A' })
+      .send({ name: 'Alpha Section' })
       .expect(201);
 
     const secB = await request(app.getHttpServer())
       .post(`/projects/${projectId}/sections`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ name: 'B' })
+      .send({ name: 'Beta Section' })
       .expect(201);
 
     const createTaskCorrelationId = `it-task-create-${Date.now()}`;
@@ -324,6 +324,31 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ title: 'Task 2', sectionId: secA.body.id })
       .expect(201);
+
+    const sectionSearch = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/tasks?q=${encodeURIComponent('Alpha Section')}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(sectionSearch.body.some((task: any) => task.id === t1.body.id)).toBe(true);
+    expect(sectionSearch.body.some((task: any) => task.id === t2.body.id)).toBe(true);
+
+    const completed = await request(app.getHttpServer())
+      .post(`/tasks/${t2.body.id}/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ done: true, version: t2.body.version })
+      .expect(201);
+    expect(completed.body.status).toBe('DONE');
+    expect(completed.body.progressPercent).toBe(100);
+    expect(Boolean(completed.body.completedAt)).toBe(true);
+
+    const reopened = await request(app.getHttpServer())
+      .post(`/tasks/${t2.body.id}/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ done: false, version: completed.body.version })
+      .expect(201);
+    expect(reopened.body.status).toBe('IN_PROGRESS');
+    expect(reopened.body.progressPercent).toBe(0);
+    expect(reopened.body.completedAt).toBeNull();
 
     await request(app.getHttpServer())
       .delete(`/tasks/${t2.body.id}`)
@@ -697,6 +722,8 @@ describe('Core API Integration', () => {
     expect(outbox.body.some((e: any) => e.type === 'task.reminder.sent')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.deleted')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.restored')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'task.completed')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'task.reopened')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'rule.updated')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'notification.created')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'notification.read')).toBe(true);

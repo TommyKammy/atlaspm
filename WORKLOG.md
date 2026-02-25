@@ -944,3 +944,54 @@
   - `pnpm e2e`
 - Risks/known gaps:
   - Redrive is single-event API; bulk redrive is intentionally not included in this patch.
+
+## 2026-02-26 - P0 UX Flow Stabilization (Header/Add-new/Task completion API + Row DnD)
+- What changed:
+  - `web-ui` project page header and toolbar:
+    - Moved `+ Add new` to the view-tab row.
+    - Replaced always-visible local search with a filter popover (`project-filter-trigger`) containing search/status/priority and clear action.
+    - Removed duplicate project-local search bar and helper subtext, emphasized project title.
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/projects/[id]/page.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/i18n.tsx`
+  - `core-api` task completion endpoint:
+    - Added `POST /tasks/:id/complete` with optimistic version check.
+    - `done=true` => `status=DONE`, `progressPercent=100`, `completedAt=now`.
+    - `done=false` => `status=IN_PROGRESS`, `progressPercent=0`, `completedAt=null`.
+    - emits audit/outbox (`task.completed` / `task.reopened`), reindexes search.
+    - Added section-name aware task search (`q` matches task title OR section name).
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/tasks/tasks.controller.ts`
+  - Task list row interaction and density updates:
+    - Row-level DnD with pointer activation distance to avoid click conflict.
+    - Added task done toggle circle (`task-complete-*`) with done visuals (line-through + muted row).
+    - Compressed row/input heights and made input borders appear on hover/focus.
+    - Styled status as compact rounded badge-like select.
+    - Restored stable task detail open behavior by isolating open control from DnD activation.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+  - Tests:
+    - core integration test coverage for:
+      - search by section name
+      - complete/reopen endpoint and outbox audit events
+    - updated Playwright DnD helper to row-based drag (no drag-handle dependency).
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+      - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/mvp.spec.ts`
+- Why:
+  - Implement safe-first P0 UX fixes while preserving existing flows:
+    - no refresh requirement,
+    - Asana-like Add-new placement,
+    - consistent completion semantics via API,
+    - stable E2E behavior after row-level DnD change.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e:up && pnpm --filter @atlaspm/playwright e2e tests/collab.spec.ts tests/dependencies.spec.ts tests/subtasks.spec.ts tests/mvp.spec.ts tests/workload.spec.ts`
+  - `pnpm --filter @atlaspm/playwright e2e tests/mvp.spec.ts`
+  - `pnpm e2e:rebuild`
+- Risks/known gaps:
+  - Project filter search is client-side against loaded grouped data (task title/section/project name). Large datasets may need server-driven query pagination/ranking in a follow-up.

@@ -17,6 +17,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import {
+  IsBoolean,
   IsArray,
   IsEnum,
   IsInt,
@@ -180,6 +181,14 @@ class PatchTaskDto {
   @IsOptional()
   @IsInt()
   version?: number;
+}
+
+class CompleteTaskDto {
+  @IsBoolean()
+  done!: boolean;
+
+  @IsInt()
+  version!: number;
 }
 
 class BulkTaskDto {
@@ -354,6 +363,7 @@ export class TasksController {
         { title: { contains: query.q, mode: 'insensitive' } },
         { description: { contains: query.q, mode: 'insensitive' } },
         { descriptionText: { contains: query.q, mode: 'insensitive' } },
+        { section: { name: { contains: query.q, mode: 'insensitive' } } },
       ];
     }
 
@@ -475,6 +485,53 @@ export class TasksController {
         correlationId: req.correlationId,
         outboxType: 'task.updated',
         payload: updated,
+      });
+      await this.applyProgressRules(tx, id, req.correlationId);
+      return updated;
+    }).then((updated) => {
+      void this.searchService.indexTask(updated);
+      return updated;
+    });
+  }
+
+  @Post('tasks/:id/complete')
+  async complete(@Param('id') id: string, @Body() body: CompleteTaskDto, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    if (body.version !== task.version) throw new ConflictException('Version conflict');
+
+    const nextStatus = body.done ? TaskStatus.DONE : TaskStatus.IN_PROGRESS;
+    const nextProgress = body.done ? 100 : 0;
+    const nextCompletedAt = body.done ? task.completedAt ?? new Date() : null;
+    const action = body.done ? 'task.completed' : 'task.reopened';
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.task.update({
+        where: { id },
+        data: {
+          status: nextStatus,
+          progressPercent: nextProgress,
+          completedAt: nextCompletedAt,
+          version: { increment: 1 },
+        },
+      });
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'Task',
+        entityId: id,
+        action,
+        beforeJson: task,
+        afterJson: updated,
+        correlationId: req.correlationId,
+        outboxType: action,
+        payload: {
+          taskId: id,
+          projectId: task.projectId,
+          done: body.done,
+          status: updated.status,
+          progressPercent: updated.progressPercent,
+        },
       });
       await this.applyProgressRules(tx, id, req.correlationId);
       return updated;

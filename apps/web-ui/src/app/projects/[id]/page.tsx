@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Plus } from 'lucide-react';
+import { ChevronDown, Filter, Plus } from 'lucide-react';
 import ProjectBoard from '@/components/project-board';
 import { ProjectBoardView, ProjectCalendarView, ProjectFilesView } from '@/components/project-alt-views';
 import { api } from '@/lib/api';
@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { useI18n } from '@/lib/i18n';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,10 +36,13 @@ export default function ProjectPage() {
   const [priorityFilter, setPriorityFilter] = useState<'ALL' | NonNullable<Task['priority']>>('ALL');
   const [view, setView] = useState<'List' | 'Board' | 'Calendar' | 'Files'>('List');
   const [showAddSectionInput, setShowAddSectionInput] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const addSectionInputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
   const [trashOpen, setTrashOpen] = useState(false);
+  const activeFilterCount = useMemo(
+    () => Number(search.trim().length > 0) + Number(statusFilter !== 'ALL') + Number(priorityFilter !== 'ALL'),
+    [search, statusFilter, priorityFilter],
+  );
 
   const projectsQuery = useQuery<Project[]>({
     queryKey: queryKeys.projects,
@@ -97,7 +101,8 @@ export default function ProjectPage() {
       const isInputLike = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable;
       if (event.key === '/' && !isInputLike) {
         event.preventDefault();
-        searchInputRef.current?.focus();
+        const globalSearchInput = document.querySelector('[data-testid="global-search-input"]') as HTMLInputElement | null;
+        globalSearchInput?.focus();
       }
       if ((event.key === 'c' || event.key === 'C') && !isInputLike) {
         const quickAddSectionId = sectionsQuery.data?.[0]?.id;
@@ -120,9 +125,8 @@ export default function ProjectPage() {
       <header className="rounded-lg border bg-card p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold">{project?.name ?? t('project')}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">{t('taskListGroupedBySections')}</p>
-            <div className="mt-3 flex items-center gap-1">
+            <h2 className="text-xl font-semibold">{project?.name ?? t('project')}</h2>
+            <div className="mt-3 flex items-center gap-1" data-testid="project-view-tabs-row">
               {([
                 { key: 'List', label: t('list') },
                 { key: 'Board', label: t('board') },
@@ -140,6 +144,46 @@ export default function ProjectPage() {
                   {tab.label}
                 </Button>
               ))}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button className="ml-2" data-testid="add-new-trigger">
+                    <Plus className="mr-1 h-4 w-4" />
+                    {t('addNew')}
+                    <ChevronDown className="ml-1 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem
+                    data-testid="add-new-task"
+                    onClick={() => {
+                      const openQuickAdd = () => {
+                        const sectionId = sectionsQuery.data?.find((section) => !section.isDefault)?.id ?? sectionsQuery.data?.[0]?.id;
+                        const el = sectionId
+                          ? (document.querySelector(`[data-testid="quick-add-open-${sectionId}"]`) as HTMLButtonElement | null)
+                          : null;
+                        el?.click();
+                      };
+                      if (view !== 'List') {
+                        setView('List');
+                        setTimeout(openQuickAdd, 50);
+                      } else {
+                        openQuickAdd();
+                      }
+                    }}
+                  >
+                    {t('addTask')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    data-testid="add-new-section"
+                    onClick={() => {
+                      setShowAddSectionInput(true);
+                      setTimeout(() => addSectionInputRef.current?.focus(), 0);
+                    }}
+                  >
+                    {t('addSection')}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -215,79 +259,78 @@ export default function ProjectPage() {
       </header>
 
       <section className="rounded-lg border bg-card p-4">
-        <div className="grid gap-2 md:grid-cols-6">
-          <Input
-            ref={searchInputRef}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('searchTasks')}
-            className="md:col-span-2"
-            data-testid="project-search-input"
-          />
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as 'ALL' | Task['status'])}
-            className="h-9 rounded-md border bg-background px-3 text-sm"
-            data-testid="status-filter"
-          >
-            <option value="ALL">{t('statusAll')}</option>
-            <option value="TODO">TODO</option>
-            <option value="IN_PROGRESS">IN_PROGRESS</option>
-            <option value="DONE">DONE</option>
-            <option value="BLOCKED">BLOCKED</option>
-          </select>
-          <select
-            value={priorityFilter}
-            onChange={(e) => setPriorityFilter(e.target.value as 'ALL' | NonNullable<Task['priority']>)}
-            className="h-9 rounded-md border bg-background px-3 text-sm"
-            data-testid="priority-filter"
-          >
-            <option value="ALL">{t('priorityAll')}</option>
-            <option value="LOW">LOW</option>
-            <option value="MEDIUM">MEDIUM</option>
-            <option value="HIGH">HIGH</option>
-            <option value="URGENT">URGENT</option>
-          </select>
-          <select
-            value={view}
-            onChange={(e) => setView(e.target.value as 'List' | 'Board' | 'Calendar' | 'Files')}
-            className="h-9 rounded-md border bg-background px-3 text-sm"
-          >
-            <option>{t('list')}</option>
-            <option>{t('board')}</option>
-          </select>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button className="md:justify-self-end" data-testid="add-new-trigger">
-                <Plus className="mr-1 h-4 w-4" />
-                {t('addNew')}
-                <ChevronDown className="ml-1 h-4 w-4" />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" data-testid="project-filter-trigger">
+                <Filter className="mr-1 h-4 w-4" />
+                {t('filter')}
+                {activeFilterCount > 0 ? (
+                  <span className="ml-1 rounded bg-primary/10 px-1.5 py-0.5 text-[11px]">{activeFilterCount}</span>
+                ) : null}
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                data-testid="add-new-task"
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-72 space-y-3">
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">{t('searchTasks')}</p>
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={t('searchTasks')}
+                  data-testid="project-filter-search-input"
+                />
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">{t('status')}</p>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as 'ALL' | Task['status'])}
+                  className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                  data-testid="status-filter"
+                >
+                  <option value="ALL">{t('statusAll')}</option>
+                  <option value="TODO">TODO</option>
+                  <option value="IN_PROGRESS">IN_PROGRESS</option>
+                  <option value="DONE">DONE</option>
+                  <option value="BLOCKED">BLOCKED</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">{t('priorityAll')}</p>
+                <select
+                  value={priorityFilter}
+                  onChange={(e) => setPriorityFilter(e.target.value as 'ALL' | NonNullable<Task['priority']>)}
+                  className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                  data-testid="priority-filter"
+                >
+                  <option value="ALL">{t('priorityAll')}</option>
+                  <option value="LOW">LOW</option>
+                  <option value="MEDIUM">MEDIUM</option>
+                  <option value="HIGH">HIGH</option>
+                  <option value="URGENT">URGENT</option>
+                </select>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="w-full"
+                data-testid="project-filter-clear"
                 onClick={() => {
-                  const sectionId = sectionsQuery.data?.find((section) => !section.isDefault)?.id ?? sectionsQuery.data?.[0]?.id;
-                  const el = sectionId
-                    ? (document.querySelector(`[data-testid="quick-add-open-${sectionId}"]`) as HTMLButtonElement | null)
-                    : null;
-                  el?.click();
+                  setSearch('');
+                  setStatusFilter('ALL');
+                  setPriorityFilter('ALL');
                 }}
               >
-                {t('addTask')}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                data-testid="add-new-section"
-                onClick={() => {
-                  setShowAddSectionInput(true);
-                  setTimeout(() => addSectionInputRef.current?.focus(), 0);
-                }}
-              >
-                {t('addSection')}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                {t('clearFilters')}
+              </Button>
+            </PopoverContent>
+          </Popover>
+          {activeFilterCount > 0 ? (
+            <p className="text-xs text-muted-foreground">{t('filtered')}</p>
+          ) : (
+            <p className="text-xs text-muted-foreground">{t('noActiveFilters')}</p>
+          )}
         </div>
         {showAddSectionInput ? (
           <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">

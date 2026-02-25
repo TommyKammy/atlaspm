@@ -20,10 +20,7 @@ async function dragTaskToTask(page: Page, taskTitle: string, targetTitle: string
   const target = page.locator(`[data-task-title="${targetTitle}"]`).first();
   await expect(source).toBeVisible();
   await expect(target).toBeVisible();
-
-  const sourceHandle = source.locator('button[data-testid^="drag-handle-"]').first();
-  await expect(sourceHandle).toBeVisible();
-  await sourceHandle.dragTo(target, { force: true });
+  await source.dragTo(target, { force: true });
 }
 
 async function dragBoardTaskToTask(page: Page, taskTitle: string, targetTitle: string) {
@@ -100,6 +97,9 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
 
   await sidebar.getByRole('link', { name: projectName1 }).click();
   await page.waitForURL(`**/projects/${projectA.id}`);
+  await expect(page.locator('[data-testid="project-view-tabs-row"] [data-testid="add-new-trigger"]')).toBeVisible();
+  await expect(page.locator('[data-testid="global-search-input"]')).toBeVisible();
+  await expect(page.locator('[data-testid="project-search-input"]')).toHaveCount(0);
 
   await page.click('[data-testid="add-new-trigger"]');
   await page.click('[data-testid="add-new-section"]');
@@ -132,6 +132,16 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await quickAddBacklog.fill('Task C');
   await quickAddBacklog.press('Enter');
   await expect(page.locator('[data-task-title="Task C"]')).toBeVisible();
+
+  await page.click('[data-testid="project-filter-trigger"]');
+  await page.fill('[data-testid="project-filter-search-input"]', 'Task A');
+  await expect(page.locator('[data-task-title="Task A"]')).toBeVisible();
+  await expect(page.locator('[data-task-title="Task B"]')).toHaveCount(0);
+  await page.fill('[data-testid="project-filter-search-input"]', 'Backlog');
+  await expect(page.locator('[data-task-title="Task A"]')).toBeVisible();
+  await expect(page.locator('[data-task-title="Task B"]')).toBeVisible();
+  await page.click('[data-testid="project-filter-clear"]');
+  await expect(page.locator('[data-task-title="Task B"]')).toBeVisible();
 
   await page.locator('[data-task-title="Task C"] button[data-testid^="delete-task-"]').first().click({ force: true });
   await expect(page.locator('[data-testid="delete-undo-banner"]')).toBeVisible();

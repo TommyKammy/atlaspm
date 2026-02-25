@@ -13,7 +13,7 @@ import { useSortable, SortableContext, verticalListSortingStrategy } from '@dnd-
 import { CSS } from '@dnd-kit/utilities';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Check, ChevronDown, ChevronRight, Plus, Trash2, User } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Circle, Plus, Trash2, User } from 'lucide-react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { ProjectMember, SectionTaskGroup, Task } from '@/lib/types';
@@ -169,6 +169,13 @@ function ProgressBar({ value }: { value: number }) {
   );
 }
 
+const statusBadgeClass: Record<Task['status'], string> = {
+  TODO: 'bg-slate-100 text-slate-700',
+  IN_PROGRESS: 'bg-sky-100 text-sky-700',
+  DONE: 'bg-emerald-100 text-emerald-700',
+  BLOCKED: 'bg-rose-100 text-rose-700',
+};
+
 function AssigneeCombobox({
   task,
   members,
@@ -250,6 +257,7 @@ function TaskRow({
   task,
   sectionId,
   onEdit,
+  onToggleDone,
   members,
   onOpen,
   projectName,
@@ -263,6 +271,7 @@ function TaskRow({
   task: Task;
   sectionId: string;
   onEdit: (taskId: string, patch: Partial<Task> & { version: number }) => void;
+  onToggleDone: (task: Task) => void;
   members: ProjectMember[];
   onOpen: (taskId: string) => void;
   projectName: string;
@@ -279,21 +288,34 @@ function TaskRow({
     data: { sectionId },
     disabled: !draggable,
   });
+  const isDone = task.status === 'DONE';
 
   return (
     <tr
       ref={setNodeRef as never}
       style={{ transform: CSS.Transform.toString(transform), transition: transition || 'transform 150ms ease' }}
-      className="h-11 border-b transition-colors hover:bg-muted/60"
+      className={cn(
+        'group h-9 border-b transition-colors hover:bg-muted/40',
+        draggable && 'cursor-grab active:cursor-grabbing',
+        isDone && 'text-muted-foreground/80',
+      )}
       data-testid={`task-${task.id}`}
       data-task-title={task.title}
+      {...(draggable ? attributes : {})}
+      {...(draggable ? listeners : {})}
+      onPointerDownCapture={(event) => {
+        const target = event.target as HTMLElement;
+        if (target.closest('button,input,select,textarea,a,[data-no-dnd="true"]')) {
+          event.stopPropagation();
+        }
+      }}
     >
       <TableCell>
         <div className="flex items-center gap-2" style={{ paddingLeft: `${depth * 16}px` }}>
           <button
             type="button"
             className={cn(
-              'inline-flex h-6 w-6 items-center justify-center rounded border text-muted-foreground',
+              'inline-flex h-5 w-5 items-center justify-center rounded border text-muted-foreground',
               hasChildren ? 'opacity-100' : 'pointer-events-none opacity-0',
             )}
             onClick={(event) => {
@@ -306,23 +328,35 @@ function TaskRow({
             {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           </button>
           <button
-            className={cn(
-              'rounded-sm border px-1.5 py-0.5 text-[11px] text-muted-foreground',
-              draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed opacity-50',
-            )}
-            data-testid={`drag-handle-${task.id}`}
-            aria-label={`Drag ${task.title}`}
             type="button"
-            {...(draggable ? attributes : {})}
-            {...(draggable ? listeners : {})}
-            title={draggable ? t('dragToReorder') : t('nestedTasksCannotBeDragged')}
+            className={cn(
+              'inline-flex h-5 w-5 items-center justify-center rounded-full border transition-colors',
+              isDone ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-muted-foreground/40 text-muted-foreground',
+            )}
+            data-testid={`task-complete-${task.id}`}
+            aria-label={isDone ? `Reopen ${task.title}` : `Complete ${task.title}`}
+            onClick={() => onToggleDone(task)}
           >
-            Drag
+            {isDone ? <Check className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
           </button>
           <button
             type="button"
-            className="truncate text-left text-sm hover:underline"
-            onClick={() => onOpen(task.id)}
+            data-no-dnd="true"
+            className={cn(
+              'truncate text-left text-sm hover:underline',
+              isDone && 'line-through',
+            )}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpen(task.id);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                onOpen(task.id);
+              }
+            }}
             data-testid={`open-task-${task.id}`}
           >
             {task.title.trim() || t('untitledTask')}
@@ -346,7 +380,7 @@ function TaskRow({
               version: task.version,
             })
           }
-          className="h-8"
+          className="h-7 border-transparent bg-transparent px-2 shadow-none hover:border-border focus-visible:border-border"
         />
       </TableCell>
       <TableCell>
@@ -357,14 +391,18 @@ function TaskRow({
             max={100}
             value={task.progressPercent}
             onChange={(e) => onEdit(task.id, { progressPercent: Number(e.target.value), version: task.version })}
-            className="h-8"
+            className="h-7 w-16 border-transparent bg-transparent px-2 shadow-none hover:border-border focus-visible:border-border"
           />
           <ProgressBar value={task.progressPercent} />
         </div>
       </TableCell>
       <TableCell>
         <select
-          className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+          className={cn(
+            'h-7 w-full rounded-full border border-transparent bg-transparent px-2 text-xs font-medium',
+            'hover:border-border focus:border-border',
+            statusBadgeClass[task.status],
+          )}
           value={task.status}
           onChange={(e) => onEdit(task.id, { status: e.target.value as Task['status'], version: task.version })}
         >
@@ -394,7 +432,7 @@ function TaskRow({
         <Button
           size="icon"
           variant="ghost"
-          className="h-7 w-7"
+          className="h-6 w-6"
           data-testid={`delete-task-${task.id}`}
           onClick={(event) => {
             event.stopPropagation();
@@ -528,7 +566,11 @@ export default function ProjectBoard({
   initialTaskId?: string | null;
 }) {
   const { t } = useI18n();
-  const sensors = useSensors(useSensor(PointerSensor));
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 6 },
+    }),
+  );
   const queryClient = useQueryClient();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [collapsedTaskIds, setCollapsedTaskIds] = useState<Set<string>>(new Set());
@@ -569,6 +611,45 @@ export default function ProjectBoard({
           ...group,
           tasks: group.tasks.map((task) =>
             task.id === taskId ? { ...task, ...patch, version: task.version + 1 } : task,
+          ),
+        })),
+      );
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(queryKeys.projectTasksGrouped(projectId), context.previous);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) => {
+        const removed = removeTaskFromGroups(current, updated.id);
+        return upsertTaskInSection(removed, updated.sectionId, updated);
+      });
+    },
+  });
+
+  const completeTask = useMutation({
+    mutationFn: ({ taskId, done, version }: { taskId: string; done: boolean; version: number }) =>
+      api(`/tasks/${taskId}/complete`, {
+        method: 'POST',
+        body: { done, version },
+      }) as Promise<Task>,
+    onMutate: async ({ taskId, done }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      const previous = queryClient.getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId));
+      queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) =>
+        current.map((group) => ({
+          ...group,
+          tasks: group.tasks.map((task) =>
+            task.id === taskId
+              ? {
+                  ...task,
+                  status: done ? 'DONE' : 'IN_PROGRESS',
+                  progressPercent: done ? 100 : 0,
+                  completedAt: done ? new Date().toISOString() : null,
+                  version: task.version + 1,
+                }
+              : task,
           ),
         })),
       );
@@ -669,16 +750,22 @@ export default function ProjectBoard({
   const members = membersQuery.data ?? [];
 
   const filteredGroups = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    const normalizedProjectName = projectName.trim().toLowerCase();
     return groups.map((group) => ({
       ...group,
       tasks: group.tasks.filter((task) => {
-        const bySearch = !search.trim() || task.title.toLowerCase().includes(search.trim().toLowerCase());
+        const sectionMatches = Boolean(normalizedSearch) && group.section.name.toLowerCase().includes(normalizedSearch);
+        const titleMatches = task.title.toLowerCase().includes(normalizedSearch);
+        const projectMatches = Boolean(normalizedSearch) && normalizedProjectName.includes(normalizedSearch);
+        const bySearch =
+          !normalizedSearch || sectionMatches || titleMatches || projectMatches;
         const byStatus = statusFilter === 'ALL' || task.status === statusFilter;
         const byPriority = priorityFilter === 'ALL' || task.priority === priorityFilter;
         return bySearch && byStatus && byPriority;
       }),
     }));
-  }, [groups, search, statusFilter, priorityFilter]);
+  }, [groups, priorityFilter, projectName, search, statusFilter]);
 
   const groupedVisibleRows = useMemo(() => {
     return filteredGroups.map((group) => {
@@ -765,6 +852,13 @@ export default function ProjectBoard({
                       task={row.task}
                       sectionId={group.section.id}
                       onEdit={onEdit}
+                      onToggleDone={(task) =>
+                        completeTask.mutate({
+                          taskId: task.id,
+                          done: task.status !== 'DONE',
+                          version: task.version,
+                        })
+                      }
                       members={members}
                       onOpen={setSelectedTaskId}
                       projectName={projectName}
