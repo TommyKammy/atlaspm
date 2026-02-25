@@ -874,3 +874,42 @@
   - Result: all 3 runs passed (`30/30` each run), no rerun dependency.
 - Risks/known gaps:
   - Stability runner executes full dockerized E2E and is time-consuming by design; keep for pre-merge verification rather than every local edit cycle.
+
+## 2026-02-26 - P0 #35 Task Retention Completion (Soft-delete expiry purge)
+- What changed:
+  - Added task retention worker:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/tasks/task-retention.service.ts`
+    - scans soft-deleted tasks older than retention window and hard-deletes them in batches
+    - emits audit/outbox before purge:
+      - audit action `task.purged` (actor `retention-worker`)
+      - outbox type `task.purged`
+  - Registered worker in app module:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/app.module.ts`
+  - Added env controls:
+    - `TASK_RETENTION_WORKER_ENABLED`
+    - `TASK_RETENTION_WORKER_INTERVAL_MS`
+    - `TASK_RETENTION_DAYS`
+    - `TASK_RETENTION_BATCH_SIZE`
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/.env.example`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/.env.example`
+      - `/Users/tomoakikawada/Dev/atlaspm/README.md`
+  - Extended integration tests:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+    - verifies:
+      - expired soft-deleted task is purged
+      - recent soft-deleted task remains restorable
+      - `task.purged` audit/outbox entries are created
+  - Documentation:
+    - added retention worker section in `/Users/tomoakikawada/Dev/atlaspm/docs/architecture.md`
+- Why:
+  - Close #35 remaining scope (“自動削除期限”) while preserving existing user-driven undo/restore UX.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Purge currently hard-deletes task rows after writing audit/outbox; there is no admin “purge preview” endpoint yet.
+  - For very large expired datasets, batch size tuning may be required in production via env.

@@ -13,6 +13,7 @@ import { DomainService } from './common/domain.service';
 import { SubtaskService } from './tasks/subtask.service';
 import { CycleDetectionService } from './tasks/cycle-detection.service';
 import { ReminderDeliveryService } from './tasks/reminder-delivery.service';
+import { TaskRetentionService } from './tasks/task-retention.service';
 import { PublicAttachmentsController } from './tasks/public-attachments.controller';
 import { CollabController } from './collab/collab.controller';
 import { WorkspaceAdminController } from './workspaces/workspace-admin.controller';
@@ -46,6 +47,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
     SubtaskService,
     CycleDetectionService,
     ReminderDeliveryService,
+    TaskRetentionService,
     WebhookDeliveryService,
     NotificationsService,
   ],

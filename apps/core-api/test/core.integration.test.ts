@@ -8,6 +8,7 @@ import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { AuthService } from '../src/auth/auth.service';
 import { ReminderDeliveryService } from '../src/tasks/reminder-delivery.service';
+import { TaskRetentionService } from '../src/tasks/task-retention.service';
 import { WebhookDeliveryService } from '../src/webhooks/webhook-delivery.service';
 import { CorrelationIdMiddleware } from '../src/common/correlation.middleware';
 
@@ -16,6 +17,7 @@ describe('Core API Integration', () => {
   let prisma: PrismaService;
   let token: string;
   let reminderWorker: ReminderDeliveryService;
+  let retentionWorker: TaskRetentionService;
   let webhookWorker: WebhookDeliveryService;
 
   beforeAll(async () => {
@@ -25,6 +27,8 @@ describe('Core API Integration', () => {
     process.env.COLLAB_SERVICE_TOKEN = 'collab-service-secret';
     process.env.COLLAB_SERVER_URL = 'ws://localhost:18080';
     process.env.REMINDER_WORKER_ENABLED = 'false';
+    process.env.TASK_RETENTION_WORKER_ENABLED = 'false';
+    process.env.TASK_RETENTION_DAYS = '30';
     process.env.WEBHOOK_DELIVERY_WORKER_ENABLED = 'false';
     process.env.WEBHOOK_DELIVERY_BASE_DELAY_MS = '0';
     process.env.WEBHOOK_DELIVERY_MAX_DELAY_MS = '0';
@@ -39,6 +43,7 @@ describe('Core API Integration', () => {
     await app.init();
     prisma = moduleRef.get(PrismaService);
     reminderWorker = moduleRef.get(ReminderDeliveryService);
+    retentionWorker = moduleRef.get(TaskRetentionService);
     webhookWorker = moduleRef.get(WebhookDeliveryService);
 
     await prisma.$connect();
@@ -737,6 +742,82 @@ describe('Core API Integration', () => {
     ).toBe(true);
 
     expect(defaultSection).toBeTruthy();
+  });
+
+  test('task retention worker purges expired soft-deleted tasks and keeps recent deletions', async () => {
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Retention ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSection = sectionsRes.body.find((section: any) => section.isDefault);
+    expect(defaultSection?.id).toBeTruthy();
+
+    const expiredTask = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Retention expired', sectionId: defaultSection.id })
+      .expect(201);
+
+    const recentTask = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Retention recent', sectionId: defaultSection.id })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .delete(`/tasks/${expiredTask.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    await request(app.getHttpServer())
+      .delete(`/tasks/${recentTask.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const now = new Date();
+    const oldDeletedAt = new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000);
+    await prisma.task.update({
+      where: { id: expiredTask.body.id },
+      data: { deletedAt: oldDeletedAt },
+    });
+
+    const purgedCount = await retentionWorker.processExpiredDeletes(now);
+    expect(purgedCount).toBeGreaterThanOrEqual(1);
+
+    const expiredAfter = await prisma.task.findUnique({ where: { id: expiredTask.body.id } });
+    expect(expiredAfter).toBeNull();
+
+    const recentAfter = await prisma.task.findUnique({ where: { id: recentTask.body.id } });
+    expect(recentAfter).toBeTruthy();
+    expect(Boolean(recentAfter?.deletedAt)).toBe(true);
+
+    const purgeAudit = await prisma.auditEvent.findFirst({
+      where: { entityType: 'Task', entityId: expiredTask.body.id, action: 'task.purged' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(purgeAudit).toBeTruthy();
+    expect(typeof purgeAudit?.correlationId).toBe('string');
+    expect(purgeAudit?.correlationId.startsWith('task-retention-')).toBe(true);
+
+    const purgeOutbox = await prisma.outboxEvent.findFirst({
+      where: { type: 'task.purged' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(purgeOutbox).toBeTruthy();
+    expect((purgeOutbox?.payload as any)?.taskId).toBe(expiredTask.body.id);
+    expect((purgeOutbox?.payload as any)?.projectId).toBe(projectId);
   });
 
   test('webhook delivery worker retries failed events, signs payloads, and exposes DLQ', async () => {

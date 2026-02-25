@@ -90,6 +90,11 @@ docker compose up -d --build
   - `REMINDER_WORKER_ENABLED` (default `true`)
   - `REMINDER_WORKER_INTERVAL_MS` (default `30000`)
   - `REMINDER_WORKER_BATCH_SIZE` (default `50`)
+- Task retention worker controls:
+  - `TASK_RETENTION_WORKER_ENABLED` (default `false`)
+  - `TASK_RETENTION_WORKER_INTERVAL_MS` (default `3600000`)
+  - `TASK_RETENTION_DAYS` (default `30`)
+  - `TASK_RETENTION_BATCH_SIZE` (default `100`)
 - Webhook delivery reliability controls:
   - `WEBHOOK_DELIVERY_WORKER_ENABLED` (default `false`)
   - `WEBHOOK_DELIVERY_INTERVAL_MS` (default `15000`)

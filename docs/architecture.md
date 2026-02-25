@@ -94,6 +94,21 @@
   - `REMINDER_WORKER_INTERVAL_MS`
   - `REMINDER_WORKER_BATCH_SIZE`
 
+## Task Soft-Delete Retention Worker
+- Purpose:
+  - Keep user self-restore window while preventing unbounded growth of soft-deleted tasks.
+- Behavior:
+  - Scans soft-deleted tasks (`deletedAt` set) older than `TASK_RETENTION_DAYS`.
+  - Hard-deletes expired tasks in batches.
+  - Emits audit/outbox before purge:
+    - audit action `task.purged` (actor: `retention-worker`)
+    - outbox type `task.purged`
+- Worker controls:
+  - `TASK_RETENTION_WORKER_ENABLED=true|false`
+  - `TASK_RETENTION_WORKER_INTERVAL_MS`
+  - `TASK_RETENTION_DAYS`
+  - `TASK_RETENTION_BATCH_SIZE`
+
 ## Task Internals (Phase 2)
 - Editor model:
   - Description authoring keeps ProseMirror JSON as the canonical representation.
