@@ -445,6 +445,31 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
+    const attachmentsAfterDelete = await request(app.getHttpServer())
+      .get(`/tasks/${t1.body.id}/attachments`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(attachmentsAfterDelete.body.some((a: any) => a.id === attachmentInit.body.attachmentId)).toBe(false);
+
+    const attachmentsIncludingDeleted = await request(app.getHttpServer())
+      .get(`/tasks/${t1.body.id}/attachments?includeDeleted=true`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const deletedAttachment = attachmentsIncludingDeleted.body.find((a: any) => a.id === attachmentInit.body.attachmentId);
+    expect(deletedAttachment).toBeTruthy();
+    expect(Boolean(deletedAttachment.deletedAt)).toBe(true);
+
+    await request(app.getHttpServer())
+      .post(`/attachments/${attachmentInit.body.attachmentId}/restore`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+
+    const attachmentsAfterRestore = await request(app.getHttpServer())
+      .get(`/tasks/${t1.body.id}/attachments`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(attachmentsAfterRestore.body.some((a: any) => a.id === attachmentInit.body.attachmentId)).toBe(true);
+
     const rulesRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/rules`)
       .set('Authorization', `Bearer ${token}`)
@@ -479,6 +504,7 @@ describe('Core API Integration', () => {
     expect(outbox.body.some((e: any) => e.type === 'task.mention.deleted')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.attachment.created')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.attachment.deleted')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'task.attachment.restored')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.deleted')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.restored')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'rule.updated')).toBe(true);

@@ -279,6 +279,20 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await expect(page.getByText('pixel.png').first()).toBeVisible();
   await page.selectOption('[data-testid="files-uploader-filter"]', sub);
   await expect(page.getByText('pixel.png').first()).toBeVisible();
+
+  const attachmentRows = await api(`/tasks/${movedTask.id}/attachments`, token);
+  const uploadedAttachmentId = attachmentRows.find((row: any) => row.fileName === 'pixel.png')?.id;
+  expect(uploadedAttachmentId).toBeTruthy();
+
+  await page.click(`[data-testid="file-delete-${uploadedAttachmentId}"]`);
+  await expect(page.locator(`[data-testid="file-row-${uploadedAttachmentId}"]`)).toHaveCount(0);
+
+  await page.click('[data-testid="files-toggle-deleted"]');
+  await expect(page.locator(`[data-testid="file-row-${uploadedAttachmentId}"]`)).toBeVisible();
+  await page.click(`[data-testid="file-restore-${uploadedAttachmentId}"]`);
+  await page.click('[data-testid="files-toggle-deleted"]');
+  await expect(page.locator(`[data-testid="file-row-${uploadedAttachmentId}"]`)).toBeVisible();
+
   await page.click('[data-testid="project-view-list"]');
   await page.click(`[data-testid="open-task-${movedTask.id}"]`);
 

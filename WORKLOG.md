@@ -493,3 +493,29 @@
   - `pnpm e2e`
 - Risks/known gaps:
   - Uploader filter options currently include only project members; historical uploads by users no longer in project fall back to raw uploader ID label.
+
+## 2026-02-25 - P1 Files View Delete/Restore Completion
+- What changed:
+  - Completed remaining acceptance criteria for issue #40 (Files view):
+    - Added date filter (`All dates` / `Last 7 days` / `Last 30 days`).
+    - Added deleted-files toggle in Files view.
+    - Added per-file actions in Files table:
+      - delete attachment
+      - restore attachment
+    - Added deleted-state rendering (`DELETED`) and row test IDs for deterministic E2E.
+  - Extended core-api attachments API:
+    - `GET /tasks/:id/attachments?includeDeleted=true` now returns soft-deleted attachments as well.
+    - Added `POST /attachments/:id/restore` with membership authz and audit/outbox append.
+  - Extended tests:
+    - core integration test now verifies attachment delete -> includeDeleted listing -> restore flow and outbox `task.attachment.restored`.
+    - MVP Playwright flow now verifies Files tab delete/restore behavior end-to-end.
+- Why:
+  - Close the remaining high-priority gap in Files tab so non-list views have production-usable CRUD parity.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Files delete/restore is per-attachment action only; bulk operations are not added yet.

@@ -818,11 +818,21 @@ export class TasksController {
   }
 
   @Get('tasks/:id/attachments')
-  async listAttachments(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
+  async listAttachments(
+    @Param('id') taskId: string,
+    @Query('includeDeleted') includeDeletedRaw: string | undefined,
+    @CurrentRequest() req: AppRequest,
+  ) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    const includeDeleted = String(includeDeletedRaw ?? '').toLowerCase() === 'true';
+    const where: Prisma.TaskAttachmentWhereInput = {
+      taskId,
+      completedAt: { not: null },
+      ...(includeDeleted ? {} : { deletedAt: null }),
+    };
     const attachments = await this.prisma.taskAttachment.findMany({
-      where: { taskId, deletedAt: null, completedAt: { not: null } },
+      where,
       orderBy: { createdAt: 'desc' },
     });
     return attachments.map((item) => ({
@@ -985,6 +995,35 @@ export class TasksController {
         payload: { taskId: attachment.taskId, attachmentId: id },
       });
       return deleted;
+    });
+  }
+
+  @Post('attachments/:id/restore')
+  async restoreAttachment(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
+    const attachment = await this.prisma.taskAttachment.findUniqueOrThrow({
+      where: { id },
+      include: { task: true },
+    });
+    await this.domain.requireProjectRole(attachment.task.projectId, req.user.sub, ProjectRole.MEMBER);
+    if (!attachment.deletedAt) return attachment;
+    return this.prisma.$transaction(async (tx) => {
+      const restored = await tx.taskAttachment.update({
+        where: { id },
+        data: { deletedAt: null },
+      });
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'Task',
+        entityId: attachment.taskId,
+        action: 'task.attachment.restored',
+        beforeJson: attachment,
+        afterJson: restored,
+        correlationId: req.correlationId,
+        outboxType: 'task.attachment.restored',
+        payload: { taskId: attachment.taskId, attachmentId: id },
+      });
+      return restored;
     });
   }
 

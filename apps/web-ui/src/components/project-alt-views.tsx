@@ -535,6 +535,9 @@ export function ProjectFilesView({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [mimeFilter, setMimeFilter] = useState<'ALL' | 'IMAGE' | 'OTHER'>('ALL');
   const [uploaderFilter, setUploaderFilter] = useState<string>('ALL');
+  const [dateFilter, setDateFilter] = useState<'ALL' | 'LAST_7_DAYS' | 'LAST_30_DAYS'>('ALL');
+  const [showDeleted, setShowDeleted] = useState(false);
+  const queryClient = useQueryClient();
   const groupsQuery = useQuery<SectionTaskGroup[]>({
     queryKey: queryKeys.projectTasksGrouped(projectId),
     queryFn: () => api(`/projects/${projectId}/tasks?groupBy=section`),
@@ -558,10 +561,27 @@ export function ProjectFilesView({
 
   const attachmentQueries = useQueries({
     queries: filteredTaskRows.map((row) => ({
-      queryKey: queryKeys.taskAttachments(row.task.id),
-      queryFn: () => api(`/tasks/${row.task.id}/attachments`) as Promise<TaskAttachment[]>,
+      queryKey: queryKeys.taskAttachments(row.task.id, { includeDeleted: showDeleted }),
+      queryFn: () =>
+        api(`/tasks/${row.task.id}/attachments${showDeleted ? '?includeDeleted=true' : ''}`) as Promise<TaskAttachment[]>,
       staleTime: 60_000,
     })),
+  });
+
+  const refreshAttachments = async () => {
+    await queryClient.invalidateQueries({
+      predicate: (query) => Array.isArray(query.queryKey) && query.queryKey[0] === 'task' && query.queryKey[2] === 'attachments',
+    });
+  };
+
+  const deleteAttachment = useMutation({
+    mutationFn: (attachmentId: string) => api(`/attachments/${attachmentId}`, { method: 'DELETE' }),
+    onSuccess: refreshAttachments,
+  });
+
+  const restoreAttachment = useMutation({
+    mutationFn: (attachmentId: string) => api(`/attachments/${attachmentId}/restore`, { method: 'POST' }),
+    onSuccess: refreshAttachments,
   });
 
   const loadingAttachments = attachmentQueries.some((query) => query.isLoading);
@@ -585,10 +605,17 @@ export function ProjectFilesView({
       if (mimeFilter === 'IMAGE' && !file.mimeType.startsWith('image/')) return false;
       if (mimeFilter === 'OTHER' && file.mimeType.startsWith('image/')) return false;
       if (uploaderFilter !== 'ALL' && file.uploaderUserId !== uploaderFilter) return false;
+      if (dateFilter !== 'ALL') {
+        const now = Date.now();
+        const created = +new Date(file.createdAt);
+        const dayMs = 24 * 60 * 60 * 1000;
+        const threshold = dateFilter === 'LAST_7_DAYS' ? now - (7 * dayMs) : now - (30 * dayMs);
+        if (created < threshold) return false;
+      }
       return true;
     });
     return filtered.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
-  }, [attachmentQueries, filteredTaskRows, t, mimeFilter, uploaderFilter]);
+  }, [attachmentQueries, filteredTaskRows, t, mimeFilter, uploaderFilter, dateFilter]);
 
   if (groupsQuery.isLoading || loadingAttachments) {
     return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">{t('loadingFiles')}</div>;
@@ -599,7 +626,18 @@ export function ProjectFilesView({
       <section className="rounded-lg border bg-card">
         <header className="flex items-center justify-between border-b px-4 py-2">
           <h3 className="text-sm font-medium">{t('projectFiles')}</h3>
-          <Badge variant="secondary">{files.length}</Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary">{files.length}</Badge>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setShowDeleted((current) => !current)}
+              data-testid="files-toggle-deleted"
+            >
+              {showDeleted ? t('hideDeletedFiles') : t('showDeletedFiles')}
+            </Button>
+          </div>
         </header>
         <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
           <select
@@ -625,6 +663,16 @@ export function ProjectFilesView({
               </option>
             ))}
           </select>
+          <select
+            className="h-8 rounded-md border bg-background px-2 text-xs"
+            value={dateFilter}
+            onChange={(event) => setDateFilter(event.target.value as 'ALL' | 'LAST_7_DAYS' | 'LAST_30_DAYS')}
+            data-testid="files-date-filter"
+          >
+            <option value="ALL">{t('allDates')}</option>
+            <option value="LAST_7_DAYS">{t('last7Days')}</option>
+            <option value="LAST_30_DAYS">{t('last30Days')}</option>
+          </select>
         </div>
         {!files.length ? (
           <div className="px-4 py-8 text-center text-sm text-muted-foreground">
@@ -641,11 +689,16 @@ export function ProjectFilesView({
                 <TableHead>{t('uploader')}</TableHead>
                 <TableHead>{t('status')}</TableHead>
                 <TableHead>{t('added')}</TableHead>
+                <TableHead>{t('actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {files.map((file) => (
-                <TableRow key={file.id}>
+                <TableRow
+                  key={file.id}
+                  className={file.deletedAt ? 'opacity-70' : ''}
+                  data-testid={`file-row-${file.id}`}
+                >
                   <TableCell>
                     <a
                       href={`${apiBaseUrl}${file.url}`}
@@ -670,9 +723,34 @@ export function ProjectFilesView({
                   <TableCell className="text-sm text-muted-foreground">
                     {uploaderMap.get(file.uploaderUserId) || file.uploaderUserId}
                   </TableCell>
-                  <TableCell className="text-sm">{file.status}</TableCell>
+                  <TableCell className="text-sm">{file.deletedAt ? t('fileDeleted') : file.status}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {new Date(file.createdAt).toLocaleString()}
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {file.deletedAt ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => restoreAttachment.mutate(file.id)}
+                        disabled={restoreAttachment.isPending}
+                        data-testid={`file-restore-${file.id}`}
+                      >
+                        {t('restore')}
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => deleteAttachment.mutate(file.id)}
+                        disabled={deleteAttachment.isPending}
+                        data-testid={`file-delete-${file.id}`}
+                      >
+                        {t('delete')}
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

@@ -16,7 +16,8 @@ export const queryKeys = {
   taskComments: (taskId: string) => ['task', taskId, 'comments'] as const,
   taskAudit: (taskId: string) => ['task', taskId, 'audit'] as const,
   taskMentions: (taskId: string) => ['task', taskId, 'mentions'] as const,
-  taskAttachments: (taskId: string) => ['task', taskId, 'attachments'] as const,
+  taskAttachments: (taskId: string, options?: { includeDeleted?: boolean }) =>
+    ['task', taskId, 'attachments', options?.includeDeleted ? 'all' : 'active'] as const,
 
   // Subtask keys
   taskSubtasks: (taskId: string) => ['task', taskId, 'subtasks'] as const,
