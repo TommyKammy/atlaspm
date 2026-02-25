@@ -156,6 +156,22 @@
   - `Project.ADMIN` can add/remove/change project members.
   - Added users must already be workspace members.
 - Admin audit/outbox events:
-  - `workspace.invite.created|accepted|revoked`
+  - `workspace.invite.created|accepted|revoked|reissued`
   - `workspace.user.suspended|unsuspended|display_name_updated`
   - `project.member.added|removed|role_changed`
+
+## Webhook Delivery Reliability (P2)
+- Registration:
+  - Project admin registers endpoints via `POST /webhooks`.
+- Delivery worker:
+  - `core-api` webhook worker consumes pending outbox events and sends event envelopes to active project webhooks.
+  - Worker is env-gated (`WEBHOOK_DELIVERY_WORKER_ENABLED=true`).
+  - Retries use exponential backoff with capped delay.
+- Dead letter queue (DLQ):
+  - Events that exceed retry limit are marked `deadLetteredAt` with `lastError`.
+  - Project admins can inspect by project via `GET /webhooks/dlq?projectId=...`.
+- Signature:
+  - Outbound webhook deliveries include HMAC signature headers when `WEBHOOK_SIGNING_SECRET` is configured:
+    - `x-atlaspm-signature` (`v1=<sha256>`)
+    - `x-atlaspm-timestamp`
+  - Signature base string: `${timestamp}.${rawJsonBody}`.

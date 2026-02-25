@@ -86,6 +86,15 @@ docker compose up -d --build
   - `REMINDER_WORKER_ENABLED` (default `true`)
   - `REMINDER_WORKER_INTERVAL_MS` (default `30000`)
   - `REMINDER_WORKER_BATCH_SIZE` (default `50`)
+- Webhook delivery reliability controls:
+  - `WEBHOOK_DELIVERY_WORKER_ENABLED` (default `false`)
+  - `WEBHOOK_DELIVERY_INTERVAL_MS` (default `15000`)
+  - `WEBHOOK_DELIVERY_BATCH_SIZE` (default `25`)
+  - `WEBHOOK_DELIVERY_MAX_ATTEMPTS` (default `5`)
+  - `WEBHOOK_DELIVERY_BASE_DELAY_MS` (default `5000`)
+  - `WEBHOOK_DELIVERY_MAX_DELAY_MS` (default `60000`)
+  - `WEBHOOK_DELIVERY_REQUEST_TIMEOUT_MS` (default `8000`)
+  - `WEBHOOK_SIGNING_SECRET` (HMAC secret for outbound webhook signature headers)
 - Invitation link base URL:
   - `INVITE_BASE_URL` (defaults to `http://localhost:3000/login`)
 - Collaboration in web-ui is feature-gated and off by default: `NEXT_PUBLIC_COLLAB_ENABLED=false`.

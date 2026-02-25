@@ -2,16 +2,20 @@ import { beforeAll, afterAll, describe, expect, test } from 'vitest';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import { createServer } from 'node:http';
+import { createHmac } from 'node:crypto';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { AuthService } from '../src/auth/auth.service';
 import { ReminderDeliveryService } from '../src/tasks/reminder-delivery.service';
+import { WebhookDeliveryService } from '../src/webhooks/webhook-delivery.service';
 
 describe('Core API Integration', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let token: string;
   let reminderWorker: ReminderDeliveryService;
+  let webhookWorker: WebhookDeliveryService;
 
   beforeAll(async () => {
     process.env.DEV_AUTH_ENABLED = 'true';
@@ -20,6 +24,11 @@ describe('Core API Integration', () => {
     process.env.COLLAB_SERVICE_TOKEN = 'collab-service-secret';
     process.env.COLLAB_SERVER_URL = 'ws://localhost:18080';
     process.env.REMINDER_WORKER_ENABLED = 'false';
+    process.env.WEBHOOK_DELIVERY_WORKER_ENABLED = 'false';
+    process.env.WEBHOOK_DELIVERY_BASE_DELAY_MS = '0';
+    process.env.WEBHOOK_DELIVERY_MAX_DELAY_MS = '0';
+    process.env.WEBHOOK_DELIVERY_MAX_ATTEMPTS = '2';
+    process.env.WEBHOOK_SIGNING_SECRET = 'webhook-test-secret';
     process.env.DATABASE_URL =
       process.env.DATABASE_URL ?? 'postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public';
 
@@ -28,6 +37,7 @@ describe('Core API Integration', () => {
     await app.init();
     prisma = moduleRef.get(PrismaService);
     reminderWorker = moduleRef.get(ReminderDeliveryService);
+    webhookWorker = moduleRef.get(WebhookDeliveryService);
 
     await prisma.$connect();
     const auth = moduleRef.get(AuthService);
@@ -665,5 +675,145 @@ describe('Core API Integration', () => {
       .expect(404);
 
     expect(defaultSection).toBeTruthy();
+  });
+
+  test('webhook delivery worker retries failed events, signs payloads, and exposes DLQ', async () => {
+    await prisma.outboxEvent.deleteMany({});
+
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = wsRes.body[0].id;
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Webhook Delivery ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const received: Array<{ signature?: string; timestamp?: string; body: string }> = [];
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      req.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        if (req.url === '/ok') {
+          received.push({
+            signature: req.headers['x-atlaspm-signature']?.toString(),
+            timestamp: req.headers['x-atlaspm-timestamp']?.toString(),
+            body,
+          });
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false }));
+      });
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to obtain webhook test server port');
+    }
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const okWebhook = await request(app.getHttpServer())
+        .post('/webhooks')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ projectId, targetUrl: `${baseUrl}/ok` })
+        .expect(201);
+
+      await prisma.outboxEvent.deleteMany({});
+
+      const successEvent = await prisma.outboxEvent.create({
+        data: {
+          type: 'task.updated',
+          payload: { projectId, taskId: 'fake-task' },
+          correlationId: `webhook-success-${Date.now()}`,
+        },
+      });
+
+      await webhookWorker.processDueEvents(new Date());
+      const delivered = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: successEvent.id } });
+      expect(Boolean(delivered.deliveredAt)).toBe(true);
+      expect(delivered.deadLetteredAt).toBeNull();
+      const captured = received.find((entry) => {
+        try {
+          return JSON.parse(entry.body).id === successEvent.id;
+        } catch {
+          return false;
+        }
+      });
+      expect(captured).toBeTruthy();
+      expect(captured?.signature).toMatch(/^v1=/);
+      expect(captured?.timestamp).toBeTruthy();
+      const expectedSig = `v1=${createHmac('sha256', 'webhook-test-secret')
+        .update(`${captured?.timestamp}.${captured?.body}`, 'utf8')
+        .digest('hex')}`;
+      expect(captured?.signature).toBe(expectedSig);
+
+      await prisma.webhook.update({
+        where: { id: okWebhook.body.id },
+        data: { active: false },
+      });
+      await request(app.getHttpServer())
+        .post('/webhooks')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ projectId, targetUrl: `${baseUrl}/fail` })
+        .expect(201);
+
+      const failingEvent = await prisma.outboxEvent.create({
+        data: {
+          type: 'task.updated',
+          payload: { projectId, taskId: 'fake-task' },
+          correlationId: `webhook-fail-${Date.now()}`,
+        },
+      });
+
+      await webhookWorker.processDueEvents(new Date());
+      let failedState = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: failingEvent.id } });
+      expect(failedState.deliveryAttempts).toBe(1);
+      expect(failedState.deadLetteredAt).toBeNull();
+      expect(failedState.deliveredAt).toBeNull();
+      expect(failedState.lastError).toContain('500');
+
+      await prisma.outboxEvent.update({
+        where: { id: failingEvent.id },
+        data: { nextRetryAt: new Date(Date.now() - 1_000) },
+      });
+      await webhookWorker.processDueEvents(new Date());
+      failedState = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: failingEvent.id } });
+      expect(failedState.deliveryAttempts).toBe(2);
+      expect(Boolean(failedState.deadLetteredAt)).toBe(true);
+      expect(failedState.deliveredAt).toBeNull();
+
+      const dlq = await request(app.getHttpServer())
+        .get(`/webhooks/dlq?projectId=${projectId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(dlq.body.some((event: any) => event.id === failingEvent.id)).toBe(true);
+
+      const auth = app.get(AuthService);
+      const projectMemberToken = await auth.mintDevToken(
+        `webhook-member-${Date.now()}`,
+        `webhook-member-${Date.now()}@example.com`,
+        'Webhook Member',
+      );
+      await request(app.getHttpServer())
+        .get(`/webhooks/dlq?projectId=${projectId}`)
+        .set('Authorization', `Bearer ${projectMemberToken}`)
+        .expect(404);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+    }
   });
 });

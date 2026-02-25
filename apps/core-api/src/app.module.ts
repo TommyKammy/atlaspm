@@ -18,6 +18,7 @@ import { CollabController } from './collab/collab.controller';
 import { WorkspaceAdminController } from './workspaces/workspace-admin.controller';
 import { NotificationsController } from './notifications/notifications.controller';
 import { NotificationsService } from './notifications/notifications.service';
+import { WebhookDeliveryService } from './webhooks/webhook-delivery.service';
 import { SearchModule } from './search/search.module';
 import { PortfoliosModule } from './portfolios/portfolios.module';
 import { WorkloadModule } from './workload/workload.module';
@@ -45,6 +46,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
     SubtaskService,
     CycleDetectionService,
     ReminderDeliveryService,
+    WebhookDeliveryService,
     NotificationsService,
   ],
 })

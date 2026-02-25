@@ -13,12 +13,14 @@
 |---|---|---:|---:|---:|---:|---:|
 | Workspace Admin | `GET /workspaces/:id/users` | ✅ | ❌ | - | - | - |
 | Workspace Admin | `POST /workspaces/:id/invitations` | ✅ | ❌ | - | - | - |
+| Workspace Admin | `POST /invitations/:id/reissue` | ✅ | ❌ | - | - | - |
 | Workspace Admin | `PATCH /users/:id` (status change) | ✅ | ❌ | - | - | - |
 | Project Admin | `POST /projects/:id/members` | - | - | ✅ | ❌ | ❌ |
 | Project Admin | `PATCH /projects/:id/members/:userId` | - | - | ✅ | ❌ | ❌ |
 | Project Admin | `DELETE /projects/:id/members/:userId` | - | - | ✅ | ❌ | ❌ |
 | Rules | `POST /projects/:id/rules` | - | - | ✅ | ✅ | ❌ |
 | Webhooks | `POST /webhooks` | - | - | ✅ | ❌ | ❌ |
+| Webhooks | `GET /webhooks/dlq?projectId=...` | - | - | ✅ | ❌ | ❌ |
 | Audit/Outbox | `GET /outbox?projectId=...` | - | - | ✅ | ✅ | ✅ (project member only) |
 
 Notes:

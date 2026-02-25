@@ -738,3 +738,57 @@
 - Risks/known gaps:
   - Outbox project scoping currently uses payload key extraction + project task/section lookup; if future outbox payload contracts omit `projectId/taskId/sectionId`, additional explicit entity scoping will be required.
   - `create-roadmap-issues.sh` remains local automation helper and is intentionally untracked.
+
+## 2026-02-26 - P2 #45 Slack/Webhook Delivery Hardening (Retry + DLQ + Signature)
+- What changed:
+  - Added outbox delivery reliability fields and migration:
+    - `OutboxEvent.deliveryAttempts`
+    - `OutboxEvent.nextRetryAt`
+    - `OutboxEvent.deadLetteredAt`
+    - `OutboxEvent.lastError`
+    - files:
+      - `apps/core-api/prisma/schema.prisma`
+      - `apps/core-api/prisma/migrations/20260226023000_webhook_delivery_retry_dlq/migration.sql`
+  - Implemented webhook delivery worker:
+    - new file: `apps/core-api/src/webhooks/webhook-delivery.service.ts`
+    - capabilities:
+      - consumes pending outbox events
+      - resolves project scope from payload (`projectId` / `taskId` / `sectionId`)
+      - delivers event envelopes to active project webhooks
+      - exponential backoff retries with max-attempt dead-lettering
+      - outbound HMAC signature headers (`x-atlaspm-signature`, `x-atlaspm-timestamp`) via `WEBHOOK_SIGNING_SECRET`
+      - dead-letter audit event (`webhook.delivery.dead_lettered`)
+    - registered in `apps/core-api/src/app.module.ts`
+  - Added project-admin DLQ inspection endpoint:
+    - `GET /webhooks/dlq?projectId=...` in `apps/core-api/src/webhooks/webhooks.controller.ts`
+    - authorization: `ProjectRole.ADMIN` only
+  - Expanded integration tests:
+    - `apps/core-api/test/core.integration.test.ts`
+    - verifies:
+      - signed successful delivery
+      - retry progression and dead-letter after max attempts
+      - DLQ endpoint returns failed event for project admins
+      - non-member access denied for DLQ endpoint
+  - Documentation and env updates:
+    - `.env.example`
+    - `apps/core-api/.env.example`
+    - `README.md`
+    - `docs/architecture.md`
+    - `docs/admin.md`
+- Why:
+  - Address issue #45 acceptance targets with minimal architectural blast radius:
+    - reliable webhook delivery path
+    - dead-letter visibility
+    - outbound signature support
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api prisma:generate`
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+- Risks/known gaps:
+  - Retry/DLQ currently tracks per-outbox-event (not per-webhook endpoint); one failing endpoint can keep the event retrying until DLQ.
+  - No dedicated DLQ redrive API yet; current scope is visibility + retry safety.

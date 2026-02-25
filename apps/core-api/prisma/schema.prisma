@@ -337,8 +337,13 @@ model OutboxEvent {
   correlationId String
   createdAt     DateTime @default(now())
   deliveredAt   DateTime?
+  deliveryAttempts Int     @default(0) @map("delivery_attempts")
+  nextRetryAt      DateTime? @map("next_retry_at")
+  deadLetteredAt   DateTime? @map("dead_lettered_at")
+  lastError        String?   @map("last_error")
 
   @@index([type, createdAt])
+  @@index([nextRetryAt, deadLetteredAt, deliveredAt])
 }
 
 model Webhook {
