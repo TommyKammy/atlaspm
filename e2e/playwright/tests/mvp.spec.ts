@@ -24,6 +24,14 @@ async function dragTaskToTask(page: Page, taskTitle: string, targetTitle: string
   await sourceHandle.dragTo(target, { force: true });
 }
 
+async function dragBoardTaskToTask(page: Page, taskTitle: string, targetTitle: string) {
+  const source = page.locator(`[data-testid^="board-task-"][data-task-title="${taskTitle}"]`).first();
+  const target = page.locator(`[data-testid^="board-task-"][data-task-title="${targetTitle}"]`).first();
+  await expect(source).toBeVisible();
+  await expect(target).toBeVisible();
+  await source.dragTo(target, { force: true });
+}
+
 test('AtlasPM Asana-like UX flow', async ({ page }) => {
   const sub = `e2e-user-${Date.now()}`;
   const email = `e2e-${Date.now()}@example.com`;
@@ -127,6 +135,17 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await quickAddDoing.press('Enter');
   await expect(page.locator('[data-task-title="Task D"]')).toBeVisible();
 
+  await page.click('[data-testid="project-view-board"]');
+  await dragBoardTaskToTask(page, 'Task C', 'Task D');
+  await expect
+    .poll(async () => {
+      const taskGroups = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
+      const doingGroup = taskGroups.find((g: any) => g.section.id === doing.id);
+      return doingGroup.tasks.some((task: any) => task.title === 'Task C');
+    })
+    .toBe(true);
+  await page.click('[data-testid="project-view-list"]');
+
   await page.reload();
   await expect(page.locator('[data-task-title="Task A"]')).toBeVisible();
   await expect(page.locator('[data-task-title="Task B"]')).toBeVisible();
@@ -142,8 +161,8 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
     .toBe('Task B');
 
   let grouped = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
-  const backlogAfterReorder = grouped.find((g: any) => g.section.id === backlog.id);
-  const taskB = backlogAfterReorder.tasks.find((t: any) => t.title === 'Task B');
+  const taskB = grouped.flatMap((g: any) => g.tasks).find((t: any) => t.title === 'Task B');
+  expect(taskB).toBeTruthy();
 
   grouped = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
   const doingBeforeMove = grouped.find((g: any) => g.section.id === doing.id);

@@ -1,5 +1,16 @@
 'use client';
 
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useMemo, useState } from 'react';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Paperclip } from 'lucide-react';
@@ -29,6 +40,92 @@ function taskMatchesFilters(
   return bySearch && byStatus && byPriority;
 }
 
+function moveTaskPreview(
+  groups: SectionTaskGroup[],
+  taskId: string,
+  toSectionId: string,
+  targetTaskId: string | null,
+) {
+  const cloned = groups.map((group) => ({ ...group, tasks: [...group.tasks] }));
+  let movingTask: Task | null = null;
+
+  for (const group of cloned) {
+    const index = group.tasks.findIndex((task) => task.id === taskId);
+    if (index >= 0) {
+      movingTask = group.tasks[index] ?? null;
+      group.tasks.splice(index, 1);
+      break;
+    }
+  }
+
+  if (!movingTask) return groups;
+
+  const destination = cloned.find((group) => group.section.id === toSectionId);
+  if (!destination) return groups;
+
+  const insertAt = targetTaskId
+    ? Math.max(destination.tasks.findIndex((task) => task.id === targetTaskId), 0)
+    : destination.tasks.length;
+
+  destination.tasks.splice(insertAt, 0, { ...movingTask, sectionId: toSectionId });
+  return cloned;
+}
+
+function BoardTaskCard({
+  task,
+  onOpen,
+}: {
+  task: Task;
+  onOpen: (taskId: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
+    id: task.id,
+    data: { sectionId: task.sectionId },
+  });
+
+  return (
+    <button
+      ref={setNodeRef as never}
+      type="button"
+      onClick={() => onOpen(task.id)}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      data-testid={`board-task-${task.id}`}
+      data-task-title={task.title}
+      className="w-full rounded-md border bg-background p-2 text-left transition-colors hover:bg-muted/60"
+      {...attributes}
+      {...listeners}
+    >
+      <p className="truncate text-sm font-medium">{task.title}</p>
+      <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+        <span>{task.status}</span>
+      </div>
+    </button>
+  );
+}
+
+function BoardColumn({
+  sectionId,
+  children,
+}: {
+  sectionId: string;
+  children: React.ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `board-column-${sectionId}`,
+    data: { sectionId },
+  });
+
+  return (
+    <section
+      ref={setNodeRef}
+      data-testid={`board-column-${sectionId}`}
+      className={`w-80 shrink-0 rounded-lg border bg-card ${isOver ? 'ring-1 ring-ring' : ''}`}
+    >
+      {children}
+    </section>
+  );
+}
+
 export function ProjectBoardView({
   projectId,
   search,
@@ -41,6 +138,7 @@ export function ProjectBoardView({
   priorityFilter: 'ALL' | NonNullable<Task['priority']>;
 }) {
   const { t } = useI18n();
+  const sensors = useSensors(useSensor(PointerSensor));
   const queryClient = useQueryClient();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
@@ -63,6 +161,25 @@ export function ProjectBoardView({
     },
   });
 
+  const reorderTask = useMutation({
+    mutationFn: ({ taskId, toSectionId, beforeTaskId, afterTaskId }: { taskId: string; toSectionId: string; beforeTaskId: string | null; afterTaskId: string | null; }) =>
+      api(`/sections/${toSectionId}/tasks/reorder`, { method: 'POST', body: { taskId, beforeTaskId, afterTaskId } }),
+    onMutate: async ({ taskId, toSectionId, afterTaskId }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      const previous = queryClient.getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId));
+      queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) =>
+        moveTaskPreview(current, taskId, toSectionId, afterTaskId),
+      );
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(queryKeys.projectTasksGrouped(projectId), context.previous);
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+    },
+  });
+
   const [draftBySection, setDraftBySection] = useState<Record<string, string>>({});
   const groups = groupsQuery.data ?? [];
   const filteredGroups = useMemo(
@@ -79,83 +196,101 @@ export function ProjectBoardView({
     return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">{t('loadingBoard')}</div>;
   }
 
+  const onDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over) return;
+
+    const activeTaskId = String(active.id);
+    const allTasks = groups.flatMap((group) => group.tasks);
+    const activeTask = allTasks.find((task) => task.id === activeTaskId);
+    if (!activeTask) return;
+
+    const activeHasChildren = allTasks.some((task) => task.parentId === activeTaskId);
+    if (activeTask.parentId || activeHasChildren) return;
+
+    const overTaskId = String(over.id);
+    const droppedOnSection = overTaskId.startsWith('board-column-');
+    const overSectionIdFromId = droppedOnSection ? overTaskId.replace('board-column-', '') : '';
+    const fallbackSectionId = groups.find((group) => group.tasks.some((task) => task.id === overTaskId))?.section.id ?? '';
+    const toSectionId = String(over.data.current?.sectionId ?? overSectionIdFromId ?? fallbackSectionId);
+    if (!toSectionId) return;
+
+    const targetGroup = groups.find((group) => group.section.id === toSectionId);
+    const targetTasks = targetGroup?.tasks ?? [];
+    const overIndex = droppedOnSection ? -1 : targetTasks.findIndex((task) => task.id === overTaskId);
+    const beforeTaskId = overIndex > 0 ? targetTasks[overIndex - 1]?.id ?? null : null;
+    const afterTaskId = overIndex >= 0 ? targetTasks[overIndex]?.id ?? null : null;
+    reorderTask.mutate({ taskId: activeTaskId, toSectionId, beforeTaskId, afterTaskId });
+  };
+
   return (
-    <div className="space-y-4">
-      <div className="flex gap-3 overflow-x-auto pb-1">
-        {filteredGroups.map((group) => (
-          <section
-            key={group.section.id}
-            data-testid={`board-column-${group.section.id}`}
-            className="w-80 shrink-0 rounded-lg border bg-card"
-          >
-            <header className="flex items-center justify-between border-b px-3 py-2">
-              <h3 className="truncate text-sm font-medium">{group.sectionLabel}</h3>
-              <Badge variant="secondary">{group.tasks.length}</Badge>
-            </header>
-            <div className="space-y-2 p-3">
-              {group.tasks.length ? (
-                group.tasks.map((task) => (
-                  <button
-                    type="button"
-                    key={task.id}
-                    onClick={() => setSelectedTaskId(task.id)}
-                    data-testid={`board-task-${task.id}`}
-                    className="w-full rounded-md border bg-background p-2 text-left transition-colors hover:bg-muted/60"
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <div className="space-y-4">
+        <div className="flex gap-3 overflow-x-auto pb-1">
+          {filteredGroups.map((group) => (
+            <BoardColumn key={group.section.id} sectionId={group.section.id}>
+              <header className="flex items-center justify-between border-b px-3 py-2">
+                <h3 className="truncate text-sm font-medium">{group.sectionLabel}</h3>
+                <Badge variant="secondary">{group.tasks.length}</Badge>
+              </header>
+              <div className="space-y-2 p-3">
+                {group.tasks.length ? (
+                  <SortableContext
+                    items={group.tasks.map((task) => task.id)}
+                    strategy={verticalListSortingStrategy}
                   >
-                    <p className="truncate text-sm font-medium">{task.title}</p>
-                    <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{task.status}</span>
-                      <span>{task.dueAt ? String(task.dueAt).slice(0, 10) : t('noDueDate')}</span>
-                    </div>
-                  </button>
-                ))
-              ) : (
-                <p className="text-xs text-muted-foreground">{t('noTasks')}</p>
-              )}
+                    {group.tasks.map((task) => (
+                      <BoardTaskCard key={task.id} task={task} onOpen={setSelectedTaskId} />
+                    ))}
+                  </SortableContext>
+                ) : (
+                  <p className="text-xs text-muted-foreground">{t('noTasks')}</p>
+                )}
 
-              <div className="flex items-center gap-2 pt-1">
-                <Input
-                  placeholder={t('addTask')}
-                  value={draftBySection[group.section.id] ?? ''}
-                  onChange={(event) =>
-                    setDraftBySection((current) => ({ ...current, [group.section.id]: event.target.value }))
-                  }
-                  onKeyDown={(event) => {
-                    if (event.key !== 'Enter') return;
-                    const title = (draftBySection[group.section.id] ?? '').trim();
-                    if (!title || createTask.isPending) return;
-                    void createTask.mutateAsync({ sectionId: group.section.id, title }).then(() => {
-                      setDraftBySection((current) => ({ ...current, [group.section.id]: '' }));
-                    });
-                  }}
-                />
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    const title = (draftBySection[group.section.id] ?? '').trim();
-                    if (!title || createTask.isPending) return;
-                    void createTask.mutateAsync({ sectionId: group.section.id, title }).then(() => {
-                      setDraftBySection((current) => ({ ...current, [group.section.id]: '' }));
-                    });
-                  }}
-                >
-                  {t('add')}
-                </Button>
+                <div className="flex items-center gap-2 pt-1">
+                  <Input
+                    placeholder={t('addTask')}
+                    value={draftBySection[group.section.id] ?? ''}
+                    onChange={(event) =>
+                      setDraftBySection((current) => ({ ...current, [group.section.id]: event.target.value }))
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter') return;
+                      const title = (draftBySection[group.section.id] ?? '').trim();
+                      if (!title || createTask.isPending) return;
+                      void createTask.mutateAsync({ sectionId: group.section.id, title }).then(() => {
+                        setDraftBySection((current) => ({ ...current, [group.section.id]: '' }));
+                      });
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const title = (draftBySection[group.section.id] ?? '').trim();
+                      if (!title || createTask.isPending) return;
+                      void createTask.mutateAsync({ sectionId: group.section.id, title }).then(() => {
+                        setDraftBySection((current) => ({ ...current, [group.section.id]: '' }));
+                      });
+                    }}
+                  >
+                    {t('add')}
+                  </Button>
+                </div>
               </div>
-            </div>
-          </section>
-        ))}
-      </div>
+            </BoardColumn>
+          ))}
+        </div>
 
-      <TaskDetailDrawer
-        taskId={selectedTaskId}
-        open={Boolean(selectedTaskId)}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) setSelectedTaskId(null);
-        }}
-        projectId={projectId}
-      />
-    </div>
+        <TaskDetailDrawer
+          taskId={selectedTaskId}
+          open={Boolean(selectedTaskId)}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setSelectedTaskId(null);
+          }}
+          projectId={projectId}
+        />
+      </div>
+    </DndContext>
   );
 }
 
