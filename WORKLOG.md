@@ -695,3 +695,46 @@
 - Risks/known gaps:
   - `pnpm test` at repo root fails when local compose Postgres is not running (existing local-env dependency pattern); run `pnpm e2e:up` first when validating `core-api` tests locally.
   - Notification center currently prioritizes unread feed in header; inbox page is the complete history surface.
+
+## 2026-02-26 - P2 #43/#44 Security Hardening + Invitation Lifecycle Completion
+- What changed:
+  - `core-api` authorization/security hardening:
+    - Removed implicit workspace role escalation in bootstrap (`WS_MEMBER` is no longer auto-promoted to `WS_ADMIN`) in `apps/core-api/src/common/domain.service.ts`.
+    - Scoped outbox read API to project membership and explicit project query:
+      - `GET /outbox?projectId=...` now required
+      - endpoint denies unscoped/global access and filters to the target project payloads in `apps/core-api/src/audit/audit.controller.ts`.
+  - `core-api` invitation lifecycle completion:
+    - Added `POST /invitations/:id/reissue` in `apps/core-api/src/workspaces/workspace-admin.controller.ts`.
+    - Reissue is atomic: old invite is revoked, new token/link issued, and audit/outbox records are appended.
+  - `web-ui` admin users UX:
+    - Added invitation reissue action to invited rows in `apps/web-ui/src/app/admin/users/page.tsx`.
+    - Reissued link is surfaced in the existing invite dialog with copy action, preserving no-refresh behavior.
+    - Added localized label for reissue action in `apps/web-ui/src/lib/i18n.tsx`.
+  - Tests:
+    - Expanded integration boundary checks in `apps/core-api/test/core.integration.test.ts`:
+      - invited user stays `WS_MEMBER`
+      - non-admin invitation create/reissue denied
+      - suspended user receives consistent `403` until unsuspended
+      - invite reissue invalidates old token and accepts new token only
+      - viewer deny paths for rule/webhook create
+      - outsider cannot read project outbox
+    - Updated E2E:
+      - outbox API call switched to project-scoped query in `e2e/playwright/tests/mvp.spec.ts`
+      - admin flow covers invite reissue + stale token rejection + suspended `/me` rejection in `e2e/playwright/tests/admin.spec.ts`
+  - Docs:
+    - Added permission matrix and security boundary notes in `docs/admin.md`.
+    - Documented project-scoped outbox read boundary in `docs/architecture.md`.
+- Why:
+  - Close #43 permission boundary gaps (privilege escalation risk and cross-project event visibility).
+  - Complete #44 invitation/user-admin lifecycle so admins can operate invite expiry/reissue and suspended-user behavior from UI/API consistently.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Outbox project scoping currently uses payload key extraction + project task/section lookup; if future outbox payload contracts omit `projectId/taskId/sectionId`, additional explicit entity scoping will be required.
+  - `create-roadmap-issues.sh` remains local automation helper and is intentionally untracked.

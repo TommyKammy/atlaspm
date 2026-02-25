@@ -12,6 +12,14 @@ async function api(path: string, token: string, method = 'GET', body?: unknown) 
   return res.json();
 }
 
+async function apiStatus(path: string, token: string, method = 'GET', body?: unknown) {
+  return fetch(`${API}${path}`, {
+    method,
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
 async function login(page: Page, sub: string, email: string) {
   await page.goto('/login');
   await page.fill('input[placeholder="OIDC sub"]', sub);
@@ -57,11 +65,29 @@ test('admin users and project members management', async ({ browser, page }) => 
   expect(inviteToken).toBeTruthy();
   await page.keyboard.press('Escape');
 
+  const invitedRows = await api(
+    `/workspaces/${workspaceId}/users?status=INVITED&query=${encodeURIComponent(invitedEmail)}`,
+    adminToken,
+  );
+  const pendingInvite = invitedRows.find((row: any) => row.email === invitedEmail && row.invitationId);
+  expect(pendingInvite?.invitationId).toBeTruthy();
+
+  await page.click(`[data-testid="admin-invite-reissue-${pendingInvite.invitationId}"]`);
+  await expect(page.locator('[data-testid="invite-link-value"]')).toBeVisible();
+  const reissuedLink = await page.locator('[data-testid="invite-link-value"]').innerText();
+  const reissuedToken = reissuedLink.split('inviteToken=')[1];
+  expect(reissuedToken).toBeTruthy();
+  expect(reissuedToken).not.toBe(inviteToken);
+  await page.keyboard.press('Escape');
+
   const invitedContext: BrowserContext = await browser.newContext();
   const invitedPage = await invitedContext.newPage();
   await login(invitedPage, invitedSub, invitedEmail);
+  await expect(invitedPage.locator('[data-testid="sidebar-admin-users"]')).toHaveCount(0);
   const invitedTokenJwt = await tokenFrom(invitedPage);
-  await api('/invitations/accept', invitedTokenJwt, 'POST', { token: inviteToken });
+  const staleAccept = await apiStatus('/invitations/accept', invitedTokenJwt, 'POST', { token: inviteToken });
+  expect(staleAccept.status).toBe(400);
+  await api('/invitations/accept', invitedTokenJwt, 'POST', { token: reissuedToken });
 
   await page.fill('[data-testid="admin-users-search"]', invitedSub);
   await expect(page.locator(`[data-testid="admin-user-row-${invitedSub}"]`)).toBeVisible();
@@ -73,6 +99,8 @@ test('admin users and project members management', async ({ browser, page }) => 
       return users.find((row: any) => row.id === invitedSub)?.status;
     })
     .toBe('SUSPENDED');
+  const suspendedMe = await apiStatus('/me', invitedTokenJwt);
+  expect(suspendedMe.status).toBe(403);
 
   await page.reload();
   await page.fill('[data-testid="admin-users-search"]', invitedSub);
@@ -85,6 +113,7 @@ test('admin users and project members management', async ({ browser, page }) => 
       return users.find((row: any) => row.id === invitedSub)?.status;
     })
     .toBe('ACTIVE');
+  await api('/me', invitedTokenJwt);
 
   await page.goto(`/projects/${project.id}`);
   await page.click('[data-testid="project-members-page-link"]');

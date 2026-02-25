@@ -74,9 +74,22 @@ describe('Core API Integration', () => {
       .send({ token: inviteToken })
       .expect(201);
 
+    const invitedWorkspaces = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${invitedToken}`)
+      .expect(200);
+    const invitedWorkspace = invitedWorkspaces.body.find((ws: any) => ws.id === workspaceId);
+    expect(invitedWorkspace?.role).toBe('WS_MEMBER');
+
     await request(app.getHttpServer())
       .get(`/workspaces/${workspaceId}/users`)
       .set('Authorization', `Bearer ${invitedToken}`)
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${invitedToken}`)
+      .send({ email: 'forbidden-invite@example.com', role: 'WS_MEMBER' })
       .expect(403);
 
     await request(app.getHttpServer())
@@ -84,11 +97,13 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ workspaceId, status: 'SUSPENDED' })
       .expect(200);
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${invitedToken}`).expect(403);
     await request(app.getHttpServer())
       .patch('/users/invited-1')
       .set('Authorization', `Bearer ${token}`)
       .send({ workspaceId, status: 'ACTIVE' })
       .expect(200);
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${invitedToken}`).expect(200);
 
     const revokedInvite = await request(app.getHttpServer())
       .post(`/workspaces/${workspaceId}/invitations`)
@@ -123,6 +138,45 @@ describe('Core API Integration', () => {
       .post('/invitations/accept')
       .set('Authorization', `Bearer ${expiredUserToken}`)
       .send({ token: expiredToken })
+      .expect(400);
+
+    const reissueInvite = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ email: 'reissue-1@example.com', role: 'WS_MEMBER' })
+      .expect(201);
+    const firstInvitationId = reissueInvite.body.invitationId;
+    const firstToken = String(reissueInvite.body.inviteLink).split('inviteToken=')[1];
+
+    await request(app.getHttpServer())
+      .post(`/invitations/${firstInvitationId}/reissue`)
+      .set('Authorization', `Bearer ${invitedToken}`)
+      .expect(403);
+
+    const reissuedInvite = await request(app.getHttpServer())
+      .post(`/invitations/${firstInvitationId}/reissue`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+    expect(reissuedInvite.body.invitationId).not.toBe(firstInvitationId);
+    const secondToken = String(reissuedInvite.body.inviteLink).split('inviteToken=')[1];
+    expect(secondToken).toBeTruthy();
+    expect(secondToken).not.toBe(firstToken);
+
+    const reissueUserToken = await auth.mintDevToken('reissue-1', 'reissue-1@example.com', 'Reissue One');
+    await request(app.getHttpServer())
+      .post('/invitations/accept')
+      .set('Authorization', `Bearer ${reissueUserToken}`)
+      .send({ token: firstToken })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/invitations/accept')
+      .set('Authorization', `Bearer ${reissueUserToken}`)
+      .send({ token: secondToken })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/invitations/${reissuedInvite.body.invitationId}/reissue`)
+      .set('Authorization', `Bearer ${token}`)
       .expect(400);
 
     const projectRes = await request(app.getHttpServer())
@@ -201,6 +255,25 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${projectAdminToken}`)
       .send({ userId: 'member-1', role: 'MEMBER' })
       .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/rules`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({
+        name: 'Viewer should not create',
+        templateKey: 'progress_to_done',
+        enabled: true,
+      })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post('/webhooks')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({
+        projectId,
+        targetUrl: 'http://localhost:9999/webhook',
+      })
+      .expect(403);
 
     const sectionsRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/sections`)
@@ -564,7 +637,7 @@ describe('Core API Integration', () => {
     expect(ruleUpdated.body.name).toBe('Progress to Done (Edited)');
 
     const outbox = await request(app.getHttpServer())
-      .get('/outbox')
+      .get(`/outbox?projectId=${projectId}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(outbox.body.some((e: any) => e.type === 'task.reordered')).toBe(true);
@@ -585,6 +658,11 @@ describe('Core API Integration', () => {
     expect(outbox.body.some((e: any) => e.type === 'rule.updated')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'notification.created')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'notification.read')).toBe(true);
+
+    await request(app.getHttpServer())
+      .get(`/outbox?projectId=${projectId}`)
+      .set('Authorization', `Bearer ${outsiderToken}`)
+      .expect(404);
 
     expect(defaultSection).toBeTruthy();
   });

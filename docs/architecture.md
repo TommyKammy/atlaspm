@@ -14,6 +14,7 @@
 - Every write appends:
   - `AuditEvent`: actor, entity, action, before/after, timestamp, correlationId
   - `OutboxEvent`: type, payload, createdAt, correlationId, deliveredAt
+- Outbox read API is project-scoped (`GET /outbox?projectId=...`) with membership authorization to prevent cross-project data exposure.
 
 ## Observability (P0-3)
 - Correlation id propagation:

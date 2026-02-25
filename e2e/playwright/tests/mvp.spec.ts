@@ -430,7 +430,7 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   const audit = await api(`/tasks/${movedTask.id}/audit`, token);
   expect(audit.length).toBeGreaterThan(0);
 
-  const outbox = await api('/outbox', token);
+  const outbox = await api(`/outbox?projectId=${projectA.id}`, token);
   expect(outbox.some((event: any) => String(event.type).startsWith('task.'))).toBeTruthy();
   expect(outbox.some((event: any) => String(event.type).startsWith('rule.'))).toBeTruthy();
 });

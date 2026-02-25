@@ -8,6 +8,23 @@
   - `ADMIN`: can manage project membership.
   - `MEMBER` / `VIEWER`: cannot manage project members.
 
+## Permission Matrix (Key Management APIs)
+| Area | Endpoint | WS_ADMIN | WS_MEMBER | Project ADMIN | Project MEMBER | Project VIEWER |
+|---|---|---:|---:|---:|---:|---:|
+| Workspace Admin | `GET /workspaces/:id/users` | ✅ | ❌ | - | - | - |
+| Workspace Admin | `POST /workspaces/:id/invitations` | ✅ | ❌ | - | - | - |
+| Workspace Admin | `PATCH /users/:id` (status change) | ✅ | ❌ | - | - | - |
+| Project Admin | `POST /projects/:id/members` | - | - | ✅ | ❌ | ❌ |
+| Project Admin | `PATCH /projects/:id/members/:userId` | - | - | ✅ | ❌ | ❌ |
+| Project Admin | `DELETE /projects/:id/members/:userId` | - | - | ✅ | ❌ | ❌ |
+| Rules | `POST /projects/:id/rules` | - | - | ✅ | ✅ | ❌ |
+| Webhooks | `POST /webhooks` | - | - | ✅ | ❌ | ❌ |
+| Audit/Outbox | `GET /outbox?projectId=...` | - | - | ✅ | ✅ | ✅ (project member only) |
+
+Notes:
+- `GET /outbox` requires `projectId` and is project-scoped; cross-project/global outbox listing is blocked.
+- `WS_MEMBER` must never be auto-promoted to `WS_ADMIN` by login/workspace bootstrap flows.
+
 ## Workspace User Management
 - Page: `/admin/users` (visible in sidebar only for `WS_ADMIN`).
 - Capabilities:
@@ -16,13 +33,15 @@
   - invite by email + workspace role
   - edit displayName
   - suspend / unsuspend
+  - reissue pending invitation (old token invalidated)
   - revoke pending invitation
 
 ## Invitation Lifecycle
 1. `POST /workspaces/:id/invitations` creates invitation and returns raw invite link.
 2. Token is stored only as `tokenHash` in DB (raw token is not persisted).
 3. Invite can be revoked by `DELETE /invitations/:id`.
-4. Invite is accepted by `POST /invitations/accept` with a logged-in OIDC user.
+4. Invite can be reissued by `POST /invitations/:id/reissue` (old token is revoked atomically).
+5. Invite is accepted by `POST /invitations/accept` with a logged-in OIDC user.
 
 ### Email Match Policy
 - Invitation acceptance requires strict email match:
@@ -43,6 +62,7 @@
   - `workspace.invite.created`
   - `workspace.invite.accepted`
   - `workspace.invite.revoked`
+  - `workspace.invite.reissued`
   - `workspace.user.suspended`
   - `workspace.user.unsuspended`
   - `workspace.user.display_name_updated`
@@ -56,3 +76,4 @@
 - Invitation token storage is hash-only.
 - Suspended users are blocked by auth guard.
 - Admin endpoints enforce role checks server-side (not UI-only).
+- Authorization boundaries are validated by integration/E2E tests for both allow and deny paths.

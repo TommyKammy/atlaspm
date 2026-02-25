@@ -279,6 +279,75 @@ export class WorkspaceAdminController {
     });
   }
 
+  @Post('invitations/:id/reissue')
+  async reissueInvitation(@Param('id') invitationId: string, @CurrentRequest() req: AppRequest) {
+    const invitation = await this.prisma.invitation.findUniqueOrThrow({ where: { id: invitationId } });
+    await this.domain.requireWorkspaceRole(invitation.workspaceId, req.user.sub, WorkspaceRole.WS_ADMIN);
+    if (invitation.acceptedAt) throw new BadRequestException('Accepted invitation cannot be reissued');
+    if (invitation.revokedAt) throw new BadRequestException('Revoked invitation cannot be reissued');
+
+    const rawToken = randomBytes(24).toString('hex');
+    const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7);
+
+    const reissued = await this.prisma.$transaction(async (tx) => {
+      const revoked = await tx.invitation.update({
+        where: { id: invitationId },
+        data: { revokedAt: new Date() },
+      });
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'Invitation',
+        entityId: invitationId,
+        action: 'workspace.invite.revoked',
+        beforeJson: invitation,
+        afterJson: revoked,
+        correlationId: req.correlationId,
+        outboxType: 'workspace.invite.revoked',
+        payload: { invitationId, workspaceId: invitation.workspaceId, reason: 'reissued' },
+      });
+
+      const created = await tx.invitation.create({
+        data: {
+          workspaceId: invitation.workspaceId,
+          email: invitation.email,
+          role: invitation.role,
+          tokenHash,
+          expiresAt,
+          createdByUserId: req.user.sub,
+        },
+      });
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'Invitation',
+        entityId: created.id,
+        action: 'workspace.invite.reissued',
+        beforeJson: invitation,
+        afterJson: created,
+        correlationId: req.correlationId,
+        outboxType: 'workspace.invite.reissued',
+        payload: {
+          workspaceId: invitation.workspaceId,
+          oldInvitationId: invitation.id,
+          invitationId: created.id,
+          email: created.email,
+          role: created.role,
+          expiresAt: created.expiresAt,
+        },
+      });
+      return created;
+    });
+
+    const baseUrl = process.env.INVITE_BASE_URL ?? 'http://localhost:3000/login';
+    return {
+      invitationId: reissued.id,
+      inviteLink: `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}inviteToken=${rawToken}`,
+      expiresAt: reissued.expiresAt,
+    };
+  }
+
   @Post('invitations/accept')
   async acceptInvitation(@Body() body: AcceptInvitationDto, @CurrentRequest() req: AppRequest) {
     const tokenHash = createHash('sha256').update(body.token).digest('hex');

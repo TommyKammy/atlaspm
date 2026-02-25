@@ -66,12 +66,6 @@ export class DomainService {
               data: { workspaceId: ws.id, userId: sub, role: WorkspaceRole.WS_ADMIN },
               include: { workspace: true },
             });
-          } else if (membership.role !== WorkspaceRole.WS_ADMIN) {
-            membership = await tx.workspaceMembership.update({
-              where: { id: membership.id },
-              data: { role: WorkspaceRole.WS_ADMIN },
-              include: { workspace: true },
-            });
           }
 
           return membership.workspace;
