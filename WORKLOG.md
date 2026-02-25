@@ -913,3 +913,34 @@
 - Risks/known gaps:
   - Purge currently hard-deletes task rows after writing audit/outbox; there is no admin “purge preview” endpoint yet.
   - For very large expired datasets, batch size tuning may be required in production via env.
+
+## 2026-02-26 - P2 #45 Completion (Webhook DLQ Redrive)
+- What changed:
+  - Added dead-letter redrive API for project admins:
+    - `POST /webhooks/dlq/:eventId/retry`
+    - body: `{ projectId }`
+    - file: `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/webhooks/webhooks.controller.ts`
+  - Redrive behavior:
+    - validates project admin authorization
+    - validates event is dead-lettered and belongs to target project scope
+    - resets outbox retry state (`deliveryAttempts=0`, `deadLetteredAt=null`, `nextRetryAt=now`, `lastError=null`, `deliveredAt=null`)
+    - appends audit/outbox event `webhook.delivery.retry_requested`
+  - Extended integration test coverage:
+    - file: `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+    - validates:
+      - non-admin cannot invoke redrive
+      - admin can redrive dead-lettered event
+      - redriven event is delivered successfully on next worker tick
+      - redrive audit/outbox records are emitted
+  - Updated architecture docs:
+    - `/Users/tomoakikawada/Dev/atlaspm/docs/architecture.md`
+- Why:
+  - Close remaining #45 acceptance gap (“失敗イベントを再実行可能”).
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Redrive is single-event API; bulk redrive is intentionally not included in this patch.

@@ -903,7 +903,7 @@ describe('Core API Integration', () => {
         where: { id: okWebhook.body.id },
         data: { active: false },
       });
-      await request(app.getHttpServer())
+      const failWebhook = await request(app.getHttpServer())
         .post('/webhooks')
         .set('Authorization', `Bearer ${token}`)
         .send({ projectId, targetUrl: `${baseUrl}/fail` })
@@ -950,6 +950,68 @@ describe('Core API Integration', () => {
         .get(`/webhooks/dlq?projectId=${projectId}`)
         .set('Authorization', `Bearer ${projectMemberToken}`)
         .expect(404);
+
+      await request(app.getHttpServer())
+        .post(`/webhooks/dlq/${failingEvent.id}/retry`)
+        .set('Authorization', `Bearer ${projectMemberToken}`)
+        .send({ projectId })
+        .expect(404);
+
+      await prisma.webhook.update({
+        where: { id: okWebhook.body.id },
+        data: { active: true },
+      });
+      await prisma.webhook.update({
+        where: { id: failWebhook.body.id },
+        data: { active: false },
+      });
+
+      const redriveCorrelationId = `webhook-redrive-${Date.now()}`;
+      await request(app.getHttpServer())
+        .post(`/webhooks/dlq/${failingEvent.id}/retry`)
+        .set('Authorization', `Bearer ${token}`)
+        .set('x-correlation-id', redriveCorrelationId)
+        .send({ projectId })
+        .expect(201);
+
+      const resetState = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: failingEvent.id } });
+      expect(resetState.deadLetteredAt).toBeNull();
+      expect(resetState.deliveryAttempts).toBe(0);
+      expect(resetState.deliveredAt).toBeNull();
+
+      await webhookWorker.processDueEvents(new Date());
+      const redrivenState = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: failingEvent.id } });
+      expect(Boolean(redrivenState.deliveredAt)).toBe(true);
+      expect(redrivenState.deadLetteredAt).toBeNull();
+      const redriveDelivered = received.find((entry) => {
+        try {
+          return JSON.parse(entry.body).id === failingEvent.id;
+        } catch {
+          return false;
+        }
+      });
+      expect(redriveDelivered).toBeTruthy();
+
+      const redriveAudit = await prisma.auditEvent.findFirst({
+        where: {
+          entityType: 'OutboxEvent',
+          entityId: failingEvent.id,
+          action: 'webhook.delivery.retry_requested',
+          correlationId: redriveCorrelationId,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(redriveAudit).toBeTruthy();
+      const redriveOutbox = await prisma.outboxEvent.findFirst({
+        where: {
+          type: 'webhook.delivery.retry_requested',
+          correlationId: redriveCorrelationId,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(redriveOutbox).toBeTruthy();
+      expect((redriveOutbox?.payload as any)?.projectId).toBe(projectId);
+      expect((redriveOutbox?.payload as any)?.outboxEventId).toBe(failingEvent.id);
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => {

@@ -191,6 +191,8 @@
 - Dead letter queue (DLQ):
   - Events that exceed retry limit are marked `deadLetteredAt` with `lastError`.
   - Project admins can inspect by project via `GET /webhooks/dlq?projectId=...`.
+  - Project admins can request redrive for a dead-lettered event via `POST /webhooks/dlq/:eventId/retry` (`{ projectId }`).
+  - Redrive resets retry state (`deliveryAttempts=0`, `deadLetteredAt=null`) and emits audit/outbox event `webhook.delivery.retry_requested`.
 - Signature:
   - Outbound webhook deliveries include HMAC signature headers when `WEBHOOK_SIGNING_SECRET` is configured:
     - `x-atlaspm-signature` (`v1=<sha256>`)
