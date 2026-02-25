@@ -104,11 +104,13 @@ export default function SearchPage() {
               value={projectFilter}
               onChange={(e) => setProjectFilter(e.target.value)}
               className="flex-1"
+              data-testid="search-project-filter"
             />
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               className="flex-1 px-3 py-2 border rounded-md bg-background"
+              data-testid="search-status-filter"
             >
               <option value="">All Statuses</option>
               <option value="TODO">To Do</option>
@@ -117,7 +119,7 @@ export default function SearchPage() {
               <option value="BLOCKED">Blocked</option>
             </select>
             
-            <Button type="submit" disabled={isSearching}>
+            <Button type="submit" disabled={isSearching} data-testid="search-submit-btn">
               {isSearching ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -155,7 +157,7 @@ export default function SearchPage() {
                     key={task.objectID}
                     onClick={() => handleTaskClick(task.objectID, task.projectId)}
                     className="p-4 rounded-lg border bg-card cursor-pointer hover:bg-accent/50 transition-colors"
-                    data-testid="search-result-item"
+                    data-testid={`search-result-item-${task.objectID}`}
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex-1 min-w-0">

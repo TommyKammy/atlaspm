@@ -65,7 +65,7 @@ function DependencyItem({
   });
 
   return (
-    <div className="flex items-center gap-2 px-2 py-1.5 rounded-md border bg-card">
+    <div className="flex items-center gap-2 px-2 py-1.5 rounded-md border bg-card" data-testid={`dependency-item-${dependency.id}`}>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <Badge className={typeInfo.color}>
@@ -234,16 +234,18 @@ export function DependencyManager({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Link2 className="h-4 w-4" />
-            <h3 className="text-sm font-medium">Dependencies</h3>
+            <h3 className="text-sm font-medium" data-testid="dependencies-heading">Dependencies</h3>
             {dependencies.length > 0 && (
-              <Badge className="bg-secondary text-secondary-foreground">{dependencies.length}</Badge>
+              <Badge className="bg-secondary text-secondary-foreground" data-testid="dependencies-count">
+                {dependencies.length}
+              </Badge>
             )}
           </div>
           <AddDependencyDialog
             taskId={taskId}
             existingTaskIds={existingTaskIds}
           >
-            <Button size="sm" variant="outline">
+            <Button size="sm" variant="outline" data-testid="dependencies-add-btn">
               <Plus className="h-3 w-3 mr-1" />
               Add
             </Button>
@@ -253,7 +255,7 @@ export function DependencyManager({
         {dependenciesQuery.isLoading || dependentsQuery.isLoading ? (
           <div className="text-sm text-muted-foreground">Loading dependencies...</div>
         ) : dependencies.length === 0 && dependents.length === 0 ? (
-          <div className="text-sm text-muted-foreground py-4 text-center border rounded-lg bg-card">
+          <div className="text-sm text-muted-foreground py-4 text-center border rounded-lg bg-card" data-testid="dependencies-empty">
             No dependencies yet. Add one to link related tasks.
           </div>
         ) : (

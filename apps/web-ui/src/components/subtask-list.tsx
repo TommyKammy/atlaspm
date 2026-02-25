@@ -62,6 +62,7 @@ function SubtaskItem({
         className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent/50 cursor-pointer"
         style={{ paddingLeft: `${(depth + 1) * 16}px` }}
         onClick={() => onTaskClick(task.id)}
+        data-testid={`subtask-row-${task.id}`}
       >
         <button
           type="button"
@@ -70,6 +71,7 @@ function SubtaskItem({
             e.stopPropagation();
             onToggle(task.id);
           }}
+          data-testid={`subtask-toggle-${task.id}`}
         >
           {isExpanded ? (
             <ChevronDown className="h-3 w-3" />
@@ -90,6 +92,7 @@ function SubtaskItem({
               deleteSubtask.mutate();
             }}
             disabled={deleteSubtask.isPending}
+            data-testid={`subtask-delete-${task.id}`}
           >
             <Trash2 className="h-3 w-3" />
           </Button>
@@ -166,6 +169,7 @@ function CreateSubtaskDialog({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Enter subtask title"
+              data-testid="create-subtask-title"
             />
           </div>
           <div className="space-y-2">
@@ -175,12 +179,14 @@ function CreateSubtaskDialog({
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Enter subtask description (optional)"
               className="w-full min-h-[80px] px-3 py-2 text-sm border rounded-md resize-y"
+              data-testid="create-subtask-description"
             />
           </div>
           <Button
             onClick={() => createSubtask.mutate({ title, description })}
             disabled={!title.trim() || createSubtask.isPending}
             className="w-full"
+            data-testid="create-subtask-submit"
           >
             Create Subtask
           </Button>
@@ -228,7 +234,7 @@ export function SubtaskList({
   const hasSubtasks = tree.length > 0;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-testid="subtasks-section">
       {breadcrumbs.length > 0 && (
         <div className="flex items-center gap-1 text-sm text-muted-foreground flex-wrap">
           {breadcrumbs.map((crumb, index) => (
@@ -249,7 +255,7 @@ export function SubtaskList({
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium">Subtasks</h3>
         <CreateSubtaskDialog parentTaskId={taskId} projectId={projectId}>
-          <Button size="sm" variant="outline">
+          <Button size="sm" variant="outline" data-testid="subtasks-add-btn">
             <Plus className="h-3 w-3 mr-1" />
             Add
           </Button>
@@ -273,7 +279,7 @@ export function SubtaskList({
           ))}
         </div>
       ) : (
-        <div className="text-sm text-muted-foreground py-4 text-center border rounded-lg bg-card">
+        <div className="text-sm text-muted-foreground py-4 text-center border rounded-lg bg-card" data-testid="subtasks-empty">
           No subtasks yet. Create one to break down this task.
         </div>
       )}

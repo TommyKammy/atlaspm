@@ -79,7 +79,7 @@ test.describe('Search Feature', () => {
     
     await page.goto(`/search?q=${encodeURIComponent(uniqueTitle)}`);
     
-    await expect(page.getByTestId('search-result-item').first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('[data-testid^="search-result-item-"]').first()).toBeVisible({ timeout: 10000 });
     await expect(page.getByText(uniqueTitle)).toBeVisible();
   });
 
@@ -99,8 +99,8 @@ test.describe('Search Feature', () => {
     
     await page.goto('/search');
     await page.fill('[data-testid="search-page-input"]', 'Task');
-    await page.selectOption('select', 'DONE');
-    await page.click('button:has-text("Search")');
+    await page.selectOption('[data-testid="search-status-filter"]', 'DONE');
+    await page.getByTestId('search-submit-btn').click();
     
     await expect(page.getByText(/Found \d+ result/)).toBeVisible();
     await expect(page.getByText(task1Title)).toBeVisible();
@@ -141,7 +141,7 @@ test.describe('Search Feature', () => {
     
     await page.goto(`/search?q=${encodeURIComponent(taskTitle)}`);
     
-    await page.click('[data-testid="search-result-item"]');
+    await page.locator('[data-testid^="search-result-item-"]').first().click();
     
     await expect(page).toHaveURL(new RegExp(`/projects/${projectId}`));
   });
