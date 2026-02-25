@@ -519,3 +519,23 @@
   - `pnpm e2e`
 - Risks/known gaps:
   - Files delete/restore is per-attachment action only; bulk operations are not added yet.
+
+## 2026-02-25 - P1 Task Detail Enhancement (Phase A)
+- What changed:
+  - Started issue #41 with low-risk, API-reuse changes in task detail drawer:
+    - Added dependency status highlight badge (`Dependencies clear` / `Blocked by N`) based on existing dependency API.
+    - Added subtask completion roll-up (`done/total (%)`) from existing subtask tree API.
+  - Added stable test ids:
+    - `subtask-rollup`
+    - `dependency-blocked-indicator`
+  - Extended MVP E2E to assert roll-up and dependency indicator visibility in task detail.
+- Why:
+  - Deliver immediate operator value in daily task review without schema changes, while keeping room for reminder feature in next step.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Due reminder creation/editing is not included in this sub-step yet; this is the next remaining scope in #41.

@@ -219,6 +219,8 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await page.click(`[data-testid="open-task-${movedTask.id}"]`);
   const editor = page.locator('[data-testid="task-description-content"]');
   await expect(editor).toBeVisible();
+  await expect(page.locator('[data-testid="subtask-rollup"]')).toBeVisible();
+  await expect(page.locator('[data-testid="dependency-blocked-indicator"]')).toHaveText('Dependencies clear');
   await editor.click();
   await editor.fill('Detailed implementation plan for this task.');
 
