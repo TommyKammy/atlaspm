@@ -310,23 +310,34 @@ export function ProjectCalendarView({
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
+  const [dateField, setDateField] = useState<'dueAt' | 'startAt'>('dueAt');
 
   const groupsQuery = useQuery<SectionTaskGroup[]>({
     queryKey: queryKeys.projectTasksGrouped(projectId),
     queryFn: () => api(`/projects/${projectId}/tasks?groupBy=section`),
   });
 
-  const patchTaskDueDate = useMutation({
-    mutationFn: ({ taskId, dueAt, version }: { taskId: string; dueAt: string | null; version: number }) =>
-      api(`/tasks/${taskId}`, { method: 'PATCH', body: { dueAt, version } }) as Promise<Task>,
-    onMutate: async ({ taskId, dueAt }) => {
+  const patchTaskDate = useMutation({
+    mutationFn: ({
+      taskId,
+      field,
+      value,
+      version,
+    }: {
+      taskId: string;
+      field: 'dueAt' | 'startAt';
+      value: string | null;
+      version: number;
+    }) =>
+      api(`/tasks/${taskId}`, { method: 'PATCH', body: { [field]: value, version } }) as Promise<Task>,
+    onMutate: async ({ taskId, field, value }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
       const previous = queryClient.getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId));
       queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) =>
         current.map((group) => ({
           ...group,
           tasks: group.tasks.map((task) =>
-            task.id === taskId ? { ...task, dueAt, version: task.version + 1 } : task,
+            task.id === taskId ? { ...task, [field]: value, version: task.version + 1 } : task,
           ),
         })),
       );
@@ -349,8 +360,8 @@ export function ProjectCalendarView({
     return rows;
   }, [groupsQuery.data, search, statusFilter, priorityFilter]);
 
-  const dueTasks = tasks.filter((task) => task.dueAt);
-  const noDueTasks = tasks.filter((task) => !task.dueAt);
+  const datedTasks = tasks.filter((task) => (dateField === 'dueAt' ? task.dueAt : task.startAt));
+  const noDateTasks = tasks.filter((task) => !(dateField === 'dueAt' ? task.dueAt : task.startAt));
   const year = monthAnchor.getFullYear();
   const month = monthAnchor.getMonth();
   const firstDay = new Date(year, month, 1);
@@ -360,21 +371,26 @@ export function ProjectCalendarView({
     const day = index - offset + 1;
     if (day < 1 || day > daysInMonth) return null;
     const isoPrefix = new Date(year, month, day).toISOString().slice(0, 10);
-    const dayTasks = dueTasks.filter((task) => String(task.dueAt).slice(0, 10) === isoPrefix);
+    const dayTasks = datedTasks.filter((task) => {
+      const value = dateField === 'dueAt' ? task.dueAt : task.startAt;
+      return value ? String(value).slice(0, 10) === isoPrefix : false;
+    });
     return { day, tasks: dayTasks, isoPrefix };
   });
 
   const allTasksById = new Map(tasks.map((task) => [task.id, task]));
 
-  const updateTaskDueDate = (taskId: string, dueDateIso: string | null) => {
+  const updateTaskDate = (taskId: string, dateIso: string | null) => {
     const task = allTasksById.get(taskId);
     if (!task) return;
-    const currentDate = task.dueAt ? String(task.dueAt).slice(0, 10) : null;
-    const nextDate = dueDateIso ? dueDateIso.slice(0, 10) : null;
+    const currentValue = dateField === 'dueAt' ? task.dueAt : task.startAt;
+    const currentDate = currentValue ? String(currentValue).slice(0, 10) : null;
+    const nextDate = dateIso ? dateIso.slice(0, 10) : null;
     if (currentDate === nextDate) return;
-    patchTaskDueDate.mutate({
+    patchTaskDate.mutate({
       taskId,
-      dueAt: dueDateIso ? `${dueDateIso}T00:00:00.000Z` : null,
+      field: dateField,
+      value: dateIso ? `${dateIso}T00:00:00.000Z` : null,
       version: task.version,
     });
   };
@@ -386,25 +402,45 @@ export function ProjectCalendarView({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between rounded-lg border bg-card p-3">
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={() => setMonthAnchor((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))}
-          aria-label="Previous month"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <h3 className="text-sm font-semibold">
-          {monthAnchor.toLocaleDateString(undefined, { year: 'numeric', month: 'long' })}
-        </h3>
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={() => setMonthAnchor((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))}
-          aria-label="Next month"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setMonthAnchor((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))}
+            aria-label="Previous month"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <h3 className="text-sm font-semibold">
+            {monthAnchor.toLocaleDateString(undefined, { year: 'numeric', month: 'long' })}
+          </h3>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setMonthAnchor((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))}
+            aria-label="Next month"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant={dateField === 'dueAt' ? 'default' : 'outline'}
+            onClick={() => setDateField('dueAt')}
+            data-testid="calendar-field-due"
+          >
+            {t('dueDate')}
+          </Button>
+          <Button
+            size="sm"
+            variant={dateField === 'startAt' ? 'default' : 'outline'}
+            onClick={() => setDateField('startAt')}
+            data-testid="calendar-field-start"
+          >
+            {t('startDate')}
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-7 gap-2 text-xs text-muted-foreground">
@@ -427,7 +463,7 @@ export function ProjectCalendarView({
               event.preventDefault();
               const taskId = event.dataTransfer.getData('text/task-id') || draggingTaskId;
               if (!taskId) return;
-              updateTaskDueDate(taskId, cell.isoPrefix);
+              updateTaskDate(taskId, cell.isoPrefix);
               setDraggingTaskId(null);
             }}
           >
@@ -464,29 +500,33 @@ export function ProjectCalendarView({
 
       <section
         className="rounded-lg border bg-card p-3"
-        data-testid="calendar-no-due"
+        data-testid={dateField === 'dueAt' ? 'calendar-no-due' : 'calendar-no-start'}
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => {
           event.preventDefault();
           const taskId = event.dataTransfer.getData('text/task-id') || draggingTaskId;
           if (!taskId) return;
-          updateTaskDueDate(taskId, null);
+          updateTaskDate(taskId, null);
           setDraggingTaskId(null);
         }}
       >
-        <h4 className="mb-2 text-sm font-medium">{t('noDueDate')}</h4>
-        {!noDueTasks.length ? (
-          <p className="text-xs text-muted-foreground">{t('allTasksHaveDueDates')}</p>
+        <h4 className="mb-2 text-sm font-medium">
+          {dateField === 'dueAt' ? t('noDueDate') : t('noStartDate')}
+        </h4>
+        {!noDateTasks.length ? (
+          <p className="text-xs text-muted-foreground">
+            {dateField === 'dueAt' ? t('allTasksHaveDueDates') : t('allTasksHaveStartDates')}
+          </p>
         ) : (
           <div className="flex flex-wrap gap-2">
-            {noDueTasks.map((task) => (
+            {noDateTasks.map((task) => (
               <button
                 key={task.id}
                 type="button"
                 onClick={() => setSelectedTaskId(task.id)}
                 className="rounded-full border px-2 py-1 text-xs hover:bg-muted/60"
                 draggable
-                data-testid={`calendar-no-due-task-${task.id}`}
+                data-testid={dateField === 'dueAt' ? `calendar-no-due-task-${task.id}` : `calendar-no-start-task-${task.id}`}
                 onDragStart={(event) => {
                   event.dataTransfer.setData('text/task-id', task.id);
                   setDraggingTaskId(task.id);

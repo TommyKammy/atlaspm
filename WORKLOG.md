@@ -618,3 +618,31 @@
   - `pnpm e2e`
 - Risks/known gaps:
   - Current delivery is outbox/audit-first; external notifier consumers (email/Slack/push) are still downstream responsibilities.
+
+## 2026-02-25 - P1 Calendar Enhancement: due/start Dual Editing
+- What changed:
+  - Upgraded `ProjectCalendarView` to support dual date-field editing modes:
+    - `Due date` mode (existing behavior, preserved)
+    - `Start date` mode (new)
+  - Added calendar field switch controls:
+    - `data-testid=calendar-field-due`
+    - `data-testid=calendar-field-start`
+  - Generalized drag-and-drop date mutation logic to patch either `dueAt` or `startAt` with optimistic cache update/rollback.
+  - Added mode-specific “unscheduled” buckets:
+    - due mode: `calendar-no-due` and `calendar-no-due-task-*`
+    - start mode: `calendar-no-start` and `calendar-no-start-task-*`
+  - Added i18n keys for start-date calendar UX text in EN/JA.
+  - Extended MVP E2E to verify start-date drag edit roundtrip:
+    - drag from no-start bucket to day (set startAt)
+    - drag back to no-start bucket (clear startAt)
+    - verify via API poll that state persists.
+- Why:
+  - Completes issue #39 acceptance for bidirectional calendar editing on both `dueAt` and `startAt` while preserving list/task-detail consistency.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Calendar still uses month view only; week view remains out of scope for this step.

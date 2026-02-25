@@ -172,6 +172,31 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
       return taskAAfter?.dueAt ? String(taskAAfter.dueAt).slice(0, 10) : null;
     })
     .toBe(targetDate);
+
+  await page.click('[data-testid="calendar-field-start"]');
+  await expect(page.locator(`[data-testid="calendar-no-start-task-${taskAId}"]`)).toBeVisible();
+  await page.locator(`[data-testid="calendar-no-start-task-${taskAId}"]`).dragTo(
+    page.locator(`[data-testid="calendar-day-${targetDate}"]`),
+    { force: true },
+  );
+  await expect
+    .poll(async () => {
+      const taskGroups = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
+      const taskAAfter = taskGroups.flatMap((g: any) => g.tasks).find((task: any) => task.id === taskAId);
+      return taskAAfter?.startAt ? String(taskAAfter.startAt).slice(0, 10) : null;
+    })
+    .toBe(targetDate);
+  await page.locator(`[data-testid="calendar-task-${taskAId}"]`).dragTo(page.locator('[data-testid="calendar-no-start"]'), {
+    force: true,
+  });
+  await expect
+    .poll(async () => {
+      const taskGroups = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
+      const taskAAfter = taskGroups.flatMap((g: any) => g.tasks).find((task: any) => task.id === taskAId);
+      return taskAAfter?.startAt ?? null;
+    })
+    .toBe(null);
+  await page.click('[data-testid="calendar-field-due"]');
   await page.click('[data-testid="project-view-list"]');
 
   await page.reload();
