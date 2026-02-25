@@ -135,6 +135,9 @@ const dictionaries: Record<Locale, Dictionary> = {
     restore: 'Restore',
     restoring: 'Restoring...',
     deletedAt: 'Deleted at',
+    taskDeletedLabel: 'Task deleted',
+    undo: 'Undo',
+    dismiss: 'Dismiss',
   },
   ja: {
     appName: 'AtlasPM',
@@ -265,6 +268,9 @@ const dictionaries: Record<Locale, Dictionary> = {
     restore: '復元',
     restoring: '復元中...',
     deletedAt: '削除日時',
+    taskDeletedLabel: 'タスクを削除しました',
+    undo: '元に戻す',
+    dismiss: '閉じる',
   },
 };
 

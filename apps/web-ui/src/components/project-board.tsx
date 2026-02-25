@@ -12,7 +12,7 @@ import {
 import { useSortable, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, ChevronDown, ChevronRight, Plus, Trash2, User } from 'lucide-react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
@@ -100,6 +100,17 @@ function initials(label: string) {
 type TaskTreeNode = {
   task: Task;
   children: TaskTreeNode[];
+};
+
+type UndoDeleteState = {
+  taskId: string;
+  title: string;
+};
+
+type DeleteTaskResponse = {
+  success: boolean;
+  deletedCount: number;
+  taskIds: string[];
 };
 
 function buildSectionTaskTree(tasks: Task[]): TaskTreeNode[] {
@@ -519,6 +530,16 @@ export default function ProjectBoard({
   const queryClient = useQueryClient();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [collapsedTaskIds, setCollapsedTaskIds] = useState<Set<string>>(new Set());
+  const [undoDelete, setUndoDelete] = useState<UndoDeleteState | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current) {
+        clearTimeout(undoTimerRef.current);
+      }
+    };
+  }, []);
 
   const groupsQuery = useQuery<SectionTaskGroup[]>({
     queryKey: queryKeys.projectTasksGrouped(projectId),
@@ -590,10 +611,12 @@ export default function ProjectBoard({
   });
 
   const deleteTask = useMutation({
-    mutationFn: (taskId: string) => api(`/tasks/${taskId}`, { method: 'DELETE' }),
+    mutationFn: (taskId: string) => api(`/tasks/${taskId}`, { method: 'DELETE' }) as Promise<DeleteTaskResponse>,
     onMutate: async (taskId) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
       const previous = queryClient.getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId));
+      const deletedTask =
+        previous?.flatMap((group) => group.tasks).find((task) => task.id === taskId) ?? null;
       queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) =>
         current.map((group) => ({
           ...group,
@@ -601,14 +624,37 @@ export default function ProjectBoard({
         })),
       );
       if (selectedTaskId === taskId) setSelectedTaskId(null);
-      return { previous };
+      return { previous, deletedTask };
     },
     onError: (_error, _taskId, context) => {
       if (context?.previous) queryClient.setQueryData(queryKeys.projectTasksGrouped(projectId), context.previous);
     },
+    onSuccess: (_result, taskId, context) => {
+      if (undoTimerRef.current) {
+        clearTimeout(undoTimerRef.current);
+      }
+      setUndoDelete({
+        taskId,
+        title: context?.deletedTask?.title.trim() || t('untitledTask'),
+      });
+      undoTimerRef.current = setTimeout(() => {
+        setUndoDelete(null);
+      }, 10000);
+    },
     onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksDeletedGrouped(projectId) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.projectSections(projectId) });
+    },
+  });
+
+  const restoreTask = useMutation({
+    mutationFn: (taskId: string) => api(`/tasks/${taskId}/restore`, { method: 'POST' }) as Promise<Task>,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksDeletedGrouped(projectId) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectSections(projectId) });
+      setUndoDelete(null);
     },
   });
 
@@ -755,6 +801,44 @@ export default function ProjectBoard({
         {!filteredGroups.length ? (
           <div className="rounded-lg border border-dashed bg-card p-6 text-center text-sm text-muted-foreground">
             {t('noSectionsYet')}
+          </div>
+        ) : null}
+
+        {undoDelete ? (
+          <div
+            className="fixed bottom-4 right-4 z-50 flex items-center gap-3 rounded-md border bg-background px-3 py-2 text-sm shadow-md"
+            data-testid="delete-undo-banner"
+          >
+            <span>
+              {t('taskDeletedLabel')}: {undoDelete.title}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              data-testid="delete-undo-action"
+              disabled={restoreTask.isPending}
+              onClick={() => {
+                if (undoTimerRef.current) {
+                  clearTimeout(undoTimerRef.current);
+                }
+                restoreTask.mutate(undoDelete.taskId);
+              }}
+            >
+              {restoreTask.isPending ? t('restoring') : t('undo')}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              data-testid="delete-undo-dismiss"
+              onClick={() => {
+                if (undoTimerRef.current) {
+                  clearTimeout(undoTimerRef.current);
+                }
+                setUndoDelete(null);
+              }}
+            >
+              {t('dismiss')}
+            </Button>
           </div>
         ) : null}
 

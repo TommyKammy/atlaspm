@@ -8,6 +8,8 @@ export const queryKeys = {
   projectSections: (projectId: string) => ['project', projectId, 'sections'] as const,
   projectTasksGrouped: (projectId: string) =>
     ['project', projectId, 'tasks', { groupBy: 'section' }] as const,
+  projectTasksDeletedGrouped: (projectId: string) =>
+    ['project', projectId, 'tasks', { groupBy: 'section', deleted: true }] as const,
   projectRules: (projectId: string) => ['project', projectId, 'rules'] as const,
   projectMembers: (projectId: string) => ['project', projectId, 'members'] as const,
   taskDetail: (taskId: string) => ['task', taskId] as const,

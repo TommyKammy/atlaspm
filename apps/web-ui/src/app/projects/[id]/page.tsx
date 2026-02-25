@@ -74,7 +74,7 @@ export default function ProjectPage() {
   });
 
   const deletedTasksQuery = useQuery<SectionTaskGroup[]>({
-    queryKey: [...queryKeys.projectTasksGrouped(projectId), 'deleted'],
+    queryKey: queryKeys.projectTasksDeletedGrouped(projectId),
     queryFn: () => api(`/projects/${projectId}/tasks?groupBy=section&deleted=true`),
     enabled: Boolean(projectId) && trashOpen,
   });
@@ -83,7 +83,7 @@ export default function ProjectPage() {
     mutationFn: (taskId: string) => api(`/tasks/${taskId}/restore`, { method: 'POST' }) as Promise<Task>,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
-      await queryClient.invalidateQueries({ queryKey: [...queryKeys.projectTasksGrouped(projectId), 'deleted'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksDeletedGrouped(projectId) });
     },
   });
 

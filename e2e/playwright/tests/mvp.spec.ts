@@ -116,6 +116,11 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await quickAddBacklog.press('Enter');
   await expect(page.locator('[data-task-title="Task C"]')).toBeVisible();
 
+  await page.locator('[data-task-title="Task C"] button[data-testid^="delete-task-"]').first().click({ force: true });
+  await expect(page.locator('[data-testid="delete-undo-banner"]')).toBeVisible();
+  await page.click('[data-testid="delete-undo-action"]');
+  await expect(page.locator('[data-task-title="Task C"]')).toBeVisible();
+
   await page.click(`[data-testid="quick-add-open-${doing.id}"]`);
   const quickAddDoing = page.locator(`[data-testid="quick-add-input-${doing.id}"]`);
   await quickAddDoing.fill('Task D');
