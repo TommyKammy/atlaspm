@@ -16,6 +16,8 @@ import { ReminderDeliveryService } from './tasks/reminder-delivery.service';
 import { PublicAttachmentsController } from './tasks/public-attachments.controller';
 import { CollabController } from './collab/collab.controller';
 import { WorkspaceAdminController } from './workspaces/workspace-admin.controller';
+import { NotificationsController } from './notifications/notifications.controller';
+import { NotificationsService } from './notifications/notifications.service';
 import { SearchModule } from './search/search.module';
 import { PortfoliosModule } from './portfolios/portfolios.module';
 import { WorkloadModule } from './workload/workload.module';
@@ -35,7 +37,15 @@ import { IntegrationsModule } from './integrations/integrations.module';
     PublicAttachmentsController,
     CollabController,
     WorkspaceAdminController,
+    NotificationsController,
   ],
-  providers: [PrismaService, DomainService, SubtaskService, CycleDetectionService, ReminderDeliveryService],
+  providers: [
+    PrismaService,
+    DomainService,
+    SubtaskService,
+    CycleDetectionService,
+    ReminderDeliveryService,
+    NotificationsService,
+  ],
 })
 export class AppModule {}

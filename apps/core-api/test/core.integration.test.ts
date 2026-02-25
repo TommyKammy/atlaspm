@@ -355,6 +355,34 @@ describe('Core API Integration', () => {
       ),
     ).toBe(true);
 
+    const memberNotifications = await request(app.getHttpServer())
+      .get('/notifications?status=unread')
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(200);
+    const mentionNotification = memberNotifications.body.find(
+      (item: any) => item.type === 'mention' && item.taskId === t1.body.id,
+    );
+    expect(mentionNotification).toBeTruthy();
+    expect(mentionNotification.project?.id).toBe(projectId);
+
+    const unreadCountBeforeRead = await request(app.getHttpServer())
+      .get('/notifications/unread-count')
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(200);
+    expect(unreadCountBeforeRead.body.count).toBeGreaterThan(0);
+
+    await request(app.getHttpServer())
+      .post(`/notifications/${mentionNotification.id}/read`)
+      .set('Authorization', `Bearer ${memberToken}`)
+      .send({ read: true })
+      .expect(201);
+
+    const unreadCountAfterRead = await request(app.getHttpServer())
+      .get('/notifications/unread-count')
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(200);
+    expect(unreadCountAfterRead.body.count).toBeLessThan(unreadCountBeforeRead.body.count);
+
     await request(app.getHttpServer())
       .patch(`/tasks/${t1.body.id}/description`)
       .set('Authorization', `Bearer ${token}`)
@@ -555,6 +583,8 @@ describe('Core API Integration', () => {
     expect(outbox.body.some((e: any) => e.type === 'task.deleted')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.restored')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'rule.updated')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'notification.created')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'notification.read')).toBe(true);
 
     expect(defaultSection).toBeTruthy();
   });

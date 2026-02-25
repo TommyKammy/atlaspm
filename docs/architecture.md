@@ -97,6 +97,14 @@
   - Comments use token syntax `@[userId|label]` in Phase 2.
   - Server normalizes mentions into `task_mentions` (`task_id`, `mentioned_user_id`, `source_type`, `source_id`).
   - Mention sync runs on description save and comment create/update/delete.
+- Inbox notifications for mentions:
+  - Mention create events upsert `inbox_notifications` rows (dedup key: `user_id + task_id + type + source_type + source_id`).
+  - Notification center/inbox read APIs:
+    - `GET /notifications`
+    - `GET /notifications/unread-count`
+    - `POST /notifications/:id/read`
+    - `POST /notifications/read-all`
+  - Notification list access is filtered by current project membership; removed members cannot read stale project notifications.
 - Attachments:
   - Metadata is stored in `task_attachments`.
   - Upload flow:
@@ -108,6 +116,7 @@
 - Audit/outbox additions:
   - `task.mention.created`, `task.mention.deleted`
   - `task.attachment.initiated`, `task.attachment.created`, `task.attachment.deleted`
+  - `notification.created`, `notification.reopened`, `notification.read`, `notification.read_all`
 
 ## Future readiness
 - `packages/domain` and `packages/rule-engine` provide extraction boundaries for phase 2.

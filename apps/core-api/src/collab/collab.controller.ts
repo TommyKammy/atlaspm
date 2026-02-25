@@ -21,6 +21,7 @@ import { AuthGuard } from '../auth/auth.guard';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { Prisma, ProjectRole } from '@prisma/client';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const MAX_DESCRIPTION_DOC_BYTES = 200_000;
 const MAX_DESCRIPTION_TEXT_LENGTH = 20_000;
@@ -49,6 +50,7 @@ export class CollabController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(NotificationsService) private readonly notifications: NotificationsService,
   ) {}
 
   @Post('tasks/:id/collab-token')
@@ -297,6 +299,15 @@ export class CollabController {
         correlationId,
         outboxType: 'task.mention.created',
         payload: { taskId, mentionedUserId: userId, sourceType: 'description', sourceId: '' },
+      });
+      await this.notifications.upsertMentionNotification(tx, {
+        userId,
+        projectId: task.projectId,
+        taskId,
+        sourceType: 'description',
+        sourceId: '',
+        actor: 'collab-server',
+        correlationId,
       });
     }
 

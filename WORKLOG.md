@@ -646,3 +646,52 @@
   - `pnpm e2e`
 - Risks/known gaps:
   - Calendar still uses month view only; week view remains out of scope for this step.
+
+## 2026-02-25 - P1 #42 @mention Notifications (Inbox / Notification Center)
+- What changed:
+  - `core-api`
+    - Added `inbox_notifications` persistence model and migration:
+      - `apps/core-api/prisma/migrations/20260226010000_inbox_notifications/migration.sql`
+      - `apps/core-api/prisma/schema.prisma`
+    - Added notifications API:
+      - `GET /notifications`
+      - `GET /notifications/unread-count`
+      - `POST /notifications/:id/read`
+      - `POST /notifications/read-all`
+      - files: `apps/core-api/src/notifications/notifications.controller.ts`, `apps/core-api/src/notifications/notifications.service.ts`
+    - Wired mention -> notification upsert on both paths:
+      - direct description/comment saves (`TasksController.syncTaskMentions`)
+      - collab snapshot mention sync (`CollabController.syncDescriptionMentions`)
+    - Added audit/outbox for notification lifecycle:
+      - `notification.created`, `notification.reopened`, `notification.read`, `notification.read_all`
+    - Registered notifications controller/service in `AppModule`.
+    - Extended integration test to verify mention notification creation and read flow.
+  - `web-ui`
+    - Added header notification center component with unread badge and quick jump:
+      - `apps/web-ui/src/components/notification-center.tsx`
+    - Added Inbox page:
+      - `apps/web-ui/src/app/inbox/page.tsx`
+    - Added `/my-tasks` route placeholder to align sidebar top-nav routing:
+      - `apps/web-ui/src/app/my-tasks/page.tsx`
+    - Sidebar inbox link moved to real route (`/inbox`) and active-state logic fixed.
+    - Added project deep-link open support (`/projects/:id?task=:taskId`) by plumbing query param into `ProjectBoard`.
+    - Added i18n strings and query keys/types for notifications.
+  - E2E
+    - Extended MVP flow to verify mention notification path:
+      - mention creation -> header notification -> inbox listing -> task open
+      - unread count decreases after open/read
+- Why:
+  - Implement issue #42 acceptance criteria with minimal blast radius while preserving headless separation and existing auth/rbac boundaries.
+  - Close the missing Inbox/notification-center user path for @mentions without introducing page refresh dependence.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api prisma:generate`
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test` (with compose DB up)
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - `pnpm test` at repo root fails when local compose Postgres is not running (existing local-env dependency pattern); run `pnpm e2e:up` first when validating `core-api` tests locally.
+  - Notification center currently prioritizes unread feed in header; inbox page is the complete history surface.

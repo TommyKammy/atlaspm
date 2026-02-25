@@ -47,6 +47,7 @@ import {
   templateDefinition,
   type RuleDefinition,
 } from '../rules/rule-definition';
+import { NotificationsService } from '../notifications/notifications.service';
 
 class TaskQuery {
   @IsOptional()
@@ -327,6 +328,7 @@ export class TasksController {
     @Inject(DomainService) private readonly domain: DomainService,
     @Inject(SubtaskService) private readonly subtaskService: SubtaskService,
     @Inject(SearchService) private readonly searchService: SearchService,
+    @Inject(NotificationsService) private readonly notifications: NotificationsService,
   ) {}
 
   @Get('projects/:id/tasks')
@@ -1401,12 +1403,12 @@ export class TasksController {
     req: AppRequest,
   ) {
     const sourceId = input.sourceId ?? '';
+    const task = await tx.task.findUniqueOrThrow({ where: { id: input.taskId }, select: { projectId: true } });
     const uniqueIncoming = [...new Set(input.mentionedUserIds)].filter(Boolean);
     const validUsers = uniqueIncoming.length
       ? await tx.projectMembership.findMany({
           where: {
-            projectId: (await tx.task.findUniqueOrThrow({ where: { id: input.taskId }, select: { projectId: true } }))
-              .projectId,
+            projectId: task.projectId,
             userId: { in: uniqueIncoming },
           },
           select: { userId: true },
@@ -1441,6 +1443,16 @@ export class TasksController {
           sourceType: input.sourceType,
           sourceId,
         },
+      });
+      await this.notifications.upsertMentionNotification(tx, {
+        userId,
+        projectId: task.projectId,
+        taskId: input.taskId,
+        sourceType: input.sourceType,
+        sourceId,
+        triggeredByUserId: req.user.sub,
+        actor: req.user.sub,
+        correlationId: req.correlationId,
       });
     }
 

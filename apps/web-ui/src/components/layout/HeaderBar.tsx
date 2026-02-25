@@ -18,6 +18,7 @@ import type { Project } from '@/lib/types';
 import { useI18n } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { NotificationCenter } from '@/components/notification-center';
 
 type Me = {
   id: string;
@@ -265,6 +266,7 @@ export function HeaderBar({
             <TooltipContent>{t('theme')}</TooltipContent>
           </Tooltip>
         </TooltipProvider>
+        <NotificationCenter />
         <PersonalSettingsMenu />
       </div>
     </header>

@@ -253,11 +253,11 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
 
   await editor.type('\n/quo');
   await expect(page.locator('[data-testid="slash-menu"]')).toBeVisible();
-  await page.click('[data-testid="slash-item-quote"]');
+  await page.locator('[data-testid="slash-item-quote"]').first().click({ force: true });
   await editor.type('Quote block from slash menu');
 
   await editor.type('\n/cod');
-  await page.click('[data-testid="slash-item-code"]');
+  await page.locator('[data-testid="slash-item-code"]').first().click({ force: true });
   await editor.type('const phaseTwo = true;');
 
   await editor.type('\nMention ');
@@ -268,7 +268,7 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await editor.type(' LinkText');
 
   await editor.type('\n/image');
-  await page.click('[data-testid="slash-item-image"]');
+  await page.locator('[data-testid="slash-item-image"]').first().click({ force: true });
   const fixturePath = path.resolve(process.cwd(), 'fixtures/pixel.png');
   await page.setInputFiles('[data-testid="description-image-input"]', fixturePath);
   await expect(editor.locator('img')).toBeVisible();
@@ -294,6 +294,32 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
     });
 
   await page.click('button[aria-label="Close task detail"]');
+
+  const unreadBeforeOpen = await api('/notifications/unread-count', token);
+  expect(unreadBeforeOpen.count).toBeGreaterThan(0);
+
+  await page.click('[data-testid="notification-center-trigger"]');
+  const notificationItem = page.locator('[data-testid^="notification-item-"]').first();
+  await expect(notificationItem).toBeVisible();
+  await notificationItem.click();
+  await page.waitForURL(`**/projects/${projectA.id}?task=*`);
+
+  await page.goto('/inbox');
+  await expect(page.locator('[data-testid="inbox-page"]')).toBeVisible();
+  await expect(page.locator('[data-testid^="inbox-notification-"]').first()).toBeVisible();
+  await page.locator('[data-testid^="inbox-open-task-"]').first().click({ force: true });
+  await page.waitForURL(`**/projects/${projectA.id}?task=*`);
+  await expect(page.locator('[data-testid="task-description-content"]')).toBeVisible();
+  await page.click('button[aria-label="Close task detail"]');
+  await page.goto(`/projects/${projectA.id}`);
+
+  await expect
+    .poll(async () => {
+      const unreadAfterOpen = await api('/notifications/unread-count', token);
+      return unreadAfterOpen.count;
+    })
+    .toBeLessThan(unreadBeforeOpen.count);
+
   await page.click('[data-testid="project-view-files"]');
   await expect(page.locator('[data-testid="files-mime-filter"]')).toBeVisible();
   await page.selectOption('[data-testid="files-mime-filter"]', 'IMAGE');

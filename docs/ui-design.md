@@ -24,6 +24,7 @@
 - Header:
   - current project title context
   - theme toggle dropdown
+  - notification center dropdown (unread badge + quick jump to task)
 
 ## Task List Structure
 - Header tabs: `List / Board / Calendar / Files` (non-list views are placeholder unless implemented).
@@ -56,6 +57,8 @@
 - `['project', projectId, 'tasks', { groupBy: 'section' }]`
 - `['project', projectId, 'members']`
 - `['project', projectId, 'rules']`
+- `['notifications', { status: 'all' | 'unread' }]`
+- `['notifications', 'unread-count']`
 
 ## Mutation/Caching Discipline
 - Use targeted optimistic updates for inline edits and reorder.
@@ -109,6 +112,19 @@
 - Visual style remains consistent with existing shadcn tokens and compact task detail layout.
 - Fallback behavior:
   - when collab token/ws fails, editor gracefully switches to snapshot mode without full refresh.
+
+## Mention Notifications (P1)
+- Header notification center:
+  - bell trigger with unread badge
+  - latest mention notifications
+  - one-click navigation to `/projects/:id?task=:taskId`
+- Inbox page:
+  - route: `/inbox`
+  - filters: `All` / `Unread`
+  - actions: mark read/unread, mark all read, open target task
+- Caching:
+  - targeted invalidation for notifications list and unread count after read/read-all mutations
+  - no hard refresh required
 
 ## Admin UI (Phase 3+)
 - Workspace user admin:

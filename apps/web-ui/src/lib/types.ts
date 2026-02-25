@@ -116,6 +116,33 @@ export type TaskReminder = {
   sentAt?: string | null;
 };
 
+export type InboxNotification = {
+  id: string;
+  userId: string;
+  projectId: string;
+  taskId: string;
+  type: 'mention' | string;
+  sourceType: 'description' | 'comment' | string;
+  sourceId: string;
+  readAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  project: {
+    id: string;
+    name: string;
+  };
+  task: {
+    id: string;
+    title: string;
+    deletedAt?: string | null;
+  };
+  triggeredBy?: {
+    id: string;
+    displayName?: string | null;
+    email?: string | null;
+  } | null;
+};
+
 export type AuditEvent = {
   id: string;
   actor: string;

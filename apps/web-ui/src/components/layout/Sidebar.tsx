@@ -33,9 +33,9 @@ export function Sidebar({ onNavigate, compact = false }: SidebarProps) {
   const handleNavigate = () => onNavigate?.();
 
   const topLinks = [
-    { href: '/', label: t('home'), icon: Home, compact: 'H', active: pathname === '/' && !pathname.includes('view=') },
-    { href: '/?view=my-tasks', label: t('myTasks'), icon: CheckCircle2, compact: 'M', active: pathname === '/' && pathname.includes('view=my-tasks') },
-    { href: '/?view=inbox', label: t('inbox'), icon: Inbox, compact: 'I', active: pathname === '/' && pathname.includes('view=inbox') },
+    { href: '/', label: t('home'), icon: Home, compact: 'H', active: pathname === '/' },
+    { href: '/my-tasks', label: t('myTasks'), icon: CheckCircle2, compact: 'M', active: pathname === '/my-tasks' },
+    { href: '/inbox', label: t('inbox'), icon: Inbox, compact: 'I', active: pathname === '/inbox' },
   ];
 
   const insightLinks = [

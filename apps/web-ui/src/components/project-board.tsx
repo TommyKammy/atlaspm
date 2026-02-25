@@ -518,12 +518,14 @@ export default function ProjectBoard({
   search,
   statusFilter,
   priorityFilter,
+  initialTaskId,
 }: {
   projectId: string;
   projectName?: string;
   search: string;
   statusFilter: 'ALL' | Task['status'];
   priorityFilter: 'ALL' | NonNullable<Task['priority']>;
+  initialTaskId?: string | null;
 }) {
   const { t } = useI18n();
   const sensors = useSensors(useSensor(PointerSensor));
@@ -540,6 +542,11 @@ export default function ProjectBoard({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!initialTaskId) return;
+    setSelectedTaskId(initialTaskId);
+  }, [initialTaskId]);
 
   const groupsQuery = useQuery<SectionTaskGroup[]>({
     queryKey: queryKeys.projectTasksGrouped(projectId),

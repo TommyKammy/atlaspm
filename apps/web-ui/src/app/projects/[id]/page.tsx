@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Plus } from 'lucide-react';
@@ -26,7 +26,9 @@ import {
 export default function ProjectPage() {
   const { t } = useI18n();
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const projectId = params.id;
+  const openTaskId = searchParams.get('task');
   const [newSection, setNewSection] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | Task['status']>('ALL');
@@ -108,6 +110,10 @@ export default function ProjectPage() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [sectionsQuery.data]);
+
+  useEffect(() => {
+    if (openTaskId) setView('List');
+  }, [openTaskId]);
 
   return (
     <div className="space-y-4">
@@ -329,6 +335,7 @@ export default function ProjectPage() {
           search={search}
           statusFilter={statusFilter}
           priorityFilter={priorityFilter}
+          initialTaskId={openTaskId}
         />
       ) : view === 'Board' ? (
         <ProjectBoardView
