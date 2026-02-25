@@ -272,6 +272,16 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
       hasImage: true,
     });
 
+  await page.click('button[aria-label="Close task detail"]');
+  await page.click('[data-testid="project-view-files"]');
+  await expect(page.locator('[data-testid="files-mime-filter"]')).toBeVisible();
+  await page.selectOption('[data-testid="files-mime-filter"]', 'IMAGE');
+  await expect(page.getByText('pixel.png').first()).toBeVisible();
+  await page.selectOption('[data-testid="files-uploader-filter"]', sub);
+  await expect(page.getByText('pixel.png').first()).toBeVisible();
+  await page.click('[data-testid="project-view-list"]');
+  await page.click(`[data-testid="open-task-${movedTask.id}"]`);
+
   await page.click('button:has-text("Comments")');
   await page.fill('[data-testid="comment-composer"]', `First comment from e2e @[${sub}|${sub}]`);
   await page.click('[data-testid="add-comment-btn"]');

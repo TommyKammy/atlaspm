@@ -21,7 +21,7 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, apiBaseUrl } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { SectionTaskGroup, Task, TaskAttachment } from '@/lib/types';
+import type { ProjectMember, SectionTaskGroup, Task, TaskAttachment } from '@/lib/types';
 import { useI18n } from '@/lib/i18n';
 
 function flattenTasks(groups: SectionTaskGroup[]) {
@@ -533,10 +533,23 @@ export function ProjectFilesView({
 }) {
   const { t } = useI18n();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [mimeFilter, setMimeFilter] = useState<'ALL' | 'IMAGE' | 'OTHER'>('ALL');
+  const [uploaderFilter, setUploaderFilter] = useState<string>('ALL');
   const groupsQuery = useQuery<SectionTaskGroup[]>({
     queryKey: queryKeys.projectTasksGrouped(projectId),
     queryFn: () => api(`/projects/${projectId}/tasks?groupBy=section`),
   });
+  const membersQuery = useQuery<ProjectMember[]>({
+    queryKey: queryKeys.projectMembers(projectId),
+    queryFn: () => api(`/projects/${projectId}/members`),
+  });
+  const uploaderMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const member of membersQuery.data ?? []) {
+      map.set(member.userId, member.user.displayName || member.user.email || member.user.id);
+    }
+    return map;
+  }, [membersQuery.data]);
 
   const allTaskRows = useMemo(() => flattenTasks(groupsQuery.data ?? []), [groupsQuery.data]);
   const filteredTaskRows = allTaskRows.filter((row) =>
@@ -568,8 +581,14 @@ export function ProjectFilesView({
         });
       });
     });
-    return rows.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
-  }, [attachmentQueries, filteredTaskRows, t]);
+    const filtered = rows.filter((file) => {
+      if (mimeFilter === 'IMAGE' && !file.mimeType.startsWith('image/')) return false;
+      if (mimeFilter === 'OTHER' && file.mimeType.startsWith('image/')) return false;
+      if (uploaderFilter !== 'ALL' && file.uploaderUserId !== uploaderFilter) return false;
+      return true;
+    });
+    return filtered.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+  }, [attachmentQueries, filteredTaskRows, t, mimeFilter, uploaderFilter]);
 
   if (groupsQuery.isLoading || loadingAttachments) {
     return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">{t('loadingFiles')}</div>;
@@ -582,6 +601,31 @@ export function ProjectFilesView({
           <h3 className="text-sm font-medium">{t('projectFiles')}</h3>
           <Badge variant="secondary">{files.length}</Badge>
         </header>
+        <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
+          <select
+            className="h-8 rounded-md border bg-background px-2 text-xs"
+            value={mimeFilter}
+            onChange={(event) => setMimeFilter(event.target.value as 'ALL' | 'IMAGE' | 'OTHER')}
+            data-testid="files-mime-filter"
+          >
+            <option value="ALL">{t('allFiles')}</option>
+            <option value="IMAGE">{t('imageFiles')}</option>
+            <option value="OTHER">{t('otherFiles')}</option>
+          </select>
+          <select
+            className="h-8 rounded-md border bg-background px-2 text-xs"
+            value={uploaderFilter}
+            onChange={(event) => setUploaderFilter(event.target.value)}
+            data-testid="files-uploader-filter"
+          >
+            <option value="ALL">{t('allUploaders')}</option>
+            {(membersQuery.data ?? []).map((member) => (
+              <option key={member.userId} value={member.userId}>
+                {member.user.displayName || member.user.email || member.user.id}
+              </option>
+            ))}
+          </select>
+        </div>
         {!files.length ? (
           <div className="px-4 py-8 text-center text-sm text-muted-foreground">
             <Paperclip className="mx-auto mb-2 h-5 w-5" />
@@ -594,6 +638,7 @@ export function ProjectFilesView({
                 <TableHead>{t('file')}</TableHead>
                 <TableHead>{t('task')}</TableHead>
                 <TableHead>{t('section')}</TableHead>
+                <TableHead>{t('uploader')}</TableHead>
                 <TableHead>{t('status')}</TableHead>
                 <TableHead>{t('added')}</TableHead>
               </TableRow>
@@ -622,6 +667,9 @@ export function ProjectFilesView({
                     </button>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">{file.sectionName}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {uploaderMap.get(file.uploaderUserId) || file.uploaderUserId}
+                  </TableCell>
                   <TableCell className="text-sm">{file.status}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {new Date(file.createdAt).toLocaleString()}

@@ -467,3 +467,29 @@
   - `pnpm e2e`
 - Risks/known gaps:
   - Calendar currently supports drag-based due-date assignment/clear only; explicit in-cell date picker is not yet added.
+
+## 2026-02-25 - P1 Files View Functional Filters
+- What changed:
+  - Completed `ProjectFilesView` enhancement for practical file management:
+    - added MIME filter (`All files` / `Images` / `Other files`)
+    - added uploader filter sourced from project members
+    - added uploader column in files table
+  - Kept architecture intact by reusing existing core APIs:
+    - tasks grouped query for task/section context
+    - project members query for uploader labeling/filtering
+  - Optimized uploader label lookup with a memoized map to avoid repeated linear scans per row.
+  - Extended MVP E2E flow to validate Files tab behavior:
+    - switch to Files view
+    - filter by image files
+    - filter by uploader
+    - verify uploaded image row remains visible
+- Why:
+  - Files tab had partial placeholder-like behavior; this closes a high-priority gap by making non-List views operational and test-covered.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Uploader filter options currently include only project members; historical uploads by users no longer in project fall back to raw uploader ID label.
