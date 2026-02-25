@@ -424,3 +424,22 @@
   - `pnpm e2e`
 - Risks/known gaps:
   - Structured logs are JSON to stdout; centralized aggregation/querying (e.g., Loki/OpenSearch) is not yet configured.
+
+## 2026-02-25 - P1 Board View Functional DnD
+- What changed:
+  - Upgraded `ProjectBoardView` to support drag-and-drop task movement:
+    - within same section
+    - across sections
+  - Wired board DnD to existing reorder endpoint `POST /sections/:sectionId/tasks/reorder`.
+  - Added optimistic board cache preview and rollback on error.
+  - Added board drop targets for section columns and sortable task cards.
+  - Extended MVP E2E to verify board move persistence before returning to list flow.
+- Why:
+  - Board tab needed real operational behavior, not just read-only cards, to match roadmap priority and Asana-like usage.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Board DnD currently follows list constraints and skips nested-task dragging.
