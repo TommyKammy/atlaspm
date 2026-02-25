@@ -83,6 +83,10 @@ class TaskQuery {
   @IsOptional()
   @IsString()
   sortOrder?: 'asc' | 'desc';
+
+  @IsOptional()
+  @IsString()
+  deleted?: 'true' | 'false';
 }
 
 class CreateTaskDto {
@@ -323,7 +327,11 @@ export class TasksController {
   async list(@Param('id') projectId: string, @Query() query: TaskQuery, @CurrentRequest() req: AppRequest) {
     await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
 
-    const where: any = { projectId };
+    const includeDeleted = query.deleted === 'true';
+    const where: any = {
+      projectId,
+      deletedAt: includeDeleted ? { not: null } : null,
+    };
     if (query.status) where.status = query.status;
     if (query.assignee) where.assigneeUserId = query.assignee;
     if (query.dueFrom || query.dueTo) {
@@ -358,7 +366,7 @@ export class TasksController {
 
   @Get('tasks/:id')
   async getOne(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
     return task;
   }
@@ -374,7 +382,10 @@ export class TasksController {
       sectionId = defaultSection.id;
     }
 
-    const topTask = await this.prisma.task.findFirst({ where: { projectId, sectionId }, orderBy: { position: 'asc' } });
+    const topTask = await this.prisma.task.findFirst({
+      where: { projectId, sectionId, deletedAt: null },
+      orderBy: { position: 'asc' },
+    });
     const position = (topTask?.position ?? 1000) - 1000;
     const progress = body.progressPercent ?? 0;
     const status = this.domain.deriveStatusForProgress(progress, body.status ?? TaskStatus.TODO);
@@ -419,7 +430,7 @@ export class TasksController {
 
   @Patch('tasks/:id')
   async patch(@Param('id') id: string, @Body() body: PatchTaskDto, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (body.version && body.version !== task.version) throw new ConflictException('Version conflict');
 
@@ -467,26 +478,68 @@ export class TasksController {
 
   @Delete('tasks/:id')
   async remove(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    if (task.deletedAt) return { success: true };
 
     return this.prisma.$transaction(async (tx) => {
+      const subtreeIds = await this.collectSubtreeIds(tx, id);
+      const now = new Date();
+      const beforeTasks = await tx.task.findMany({
+        where: { id: { in: subtreeIds } },
+      });
+      await tx.task.updateMany({
+        where: { id: { in: subtreeIds } },
+        data: { deletedAt: now, deletedByUserId: req.user.sub, updatedAt: now, version: { increment: 1 } },
+      });
       await this.domain.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
         entityId: id,
         action: 'task.deleted',
-        beforeJson: task,
+        beforeJson: { taskIds: subtreeIds, tasks: beforeTasks },
+        afterJson: { deletedAt: now, deletedByUserId: req.user.sub },
         correlationId: req.correlationId,
         outboxType: 'task.deleted',
-        payload: { taskId: id, projectId: task.projectId, sectionId: task.sectionId },
+        payload: { taskId: id, taskIds: subtreeIds, projectId: task.projectId, sectionId: task.sectionId },
       });
-      await tx.task.delete({ where: { id } });
-      return { success: true };
+      return { success: true, deletedCount: subtreeIds.length, taskIds: subtreeIds };
     }).then((result) => {
-      void this.searchService.removeTask(id);
+      void this.removeTasksFromSearch(result.taskIds);
       return result;
+    });
+  }
+
+  @Post('tasks/:id/restore')
+  async restore(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findUniqueOrThrow({ where: { id } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    if (!task.deletedAt) return task;
+
+    return this.prisma.$transaction(async (tx) => {
+      const subtreeIds = await this.collectSubtreeIds(tx, id, true);
+      const restored = await tx.task.updateMany({
+        where: { id: { in: subtreeIds } },
+        data: { deletedAt: null, deletedByUserId: null, version: { increment: 1 } },
+      });
+      const updatedTask = await tx.task.findUniqueOrThrow({ where: { id } });
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'Task',
+        entityId: id,
+        action: 'task.restored',
+        beforeJson: { taskIds: subtreeIds },
+        afterJson: { restoredCount: restored.count },
+        correlationId: req.correlationId,
+        outboxType: 'task.restored',
+        payload: { taskId: id, taskIds: subtreeIds, restoredCount: restored.count },
+      });
+      return { task: updatedTask, taskIds: subtreeIds };
+    }).then((restoredTask) => {
+      void this.reindexTasks(restoredTask.taskIds);
+      return restoredTask.task;
     });
   }
 
@@ -560,7 +613,7 @@ export class TasksController {
 
   @Get('tasks/:id/mentions')
   async listMentions(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
 
     const mentions = await this.prisma.taskMention.findMany({
@@ -588,7 +641,7 @@ export class TasksController {
 
   @Get('tasks/:id/comments')
   async listComments(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
     const comments = await this.prisma.taskComment.findMany({
       where: { taskId, deletedAt: null },
@@ -626,7 +679,7 @@ export class TasksController {
     @Body() body: CreateTaskCommentDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     const trimmedBody = body.body.trim();
     if (!trimmedBody) throw new ConflictException('Comment body cannot be empty');
@@ -766,7 +819,7 @@ export class TasksController {
 
   @Get('tasks/:id/attachments')
   async listAttachments(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
     const attachments = await this.prisma.taskAttachment.findMany({
       where: { taskId, deletedAt: null, completedAt: { not: null } },
@@ -784,7 +837,7 @@ export class TasksController {
     @Body() body: InitiateAttachmentDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (!IMAGE_MIME_ALLOWLIST.has(body.mimeType)) {
       throw new ConflictException('Unsupported image mime type');
@@ -870,7 +923,7 @@ export class TasksController {
     @Body() body: CompleteAttachmentDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     const attachment = await this.prisma.taskAttachment.findUniqueOrThrow({
       where: { id: body.attachmentId },
@@ -937,7 +990,7 @@ export class TasksController {
 
   @Post('tasks/bulk')
   async bulk(@Body() body: BulkTaskDto, @CurrentRequest() req: AppRequest) {
-    const tasks = await this.prisma.task.findMany({ where: { id: { in: body.taskIds } } });
+    const tasks = await this.prisma.task.findMany({ where: { id: { in: body.taskIds }, deletedAt: null } });
     if (!tasks.length) return { count: 0 };
     const firstTask = tasks[0];
     if (!firstTask) return { count: 0 };
@@ -987,11 +1040,11 @@ export class TasksController {
     @Body() body: ReorderTaskDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: body.taskId } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: body.taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (body.expectedVersion && body.expectedVersion !== task.version) {
       const sectionTasks = await this.prisma.task.findMany({
-        where: { projectId: task.projectId, sectionId: targetSectionId },
+        where: { projectId: task.projectId, sectionId: targetSectionId, deletedAt: null },
         orderBy: { position: 'asc' },
       });
       throw new ConflictException({ message: 'Version conflict', sectionTasks });
@@ -999,7 +1052,7 @@ export class TasksController {
 
     return this.prisma.$transaction(async (tx) => {
       const siblings = await tx.task.findMany({
-        where: { projectId: task.projectId, sectionId: targetSectionId, id: { not: task.id } },
+        where: { projectId: task.projectId, sectionId: targetSectionId, id: { not: task.id }, deletedAt: null },
         orderBy: { position: 'asc' },
       });
       const before = body.beforeTaskId ? siblings.find((t) => t.id === body.beforeTaskId) : undefined;
@@ -1019,16 +1072,18 @@ export class TasksController {
 
       if (siblings.some((t) => t.position === newPosition) || (before && after && before.position + 1 >= after.position)) {
         const rebalance = await tx.task.findMany({
-          where: { projectId: task.projectId, sectionId: targetSectionId, id: { not: task.id } },
+          where: { projectId: task.projectId, sectionId: targetSectionId, id: { not: task.id }, deletedAt: null },
           orderBy: { position: 'asc' },
         });
         for (const [i, item] of rebalance.entries()) {
           await tx.task.update({ where: { id: item.id }, data: { position: (i + 1) * 1000 } });
         }
         const refreshedBefore = body.beforeTaskId
-          ? await tx.task.findUnique({ where: { id: body.beforeTaskId } })
+          ? await tx.task.findFirst({ where: { id: body.beforeTaskId, deletedAt: null } })
           : null;
-        const refreshedAfter = body.afterTaskId ? await tx.task.findUnique({ where: { id: body.afterTaskId } }) : null;
+        const refreshedAfter = body.afterTaskId
+          ? await tx.task.findFirst({ where: { id: body.afterTaskId, deletedAt: null } })
+          : null;
         if (refreshedBefore && refreshedAfter) newPosition = Math.floor((refreshedBefore.position + refreshedAfter.position) / 2);
         else if (refreshedBefore) newPosition = refreshedBefore.position + 1000;
         else if (refreshedAfter) newPosition = refreshedAfter.position - 1000;
@@ -1058,7 +1113,7 @@ export class TasksController {
       });
 
       const sectionTasks = await tx.task.findMany({
-        where: { sectionId: targetSectionId, projectId: task.projectId },
+        where: { sectionId: targetSectionId, projectId: task.projectId, deletedAt: null },
         orderBy: { position: 'asc' },
       });
       return { task: updated, sectionTasks };
@@ -1068,11 +1123,11 @@ export class TasksController {
   // Subtask endpoints
   @Post('tasks/:id/subtasks')
   async createSubtask(@Param('id') parentId: string, @Body() body: CreateSubtaskDto, @CurrentRequest() req: AppRequest) {
-    const parentTask = await this.prisma.task.findUniqueOrThrow({ where: { id: parentId } });
+    const parentTask = await this.prisma.task.findFirstOrThrow({ where: { id: parentId, deletedAt: null } });
     await this.domain.requireProjectRole(parentTask.projectId, req.user.sub, ProjectRole.MEMBER);
 
     const topTask = await this.prisma.task.findFirst({
-      where: { projectId: parentTask.projectId, sectionId: parentTask.sectionId },
+      where: { projectId: parentTask.projectId, sectionId: parentTask.sectionId, deletedAt: null },
       orderBy: { position: 'asc' },
     });
     const position = (topTask?.position ?? 1000) - 1000;
@@ -1090,21 +1145,21 @@ export class TasksController {
 
   @Get('tasks/:id/subtasks')
   async getSubtasks(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
     return this.subtaskService.getSubtasks(taskId);
   }
 
   @Get('tasks/:id/subtasks/tree')
   async getSubtaskTree(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
     return this.subtaskService.getSubtaskTree(taskId);
   }
 
   @Get('tasks/:id/breadcrumbs')
   async getBreadcrumbs(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
     return this.subtaskService.getBreadcrumbPath(taskId);
   }
@@ -1112,14 +1167,14 @@ export class TasksController {
   // Dependency endpoints
   @Post('tasks/:id/dependencies')
   async addDependency(@Param('id') taskId: string, @Body() body: AddDependencyDto, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     return this.subtaskService.addDependency(taskId, body.dependsOnId, body.type);
   }
 
   @Delete('tasks/:id/dependencies/:dependsOnId')
   async removeDependency(@Param('id') taskId: string, @Param('dependsOnId') dependsOnId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     await this.subtaskService.removeDependency(taskId, dependsOnId);
     return { success: true };
@@ -1127,21 +1182,21 @@ export class TasksController {
 
   @Get('tasks/:id/dependencies')
   async getDependencies(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
     return this.subtaskService.getDependencies(taskId);
   }
 
   @Get('tasks/:id/dependents')
   async getDependents(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
     return this.subtaskService.getDependents(taskId);
   }
 
   @Get('tasks/:id/blocked')
   async isBlocked(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
     const blocked = await this.subtaskService.isBlocked(taskId);
     return { blocked };
@@ -1293,6 +1348,40 @@ export class TasksController {
       return [text, nested].filter(Boolean).join(' ').trim();
     }
     return '';
+  }
+
+  private async collectSubtreeIds(
+    tx: Prisma.TransactionClient,
+    rootTaskId: string,
+    includeDeleted: boolean = false,
+  ): Promise<string[]> {
+    const queue = [rootTaskId];
+    const visited = new Set<string>();
+    while (queue.length) {
+      const currentId = queue.shift();
+      if (!currentId || visited.has(currentId)) continue;
+      visited.add(currentId);
+      const children = await tx.task.findMany({
+        where: includeDeleted
+          ? { parentId: currentId }
+          : { parentId: currentId, deletedAt: null },
+        select: { id: true },
+      });
+      for (const child of children) queue.push(child.id);
+    }
+    return [...visited];
+  }
+
+  private async removeTasksFromSearch(taskIds: string[]) {
+    await Promise.all(taskIds.map((taskId) => this.searchService.removeTask(taskId)));
+  }
+
+  private async reindexTasks(taskIds: string[]) {
+    const uniqueTaskIds = [...new Set(taskIds)];
+    for (const taskId of uniqueTaskIds) {
+      const task = await this.prisma.task.findFirst({ where: { id: taskId, deletedAt: null } });
+      if (task) await this.searchService.indexTask(task);
+    }
   }
 
   private async applyProgressRules(tx: any, taskId: string, correlationId?: string) {

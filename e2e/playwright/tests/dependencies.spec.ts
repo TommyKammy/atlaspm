@@ -124,9 +124,8 @@ test.describe('Task Dependencies Feature', () => {
 
     await expect(page.getByText('Relates to')).toBeVisible();
 
-    const deleteButton = page.locator('svg.lucide-trash2, svg.lucide-trash-2').first().locator('xpath=ancestor::button[1]');
-    await deleteButton.scrollIntoViewIfNeeded();
-    await deleteButton.evaluate((button) => (button as HTMLButtonElement).click());
+    const deleteButton = page.locator('[data-testid^="dependency-delete-"]').first();
+    await deleteButton.dispatchEvent('click');
 
     await expect(page.getByText('No dependencies yet. Add one to link related tasks.')).toBeVisible();
   });

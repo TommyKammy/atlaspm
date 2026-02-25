@@ -227,6 +227,34 @@ describe('Core API Integration', () => {
       .send({ title: 'Task 2', sectionId: secA.body.id })
       .expect(201);
 
+    await request(app.getHttpServer())
+      .delete(`/tasks/${t2.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const activeTasksAfterDelete = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(activeTasksAfterDelete.body.some((task: any) => task.id === t2.body.id)).toBe(false);
+
+    const deletedTasks = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/tasks?deleted=true`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(deletedTasks.body.some((task: any) => task.id === t2.body.id)).toBe(true);
+
+    await request(app.getHttpServer())
+      .post(`/tasks/${t2.body.id}/restore`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+
+    const activeTasksAfterRestore = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(activeTasksAfterRestore.body.some((task: any) => task.id === t2.body.id)).toBe(true);
+
     const memberCollabToken = await request(app.getHttpServer())
       .post(`/tasks/${t1.body.id}/collab-token`)
       .set('Authorization', `Bearer ${memberToken}`)
@@ -451,6 +479,8 @@ describe('Core API Integration', () => {
     expect(outbox.body.some((e: any) => e.type === 'task.mention.deleted')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.attachment.created')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.attachment.deleted')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'task.deleted')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'task.restored')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'rule.updated')).toBe(true);
 
     expect(defaultSection).toBeTruthy();

@@ -82,6 +82,7 @@ function DependencyItem({
         className="h-6 w-6 flex-shrink-0"
         onClick={() => removeDependency.mutate()}
         disabled={removeDependency.isPending}
+        data-testid={`dependency-delete-${dependency.id}`}
       >
         <Trash2 className="h-3 w-3" />
       </Button>

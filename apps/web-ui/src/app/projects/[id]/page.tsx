@@ -14,6 +14,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useI18n } from '@/lib/i18n';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,6 +36,7 @@ export default function ProjectPage() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const addSectionInputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
+  const [trashOpen, setTrashOpen] = useState(false);
 
   const projectsQuery = useQuery<Project[]>({
     queryKey: queryKeys.projects,
@@ -67,6 +70,20 @@ export default function ProjectPage() {
       });
       setNewSection('');
       setShowAddSectionInput(false);
+    },
+  });
+
+  const deletedTasksQuery = useQuery<SectionTaskGroup[]>({
+    queryKey: [...queryKeys.projectTasksGrouped(projectId), 'deleted'],
+    queryFn: () => api(`/projects/${projectId}/tasks?groupBy=section&deleted=true`),
+    enabled: Boolean(projectId) && trashOpen,
+  });
+
+  const restoreTask = useMutation({
+    mutationFn: (taskId: string) => api(`/tasks/${taskId}/restore`, { method: 'POST' }) as Promise<Task>,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      await queryClient.invalidateQueries({ queryKey: [...queryKeys.projectTasksGrouped(projectId), 'deleted'] });
     },
   });
 
@@ -121,6 +138,66 @@ export default function ProjectPage() {
           </div>
           <div className="flex items-center gap-2">
             <Badge>{sectionsQuery.data?.length ?? 0} {t('sections')}</Badge>
+            <Dialog open={trashOpen} onOpenChange={setTrashOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm" data-testid="project-trash-open">
+                  {t('trash')}
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-3xl">
+                <DialogHeader>
+                  <DialogTitle>{t('deletedTasks')}</DialogTitle>
+                  <DialogDescription>{t('trash')}</DialogDescription>
+                </DialogHeader>
+                <div className="max-h-[60vh] overflow-auto">
+                  {deletedTasksQuery.isLoading ? (
+                    <p className="text-sm text-muted-foreground">{t('loadingTasks')}</p>
+                  ) : null}
+                  {!deletedTasksQuery.isLoading && !(deletedTasksQuery.data ?? []).some((group) => group.tasks.length) ? (
+                    <p className="text-sm text-muted-foreground">{t('noDeletedTasks')}</p>
+                  ) : null}
+                  {(deletedTasksQuery.data ?? []).map((group) => {
+                    if (!group.tasks.length) return null;
+                    return (
+                      <div key={group.section.id} className="mb-4">
+                        <h4 className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">
+                          {group.section.name}
+                        </h4>
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>{t('name')}</TableHead>
+                              <TableHead>{t('deletedAt')}</TableHead>
+                              <TableHead>{t('actions')}</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {group.tasks.map((task) => (
+                              <TableRow key={task.id}>
+                                <TableCell>{task.title.trim() || t('untitledTask')}</TableCell>
+                                <TableCell>
+                                  {task.deletedAt ? new Date(task.deletedAt).toLocaleString() : '-'}
+                                </TableCell>
+                                <TableCell>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => restoreTask.mutate(task.id)}
+                                    disabled={restoreTask.isPending}
+                                    data-testid={`restore-task-${task.id}`}
+                                  >
+                                    {restoreTask.isPending ? t('restoring') : t('restore')}
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    );
+                  })}
+                </div>
+              </DialogContent>
+            </Dialog>
             <Link href={`/projects/${projectId}/members`}>
               <Button variant="outline" size="sm" data-testid="project-members-page-link">{t('members')}</Button>
             </Link>

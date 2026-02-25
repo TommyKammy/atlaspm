@@ -57,6 +57,8 @@ export type Task = {
   dueAt?: string | null;
   startAt?: string | null;
   completedAt?: string | null;
+  deletedAt?: string | null;
+  deletedByUserId?: string | null;
   version: number;
   position: number;
 };

@@ -161,6 +161,8 @@ model Task {
   dueAt          DateTime?
   tags           String[]   @default([])
   completedAt    DateTime?
+  deletedAt      DateTime?  @map("deleted_at")
+  deletedByUserId String?   @map("deleted_by_user_id")
   position       Int
   version        Int        @default(1)
   createdAt      DateTime   @default(now())
@@ -183,6 +185,7 @@ model Task {
 
   @@index([projectId, sectionId, position])
   @@index([parentId])
+  @@index([projectId, deletedAt])
 }
 
 model TaskComment {

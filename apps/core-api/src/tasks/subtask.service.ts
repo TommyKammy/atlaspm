@@ -50,7 +50,7 @@ export class SubtaskService {
    */
   async getSubtasks(parentId: string): Promise<Task[]> {
     return this.prisma.task.findMany({
-      where: { parentId },
+      where: { parentId, deletedAt: null },
       orderBy: { position: 'asc' },
     });
   }
@@ -63,7 +63,7 @@ export class SubtaskService {
       if (currentDepth > maxDepth) return [];
 
       const children = await this.prisma.task.findMany({
-        where: { parentId },
+        where: { parentId, deletedAt: null },
         orderBy: { position: 'asc' },
       });
 
@@ -91,8 +91,8 @@ export class SubtaskService {
     let currentTask: Task | null = null;
 
     while (currentId) {
-      const task: Task | null = await this.prisma.task.findUnique({
-        where: { id: currentId },
+      const task: Task | null = await this.prisma.task.findFirst({
+        where: { id: currentId, deletedAt: null },
       });
 
       if (!task) return null;
@@ -112,8 +112,8 @@ export class SubtaskService {
     let currentId: string | null = taskId;
 
     while (currentId) {
-      const task: Task | null = await this.prisma.task.findUnique({
-        where: { id: currentId },
+      const task: Task | null = await this.prisma.task.findFirst({
+        where: { id: currentId, deletedAt: null },
       });
 
       if (!task) break;
@@ -183,7 +183,7 @@ export class SubtaskService {
    */
   async getDependencies(taskId: string): Promise<DependencyInfo[]> {
     const deps = await this.prisma.taskDependency.findMany({
-      where: { taskId },
+      where: { taskId, dependsOn: { deletedAt: null } },
       include: {
         dependsOn: {
           select: {
@@ -211,7 +211,7 @@ export class SubtaskService {
    */
   async getDependents(taskId: string): Promise<DependencyInfo[]> {
     const deps = await this.prisma.taskDependency.findMany({
-      where: { dependsOnId: taskId },
+      where: { dependsOnId: taskId, task: { deletedAt: null } },
       include: {
         task: {
           select: {
@@ -242,6 +242,7 @@ export class SubtaskService {
       where: {
         taskId,
         type: { in: [DependencyType.BLOCKS, DependencyType.BLOCKED_BY] },
+        dependsOn: { deletedAt: null },
       },
       include: {
         dependsOn: {
@@ -261,7 +262,7 @@ export class SubtaskService {
     links: { source: string; target: string; type: DependencyType }[];
   }> {
     const tasks = await this.prisma.task.findMany({
-      where: { projectId },
+      where: { projectId, deletedAt: null },
       select: { id: true, title: true, status: true },
     });
 

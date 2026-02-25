@@ -13,7 +13,7 @@ import { useSortable, SortableContext, verticalListSortingStrategy } from '@dnd-
 import { CSS } from '@dnd-kit/utilities';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
-import { Check, ChevronDown, ChevronRight, Plus, User } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Plus, Trash2, User } from 'lucide-react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { ProjectMember, SectionTaskGroup, Task } from '@/lib/types';
@@ -247,6 +247,7 @@ function TaskRow({
   collapsed,
   onToggleCollapse,
   draggable,
+  onDelete,
 }: {
   task: Task;
   sectionId: string;
@@ -259,6 +260,7 @@ function TaskRow({
   collapsed: boolean;
   onToggleCollapse: (taskId: string) => void;
   draggable: boolean;
+  onDelete: (taskId: string) => void;
 }) {
   const { t } = useI18n();
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
@@ -312,7 +314,7 @@ function TaskRow({
             onClick={() => onOpen(task.id)}
             data-testid={`open-task-${task.id}`}
           >
-            {task.title}
+            {task.title.trim() || t('untitledTask')}
           </button>
         </div>
       </TableCell>
@@ -376,6 +378,21 @@ function TaskRow({
         ) : (
           <span className="text-xs text-muted-foreground">-</span>
         )}
+      </TableCell>
+      <TableCell>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7"
+          data-testid={`delete-task-${task.id}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onDelete(task.id);
+          }}
+          aria-label={t('deleteTask')}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
       </TableCell>
     </tr>
   );
@@ -572,6 +589,29 @@ export default function ProjectBoard({
     },
   });
 
+  const deleteTask = useMutation({
+    mutationFn: (taskId: string) => api(`/tasks/${taskId}`, { method: 'DELETE' }),
+    onMutate: async (taskId) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      const previous = queryClient.getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId));
+      queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) =>
+        current.map((group) => ({
+          ...group,
+          tasks: group.tasks.filter((task) => task.id !== taskId),
+        })),
+      );
+      if (selectedTaskId === taskId) setSelectedTaskId(null);
+      return { previous };
+    },
+    onError: (_error, _taskId, context) => {
+      if (context?.previous) queryClient.setQueryData(queryKeys.projectTasksGrouped(projectId), context.previous);
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectSections(projectId) });
+    },
+  });
+
   const groups = groupsQuery.data ?? [];
   const members = membersQuery.data ?? [];
 
@@ -661,6 +701,7 @@ export default function ProjectBoard({
                   <TableHead>{t('dependencies')}</TableHead>
                   <TableHead>{t('visibility')}</TableHead>
                   <TableHead>{t('collaborators')}</TableHead>
+                  <TableHead>{t('actions')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -678,6 +719,7 @@ export default function ProjectBoard({
                       hasChildren={row.hasChildren}
                       collapsed={collapsedTaskIds.has(row.task.id)}
                       draggable={!row.task.parentId && !row.hasChildren}
+                      onDelete={(taskId) => deleteTask.mutate(taskId)}
                       onToggleCollapse={(taskId) => {
                         setCollapsedTaskIds((current) => {
                           const next = new Set(current);
