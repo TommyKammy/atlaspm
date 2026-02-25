@@ -792,3 +792,27 @@
 - Risks/known gaps:
   - Retry/DLQ currently tracks per-outbox-event (not per-webhook endpoint); one failing endpoint can keep the event retrying until DLQ.
   - No dedicated DLQ redrive API yet; current scope is visibility + retry safety.
+
+## 2026-02-26 - #46 DoD Gate Enforcement (lint/test/e2e in CI)
+- What changed:
+  - Added root verification script:
+    - `verify:ci` in `package.json`
+    - command order: `pnpm lint && pnpm type-check && pnpm test && pnpm e2e`
+  - Extended GitHub Actions CI pipeline:
+    - Added `e2e` job in `.github/workflows/ci.yml`
+    - job depends on `build` + `test`
+    - installs Playwright Chromium deps and runs `pnpm e2e`
+    - uploads `e2e/playwright/test-results` artifacts on both success/failure
+  - Updated README commands to include `pnpm verify:ci`.
+- Why:
+  - Enforce issue #46 Definition of Done via CI, not convention:
+    - lint / type-check / test / e2e all required
+    - ensures no-refresh UX and audit/outbox regressions remain covered by automated gates.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - CI runtime increases due to full E2E execution; if queue time becomes problematic, we should split smoke vs full suites while preserving branch protection on at least one full run.

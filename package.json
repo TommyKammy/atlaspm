@@ -13,6 +13,7 @@
     "lint": "pnpm -r --if-present lint",
     "test": "pnpm -r --if-present test",
     "type-check": "pnpm -r --if-present type-check",
+    "verify:ci": "pnpm lint && pnpm type-check && pnpm test && pnpm e2e",
     "type-check:core-api": "pnpm --filter @atlaspm/core-api type-check",
     "type-check:web-ui": "pnpm --filter @atlaspm/web-ui type-check",
     "type-check:collab-server": "pnpm --filter @atlaspm/collab-server type-check",
