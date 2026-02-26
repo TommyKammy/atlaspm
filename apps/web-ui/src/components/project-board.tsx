@@ -13,7 +13,7 @@ import { useSortable, SortableContext, verticalListSortingStrategy } from '@dnd-
 import { CSS } from '@dnd-kit/utilities';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { Check, ChevronDown, ChevronRight, Circle, ExternalLink, Plus, Trash2, User } from 'lucide-react';
+import { Calendar, Check, ChevronDown, ChevronRight, Circle, ExternalLink, Plus, Trash2, User } from 'lucide-react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { ProjectMember, Section, SectionTaskGroup, Task } from '@/lib/types';
@@ -177,8 +177,8 @@ const statusBadgeClass: Record<Task['status'], string> = {
 
 const BOARD_COLUMNS = [
   { key: 'name', defaultWidth: 420, minWidth: 260 },
-  { key: 'assignee', defaultWidth: 130, minWidth: 96 },
-  { key: 'dueDate', defaultWidth: 170, minWidth: 120 },
+  { key: 'assignee', defaultWidth: 220, minWidth: 150 },
+  { key: 'dueDate', defaultWidth: 240, minWidth: 180 },
   { key: 'progress', defaultWidth: 190, minWidth: 140 },
   { key: 'status', defaultWidth: 200, minWidth: 140 },
   { key: 'projects', defaultWidth: 130, minWidth: 100 },
@@ -223,11 +223,19 @@ function AssigneeCombobox({
             <PopoverTrigger asChild>
               <Button
                 variant="ghost"
-                size="icon"
                 data-testid={`assignee-trigger-${task.id}`}
-                className="h-6 w-6 rounded-full border-0 hover:bg-muted/40"
+                className="h-7 max-w-full justify-start gap-2 rounded-md border-0 px-1.5 hover:bg-muted/40"
               >
-                {selected === 'unassigned' ? <Plus className="h-3 w-3" /> : <span className="text-[10px]">{initials(selectedLabel)}</span>}
+                {selected === 'unassigned' ? (
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-dashed text-[10px] text-muted-foreground">
+                    <Plus className="h-3 w-3" />
+                  </span>
+                ) : (
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border text-[10px]">
+                    {initials(selectedLabel)}
+                  </span>
+                )}
+                <span className="truncate text-xs">{selectedLabel}</span>
               </Button>
             </PopoverTrigger>
           </TooltipTrigger>
@@ -275,6 +283,96 @@ function AssigneeCombobox({
         </Command>
       </PopoverContent>
     </Popover>
+  );
+}
+
+function toDateInputValue(value?: string | null) {
+  if (!value) return '';
+  return String(value).slice(0, 10);
+}
+
+function toIsoDateValue(value: string) {
+  if (!value) return null;
+  return `${value}T00:00:00.000Z`;
+}
+
+function formatCompactDate(value: string, currentYear: number) {
+  if (!value) return '';
+  const [year, month, day] = value.split('-').map((part) => Number(part));
+  if (!year || !month || !day) return value;
+  const mm = String(month).padStart(2, '0');
+  const dd = String(day).padStart(2, '0');
+  return year === currentYear ? `${mm}/${dd}` : `${year}/${mm}/${dd}`;
+}
+
+function CompactDateField({
+  value,
+  onCommit,
+  testId,
+  ariaLabel,
+}: {
+  value?: string | null | undefined;
+  onCommit: (next: string | null) => void;
+  testId: string;
+  ariaLabel: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const dateValue = toDateInputValue(value);
+  const displayValue = formatCompactDate(dateValue, new Date().getFullYear());
+
+  useEffect(() => {
+    if (!editing) return;
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus();
+    input.showPicker?.();
+  }, [editing]);
+
+  if (editing) {
+    return (
+      <Input
+        ref={inputRef}
+        type="date"
+        value={dateValue}
+        data-no-dnd="true"
+        onPointerDown={(event) => event.stopPropagation()}
+        onChange={(event) => {
+          onCommit(toIsoDateValue(event.target.value));
+        }}
+        onBlur={() => setEditing(false)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape' || event.key === 'Enter') {
+            event.preventDefault();
+            setEditing(false);
+          }
+        }}
+        className="h-7 border-0 bg-transparent px-2 text-[11px] shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
+        aria-label={ariaLabel}
+        data-testid={testId}
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      data-no-dnd="true"
+      data-testid={testId}
+      aria-label={ariaLabel}
+      className={cn(
+        'flex h-7 w-full items-center rounded px-2 text-left text-[11px] hover:bg-muted/40',
+        displayValue ? 'justify-between gap-1' : 'justify-center',
+      )}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        setEditing(true);
+      }}
+    >
+      {displayValue ? <span className="truncate">{displayValue}</span> : null}
+      <Calendar className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+    </button>
   );
 }
 
@@ -453,17 +551,30 @@ function TaskRow({
         />
       </TableCell>
       <TableCell className="border-l border-[#f0f0f0] dark:border-border/40">
-        <Input
-          type="date"
-          value={task.dueAt ? String(task.dueAt).slice(0, 10) : ''}
-          onChange={(e) =>
-            onEdit(task.id, {
-              dueAt: e.target.value ? new Date(e.target.value).toISOString() : null,
-              version: task.version,
-            })
-          }
-          className="h-7 border-0 bg-transparent px-2 shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
-        />
+        <div className="grid grid-cols-2 gap-1">
+          <CompactDateField
+            value={task.startAt}
+            ariaLabel={`${t('startDate')} ${task.title}`}
+            testId={`task-start-date-${task.id}`}
+            onCommit={(startAt) =>
+              onEdit(task.id, {
+                startAt,
+                version: task.version,
+              })
+            }
+          />
+          <CompactDateField
+            value={task.dueAt}
+            ariaLabel={`${t('endDate')} ${task.title}`}
+            testId={`task-end-date-${task.id}`}
+            onCommit={(dueAt) =>
+              onEdit(task.id, {
+                dueAt,
+                version: task.version,
+              })
+            }
+          />
+        </div>
       </TableCell>
       <TableCell className="border-l border-[#f0f0f0] dark:border-border/40">
         <div className="space-y-1">
@@ -680,11 +791,15 @@ export default function ProjectBoard({
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [sectionNameDraft, setSectionNameDraft] = useState('');
   const [columnWidths, setColumnWidths] = useState<BoardColumnWidths>(BOARD_DEFAULT_COLUMN_WIDTHS);
+  const [columnWidthsLoaded, setColumnWidthsLoaded] = useState(false);
+  const [hasStoredColumnWidths, setHasStoredColumnWidths] = useState(false);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resizeStateRef = useRef<{ key: BoardColumnKey; startX: number; startWidth: number } | null>(null);
   const scrollSyncLockRef = useRef(false);
   const headerScrollRef = useRef<HTMLDivElement | null>(null);
   const sectionScrollRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const autoSizedColumnsRef = useRef(false);
+  const textMeasureCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const columnStorageKey = useMemo(
     () => `atlaspm:project-board-column-widths:${projectId}`,
     [projectId],
@@ -694,7 +809,7 @@ export default function ProjectBoard({
     () => ({
       name: t('name'),
       assignee: t('assignee'),
-      dueDate: t('dueDate'),
+      dueDate: `${t('startDate')} / ${t('endDate')}`,
       progress: t('progress'),
       status: t('status'),
       projects: t('projects'),
@@ -716,9 +831,12 @@ export default function ProjectBoard({
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    setColumnWidthsLoaded(false);
+    setHasStoredColumnWidths(false);
+    autoSizedColumnsRef.current = false;
     const raw = window.localStorage.getItem(columnStorageKey);
     if (!raw) {
-      setColumnWidths(BOARD_DEFAULT_COLUMN_WIDTHS);
+      setColumnWidthsLoaded(true);
       return;
     }
     try {
@@ -731,15 +849,18 @@ export default function ProjectBoard({
           return acc;
         }, {} as BoardColumnWidths),
       );
+      setHasStoredColumnWidths(true);
     } catch {
       setColumnWidths(BOARD_DEFAULT_COLUMN_WIDTHS);
+      setHasStoredColumnWidths(false);
     }
+    setColumnWidthsLoaded(true);
   }, [columnStorageKey]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !columnWidthsLoaded) return;
     window.localStorage.setItem(columnStorageKey, JSON.stringify(columnWidths));
-  }, [columnStorageKey, columnWidths]);
+  }, [columnStorageKey, columnWidths, columnWidthsLoaded]);
 
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
@@ -1030,6 +1151,107 @@ export default function ProjectBoard({
 
   const groups = groupsQuery.data ?? [];
   const members = membersQuery.data ?? [];
+
+  const measureTextWidth = useCallback((text: string, font: string = '500 12px Inter, system-ui, sans-serif') => {
+    if (typeof document === 'undefined') return text.length * 7;
+    if (!textMeasureCanvasRef.current) {
+      textMeasureCanvasRef.current = document.createElement('canvas');
+    }
+    const context = textMeasureCanvasRef.current.getContext('2d');
+    if (!context) return text.length * 7;
+    context.font = font;
+    return Math.ceil(context.measureText(text).width);
+  }, []);
+
+  const computeAutoColumnWidths = useCallback(
+    (groupsValue: SectionTaskGroup[], membersValue: ProjectMember[]): BoardColumnWidths => {
+      const allTasks = groupsValue.flatMap((group) => group.tasks);
+      const currentYear = new Date().getFullYear();
+      const clamp = (key: BoardColumnKey, value: number) => {
+        const maxWidthByKey: Partial<Record<BoardColumnKey, number>> = {
+          name: 760,
+          assignee: 360,
+          dueDate: 360,
+          progress: 280,
+          status: 260,
+          projects: 280,
+          dependencies: 220,
+          visibility: 220,
+          collaborators: 220,
+          actions: 96,
+        };
+        const min = BOARD_MIN_COLUMN_WIDTHS[key];
+        const max = maxWidthByKey[key] ?? 420;
+        return Math.max(min, Math.min(max, Math.round(value)));
+      };
+      const maxText = (values: string[], font?: string) => {
+        const measured = values.map((value) => measureTextWidth(value || '', font));
+        return measured.length ? Math.max(...measured) : 0;
+      };
+
+      const nameValues = allTasks.map((task) => task.title.trim() || t('untitledTask'));
+      const assigneeValues = allTasks.map((task) => {
+        if (!task.assigneeUserId) return t('unassigned');
+        const member = membersValue.find((item) => item.userId === task.assigneeUserId);
+        return member?.user.displayName || member?.user.email || member?.userId || task.assigneeUserId;
+      });
+      const startValues = allTasks.map((task) => {
+        const date = toDateInputValue(task.startAt);
+        return date ? formatCompactDate(date, currentYear) : '';
+      });
+      const endValues = allTasks.map((task) => {
+        const date = toDateInputValue(task.dueAt);
+        return date ? formatCompactDate(date, currentYear) : '';
+      });
+      const statusValues = [t('statusTodo'), t('statusInProgress'), t('statusDone'), t('statusBlocked')];
+
+      const next: BoardColumnWidths = {
+        name: clamp('name', Math.max(
+          measureTextWidth(boardColumnLabels.name),
+          maxText(nameValues, '600 14px Inter, system-ui, sans-serif'),
+        ) + 120),
+        assignee: clamp('assignee', Math.max(
+          measureTextWidth(boardColumnLabels.assignee),
+          maxText(assigneeValues, '500 12px Inter, system-ui, sans-serif'),
+        ) + 58),
+        dueDate: clamp(
+          'dueDate',
+          Math.max(
+            measureTextWidth(boardColumnLabels.dueDate),
+            maxText(startValues, '500 11px Inter, system-ui, sans-serif') +
+              maxText(endValues, '500 11px Inter, system-ui, sans-serif') +
+              64,
+          ),
+        ),
+        progress: clamp('progress', Math.max(measureTextWidth(boardColumnLabels.progress), measureTextWidth('100%')) + 140),
+        status: clamp('status', Math.max(measureTextWidth(boardColumnLabels.status), maxText(statusValues)) + 58),
+        projects: clamp('projects', Math.max(measureTextWidth(boardColumnLabels.projects), measureTextWidth(projectName)) + 28),
+        dependencies: clamp('dependencies', Math.max(measureTextWidth(boardColumnLabels.dependencies), measureTextWidth('-')) + 28),
+        visibility: clamp('visibility', Math.max(measureTextWidth(boardColumnLabels.visibility), measureTextWidth(t('private'))) + 28),
+        collaborators: clamp('collaborators', Math.max(measureTextWidth(boardColumnLabels.collaborators), measureTextWidth('DD')) + 28),
+        actions: clamp('actions', Math.max(measureTextWidth(boardColumnLabels.actions), 36) + 26),
+      };
+
+      return next;
+    },
+    [boardColumnLabels, measureTextWidth, projectName, t],
+  );
+
+  useEffect(() => {
+    if (!columnWidthsLoaded || hasStoredColumnWidths || autoSizedColumnsRef.current) return;
+    if (groupsQuery.isLoading || membersQuery.isLoading) return;
+    const autoWidths = computeAutoColumnWidths(groups, members);
+    setColumnWidths(autoWidths);
+    autoSizedColumnsRef.current = true;
+  }, [
+    columnWidthsLoaded,
+    hasStoredColumnWidths,
+    groupsQuery.isLoading,
+    membersQuery.isLoading,
+    groups,
+    members,
+    computeAutoColumnWidths,
+  ]);
 
   const filteredGroups = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
