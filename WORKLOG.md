@@ -1273,3 +1273,103 @@
   - `pnpm --filter @atlaspm/web-ui build`
 - Risks/known gaps:
   - Guide assumes package names `docker.io` and `docker-compose-v2` are available from the host apt repos.
+
+## 2026-02-26 - Issue #59/#60 Investigation and Fixes
+- What changed:
+  - Fixed `+ Add new -> Add task` flow to avoid fragile DOM query/click bridging:
+    - Replaced `document.querySelector(...).click()` path with explicit React state intent (`quickAddIntent`) passed from project page to `ProjectBoard`.
+    - Added queued behavior when sections are still loading (`pendingQuickAdd`) and user-visible error message when no target section is available.
+    - Keyboard shortcut `C` now uses the same intent path.
+    - Files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/projects/[id]/page.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+  - Hardened subtask create UX for auth/API failures:
+    - Added mutation `onError` handling and visible error message in subtask dialog.
+    - Added special messaging for expired dev-auth sessions.
+    - File:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/subtask-list.tsx`
+  - Addressed dev-auth token expiry risk highlighted in #59:
+    - Introduced configurable dev token TTL (`DEV_AUTH_TOKEN_TTL`, default `8h`) instead of fixed `15m`.
+    - Updated env examples and docker-compose defaults.
+    - Files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/auth/auth.service.ts`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/.env.example`
+      - `/Users/tomoakikawada/Dev/atlaspm/.env.example`
+      - `/Users/tomoakikawada/Dev/atlaspm/infra/docker/docker-compose.yml`
+      - `/Users/tomoakikawada/Dev/atlaspm/README.md`
+  - Added i18n keys for new add-task/subtask error states.
+    - File:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/i18n.tsx`
+  - Extended E2E MVP flow to validate add-task from `+ Add new` path.
+    - File:
+      - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/mvp.spec.ts`
+- Why:
+  - #60 was reproducible locally and caused by silent DOM-dependent failure.
+  - #59 may reproduce in long dev sessions or slower remote setups due to short token lifetime and missing UI error feedback.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm --filter @atlaspm/core-api build`
+  - `pnpm e2e:up && pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts tests/subtasks.spec.ts --workers=1 --retries=1 && pnpm e2e:down`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1 --retries=2`
+- Risks/known gaps:
+  - `mvp.spec.ts` continues to show existing board-DnD flake on first attempt in some runs; targeted rerun passed.
+
+## 2026-02-26 - Auth Error Normalization for Expired/Invalid JWT
+- What changed:
+  - Wrapped JWT verification failures in `AuthService.verify` and return `401 Unauthorized` instead of bubbling as `500`.
+  - Applied to both dev-auth (shared secret) and OIDC JWKS verification paths.
+  - File:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/auth/auth.service.ts`
+- Why:
+  - Expired/invalid tokens are authentication failures, not internal errors; 500 caused silent UX breakage and misleading logs.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api build`
+  - `docker compose -f infra/docker/docker-compose.yml up -d --build core-api`
+  - `curl -s -o /tmp/badtoken-after.json -w '%{http_code}\n' -H 'authorization: Bearer abc' http://localhost:3001/projects`
+  - Verified response: HTTP `401` with message `Invalid or expired token`.
+
+## 2026-02-27 - Add New Task Behavior + Table Editing UX + CI E2E Readiness Hardening
+- What changed:
+  - Changed top primary action behavior to match requested Asana-like flow:
+    - `+ 新規タスク` now always opens quick-add in default/unsectioned (`isDefault`) section.
+    - split button layout: primary click = add task, chevron menu = add section.
+    - removed standalone non-section quick-add trigger from always-visible list area, while still allowing programmatic open in default section.
+    - moved bottom `+ セクションを追加` entry point into list footer.
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/projects/[id]/page.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/i18n.tsx`
+  - Improved task description table editing (Notion-like incremental editing):
+    - kept slash `Table (2x2)` insert.
+    - added explicit controls for add column left/right, add row above/below, delete row/column/table.
+    - stabilized table controls visibility so controls remain accessible during editing.
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/editor/TaskDescriptionEditor.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/i18n.tsx`
+  - Hardened E2E infra startup for CI reliability:
+    - added Postgres healthcheck.
+    - changed `core-api` dependency to wait for healthy Postgres.
+    - added `core-api` restart-on-failure for transient startup races.
+    - increased E2E service readiness timeout and added compose diagnostics/log dump on timeout.
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/infra/docker/docker-compose.yml`
+      - `/Users/tomoakikawada/Dev/atlaspm/scripts/run-e2e.sh`
+  - Updated Playwright MVP flow to cover:
+    - new split add button selectors and behavior.
+    - table insertion and row/column expansion persistence checks.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/mvp.spec.ts`
+- Why:
+  - Align interaction model with requested UX while keeping strict server-side order/state semantics.
+  - Enable practical table authoring after slash insertion.
+  - Address repeated Feb 26 CI failures concentrated in `e2e` readiness timeout (`core-api` startup wait).
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm e2e:down`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1 --retries=1`
+- Risks/known gaps:
+  - `tests/mvp.spec.ts` has known intermittent board DnD flake; retries are still occasionally needed.
+  - Table controls are intentionally minimal and keyboard-first advanced grid operations are not implemented in this phase.

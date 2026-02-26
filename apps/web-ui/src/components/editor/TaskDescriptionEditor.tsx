@@ -58,6 +58,14 @@ function validLink(url: string) {
   return /^(https?:|mailto:)/i.test(url);
 }
 
+function containsTableNode(node: unknown): boolean {
+  if (!node || typeof node !== 'object') return false;
+  const typed = node as { type?: string; content?: unknown[] };
+  if (typed.type === 'table') return true;
+  if (!Array.isArray(typed.content)) return false;
+  return typed.content.some((child) => containsTableNode(child));
+}
+
 const collabEnabled = process.env.NEXT_PUBLIC_COLLAB_ENABLED === 'true';
 
 export default function TaskDescriptionEditor({
@@ -374,9 +382,11 @@ export default function TaskDescriptionEditor({
 
   const shouldShowToolbar = editorFocused || editor.isFocused;
   const isTableActive = editor.isActive('table');
+  const hasTableInDoc = containsTableNode(editor.getJSON());
+  const showTableControls = !isReadOnly && (shouldShowToolbar || hasTableInDoc);
 
   return (
-    <div ref={editorContainerRef} className="relative space-y-2">
+    <div ref={editorContainerRef} className="group/editor relative space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t('description')}</span>
         {isCollabActive ? (
@@ -419,17 +429,31 @@ export default function TaskDescriptionEditor({
         <Button size="sm" variant="outline" disabled={isReadOnly} onClick={() => fileInputRef.current?.click()}>{t('imageUpload')}</Button>
       </div>
 
-      {!isReadOnly && isTableActive ? (
+      {showTableControls ? (
         <div
-          className="pointer-events-none absolute right-2 top-16 z-20 flex items-center gap-1 rounded-md border bg-background/95 p-1 opacity-0 shadow-sm backdrop-blur-sm transition-opacity duration-150 group-hover/editor:opacity-100 group-focus-within/editor:opacity-100"
+          className="absolute right-2 top-16 z-20 flex items-center gap-1 rounded-md border bg-background/95 p-1 shadow-sm backdrop-blur-sm"
           data-testid="table-controls"
         >
           <Button
             size="icon"
             variant="ghost"
-            className="pointer-events-auto h-7 w-7"
+            className="h-7 w-7"
+            onClick={() => editor.chain().focus().addColumnBefore().run()}
+            aria-label={t('tableAddColumnLeft')}
+            data-testid="table-add-column-left"
+            disabled={!isTableActive}
+          >
+            <Plus className="h-2.5 w-2.5" />
+            <Columns3 className="-ml-0.5 h-3.5 w-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7"
             onClick={() => editor.chain().focus().addColumnAfter().run()}
             aria-label={t('tableAddColumn')}
+            data-testid="table-add-column-right"
+            disabled={!isTableActive}
           >
             <Columns3 className="h-3.5 w-3.5" />
             <Plus className="-ml-0.5 h-2.5 w-2.5" />
@@ -437,9 +461,11 @@ export default function TaskDescriptionEditor({
           <Button
             size="icon"
             variant="ghost"
-            className="pointer-events-auto h-7 w-7"
+            className="h-7 w-7"
             onClick={() => editor.chain().focus().deleteColumn().run()}
             aria-label={t('tableDeleteColumn')}
+            data-testid="table-delete-column"
+            disabled={!isTableActive}
           >
             <Columns3 className="h-3.5 w-3.5" />
             <Minus className="-ml-0.5 h-2.5 w-2.5" />
@@ -447,9 +473,23 @@ export default function TaskDescriptionEditor({
           <Button
             size="icon"
             variant="ghost"
-            className="pointer-events-auto h-7 w-7"
+            className="h-7 w-7"
+            onClick={() => editor.chain().focus().addRowBefore().run()}
+            aria-label={t('tableAddRowAbove')}
+            data-testid="table-add-row-above"
+            disabled={!isTableActive}
+          >
+            <Plus className="h-2.5 w-2.5" />
+            <Rows3 className="-ml-0.5 h-3.5 w-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7"
             onClick={() => editor.chain().focus().addRowAfter().run()}
             aria-label={t('tableAddRow')}
+            data-testid="table-add-row-below"
+            disabled={!isTableActive}
           >
             <Rows3 className="h-3.5 w-3.5" />
             <Plus className="-ml-0.5 h-2.5 w-2.5" />
@@ -457,9 +497,11 @@ export default function TaskDescriptionEditor({
           <Button
             size="icon"
             variant="ghost"
-            className="pointer-events-auto h-7 w-7"
+            className="h-7 w-7"
             onClick={() => editor.chain().focus().deleteRow().run()}
             aria-label={t('tableDeleteRow')}
+            data-testid="table-delete-row"
+            disabled={!isTableActive}
           >
             <Rows3 className="h-3.5 w-3.5" />
             <Minus className="-ml-0.5 h-2.5 w-2.5" />
@@ -467,9 +509,11 @@ export default function TaskDescriptionEditor({
           <Button
             size="icon"
             variant="ghost"
-            className="pointer-events-auto h-7 w-7 text-destructive hover:text-destructive"
+            className="h-7 w-7 text-destructive hover:text-destructive"
             onClick={() => editor.chain().focus().deleteTable().run()}
             aria-label={t('tableDelete')}
+            data-testid="table-delete"
+            disabled={!isTableActive}
           >
             <Table2 className="h-3.5 w-3.5" />
             <Minus className="-ml-0.5 h-2.5 w-2.5" />

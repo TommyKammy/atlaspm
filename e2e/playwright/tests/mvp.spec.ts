@@ -141,43 +141,48 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
     })
     .toBeGreaterThan(initialNameColumnWidth);
 
-  await page.click('[data-testid="add-new-trigger"]');
+  await page.click('[data-testid="add-new-menu-trigger"]');
   await page.click('[data-testid="add-new-section"]');
   await page.fill('[data-testid="new-section-input"]', 'Backlog');
   await page.click('[data-testid="create-section-btn"]');
   await expect(page.getByText('Backlog').first()).toBeVisible();
 
-  await page.click('[data-testid="add-new-trigger"]');
+  await page.click('[data-testid="add-new-menu-trigger"]');
   await page.click('[data-testid="add-new-section"]');
   await page.fill('[data-testid="new-section-input"]', 'Doing');
   await page.click('[data-testid="create-section-btn"]');
   await expect(page.getByText('Doing').first()).toBeVisible();
 
   let sections = await api(`/projects/${projectA.id}/sections`, token);
+  const noSection = sections.find((s: any) => s.isDefault);
   const backlog = sections.find((s: any) => s.name === 'Backlog');
   const doing = sections.find((s: any) => s.name === 'Doing');
+  expect(noSection).toBeTruthy();
   expect(backlog).toBeTruthy();
   expect(doing).toBeTruthy();
 
-  await page.click(`[data-testid="quick-add-open-${backlog.id}"]`);
-  const quickAddBacklog = page.locator(`[data-testid="quick-add-input-${backlog.id}"]`);
-  await quickAddBacklog.fill('Task A');
-  await quickAddBacklog.press('Enter');
+  await page.click('[data-testid="add-new-trigger"]');
+  const quickAddNoSection = page.locator(`[data-testid="quick-add-input-${noSection.id}"]`);
+  await expect(quickAddNoSection).toBeVisible();
+  await page.waitForTimeout(250);
+  await expect(quickAddNoSection).toBeVisible();
+  await quickAddNoSection.fill('Task A');
+  await quickAddNoSection.press('Enter');
   await expect(page.locator('[data-task-title="Task A"]')).toBeVisible();
 
-  await quickAddBacklog.fill('Task B');
-  await quickAddBacklog.press('Enter');
+  await quickAddNoSection.fill('Task B');
+  await quickAddNoSection.press('Enter');
   await expect(page.locator('[data-task-title="Task B"]')).toBeVisible();
 
-  await quickAddBacklog.fill('Task C');
-  await quickAddBacklog.press('Enter');
+  await quickAddNoSection.fill('Task C');
+  await quickAddNoSection.press('Enter');
   await expect(page.locator('[data-task-title="Task C"]')).toBeVisible();
 
   const projectSearch = page.locator('[data-testid="project-search-input"]').first();
   await projectSearch.fill('Task A');
   await expect(page.locator('[data-task-title="Task A"]')).toBeVisible();
   await expect(page.locator('[data-task-title="Task B"]')).toHaveCount(0);
-  await projectSearch.fill('Backlog');
+  await projectSearch.fill('Task');
   await expect(page.locator('[data-task-title="Task A"]')).toBeVisible();
   await expect(page.locator('[data-task-title="Task B"]')).toBeVisible();
   await projectSearch.fill('');
@@ -270,12 +275,12 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await expect(page.locator('[data-task-title="Task B"]')).toBeVisible();
   await expect(page.locator('[data-task-title="Task C"]')).toBeVisible();
 
-  await dragTaskToTask(page, 'Task B', 'Task C');
+  await dragTaskToTask(page, 'Task B', 'Task A');
   await expect
     .poll(async () => {
       const taskGroups = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
-      const backlogGroup = taskGroups.find((g: any) => g.section.id === backlog.id);
-      return backlogGroup.tasks[0]?.title ?? '';
+      const unsectionedGroup = taskGroups.find((g: any) => g.section.id === noSection.id);
+      return unsectionedGroup.tasks[0]?.title ?? '';
     })
     .toBe('Task B');
 
@@ -351,6 +356,15 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
 
   await editor.type(' LinkText');
 
+  await editor.type('\n/tab');
+  await page.locator('[data-testid="slash-item-table"]').first().click({ force: true });
+  await expect(page.locator('[data-testid="task-description-content"] table')).toBeVisible();
+  await expect(page.locator('[data-testid="table-controls"]')).toBeVisible();
+  await page.locator('[data-testid="task-description-content"] table th').first().click();
+  await page.click('[data-testid="table-add-column-right"]');
+  await page.locator('[data-testid="task-description-content"] table td').first().click();
+  await page.click('[data-testid="table-add-row-below"]');
+
   await editor.type('\n/image');
   await page.locator('[data-testid="slash-item-image"]').first().click({ force: true });
   const fixturePath = path.resolve(process.cwd(), 'fixtures/pixel.png');
@@ -361,21 +375,56 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
     .poll(async () => {
       const detail = await api(`/tasks/${movedTask.id}`, token);
       const content = JSON.stringify(detail.descriptionDoc ?? {});
+      const findTable = (node: any): any => {
+        if (!node || typeof node !== 'object') return null;
+        if (node.type === 'table') return node;
+        if (!Array.isArray(node.content)) return null;
+        for (const child of node.content) {
+          const found = findTable(child);
+          if (found) return found;
+        }
+        return null;
+      };
+      const tableNode = findTable(detail.descriptionDoc);
+      const rowCount = Array.isArray(tableNode?.content) ? tableNode.content.length : 0;
+      const colCount = Array.isArray(tableNode?.content?.[0]?.content) ? tableNode.content[0].content.length : 0;
       return {
         version: detail.descriptionVersion,
         hasQuote: content.includes('blockquote'),
         hasCode: content.includes('codeBlock'),
         hasMention: content.includes(`\"id\":\"${sub}\"`),
         hasImage: content.includes('/public/attachments/'),
+        tableRows: rowCount,
+        tableCols: colCount,
       };
     })
-    .toEqual({
+    .toMatchObject({
       version: expect.any(Number),
       hasQuote: true,
       hasCode: true,
       hasMention: true,
       hasImage: true,
     });
+
+  await expect
+    .poll(async () => {
+      const detail = await api(`/tasks/${movedTask.id}`, token);
+      const findTable = (node: any): any => {
+        if (!node || typeof node !== 'object') return null;
+        if (node.type === 'table') return node;
+        if (!Array.isArray(node.content)) return null;
+        for (const child of node.content) {
+          const found = findTable(child);
+          if (found) return found;
+        }
+        return null;
+      };
+      const tableNode = findTable(detail.descriptionDoc);
+      const rowCount = Array.isArray(tableNode?.content) ? tableNode.content.length : 0;
+      const colCount = Array.isArray(tableNode?.content?.[0]?.content) ? tableNode.content[0].content.length : 0;
+      return rowCount >= 3 && colCount >= 3;
+    })
+    .toBe(true);
 
   await page.click('button[aria-label="Close task detail"]');
 

@@ -90,6 +90,7 @@ docker compose up -d --build
 
 - OIDC JWT verification via JWKS by default.
 - Dev auth mode is disabled by default and only enabled via `DEV_AUTH_ENABLED=true`.
+- Dev auth token lifetime is configurable via `DEV_AUTH_TOKEN_TTL` (default `8h`).
 - Workspace/project admin operations are authorization-enforced server-side.
 - Collaboration JWT/service secrets:
   - `COLLAB_JWT_SECRET`

@@ -531,14 +531,32 @@ function TaskRow({
 function QuickAddTask({
   sectionId,
   onCreate,
+  openSignal,
+  onOpenSignalHandled,
+  showClosedTrigger = true,
 }: {
   sectionId: string;
   onCreate: (sectionId: string, title: string) => Promise<void>;
+  openSignal?: number | null;
+  onOpenSignalHandled?: (signal: number) => void;
+  showClosedTrigger?: boolean;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const ignoreNextBlurRef = useRef(false);
+
+  useEffect(() => {
+    if (openSignal === null || openSignal === undefined) return;
+    setOpen(true);
+    ignoreNextBlurRef.current = true;
+    setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }, 120);
+    onOpenSignalHandled?.(openSignal);
+  }, [onOpenSignalHandled, openSignal]);
 
   const submit = async () => {
     const trimmed = title.trim();
@@ -549,6 +567,7 @@ function QuickAddTask({
   };
 
   if (!open) {
+    if (!showClosedTrigger) return null;
     return (
       <button
         type="button"
@@ -582,6 +601,10 @@ function QuickAddTask({
           }
         }}
         onBlur={() => {
+          if (ignoreNextBlurRef.current) {
+            ignoreNextBlurRef.current = false;
+            return;
+          }
           if (!title.trim()) {
             setOpen(false);
             setTitle('');
@@ -629,6 +652,8 @@ export default function ProjectBoard({
   statusFilters = [],
   assigneeFilters = [],
   initialTaskId,
+  quickAddIntent,
+  onQuickAddIntentHandled,
 }: {
   projectId: string;
   projectName?: string;
@@ -638,6 +663,8 @@ export default function ProjectBoard({
   statusFilters?: Task['status'][];
   assigneeFilters?: string[];
   initialTaskId?: string | null;
+  quickAddIntent?: { sectionId: string; nonce: number } | null;
+  onQuickAddIntentHandled?: (nonce: number) => void;
 }) {
   const { t } = useI18n();
   const sensors = useSensors(
@@ -795,6 +822,17 @@ export default function ProjectBoard({
     if (!initialTaskId) return;
     setSelectedTaskId(initialTaskId);
   }, [initialTaskId]);
+
+  useEffect(() => {
+    const sectionId = quickAddIntent?.sectionId;
+    if (!sectionId) return;
+    setCollapsedSectionIds((current) => {
+      if (!current.has(sectionId)) return current;
+      const next = new Set(current);
+      next.delete(sectionId);
+      return next;
+    });
+  }, [quickAddIntent]);
 
   const groupsQuery = useQuery<SectionTaskGroup[]>({
     queryKey: queryKeys.projectTasksGrouped(projectId),
@@ -1236,7 +1274,7 @@ export default function ProjectBoard({
                   </TableBody>
                 </Table>
 
-                {!group.tasks.length ? (
+                {!group.tasks.length && !isNoSection ? (
                   <div className="px-4 py-3 text-sm text-muted-foreground" data-testid={`empty-section-${group.section.id}`}>
                     {t('noTasksInSection')}
                   </div>
@@ -1248,6 +1286,9 @@ export default function ProjectBoard({
                     onCreate={async (sectionId, title) => {
                       await createTask.mutateAsync({ sectionId, title });
                     }}
+                    openSignal={quickAddIntent?.sectionId === group.section.id ? quickAddIntent.nonce : null}
+                    showClosedTrigger={!isNoSection}
+                    {...(onQuickAddIntentHandled ? { onOpenSignalHandled: onQuickAddIntentHandled } : {})}
                   />
                 </div>
               </>
