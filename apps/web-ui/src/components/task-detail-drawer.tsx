@@ -451,6 +451,7 @@ export default function TaskDetailDrawer({
                   variant="ghost"
                   className="h-8 w-8 text-muted-foreground hover:text-foreground"
                   aria-label={t('attachments')}
+                  data-testid="task-detail-tab-attachments"
                   onClick={() => {
                     setTab('details');
                     requestAnimationFrame(() => {
@@ -470,6 +471,7 @@ export default function TaskDetailDrawer({
                       : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
                   )}
                   aria-label={t('comments')}
+                  data-testid="task-detail-tab-comments"
                   onClick={() => setTab('comments')}
                 >
                   <MessageSquare className="h-4 w-4" />
@@ -484,6 +486,7 @@ export default function TaskDetailDrawer({
                       : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
                   )}
                   aria-label={t('activity')}
+                  data-testid="task-detail-tab-activity"
                   onClick={() => setTab('activity')}
                 >
                   <Activity className="h-4 w-4" />
@@ -498,6 +501,7 @@ export default function TaskDetailDrawer({
                       : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
                   )}
                   aria-label={t('details')}
+                  data-testid="task-detail-tab-details"
                   onClick={() => setTab('details')}
                 >
                   <List className="h-4 w-4" />

@@ -31,14 +31,6 @@ async function dragBoardTaskToTask(page: Page, taskTitle: string, targetTitle: s
   await source.dragTo(target, { force: true });
 }
 
-async function dragBoardTaskToColumn(page: Page, taskTitle: string, sectionId: string) {
-  const source = page.locator(`[data-testid^="board-task-"][data-task-title="${taskTitle}"]`).first();
-  const target = page.locator(`[data-testid="board-column-${sectionId}"]`).first();
-  await expect(source).toBeVisible();
-  await expect(target).toBeVisible();
-  await source.dragTo(target, { force: true });
-}
-
 async function switchProjectView(page: Page, view: 'list' | 'board' | 'calendar' | 'files') {
   await page.click(`[data-testid="project-view-${view}"]`);
   await expect(page).toHaveURL(new RegExp(`[?&]view=${view}`));
@@ -216,7 +208,7 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await expect(page.locator('[data-task-title="Task D"]')).toBeVisible();
 
   await switchProjectView(page, 'board');
-  await dragBoardTaskToColumn(page, 'Task C', doing.id);
+  await dragBoardTaskToTask(page, 'Task C', 'Task D');
   await expect
     .poll(async () => {
       const taskGroups = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
@@ -492,7 +484,7 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
     })
     .toBe(true);
 
-  await page.click('button:has-text("Comments")');
+  await page.click('[data-testid="task-detail-tab-comments"]');
   await page.fill('[data-testid="comment-composer"]', `First comment from e2e @[${sub}|${sub}]`);
   await page.click('[data-testid="add-comment-btn"]');
   await expect(page.getByText('First comment from e2e')).toBeVisible();
@@ -507,10 +499,10 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await page.click(`[data-testid="open-task-${movedTask.id}"]`);
   await expect(page.locator('[data-testid="task-description-content"] img')).toBeVisible();
   await expect(page.locator('[data-testid="task-reminder-input"]')).not.toHaveValue('');
-  await page.click('button:has-text("Comments")');
+  await page.click('[data-testid="task-detail-tab-comments"]');
   await expect(page.getByText('Edited comment from e2e')).toBeVisible();
   await expect(page.locator('[data-testid^="comment-mention-pill-"]').first()).toBeVisible();
-  await page.click('button:has-text("Activity")');
+  await page.click('[data-testid="task-detail-tab-activity"]');
   await expect(page.getByText(/updated description/i).first()).toBeVisible();
   await expect(page.getByText(/added a comment/i).first()).toBeVisible();
   await expect(page.getByText(/added an attachment/i).first()).toBeVisible();
