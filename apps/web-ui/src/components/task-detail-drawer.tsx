@@ -79,6 +79,24 @@ function parseCommentBody(body: string) {
   return output;
 }
 
+function serializeCommentMentions(body: string, members: ProjectMember[]) {
+  if (!body.trim()) return body;
+  const idToLabel = new Map<string, string>();
+  for (const member of members) {
+    const label = member.user.displayName ?? member.user.email ?? member.user.id;
+    idToLabel.set(member.userId.toLowerCase(), label);
+  }
+  return body.replace(/(^|\s)@([a-zA-Z0-9._:|-]+)/g, (whole, prefix: string, mentionId: string) => {
+    const label = idToLabel.get(mentionId.toLowerCase());
+    if (!label) return whole;
+    return `${prefix}@[${mentionId}|${label}]`;
+  });
+}
+
+function normalizeComposerMentions(body: string) {
+  return body.replace(/@\[(?<id>[a-zA-Z0-9:_-]+)\|[^\]]+\]/g, (_whole, mentionId: string) => `@${mentionId}`);
+}
+
 function statusLabel(status: Task['status'], t: (key: string) => string) {
   if (status === 'TODO') return t('statusTodo');
   if (status === 'IN_PROGRESS') return t('statusInProgress');
@@ -145,6 +163,7 @@ export default function TaskDetailDrawer({
   const [reminderAtInput, setReminderAtInput] = useState('');
   const [titleInput, setTitleInput] = useState('');
   const [progressInput, setProgressInput] = useState('0');
+  const [startDateInput, setStartDateInput] = useState('');
   const [dueDateInput, setDueDateInput] = useState('');
   const [assigneeInput, setAssigneeInput] = useState<string>('unassigned');
   const [statusInput, setStatusInput] = useState<Task['status']>('TODO');
@@ -237,7 +256,11 @@ export default function TaskDetailDrawer({
   });
 
   const createComment = useMutation({
-    mutationFn: (body: string) => api(`/tasks/${taskId}/comments`, { method: 'POST', body: { body } }) as Promise<TaskComment>,
+    mutationFn: (body: string) =>
+      api(`/tasks/${taskId}/comments`, {
+        method: 'POST',
+        body: { body: serializeCommentMentions(body, membersQuery.data ?? []) },
+      }) as Promise<TaskComment>,
     onSuccess: async () => {
       setNewComment('');
       await queryClient.invalidateQueries({ queryKey: queryKeys.taskComments(taskId!) });
@@ -320,6 +343,7 @@ export default function TaskDetailDrawer({
     if (!taskQuery.data) return;
     setTitleInput(taskQuery.data.title);
     setProgressInput(String(taskQuery.data.progressPercent ?? 0));
+    setStartDateInput(toDateInputValue(taskQuery.data.startAt));
     setDueDateInput(toDateInputValue(taskQuery.data.dueAt));
     setAssigneeInput(taskQuery.data.assigneeUserId ?? 'unassigned');
     setStatusInput(taskQuery.data.status);
@@ -365,6 +389,14 @@ export default function TaskDetailDrawer({
     patchTask.mutate({ progressPercent: normalized, version: currentTask.version });
   };
 
+  const commitStartDate = () => {
+    if (!currentTask) return;
+    const nextStartAt = startDateInput ? `${startDateInput}T00:00:00.000Z` : null;
+    const currentStartAt = currentTask.startAt ? String(currentTask.startAt).slice(0, 10) : '';
+    if (currentStartAt === startDateInput) return;
+    patchTask.mutate({ startAt: nextStartAt, version: currentTask.version });
+  };
+
   const commitDueDate = () => {
     if (!currentTask) return;
     const nextDueAt = dueDateInput ? `${dueDateInput}T00:00:00.000Z` : null;
@@ -392,37 +424,25 @@ export default function TaskDetailDrawer({
         <Dialog.Content className="fixed inset-y-0 right-0 z-50 flex h-dvh w-[760px] max-w-full flex-col border-l bg-background shadow-2xl">
           <Dialog.Title className="sr-only">{t('taskDetail')}</Dialog.Title>
           <div className="flex min-h-0 flex-1 flex-col p-4">
-            <div className="mb-3 flex items-start justify-between gap-3">
-              <div className="flex min-w-0 flex-1 items-start gap-2">
-                <Button
-                  variant={isDone ? 'default' : 'outline'}
-                  size="sm"
-                  className={cn(
-                    'min-w-[152px] justify-center whitespace-nowrap px-3 text-xs sm:text-sm',
-                    isDone
-                      ? 'bg-emerald-600 text-white hover:bg-emerald-600/90'
-                      : 'border-border/70 text-foreground hover:bg-muted/40',
-                  )}
-                  onClick={() => {
-                    if (!currentTask || toggleComplete.isPending) return;
-                    toggleComplete.mutate(!isDone);
-                  }}
-                  disabled={!currentTask || toggleComplete.isPending}
-                >
-                  {isDone ? <CheckCircle2 className="mr-1 h-4 w-4 shrink-0" /> : <Circle className="mr-1 h-4 w-4 shrink-0" />}
-                  {isDone ? t('markIncomplete') : t('markComplete')}
-                </Button>
-                <Input
-                  value={titleInput}
-                  onChange={(event) => setTitleInput(event.target.value)}
-                  onBlur={commitTitle}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') event.currentTarget.blur();
-                  }}
-                  className="h-auto border-transparent bg-transparent px-1 py-0 text-2xl font-semibold shadow-none hover:bg-muted/20 focus-visible:border-border/50 focus-visible:bg-background"
-                  data-testid="task-detail-title-input"
-                />
-              </div>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <Button
+                variant={isDone ? 'default' : 'outline'}
+                size="sm"
+                className={cn(
+                  'min-w-[152px] justify-center whitespace-nowrap px-3 text-xs sm:text-sm',
+                  isDone
+                    ? 'bg-emerald-600 text-white hover:bg-emerald-600/90'
+                    : 'border-border/70 text-foreground hover:bg-muted/40',
+                )}
+                onClick={() => {
+                  if (!currentTask || toggleComplete.isPending) return;
+                  toggleComplete.mutate(!isDone);
+                }}
+                disabled={!currentTask || toggleComplete.isPending}
+              >
+                {isDone ? <CheckCircle2 className="mr-1 h-4 w-4 shrink-0" /> : <Circle className="mr-1 h-4 w-4 shrink-0" />}
+                {isDone ? t('markIncomplete') : t('markComplete')}
+              </Button>
               <div className="flex items-center gap-1">
                 <Button
                   size="icon"
@@ -457,6 +477,19 @@ export default function TaskDetailDrawer({
                   </Button>
                 </Dialog.Close>
               </div>
+            </div>
+
+            <div className="mb-4">
+              <Input
+                value={titleInput}
+                onChange={(event) => setTitleInput(event.target.value)}
+                onBlur={commitTitle}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') event.currentTarget.blur();
+                }}
+                className="h-auto w-full border-transparent bg-transparent px-1 py-0 text-2xl font-semibold shadow-none hover:bg-muted/20 focus-visible:border-border/50 focus-visible:bg-background"
+                data-testid="task-detail-title-input"
+              />
             </div>
 
             <div className="mb-4 flex items-center gap-5 border-b border-border/60">
@@ -509,7 +542,18 @@ export default function TaskDetailDrawer({
                       </div>
                     </MetadataRow>
 
-                    <MetadataRow icon={<CalendarDays className="h-3.5 w-3.5" />} label={t('dueDate')}>
+                    <MetadataRow icon={<CalendarDays className="h-3.5 w-3.5" />} label={t('startDate')}>
+                      <Input
+                        type="date"
+                        value={startDateInput}
+                        onChange={(event) => setStartDateInput(event.target.value)}
+                        onBlur={commitStartDate}
+                        className="h-8 w-[220px] border-transparent bg-transparent px-2 shadow-none hover:bg-muted/30 focus-visible:border-border"
+                        data-testid="task-detail-start-date"
+                      />
+                    </MetadataRow>
+
+                    <MetadataRow icon={<CalendarDays className="h-3.5 w-3.5" />} label={t('endDate')}>
                       <Input
                         type="date"
                         value={dueDateInput}
@@ -670,14 +714,16 @@ export default function TaskDetailDrawer({
                     <Textarea
                       value={newComment}
                       onChange={(event) => {
-                        setNewComment(event.target.value);
-                        tryCommentMentionLookup(event.target.value);
+                        const normalized = normalizeComposerMentions(event.target.value);
+                        setNewComment(normalized);
+                        tryCommentMentionLookup(normalized);
                       }}
                       placeholder={t('addCommentPlaceholder')}
                       className="min-h-[88px] border-border/60"
                       data-testid="comment-composer"
                     />
                     <Button
+                      className="min-w-[96px] shrink-0 self-start whitespace-nowrap px-3"
                       onClick={() => createComment.mutate(newComment)}
                       disabled={!newComment.trim() || createComment.isPending}
                       data-testid="add-comment-btn"
@@ -696,7 +742,7 @@ export default function TaskDetailDrawer({
                               className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-muted"
                               data-testid={`comment-mention-option-${member.userId}`}
                               onClick={() => {
-                                setNewComment((prev) => prev.replace(/(?:^|\s)@[a-zA-Z0-9._-]*$/, ` @[${member.userId}|${label}] `));
+                                setNewComment((prev) => prev.replace(/(?:^|\s)@[a-zA-Z0-9._-]*$/, ` @${member.userId} `));
                                 setCommentMentionQuery('');
                               }}
                             >
