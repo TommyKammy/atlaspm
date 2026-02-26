@@ -112,18 +112,46 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await page.waitForURL(`**/projects/${projectA.id}`);
   await expect(page.locator('[data-testid="add-new-trigger"]')).toBeVisible();
   await expect(page.locator('[data-testid="project-search-input"]')).toBeVisible();
+  await expect(page.locator('[data-testid="column-resize-name"]')).toBeVisible();
+
+  const initialNameColumnWidth = await page
+    .locator('table')
+    .first()
+    .locator('col')
+    .first()
+    .evaluate((el) => Number.parseInt((el as HTMLTableColElement).style.width || '0', 10));
+  const resizeHandle = page.locator('[data-testid="column-resize-name"]').first();
+  const resizeBox = await resizeHandle.boundingBox();
+  expect(resizeBox).toBeTruthy();
+  if (!resizeBox) {
+    throw new Error('column resize handle not rendered');
+  }
+  await page.mouse.move(resizeBox.x + resizeBox.width / 2, resizeBox.y + resizeBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(resizeBox.x + 40, resizeBox.y + resizeBox.height / 2);
+  await page.mouse.up();
+  await expect
+    .poll(async () => {
+      return page
+        .locator('table')
+        .first()
+        .locator('col')
+        .first()
+        .evaluate((el) => Number.parseInt((el as HTMLTableColElement).style.width || '0', 10));
+    })
+    .toBeGreaterThan(initialNameColumnWidth);
 
   await page.click('[data-testid="add-new-trigger"]');
   await page.click('[data-testid="add-new-section"]');
   await page.fill('[data-testid="new-section-input"]', 'Backlog');
   await page.click('[data-testid="create-section-btn"]');
-  await expect(page.getByRole('heading', { name: 'Backlog' })).toBeVisible();
+  await expect(page.getByText('Backlog').first()).toBeVisible();
 
   await page.click('[data-testid="add-new-trigger"]');
   await page.click('[data-testid="add-new-section"]');
   await page.fill('[data-testid="new-section-input"]', 'Doing');
   await page.click('[data-testid="create-section-btn"]');
-  await expect(page.getByRole('heading', { name: 'Doing' })).toBeVisible();
+  await expect(page.getByText('Doing').first()).toBeVisible();
 
   let sections = await api(`/projects/${projectA.id}/sections`, token);
   const backlog = sections.find((s: any) => s.name === 'Backlog');
@@ -145,14 +173,30 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await quickAddBacklog.press('Enter');
   await expect(page.locator('[data-task-title="Task C"]')).toBeVisible();
 
-  const nameFilter = page.locator('[data-testid="column-filter-name"]').first();
-  await nameFilter.fill('Task A');
+  const projectSearch = page.locator('[data-testid="project-search-input"]').first();
+  await projectSearch.fill('Task A');
   await expect(page.locator('[data-task-title="Task A"]')).toBeVisible();
   await expect(page.locator('[data-task-title="Task B"]')).toHaveCount(0);
-  await nameFilter.fill('Backlog');
+  await projectSearch.fill('Backlog');
   await expect(page.locator('[data-task-title="Task A"]')).toBeVisible();
   await expect(page.locator('[data-task-title="Task B"]')).toBeVisible();
-  await nameFilter.fill('');
+  await projectSearch.fill('');
+  await expect(page.locator('[data-task-title="Task B"]')).toBeVisible();
+
+  await page.locator('[data-task-title="Task A"] button[data-testid^="task-complete-"]').first().click({ force: true });
+  await expect(page.locator('[data-task-title="Task A"] select').first()).toHaveValue('DONE');
+
+  await page.click('[data-testid="project-filter-trigger"]');
+  await page.click('[data-testid="project-filter-status-DONE"]');
+  await expect(page.locator('[data-task-title="Task A"]')).toBeVisible();
+  await expect(page.locator('[data-task-title="Task B"]')).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.locator('[data-task-title="Task A"]')).toBeVisible();
+  await expect(page.locator('[data-task-title="Task B"]')).toHaveCount(0);
+
+  await page.click('[data-testid="project-filter-trigger"]');
+  await page.click('[data-testid="project-filter-clear"]');
   await expect(page.locator('[data-task-title="Task B"]')).toBeVisible();
 
   await page.locator('[data-task-title="Task C"] button[data-testid^="delete-task-"]').first().click({ force: true });
@@ -264,6 +308,24 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   const doingAfterAssign = grouped.find((g: any) => g.section.id === doing.id);
   const assignedTask = doingAfterAssign.tasks.find((t: any) => t.id === movedTask.id);
   expect(assignedTask.assigneeUserId).toBe(sub);
+
+  const renamedSection = `Doing Updated ${Date.now()}`;
+  const sectionLabel = page.locator('[data-testid^="section-name-label-"]').first();
+  await sectionLabel.click();
+  const sectionInput = page.locator('[data-testid^="section-name-input-"]').first();
+  await sectionInput.fill(renamedSection);
+  await sectionInput.press('Enter');
+  await expect(page.locator('[data-testid^="section-name-label-"]').first()).toHaveText(renamedSection);
+
+  const renamedTask = `Task B Renamed ${Date.now()}`;
+  await page.click(`[data-testid="task-title-label-${movedTask.id}"]`);
+  await page.fill(`[data-testid="task-title-input-${movedTask.id}"]`, renamedTask);
+  await page.press(`[data-testid="task-title-input-${movedTask.id}"]`, 'Enter');
+  await expect(page.locator(`[data-task-title="${renamedTask}"]`)).toBeVisible();
+
+  await page.reload();
+  await expect(page.locator('[data-testid^="section-name-label-"]').first()).toHaveText(renamedSection);
+  await expect(page.locator(`[data-task-title="${renamedTask}"]`)).toBeVisible();
 
   await page.click(`[data-testid="open-task-${movedTask.id}"]`);
   const editor = page.locator('[data-testid="task-description-content"]');

@@ -30,7 +30,6 @@ export default function AppShell({
   const pathname = usePathname();
   const isLogin = pathname === '/login';
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>(initialSidebarMode);
-  const [sidebarHoverExpanded, setSidebarHoverExpanded] = useState(false);
   const [contentLayout] = useState<ContentLayout>(initialContentLayout);
 
   useEffect(() => {
@@ -57,7 +56,7 @@ export default function AppShell({
     return <main className="min-h-screen bg-background">{children}</main>;
   }
 
-  const showCompact = sidebarMode === 'icon' && !sidebarHoverExpanded;
+  const showCompact = sidebarMode === 'icon';
   const sidebarWidthClass = showCompact ? 'w-[68px]' : 'w-[228px]';
 
   return (
@@ -65,12 +64,6 @@ export default function AppShell({
       <aside
         className={cn('hidden border-r transition-all duration-200 ease-in-out md:block', sidebarWidthClass)}
         style={{ borderColor: 'hsl(var(--sidebar-border))' }}
-        onMouseEnter={() => {
-          if (sidebarMode === 'icon') setSidebarHoverExpanded(true);
-        }}
-        onMouseLeave={() => {
-          if (sidebarMode === 'icon') setSidebarHoverExpanded(false);
-        }}
       >
         <Sidebar
           compact={showCompact}

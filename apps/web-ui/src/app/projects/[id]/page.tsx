@@ -21,6 +21,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
+const TASK_STATUSES: Task['status'][] = ['TODO', 'IN_PROGRESS', 'DONE', 'BLOCKED'];
+
+function parseListParam(raw: string | null): string[] {
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export default function ProjectPage() {
   const { t } = useI18n();
   const params = useParams<{ id: string }>();
@@ -38,6 +48,14 @@ export default function ProjectPage() {
     viewParam === 'board' || viewParam === 'calendar' || viewParam === 'files' ? viewParam : 'list';
   const trashOpen = searchParams.get('trash') === '1';
   const search = searchParams.get('q') ?? '';
+  const statusFilters = useMemo(
+    () =>
+      parseListParam(searchParams.get('statuses')).filter(
+        (value): value is Task['status'] => TASK_STATUSES.includes(value as Task['status']),
+      ),
+    [searchParams],
+  );
+  const assigneeFilters = useMemo(() => parseListParam(searchParams.get('assignees')), [searchParams]);
   const statusFilter: 'ALL' | Task['status'] = 'ALL';
   const priorityFilter: 'ALL' | NonNullable<Task['priority']> = 'ALL';
 
@@ -267,6 +285,8 @@ export default function ProjectPage() {
             search={search}
             statusFilter={statusFilter}
             priorityFilter={priorityFilter}
+            statusFilters={statusFilters}
+            assigneeFilters={assigneeFilters}
             initialTaskId={openTaskId}
           />
         </>

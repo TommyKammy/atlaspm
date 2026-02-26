@@ -7,12 +7,15 @@ import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import * as Y from 'yjs';
+import { Columns3, Minus, Plus, Rows3, Table2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, apiBaseUrl } from '@/lib/api';
 import type { ProjectMember, Task } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
+import { useI18n } from '@/lib/i18n';
 import SlashMenu, { type SlashItem } from './SlashMenu';
 import { createTaskDescriptionExtensions, defaultTaskDoc } from './extensions/base';
 
@@ -66,6 +69,7 @@ export default function TaskDescriptionEditor({
   onReloadLatest,
   onAttachmentChanged,
 }: Props) {
+  const { t } = useI18n();
   const initialDoc = useMemo(() => normalizeDoc(descriptionDoc), [descriptionDoc]);
   const [currentVersion, setCurrentVersion] = useState(descriptionVersion);
   const [lastSavedJson, setLastSavedJson] = useState(JSON.stringify(initialDoc));
@@ -83,7 +87,9 @@ export default function TaskDescriptionEditor({
   const [presenceCount, setPresenceCount] = useState(1);
   const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
   const [ydoc, setYdoc] = useState<Y.Doc | null>(null);
+  const [editorFocused, setEditorFocused] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const editorContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!collabEnabled) return;
@@ -165,7 +171,7 @@ export default function TaskDescriptionEditor({
   const editor = useEditor(
     {
       extensions: [
-        ...createTaskDescriptionExtensions(),
+        ...createTaskDescriptionExtensions(t('descriptionPlaceholder')),
         ...(isCollabActive
           ? [
               Collaboration.configure({ document: ydoc!, field: 'default' }),
@@ -185,7 +191,7 @@ export default function TaskDescriptionEditor({
         attributes: {
           'data-testid': 'task-description-content',
           class:
-            'prose prose-sm dark:prose-invert min-h-[220px] max-w-none rounded-md border bg-background px-3 py-2 text-sm focus-visible:outline-none',
+            'prose prose-sm dark:prose-invert min-h-[220px] max-w-none rounded-md px-3 py-2 text-sm focus-visible:outline-none hover:bg-muted/20',
         },
         handleKeyDown: (_view, event) => {
           if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
@@ -265,25 +271,25 @@ export default function TaskDescriptionEditor({
   };
 
   const slashItems: SlashItem[] = [
-    { id: 'h1', label: 'Heading 1', action: () => editor?.chain().focus().toggleHeading({ level: 1 }).run() },
-    { id: 'h2', label: 'Heading 2', action: () => editor?.chain().focus().toggleHeading({ level: 2 }).run() },
-    { id: 'h3', label: 'Heading 3', action: () => editor?.chain().focus().toggleHeading({ level: 3 }).run() },
-    { id: 'bullet', label: 'Bulleted list', action: () => editor?.chain().focus().toggleBulletList().run() },
-    { id: 'ordered', label: 'Numbered list', action: () => editor?.chain().focus().toggleOrderedList().run() },
-    { id: 'check', label: 'Checklist', action: () => editor?.chain().focus().toggleTaskList().run() },
-    { id: 'quote', label: 'Quote', action: () => editor?.chain().focus().toggleBlockquote().run() },
-    { id: 'code', label: 'Code block', action: () => editor?.chain().focus().toggleCodeBlock().run() },
-    { id: 'divider', label: 'Divider', action: () => editor?.chain().focus().setHorizontalRule().run() },
+    { id: 'h1', label: t('heading1'), action: () => editor?.chain().focus().toggleHeading({ level: 1 }).run() },
+    { id: 'h2', label: t('heading2'), action: () => editor?.chain().focus().toggleHeading({ level: 2 }).run() },
+    { id: 'h3', label: t('heading3'), action: () => editor?.chain().focus().toggleHeading({ level: 3 }).run() },
+    { id: 'bullet', label: t('bulletedList'), action: () => editor?.chain().focus().toggleBulletList().run() },
+    { id: 'ordered', label: t('numberedList'), action: () => editor?.chain().focus().toggleOrderedList().run() },
+    { id: 'check', label: t('checklist'), action: () => editor?.chain().focus().toggleTaskList().run() },
+    { id: 'quote', label: t('quote'), action: () => editor?.chain().focus().toggleBlockquote().run() },
+    { id: 'code', label: t('codeBlock'), action: () => editor?.chain().focus().toggleCodeBlock().run() },
+    { id: 'divider', label: t('divider'), action: () => editor?.chain().focus().setHorizontalRule().run() },
     {
       id: 'image',
-      label: 'Image upload',
+      label: t('imageUpload'),
       action: () => {
         fileInputRef.current?.click();
       },
     },
     {
       id: 'table',
-      label: 'Table (2x2)',
+      label: t('table2x2'),
       action: () => editor?.chain().focus().insertTable({ rows: 2, cols: 2, withHeaderRow: true }).run(),
     },
   ]
@@ -344,17 +350,63 @@ export default function TaskDescriptionEditor({
     return () => clearTimeout(timeout);
   }, [editor, taskId, currentVersion, lastSavedJson, onSaved, isCollabActive]);
 
+  useEffect(() => {
+    const container = editorContainerRef.current;
+    if (!container) return;
+    const handleFocusIn = () => setEditorFocused(true);
+    const handleFocusOut = () => {
+      window.setTimeout(() => {
+        const active = document.activeElement;
+        if (!active || !container.contains(active)) {
+          setEditorFocused(false);
+        }
+      }, 0);
+    };
+    container.addEventListener('focusin', handleFocusIn);
+    container.addEventListener('focusout', handleFocusOut);
+    return () => {
+      container.removeEventListener('focusin', handleFocusIn);
+      container.removeEventListener('focusout', handleFocusOut);
+    };
+  }, []);
+
   if (!editor) return null;
 
+  const shouldShowToolbar = editorFocused || editor.isFocused;
+  const isTableActive = editor.isActive('table');
+
   return (
-    <div className="relative space-y-2">
+    <div ref={editorContainerRef} className="relative space-y-2">
       <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t('description')}</span>
+        {isCollabActive ? (
+          <Badge data-testid="collab-presence-badge">
+            {presenceCount} {t('collabUsers')}
+          </Badge>
+        ) : null}
+        <span className="ml-auto text-xs text-muted-foreground">
+          {isCollabActive
+            ? collabStatus === 'connected'
+              ? t('live')
+              : t('connecting')
+            : isSaving
+              ? t('saving')
+              : t('saved')}
+        </span>
+      </div>
+
+      <div
+        className={cn(
+          'flex flex-wrap items-center gap-2 overflow-hidden transition-all duration-150 ease-in-out',
+          shouldShowToolbar ? 'max-h-20 opacity-100' : 'max-h-0 opacity-0',
+        )}
+      >
         <Button size="sm" variant="outline" disabled={isReadOnly} onClick={() => editor.chain().focus().toggleBold().run()}>B</Button>
         <Button size="sm" variant="outline" disabled={isReadOnly} onClick={() => editor.chain().focus().toggleItalic().run()}>I</Button>
         <Button size="sm" variant="outline" disabled={isReadOnly} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>H2</Button>
-        <Button size="sm" variant="outline" disabled={isReadOnly} onClick={() => editor.chain().focus().toggleBulletList().run()}>Bullet</Button>
-        <Button size="sm" variant="outline" disabled={isReadOnly} onClick={() => editor.chain().focus().toggleOrderedList().run()}>Number</Button>
-        <Button size="sm" variant="outline" disabled={isReadOnly} onClick={() => editor.chain().focus().toggleTaskList().run()}>Check</Button>
+        <Button size="sm" variant="outline" disabled={isReadOnly} onClick={() => editor.chain().focus().toggleBulletList().run()}>{t('bulletedList')}</Button>
+        <Button size="sm" variant="outline" disabled={isReadOnly} onClick={() => editor.chain().focus().toggleOrderedList().run()}>{t('numberedList')}</Button>
+        <Button size="sm" variant="outline" disabled={isReadOnly} onClick={() => editor.chain().focus().toggleTaskList().run()}>{t('checklist')}</Button>
         <Button
           size="sm"
           variant="outline"
@@ -362,24 +414,68 @@ export default function TaskDescriptionEditor({
           onClick={() => setLinkOpen(true)}
           data-testid="link-toolbar-open"
         >
-          Link
+          {t('addLink')}
         </Button>
-        <Button size="sm" variant="outline" disabled={isReadOnly} onClick={() => fileInputRef.current?.click()}>Image</Button>
-        {isCollabActive ? (
-          <Badge data-testid="collab-presence-badge">
-            {presenceCount} users
-          </Badge>
-        ) : null}
-        <span className="ml-auto text-xs text-muted-foreground">
-          {isCollabActive
-            ? collabStatus === 'connected'
-              ? 'Live'
-              : 'Connecting…'
-            : isSaving
-              ? 'Saving…'
-              : 'Saved'}
-        </span>
+        <Button size="sm" variant="outline" disabled={isReadOnly} onClick={() => fileInputRef.current?.click()}>{t('imageUpload')}</Button>
       </div>
+
+      {!isReadOnly && isTableActive ? (
+        <div
+          className="pointer-events-none absolute right-2 top-16 z-20 flex items-center gap-1 rounded-md border bg-background/95 p-1 opacity-0 shadow-sm backdrop-blur-sm transition-opacity duration-150 group-hover/editor:opacity-100 group-focus-within/editor:opacity-100"
+          data-testid="table-controls"
+        >
+          <Button
+            size="icon"
+            variant="ghost"
+            className="pointer-events-auto h-7 w-7"
+            onClick={() => editor.chain().focus().addColumnAfter().run()}
+            aria-label={t('tableAddColumn')}
+          >
+            <Columns3 className="h-3.5 w-3.5" />
+            <Plus className="-ml-0.5 h-2.5 w-2.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="pointer-events-auto h-7 w-7"
+            onClick={() => editor.chain().focus().deleteColumn().run()}
+            aria-label={t('tableDeleteColumn')}
+          >
+            <Columns3 className="h-3.5 w-3.5" />
+            <Minus className="-ml-0.5 h-2.5 w-2.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="pointer-events-auto h-7 w-7"
+            onClick={() => editor.chain().focus().addRowAfter().run()}
+            aria-label={t('tableAddRow')}
+          >
+            <Rows3 className="h-3.5 w-3.5" />
+            <Plus className="-ml-0.5 h-2.5 w-2.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="pointer-events-auto h-7 w-7"
+            onClick={() => editor.chain().focus().deleteRow().run()}
+            aria-label={t('tableDeleteRow')}
+          >
+            <Rows3 className="h-3.5 w-3.5" />
+            <Minus className="-ml-0.5 h-2.5 w-2.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="pointer-events-auto h-7 w-7 text-destructive hover:text-destructive"
+            onClick={() => editor.chain().focus().deleteTable().run()}
+            aria-label={t('tableDelete')}
+          >
+            <Table2 className="h-3.5 w-3.5" />
+            <Minus className="-ml-0.5 h-2.5 w-2.5" />
+          </Button>
+        </div>
+      ) : null}
 
       <input
         ref={fileInputRef}
@@ -397,19 +493,19 @@ export default function TaskDescriptionEditor({
 
       {collabUnavailable && collabEnabled ? (
         <div className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-foreground" data-testid="collab-fallback-banner">
-          Collaboration unavailable; using snapshot.
+          {t('collabUnavailableUsingSnapshot')}
         </div>
       ) : null}
 
       {isReadOnly ? (
         <div className="rounded-md border border-muted bg-muted/40 px-3 py-2 text-xs text-muted-foreground" data-testid="collab-readonly-banner">
-          Read-only: your role allows viewing collaborative updates but not editing.
+          {t('collabReadonlyBanner')}
         </div>
       ) : null}
 
       {conflict ? (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          This task was updated elsewhere. Reload latest.
+          {t('taskUpdatedElsewhere')}
           <Button
             size="sm"
             variant="outline"
@@ -419,7 +515,7 @@ export default function TaskDescriptionEditor({
               onReloadLatest();
             }}
           >
-            Reload latest
+            {t('reloadLatest')}
           </Button>
         </div>
       ) : null}
@@ -465,22 +561,24 @@ export default function TaskDescriptionEditor({
         </div>
       ) : null}
 
-      <EditorContent editor={editor} />
+      <div className="tiptap-editor-surface group/editor rounded-md border border-transparent transition-colors hover:border-border/30 focus-within:border-border/60">
+        <EditorContent editor={editor} />
+      </div>
 
       <Dialog.Root open={linkOpen} onOpenChange={setLinkOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/50" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-[80] w-[420px] max-w-[95vw] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-background p-4">
-            <Dialog.Title className="text-sm font-semibold">Add link</Dialog.Title>
+            <Dialog.Title className="text-sm font-semibold">{t('addLink')}</Dialog.Title>
             <div className="mt-3 space-y-3">
               <Input
                 value={linkUrl}
                 onChange={(e) => setLinkUrl(e.target.value)}
-                placeholder="https://example.com"
+                placeholder={t('linkPlaceholder')}
                 data-testid="link-dialog-input"
               />
               <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setLinkOpen(false)} data-testid="link-dialog-cancel">Cancel</Button>
+                <Button variant="outline" onClick={() => setLinkOpen(false)} data-testid="link-dialog-cancel">{t('cancel')}</Button>
                 <Button
                   data-testid="link-dialog-save"
                   onClick={() => {
@@ -502,7 +600,7 @@ export default function TaskDescriptionEditor({
                     setLinkOpen(false);
                   }}
                 >
-                  Save
+                  {t('save')}
                 </Button>
               </div>
             </div>

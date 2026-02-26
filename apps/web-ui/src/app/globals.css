@@ -95,4 +95,38 @@
     font-size: 14px;
     line-height: 1.5;
   }
+
+  .tiptap-editor-surface .ProseMirror {
+    min-height: 220px;
+  }
+
+  .tiptap-editor-surface .ProseMirror table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    margin: 0.5rem 0;
+  }
+
+  .tiptap-editor-surface .ProseMirror th,
+  .tiptap-editor-surface .ProseMirror td {
+    border: 1px solid hsl(var(--border));
+    padding: 0.375rem 0.5rem;
+    vertical-align: top;
+  }
+
+  .tiptap-editor-surface .ProseMirror th {
+    background: hsl(var(--muted));
+    font-weight: 600;
+  }
+
+  .tiptap-editor-surface .ProseMirror .selectedCell::after {
+    background: transparent;
+    outline: 2px solid hsl(var(--primary) / 0.35);
+    outline-offset: -2px;
+  }
+
+  .tiptap-editor-surface .ProseMirror th > p,
+  .tiptap-editor-surface .ProseMirror td > p {
+    margin: 0;
+  }
 }

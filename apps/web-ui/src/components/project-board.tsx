@@ -12,11 +12,11 @@ import {
 import { useSortable, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Check, ChevronDown, ChevronRight, Circle, Plus, Trash2, User } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { Check, ChevronDown, ChevronRight, Circle, ExternalLink, Plus, Trash2, User } from 'lucide-react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { ProjectMember, SectionTaskGroup, Task } from '@/lib/types';
+import type { ProjectMember, Section, SectionTaskGroup, Task } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -113,9 +113,6 @@ type DeleteTaskResponse = {
   taskIds: string[];
 };
 
-type DueColumnFilter = 'ALL' | 'NO_DUE' | 'WITH_DUE' | 'OVERDUE';
-type ProgressColumnFilter = 'ALL' | 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETE';
-
 function buildSectionTaskTree(tasks: Task[]): TaskTreeNode[] {
   const byId = new Map<string, TaskTreeNode>();
   for (const task of tasks) byId.set(task.id, { task, children: [] });
@@ -160,24 +157,49 @@ function flattenVisibleTasks(nodes: TaskTreeNode[], collapsedTaskIds: Set<string
 function ProgressBar({ value }: { value: number }) {
   const clamped = Math.max(0, Math.min(100, value));
   return (
-    <div className="w-full space-y-1">
-      <div className="h-1 w-full overflow-hidden rounded bg-muted">
+    <div className="w-full">
+      <div className="h-[3px] w-full overflow-hidden rounded bg-muted">
         <div
           className={cn('h-full rounded transition-all', clamped >= 100 ? 'bg-green-500' : 'bg-primary')}
           style={{ width: `${clamped}%` }}
         />
       </div>
-      <p className="text-[11px] text-muted-foreground">{clamped}%</p>
     </div>
   );
 }
 
 const statusBadgeClass: Record<Task['status'], string> = {
-  TODO: 'bg-slate-100 text-slate-700',
-  IN_PROGRESS: 'bg-sky-100 text-sky-700',
-  DONE: 'bg-emerald-100 text-emerald-700',
-  BLOCKED: 'bg-rose-100 text-rose-700',
+  TODO: 'bg-slate-100/80 text-slate-600',
+  IN_PROGRESS: 'bg-sky-100/70 text-sky-700',
+  DONE: 'bg-emerald-100/80 text-emerald-700',
+  BLOCKED: 'bg-rose-100/80 text-rose-700',
 };
+
+const BOARD_COLUMNS = [
+  { key: 'name', defaultWidth: 420, minWidth: 260 },
+  { key: 'assignee', defaultWidth: 130, minWidth: 96 },
+  { key: 'dueDate', defaultWidth: 170, minWidth: 120 },
+  { key: 'progress', defaultWidth: 190, minWidth: 140 },
+  { key: 'status', defaultWidth: 200, minWidth: 140 },
+  { key: 'projects', defaultWidth: 130, minWidth: 100 },
+  { key: 'dependencies', defaultWidth: 110, minWidth: 90 },
+  { key: 'visibility', defaultWidth: 130, minWidth: 100 },
+  { key: 'collaborators', defaultWidth: 130, minWidth: 100 },
+  { key: 'actions', defaultWidth: 88, minWidth: 72 },
+] as const;
+
+type BoardColumnKey = (typeof BOARD_COLUMNS)[number]['key'];
+type BoardColumnWidths = Record<BoardColumnKey, number>;
+
+const BOARD_DEFAULT_COLUMN_WIDTHS: BoardColumnWidths = BOARD_COLUMNS.reduce((acc, column) => {
+  acc[column.key] = column.defaultWidth;
+  return acc;
+}, {} as BoardColumnWidths);
+
+const BOARD_MIN_COLUMN_WIDTHS: BoardColumnWidths = BOARD_COLUMNS.reduce((acc, column) => {
+  acc[column.key] = column.minWidth;
+  return acc;
+}, {} as BoardColumnWidths);
 
 function AssigneeCombobox({
   task,
@@ -292,13 +314,31 @@ function TaskRow({
     disabled: !draggable,
   });
   const isDone = task.status === 'DONE';
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(task.title);
+
+  useEffect(() => {
+    if (!isEditingTitle) {
+      setTitleDraft(task.title);
+    }
+  }, [isEditingTitle, task.title]);
+
+  const saveTitle = () => {
+    const next = titleDraft;
+    if (next === task.title) {
+      setIsEditingTitle(false);
+      return;
+    }
+    onEdit(task.id, { title: next, version: task.version });
+    setIsEditingTitle(false);
+  };
 
   return (
     <tr
       ref={setNodeRef as never}
       style={{ transform: CSS.Transform.toString(transform), transition: transition || 'transform 150ms ease' }}
       className={cn(
-        'group h-9 border-b transition-colors hover:bg-muted/40',
+        'group h-9 border-b border-[#f0f0f0] transition-colors hover:bg-muted/35 dark:border-border/40',
         draggable && 'cursor-grab active:cursor-grabbing',
         isDone && 'opacity-50',
       )}
@@ -330,50 +370,89 @@ function TaskRow({
           >
             {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           </button>
-          <button
-            type="button"
-            className={cn(
-              'inline-flex h-5 w-5 items-center justify-center rounded-full border transition-colors',
-              isDone ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-muted-foreground/40 text-muted-foreground',
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              className={cn(
+                'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors',
+                isDone ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-muted-foreground/40 text-muted-foreground',
+              )}
+              data-testid={`task-complete-${task.id}`}
+              aria-label={isDone ? `Reopen ${task.title}` : `Complete ${task.title}`}
+              onClick={() => onToggleDone(task)}
+            >
+              {isDone ? <Check className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
+            </button>
+            {isEditingTitle ? (
+            <Input
+              autoFocus
+              value={titleDraft}
+              data-no-dnd="true"
+              data-testid={`task-title-input-${task.id}`}
+              className={cn(
+                'h-7 border-0 bg-transparent px-1 text-sm font-medium shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0',
+                isDone && 'line-through',
+              )}
+              onPointerDown={(event) => event.stopPropagation()}
+              onChange={(event) => setTitleDraft(event.target.value)}
+              onBlur={saveTitle}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  saveTitle();
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  setTitleDraft(task.title);
+                  setIsEditingTitle(false);
+                }
+              }}
+            />
+            ) : (
+              <button
+                type="button"
+                data-no-dnd="true"
+                className={cn(
+                  'truncate text-left text-sm font-medium hover:underline',
+                  isDone && 'line-through',
+                )}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsEditingTitle(true);
+                }}
+                data-testid={`task-title-label-${task.id}`}
+              >
+                {task.title.trim() || t('untitledTask')}
+              </button>
             )}
-            data-testid={`task-complete-${task.id}`}
-            aria-label={isDone ? `Reopen ${task.title}` : `Complete ${task.title}`}
-            onClick={() => onToggleDone(task)}
-          >
-            {isDone ? <Check className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
-          </button>
-          <button
+          </div>
+          <Button
             type="button"
+            size="icon"
+            variant="ghost"
             data-no-dnd="true"
-            className={cn(
-              'truncate text-left text-sm font-medium hover:underline',
-              isDone && 'line-through',
-            )}
+            className="h-6 w-6 opacity-60 transition-opacity hover:opacity-100"
+            data-testid={`open-task-${task.id}`}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation();
               onOpen(task.id);
             }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                onOpen(task.id);
-              }
-            }}
-            data-testid={`open-task-${task.id}`}
+            aria-label={t('openTask')}
           >
-            {task.title.trim() || t('untitledTask')}
-          </button>
+            <ExternalLink className="h-3.5 w-3.5" />
+          </Button>
         </div>
       </TableCell>
-      <TableCell>
+      <TableCell className="border-l border-[#f0f0f0] dark:border-border/40">
         <AssigneeCombobox
           task={task}
           members={members}
           onSelect={(assigneeUserId) => onEdit(task.id, { assigneeUserId, version: task.version })}
         />
       </TableCell>
-      <TableCell>
+      <TableCell className="border-l border-[#f0f0f0] dark:border-border/40">
         <Input
           type="date"
           value={task.dueAt ? String(task.dueAt).slice(0, 10) : ''}
@@ -386,23 +465,26 @@ function TaskRow({
           className="h-7 border-0 bg-transparent px-2 shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
         />
       </TableCell>
-      <TableCell>
+      <TableCell className="border-l border-[#f0f0f0] dark:border-border/40">
         <div className="space-y-1">
-          <Input
-            type="number"
-            min={0}
-            max={100}
-            value={task.progressPercent}
-            onChange={(e) => onEdit(task.id, { progressPercent: Number(e.target.value), version: task.version })}
-            className="h-7 w-16 border-0 bg-transparent px-2 shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
-          />
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={task.progressPercent}
+              onChange={(e) => onEdit(task.id, { progressPercent: Number(e.target.value), version: task.version })}
+              className="h-6 w-14 border-0 bg-transparent px-1 shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
+            />
+            <span className="text-[11px] text-muted-foreground">{task.progressPercent}%</span>
+          </div>
           <ProgressBar value={task.progressPercent} />
         </div>
       </TableCell>
-      <TableCell>
+      <TableCell className="border-l border-[#f0f0f0] dark:border-border/40">
         <select
           className={cn(
-            'h-7 w-full rounded-full border-0 bg-transparent px-2 text-xs font-medium',
+            'h-7 w-full rounded-full border-0 bg-transparent px-2 text-[11px] font-medium',
             'hover:bg-muted/40 focus:bg-muted/40',
             statusBadgeClass[task.status],
           )}
@@ -415,10 +497,10 @@ function TaskRow({
           <option value="BLOCKED">BLOCKED</option>
         </select>
       </TableCell>
-      <TableCell className="text-[11px] text-muted-foreground">{projectName}</TableCell>
-      <TableCell className="text-[11px] text-muted-foreground">-</TableCell>
-      <TableCell className="text-[11px] text-muted-foreground">{t('private')}</TableCell>
-      <TableCell>
+      <TableCell className="border-l border-[#f0f0f0] text-[11px] text-muted-foreground dark:border-border/40">{projectName}</TableCell>
+      <TableCell className="border-l border-[#f0f0f0] text-[11px] text-muted-foreground dark:border-border/40">-</TableCell>
+      <TableCell className="border-l border-[#f0f0f0] text-[11px] text-muted-foreground dark:border-border/40">{t('private')}</TableCell>
+      <TableCell className="border-l border-[#f0f0f0] dark:border-border/40">
         {task.assigneeUserId ? (
           <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border text-[10px]">
             {initials(resolveAssigneeLabel(task, members))}
@@ -427,7 +509,7 @@ function TaskRow({
           <span className="text-xs text-muted-foreground">-</span>
         )}
       </TableCell>
-      <TableCell>
+      <TableCell className="border-l border-[#f0f0f0] dark:border-border/40">
         <Button
           size="icon"
           variant="ghost"
@@ -544,6 +626,8 @@ export default function ProjectBoard({
   search,
   statusFilter,
   priorityFilter,
+  statusFilters = [],
+  assigneeFilters = [],
   initialTaskId,
 }: {
   projectId: string;
@@ -551,6 +635,8 @@ export default function ProjectBoard({
   search: string;
   statusFilter: 'ALL' | Task['status'];
   priorityFilter: 'ALL' | NonNullable<Task['priority']>;
+  statusFilters?: Task['status'][];
+  assigneeFilters?: string[];
   initialTaskId?: string | null;
 }) {
   const { t } = useI18n();
@@ -562,13 +648,36 @@ export default function ProjectBoard({
   const queryClient = useQueryClient();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [collapsedTaskIds, setCollapsedTaskIds] = useState<Set<string>>(new Set());
+  const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<string>>(new Set());
   const [undoDelete, setUndoDelete] = useState<UndoDeleteState | null>(null);
-  const [nameFilter, setNameFilter] = useState('');
-  const [assigneeFilter, setAssigneeFilter] = useState<'ALL' | 'UNASSIGNED' | string>('ALL');
-  const [dueFilter, setDueFilter] = useState<DueColumnFilter>('ALL');
-  const [progressFilter, setProgressFilter] = useState<ProgressColumnFilter>('ALL');
-  const [statusColumnFilter, setStatusColumnFilter] = useState<'ALL' | Task['status']>('ALL');
+  const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
+  const [sectionNameDraft, setSectionNameDraft] = useState('');
+  const [columnWidths, setColumnWidths] = useState<BoardColumnWidths>(BOARD_DEFAULT_COLUMN_WIDTHS);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resizeStateRef = useRef<{ key: BoardColumnKey; startX: number; startWidth: number } | null>(null);
+  const scrollSyncLockRef = useRef(false);
+  const headerScrollRef = useRef<HTMLDivElement | null>(null);
+  const sectionScrollRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const columnStorageKey = useMemo(
+    () => `atlaspm:project-board-column-widths:${projectId}`,
+    [projectId],
+  );
+
+  const boardColumnLabels = useMemo(
+    () => ({
+      name: t('name'),
+      assignee: t('assignee'),
+      dueDate: t('dueDate'),
+      progress: t('progress'),
+      status: t('status'),
+      projects: t('projects'),
+      dependencies: t('dependencies'),
+      visibility: t('visibility'),
+      collaborators: t('collaborators'),
+      actions: t('actions'),
+    }),
+    [t],
+  );
 
   useEffect(() => {
     return () => {
@@ -577,6 +686,110 @@ export default function ProjectBoard({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const raw = window.localStorage.getItem(columnStorageKey);
+    if (!raw) {
+      setColumnWidths(BOARD_DEFAULT_COLUMN_WIDTHS);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as Partial<BoardColumnWidths>;
+      setColumnWidths(
+        BOARD_COLUMNS.reduce((acc, column) => {
+          const value = Number(parsed[column.key]);
+          const normalized = Number.isFinite(value) ? value : column.defaultWidth;
+          acc[column.key] = Math.max(column.minWidth, Math.round(normalized));
+          return acc;
+        }, {} as BoardColumnWidths),
+      );
+    } catch {
+      setColumnWidths(BOARD_DEFAULT_COLUMN_WIDTHS);
+    }
+  }, [columnStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(columnStorageKey, JSON.stringify(columnWidths));
+  }, [columnStorageKey, columnWidths]);
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const resizeState = resizeStateRef.current;
+      if (!resizeState) return;
+      const delta = event.clientX - resizeState.startX;
+      const minWidth = BOARD_MIN_COLUMN_WIDTHS[resizeState.key];
+      setColumnWidths((current) => ({
+        ...current,
+        [resizeState.key]: Math.max(minWidth, Math.round(resizeState.startWidth + delta)),
+      }));
+    };
+
+    const handlePointerUp = () => {
+      if (!resizeStateRef.current) return;
+      resizeStateRef.current = null;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, []);
+
+  const beginColumnResize = (key: BoardColumnKey, startX: number) => {
+    resizeStateRef.current = {
+      key,
+      startX,
+      startWidth: columnWidths[key],
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  const startColumnResize = (key: BoardColumnKey, event: ReactPointerEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    beginColumnResize(key, event.clientX);
+  };
+
+  const syncHorizontalScroll = useCallback((source: HTMLDivElement) => {
+    if (scrollSyncLockRef.current) return;
+    scrollSyncLockRef.current = true;
+    const nextLeft = source.scrollLeft;
+
+    const containers: HTMLDivElement[] = [];
+    if (headerScrollRef.current) containers.push(headerScrollRef.current);
+    sectionScrollRefs.current.forEach((container) => containers.push(container));
+
+    containers.forEach((container) => {
+      if (container !== source && container.scrollLeft !== nextLeft) {
+        container.scrollLeft = nextLeft;
+      }
+    });
+
+    requestAnimationFrame(() => {
+      scrollSyncLockRef.current = false;
+    });
+  }, []);
+
+  const registerSectionScrollRef = useCallback(
+    (sectionId: string) => (node: HTMLDivElement | null) => {
+      if (!node) {
+        sectionScrollRefs.current.delete(sectionId);
+        return;
+      }
+      sectionScrollRefs.current.set(sectionId, node);
+      if (headerScrollRef.current) {
+        node.scrollLeft = headerScrollRef.current.scrollLeft;
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!initialTaskId) return;
@@ -672,6 +885,44 @@ export default function ProjectBoard({
     },
   });
 
+  const patchSection = useMutation({
+    mutationFn: ({ sectionId, name }: { sectionId: string; name: string }) =>
+      api(`/sections/${sectionId}`, { method: 'PATCH', body: { name } }) as Promise<{ id: string; name: string }>,
+    onMutate: async ({ sectionId, name }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.projectSections(projectId) });
+      await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      const previousSections = queryClient.getQueryData<Section[]>(queryKeys.projectSections(projectId));
+      const previousGroups = queryClient.getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId));
+
+      queryClient.setQueryData<Section[]>(queryKeys.projectSections(projectId), (current = []) =>
+        current.map((section) => (section.id === sectionId ? { ...section, name } : section)),
+      );
+      queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) =>
+        current.map((group) =>
+          group.section.id === sectionId ? { ...group, section: { ...group.section, name } } : group,
+        ),
+      );
+
+      return { previousSections, previousGroups };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previousSections) {
+        queryClient.setQueryData(queryKeys.projectSections(projectId), context.previousSections);
+      }
+      if (context?.previousGroups) {
+        queryClient.setQueryData(queryKeys.projectTasksGrouped(projectId), context.previousGroups);
+      }
+    },
+    onSuccess: () => {
+      setEditingSectionId(null);
+      setSectionNameDraft('');
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectSections(projectId) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+    },
+  });
+
   const reorderTask = useMutation({
     mutationFn: ({ taskId, toSectionId, beforeTaskId, afterTaskId }: { taskId: string; toSectionId: string; beforeTaskId: string | null; afterTaskId: string | null; }) =>
       api(`/sections/${toSectionId}/tasks/reorder`, { method: 'POST', body: { taskId, beforeTaskId, afterTaskId } }),
@@ -743,10 +994,8 @@ export default function ProjectBoard({
   const members = membersQuery.data ?? [];
 
   const filteredGroups = useMemo(() => {
-    const normalizedSearch = [search.trim(), nameFilter.trim()].filter(Boolean).join(' ').trim().toLowerCase();
+    const normalizedSearch = search.trim().toLowerCase();
     const normalizedProjectName = projectName.trim().toLowerCase();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
     return groups.map((group) => ({
       ...group,
       tasks: group.tasks.filter((task) => {
@@ -757,34 +1006,26 @@ export default function ProjectBoard({
           !normalizedSearch || sectionMatches || titleMatches || projectMatches;
         const byStatus =
           (statusFilter === 'ALL' || task.status === statusFilter) &&
-          (statusColumnFilter === 'ALL' || task.status === statusColumnFilter);
+          (statusFilters.length === 0 || statusFilters.includes(task.status));
         const byPriority = priorityFilter === 'ALL' || task.priority === priorityFilter;
         const byAssignee =
-          assigneeFilter === 'ALL' ||
-          (assigneeFilter === 'UNASSIGNED' ? !task.assigneeUserId : task.assigneeUserId === assigneeFilter);
-        const dueDate = task.dueAt ? new Date(task.dueAt) : null;
-        const byDue =
-          dueFilter === 'ALL' ||
-          (dueFilter === 'NO_DUE' && !dueDate) ||
-          (dueFilter === 'WITH_DUE' && dueDate !== null) ||
-          (dueFilter === 'OVERDUE' && dueDate !== null && dueDate < today);
-        const byProgress =
-          progressFilter === 'ALL' ||
-          (progressFilter === 'NOT_STARTED' && task.progressPercent <= 0) ||
-          (progressFilter === 'IN_PROGRESS' && task.progressPercent > 0 && task.progressPercent < 100) ||
-          (progressFilter === 'COMPLETE' && task.progressPercent >= 100);
-        return bySearch && byStatus && byPriority && byAssignee && byDue && byProgress;
+          assigneeFilters.length === 0 ||
+          assigneeFilters.some((assignee) =>
+            assignee === 'UNASSIGNED' ? !task.assigneeUserId : task.assigneeUserId === assignee,
+          );
+        return bySearch && byStatus && byPriority && byAssignee;
       }),
     }));
-  }, [assigneeFilter, dueFilter, groups, nameFilter, priorityFilter, progressFilter, projectName, search, statusColumnFilter, statusFilter]);
+  }, [assigneeFilters, groups, priorityFilter, projectName, search, statusFilter, statusFilters]);
 
   const groupedVisibleRows = useMemo(() => {
     return filteredGroups.map((group) => {
+      const sectionCollapsed = collapsedSectionIds.has(group.section.id);
       const tree = buildSectionTaskTree(group.tasks);
-      const rows = flattenVisibleTasks(tree, collapsedTaskIds);
-      return { group, rows };
+      const rows = sectionCollapsed ? [] : flattenVisibleTasks(tree, collapsedTaskIds);
+      return { group, rows, sectionCollapsed };
     });
-  }, [filteredGroups, collapsedTaskIds]);
+  }, [collapsedSectionIds, filteredGroups, collapsedTaskIds]);
 
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -820,6 +1061,14 @@ export default function ProjectBoard({
     patchTask.mutate({ taskId, patch: nextPatch });
   };
 
+  const renderColumnGroup = () => (
+    <colgroup>
+      {BOARD_COLUMNS.map((column) => (
+        <col key={column.key} style={{ width: `${columnWidths[column.key]}px` }} />
+      ))}
+    </colgroup>
+  );
+
   if (groupsQuery.isLoading) {
     return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">{t('loadingTasks')}</div>;
   }
@@ -827,163 +1076,182 @@ export default function ProjectBoard({
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <div className="space-y-4">
-        {groupedVisibleRows.map(({ group, rows }, groupIndex) => {
+        <Table
+          className="w-max min-w-full table-fixed"
+          containerRef={headerScrollRef}
+          onContainerScroll={(event) => syncHorizontalScroll(event.currentTarget)}
+        >
+          {renderColumnGroup()}
+          <TableHeader className="border-b border-[#f0f0f0] bg-transparent dark:border-border/40">
+            <TableRow className="h-11 hover:bg-transparent">
+              {BOARD_COLUMNS.map((column, index) => (
+                <TableHead
+                  key={column.key}
+                  className={cn(
+                    'relative px-3 text-[11px] font-medium normal-case tracking-normal text-[#6d6e6f] dark:text-muted-foreground',
+                    index > 0 && 'border-l border-[#f0f0f0] dark:border-border/40',
+                  )}
+                  onPointerDown={(event) => {
+                    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+                    if (rect.right - event.clientX <= 12) {
+                      startColumnResize(column.key, event);
+                    }
+                  }}
+                >
+                  <span>{boardColumnLabels[column.key]}</span>
+                  {index < BOARD_COLUMNS.length - 1 ? (
+                    <button
+                      type="button"
+                      className="absolute right-0 top-0 h-full w-3 touch-none cursor-col-resize bg-transparent transition-colors hover:bg-muted/35"
+                      onPointerDown={(event) => startColumnResize(column.key, event)}
+                      aria-label={`Resize ${boardColumnLabels[column.key]} column`}
+                      data-testid={`column-resize-${column.key}`}
+                    >
+                      <span className="absolute inset-y-2 left-1/2 w-px -translate-x-1/2 bg-[#e4e7eb] dark:bg-border/60" />
+                    </button>
+                  ) : null}
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+        </Table>
+
+        {groupedVisibleRows.map(({ group, rows, sectionCollapsed }) => {
           const isNoSection = group.section.isDefault || group.section.name.toLowerCase() === 'no section';
           return (
           <SectionDropTarget key={group.section.id} sectionId={group.section.id}>
             {!isNoSection ? (
-              <header className="flex items-center justify-between border-b px-4 py-2">
-                <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground">{group.section.name}</h3>
+              <header className="flex items-center justify-between border-b border-[#eceff2] bg-[#f7f8f9] px-4 py-3.5 dark:border-border/50 dark:bg-muted/20">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded hover:bg-muted/70"
+                    data-testid={`section-collapse-${group.section.id}`}
+                    onClick={() =>
+                      setCollapsedSectionIds((current) => {
+                        const next = new Set(current);
+                        if (next.has(group.section.id)) next.delete(group.section.id);
+                        else next.add(group.section.id);
+                        return next;
+                      })
+                    }
+                    aria-label={sectionCollapsed ? `Expand ${group.section.name}` : `Collapse ${group.section.name}`}
+                  >
+                    <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', sectionCollapsed && '-rotate-90')} />
+                  </button>
+                  {editingSectionId === group.section.id ? (
+                    <Input
+                      autoFocus
+                      value={sectionNameDraft}
+                      data-testid={`section-name-input-${group.section.id}`}
+                      className="h-7 max-w-xs border-0 bg-transparent px-1 text-[11px] uppercase tracking-wider text-muted-foreground shadow-none focus-visible:bg-muted/40 focus-visible:ring-0"
+                      onChange={(event) => setSectionNameDraft(event.target.value)}
+                      onBlur={() => {
+                        const next = sectionNameDraft.trim();
+                        if (!next || next === group.section.name) {
+                          setEditingSectionId(null);
+                          setSectionNameDraft('');
+                          return;
+                        }
+                        patchSection.mutate({ sectionId: group.section.id, name: next });
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          const next = sectionNameDraft.trim();
+                          if (!next || next === group.section.name) {
+                            setEditingSectionId(null);
+                            setSectionNameDraft('');
+                            return;
+                          }
+                          patchSection.mutate({ sectionId: group.section.id, name: next });
+                        }
+                        if (event.key === 'Escape') {
+                          event.preventDefault();
+                          setEditingSectionId(null);
+                          setSectionNameDraft('');
+                        }
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                      data-testid={`section-name-label-${group.section.id}`}
+                      onClick={() => {
+                        setEditingSectionId(group.section.id);
+                        setSectionNameDraft(group.section.name);
+                      }}
+                    >
+                      {group.section.name}
+                    </button>
+                  )}
+                </div>
                 <Badge>{group.tasks.length}</Badge>
               </header>
             ) : null}
 
-            <Table>
-              {groupIndex === 0 ? (
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="min-w-[240px]">
-                      <div className="space-y-1">
-                        <p>{t('name')}</p>
-                        <Input
-                          value={nameFilter}
-                          onChange={(event) => setNameFilter(event.target.value)}
-                          placeholder={t('searchTasks')}
-                          className="h-7"
-                          data-testid="column-filter-name"
+            {!sectionCollapsed ? (
+              <>
+                <Table
+                  className="w-max min-w-full table-fixed"
+                  containerRef={registerSectionScrollRef(group.section.id)}
+                  onContainerScroll={(event) => syncHorizontalScroll(event.currentTarget)}
+                >
+                  {renderColumnGroup()}
+                  <TableBody>
+                    <SortableContext items={rows.map((row) => row.task.id)} strategy={verticalListSortingStrategy}>
+                      {rows.map((row) => (
+                        <TaskRow
+                          key={row.task.id}
+                          task={row.task}
+                          sectionId={group.section.id}
+                          onEdit={onEdit}
+                          onToggleDone={(task) =>
+                            completeTask.mutate({
+                              taskId: task.id,
+                              done: task.status !== 'DONE',
+                              version: task.version,
+                            })
+                          }
+                          members={members}
+                          onOpen={setSelectedTaskId}
+                          projectName={projectName}
+                          depth={row.depth}
+                          hasChildren={row.hasChildren}
+                          collapsed={collapsedTaskIds.has(row.task.id)}
+                          draggable={!row.task.parentId && !row.hasChildren}
+                          onDelete={(taskId) => deleteTask.mutate(taskId)}
+                          onToggleCollapse={(taskId) => {
+                            setCollapsedTaskIds((current) => {
+                              const next = new Set(current);
+                              if (next.has(taskId)) next.delete(taskId);
+                              else next.add(taskId);
+                              return next;
+                            });
+                          }}
                         />
-                      </div>
-                    </TableHead>
-                    <TableHead className="min-w-[140px]">
-                      <div className="space-y-1">
-                        <p>{t('assignee')}</p>
-                        <select
-                          value={assigneeFilter}
-                          onChange={(event) => setAssigneeFilter(event.target.value)}
-                          className="h-7 w-full rounded-md border bg-background px-2 text-xs"
-                          data-testid="column-filter-assignee"
-                        >
-                          <option value="ALL">{t('all')}</option>
-                          <option value="UNASSIGNED">{t('unassigned')}</option>
-                          {members.map((member) => {
-                            const label = member.user.displayName || member.user.email || member.user.id;
-                            return (
-                              <option key={member.id} value={member.userId}>
-                                {label}
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </div>
-                    </TableHead>
-                    <TableHead className="min-w-[130px]">
-                      <div className="space-y-1">
-                        <p>{t('dueDate')}</p>
-                        <select
-                          value={dueFilter}
-                          onChange={(event) => setDueFilter(event.target.value as DueColumnFilter)}
-                          className="h-7 w-full rounded-md border bg-background px-2 text-xs"
-                          data-testid="column-filter-due"
-                        >
-                          <option value="ALL">{t('all')}</option>
-                          <option value="NO_DUE">{t('noDueDate')}</option>
-                          <option value="WITH_DUE">{t('withDueDate')}</option>
-                          <option value="OVERDUE">{t('overdue')}</option>
-                        </select>
-                      </div>
-                    </TableHead>
-                    <TableHead className="min-w-[120px]">
-                      <div className="space-y-1">
-                        <p>{t('progress')}</p>
-                        <select
-                          value={progressFilter}
-                          onChange={(event) => setProgressFilter(event.target.value as ProgressColumnFilter)}
-                          className="h-7 w-full rounded-md border bg-background px-2 text-xs"
-                          data-testid="column-filter-progress"
-                        >
-                          <option value="ALL">{t('all')}</option>
-                          <option value="NOT_STARTED">{t('notStarted')}</option>
-                          <option value="IN_PROGRESS">1-99%</option>
-                          <option value="COMPLETE">{t('done')}</option>
-                        </select>
-                      </div>
-                    </TableHead>
-                    <TableHead className="min-w-[130px]">
-                      <div className="space-y-1">
-                        <p>{t('status')}</p>
-                        <select
-                          value={statusColumnFilter}
-                          onChange={(event) => setStatusColumnFilter(event.target.value as 'ALL' | Task['status'])}
-                          className="h-7 w-full rounded-md border bg-background px-2 text-xs"
-                          data-testid="column-filter-status"
-                        >
-                          <option value="ALL">{t('all')}</option>
-                          <option value="TODO">TODO</option>
-                          <option value="IN_PROGRESS">IN_PROGRESS</option>
-                          <option value="DONE">DONE</option>
-                          <option value="BLOCKED">BLOCKED</option>
-                        </select>
-                      </div>
-                    </TableHead>
-                    <TableHead>{t('projects')}</TableHead>
-                    <TableHead>{t('dependencies')}</TableHead>
-                    <TableHead>{t('visibility')}</TableHead>
-                    <TableHead>{t('collaborators')}</TableHead>
-                    <TableHead>{t('actions')}</TableHead>
-                  </TableRow>
-                </TableHeader>
-              ) : null}
-              <TableBody>
-                <SortableContext items={rows.map((row) => row.task.id)} strategy={verticalListSortingStrategy}>
-                  {rows.map((row) => (
-                    <TaskRow
-                      key={row.task.id}
-                      task={row.task}
-                      sectionId={group.section.id}
-                      onEdit={onEdit}
-                      onToggleDone={(task) =>
-                        completeTask.mutate({
-                          taskId: task.id,
-                          done: task.status !== 'DONE',
-                          version: task.version,
-                        })
-                      }
-                      members={members}
-                      onOpen={setSelectedTaskId}
-                      projectName={projectName}
-                      depth={row.depth}
-                      hasChildren={row.hasChildren}
-                      collapsed={collapsedTaskIds.has(row.task.id)}
-                      draggable={!row.task.parentId && !row.hasChildren}
-                      onDelete={(taskId) => deleteTask.mutate(taskId)}
-                      onToggleCollapse={(taskId) => {
-                        setCollapsedTaskIds((current) => {
-                          const next = new Set(current);
-                          if (next.has(taskId)) next.delete(taskId);
-                          else next.add(taskId);
-                          return next;
-                        });
-                      }}
-                    />
-                  ))}
-                </SortableContext>
-              </TableBody>
-            </Table>
+                      ))}
+                    </SortableContext>
+                  </TableBody>
+                </Table>
 
-            {!group.tasks.length ? (
-              <div className="px-4 py-3 text-sm text-muted-foreground" data-testid={`empty-section-${group.section.id}`}>
-                {t('noTasksInSection')}
-              </div>
+                {!group.tasks.length ? (
+                  <div className="px-4 py-3 text-sm text-muted-foreground" data-testid={`empty-section-${group.section.id}`}>
+                    {t('noTasksInSection')}
+                  </div>
+                ) : null}
+
+                <div className={cn('px-4 py-2', !isNoSection && 'border-t border-border/50')}>
+                  <QuickAddTask
+                    sectionId={group.section.id}
+                    onCreate={async (sectionId, title) => {
+                      await createTask.mutateAsync({ sectionId, title });
+                    }}
+                  />
+                </div>
+              </>
             ) : null}
-
-            <div className={cn('px-4 py-2', !isNoSection && 'border-t')}>
-              <QuickAddTask
-                sectionId={group.section.id}
-                onCreate={async (sectionId, title) => {
-                  await createTask.mutateAsync({ sectionId, title });
-                }}
-              />
-            </div>
           </SectionDropTarget>
         )})}
 

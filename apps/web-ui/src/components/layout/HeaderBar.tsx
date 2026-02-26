@@ -1,11 +1,11 @@
 'use client';
 
-import { Menu, Moon, Search, Sun } from 'lucide-react';
+import { Filter, Layers3, Menu, Moon, Search, Settings2, Sun, Trash2 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { MobileNavSheet } from '@/components/layout/MobileNavSheet';
 import { GlobalSearch } from '@/components/global-search';
 import { Button } from '@/components/ui/button';
@@ -14,12 +14,12 @@ import type { Locale } from '@/lib/layout-preferences';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { Project, Section } from '@/lib/types';
+import type { Project, ProjectMember, Section, Task } from '@/lib/types';
 import { useI18n } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { NotificationCenter } from '@/components/notification-center';
-import { Settings2, Layers3, Trash2 } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 type Me = {
   id: string;
@@ -27,10 +27,35 @@ type Me = {
   displayName?: string | null;
 };
 
+const FILTER_STATUSES: Task['status'][] = ['TODO', 'IN_PROGRESS', 'DONE', 'BLOCKED'];
+
+function parseListParam(raw: string | null): string[] {
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function initialsFromUser(user?: Me) {
   const label = user?.displayName ?? user?.email ?? 'U';
   const parts = label.trim().split(/\s+/).slice(0, 2);
   return parts.map((part) => part.slice(0, 1).toUpperCase()).join('') || 'U';
+}
+
+function statusLabel(status: Task['status'], t: (key: string) => string) {
+  switch (status) {
+    case 'TODO':
+      return t('statusTodo');
+    case 'IN_PROGRESS':
+      return t('statusInProgress');
+    case 'DONE':
+      return t('statusDone');
+    case 'BLOCKED':
+      return t('statusBlocked');
+    default:
+      return status;
+  }
 }
 
 function ThemeToggle() {
@@ -210,6 +235,16 @@ export function HeaderBar({
   const projectId = useMemo(() => pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null, [pathname]);
   const currentView = (searchParams.get('view') ?? 'list').toLowerCase();
   const query = searchParams.get('q') ?? '';
+  const statusesParam = searchParams.get('statuses');
+  const assigneesParam = searchParams.get('assignees');
+  const selectedStatuses = useMemo(
+    () =>
+      parseListParam(statusesParam).filter(
+        (value): value is Task['status'] => FILTER_STATUSES.includes(value as Task['status']),
+      ),
+    [statusesParam],
+  );
+  const selectedAssignees = useMemo(() => parseListParam(assigneesParam), [assigneesParam]);
   const tabs = [
     { id: 'list', label: t('list') },
     { id: 'board', label: t('board') },
@@ -222,29 +257,111 @@ export function HeaderBar({
     queryFn: () => api(`/projects/${projectId}/sections`),
     enabled: Boolean(projectId),
   });
+  const membersQuery = useQuery<ProjectMember[]>({
+    queryKey: queryKeys.projectMembers(projectId ?? ''),
+    queryFn: () => api(`/projects/${projectId}/members`),
+    enabled: Boolean(projectId),
+  });
 
   const title = useMemo(() => {
     if (!projectId) return t('projects');
     return projects.find((project) => project.id === projectId)?.name ?? t('project');
   }, [projectId, projects, t]);
 
-  const setProjectQueryParam = (key: string, value: string | null) => {
+  const updateProjectQueryParams = useCallback((updates: Record<string, string | null>) => {
     if (!projectId) return;
     const params = new URLSearchParams(searchParams.toString());
-    if (value === null || value === '') {
-      params.delete(key);
-    } else {
-      params.set(key, value);
-    }
-    const query = params.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-  };
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === null || value === '') {
+        params.delete(key);
+      } else {
+        params.set(key, value);
+      }
+    });
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+  }, [pathname, projectId, router, searchParams]);
+
+  const setProjectQueryParam = useCallback(
+    (key: string, value: string | null) => updateProjectQueryParams({ [key]: value }),
+    [updateProjectQueryParams],
+  );
+  const projectFilterStorageKey = useMemo(
+    () => (projectId ? `atlaspm:project-filters:${projectId}` : null),
+    [projectId],
+  );
+  const applyProjectFilters = useCallback(
+    (nextStatuses: Task['status'][], nextAssignees: string[]) => {
+      if (projectFilterStorageKey && typeof window !== 'undefined') {
+        window.localStorage.setItem(
+          projectFilterStorageKey,
+          JSON.stringify({ statuses: nextStatuses, assignees: nextAssignees }),
+        );
+      }
+      updateProjectQueryParams({
+        statuses: nextStatuses.length ? nextStatuses.join(',') : null,
+        assignees: nextAssignees.length ? nextAssignees.join(',') : null,
+      });
+    },
+    [projectFilterStorageKey, updateProjectQueryParams],
+  );
+  const toggleStatusFilter = useCallback(
+    (status: Task['status']) => {
+      const nextStatuses = selectedStatuses.includes(status)
+        ? selectedStatuses.filter((item) => item !== status)
+        : [...selectedStatuses, status];
+      applyProjectFilters(nextStatuses, selectedAssignees);
+    },
+    [applyProjectFilters, selectedAssignees, selectedStatuses],
+  );
+  const toggleAssigneeFilter = useCallback(
+    (assigneeUserId: string) => {
+      const nextAssignees = selectedAssignees.includes(assigneeUserId)
+        ? selectedAssignees.filter((item) => item !== assigneeUserId)
+        : [...selectedAssignees, assigneeUserId];
+      applyProjectFilters(selectedStatuses, nextAssignees);
+    },
+    [applyProjectFilters, selectedAssignees, selectedStatuses],
+  );
+  const clearAllFilters = useCallback(() => {
+    applyProjectFilters([], []);
+  }, [applyProjectFilters]);
+  const filterCount = selectedStatuses.length + selectedAssignees.length;
 
   const [projectSearchInput, setProjectSearchInput] = useState(query);
 
   useEffect(() => {
     setProjectSearchInput(query);
   }, [query]);
+
+  useEffect(() => {
+    if (!projectId || !projectFilterStorageKey || typeof window === 'undefined') return;
+
+    if (statusesParam || assigneesParam) {
+      window.localStorage.setItem(
+        projectFilterStorageKey,
+        JSON.stringify({ statuses: selectedStatuses, assignees: selectedAssignees }),
+      );
+      return;
+    }
+
+    const raw = window.localStorage.getItem(projectFilterStorageKey);
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as { statuses?: string[]; assignees?: string[] };
+      const restoredStatuses = (parsed.statuses ?? []).filter((value) =>
+        FILTER_STATUSES.includes(value as Task['status']),
+      );
+      const restoredAssignees = (parsed.assignees ?? []).filter(Boolean);
+      if (!restoredStatuses.length && !restoredAssignees.length) return;
+      updateProjectQueryParams({
+        statuses: restoredStatuses.length ? restoredStatuses.join(',') : null,
+        assignees: restoredAssignees.length ? restoredAssignees.join(',') : null,
+      });
+    } catch {
+      // no-op
+    }
+  }, [assigneesParam, projectFilterStorageKey, projectId, selectedAssignees, selectedStatuses, statusesParam, updateProjectQueryParams]);
 
   return (
     <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:px-6">
@@ -323,6 +440,99 @@ export function HeaderBar({
                 <TooltipContent>{t('sections')}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="relative h-8 w-8 rounded-full hover:bg-muted/50"
+                  data-testid="project-filter-trigger"
+                  aria-label={t('filter')}
+                >
+                  <Filter className="h-4 w-4" />
+                  {filterCount > 0 ? (
+                    <span className="absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] text-primary-foreground">
+                      {filterCount}
+                    </span>
+                  ) : null}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72 p-0">
+                <div className="flex items-center justify-between border-b px-3 py-2">
+                  <p className="text-xs font-medium">{t('filter')}</p>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs"
+                    onClick={clearAllFilters}
+                    data-testid="project-filter-clear"
+                  >
+                    {t('clearFilters')}
+                  </Button>
+                </div>
+                <div className="max-h-72 space-y-4 overflow-auto p-3">
+                  <div className="space-y-2">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('status')}</p>
+                    <div className="space-y-1">
+                      {FILTER_STATUSES.map((status) => {
+                        const checked = selectedStatuses.includes(status);
+                        return (
+                          <label
+                            key={status}
+                            className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-muted/30"
+                            data-testid={`project-filter-status-${status}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleStatusFilter(status)}
+                              className="h-3.5 w-3.5 rounded border-border"
+                            />
+                            <span>{statusLabel(status, t)}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('assignee')}</p>
+                    <div className="space-y-1">
+                      <label
+                        className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-muted/30"
+                        data-testid="project-filter-assignee-UNASSIGNED"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedAssignees.includes('UNASSIGNED')}
+                          onChange={() => toggleAssigneeFilter('UNASSIGNED')}
+                          className="h-3.5 w-3.5 rounded border-border"
+                        />
+                        <span>{t('unassigned')}</span>
+                      </label>
+                      {(membersQuery.data ?? []).map((member) => {
+                        const label = member.user.displayName || member.user.email || member.user.id;
+                        const checked = selectedAssignees.includes(member.userId);
+                        return (
+                          <label
+                            key={member.userId}
+                            className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-muted/30"
+                            data-testid={`project-filter-assignee-${member.userId}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleAssigneeFilter(member.userId)}
+                              className="h-3.5 w-3.5 rounded border-border"
+                            />
+                            <span className="truncate">{label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>

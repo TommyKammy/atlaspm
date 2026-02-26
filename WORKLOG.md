@@ -1095,3 +1095,167 @@
   - `pnpm e2e:down`
 - Risks/known gaps:
   - Header tabs are desktop-first (`md`+). Mobile keeps sheet navigation and remains functional, but dedicated mobile tab density tuning is still a follow-up item.
+
+## 2026-02-26 - Inline Rename (Section/Task) Asana-like Click-to-Edit
+- What changed:
+  - Added inline rename for task titles in list rows:
+    - Single click on task title enters edit mode.
+    - `Enter`/blur saves via existing task patch API with optimistic cache update.
+    - `Escape` cancels edit.
+    - Kept task detail open action via dedicated icon button.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+  - Added inline rename for section names:
+    - Single click on section name enters edit mode.
+    - Save/cancel behavior mirrors task title edit.
+    - Uses `PATCH /sections/:id` with optimistic updates for both `projectSections` and grouped-task caches.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+  - Extended E2E flow to verify inline rename persistence for both section and task:
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/mvp.spec.ts`
+- Why:
+  - User requirement: make section/task names editable directly by click, matching Asana-like lightweight editing flow.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm e2e:down && pnpm e2e:up`
+  - `pnpm --filter @atlaspm/playwright e2e tests/mvp.spec.ts`
+  - `pnpm --filter @atlaspm/playwright e2e`
+- Risks/known gaps:
+  - Inline editing is currently list-view only. Board/calendar/files rename entry points are intentionally unchanged.
+
+## 2026-02-26 - Header Filter Popover + Column Alignment Cleanup
+- What changed:
+  - Moved list filtering controls out of the table header and into a header-right filter popover:
+    - Added `project-filter-trigger` icon in top header.
+    - Added multi-select status filters (`TODO/IN_PROGRESS/DONE/BLOCKED`) and assignee filters (`UNASSIGNED` + project members).
+    - Added `Clear filters` action.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/layout/HeaderBar.tsx`
+  - Added sticky filter persistence per project:
+    - Filter state stored in `localStorage` key `atlaspm:project-filters:<projectId>`.
+    - On project revisit/reload, filters are restored and synced to URL query params (`statuses`, `assignees`).
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/layout/HeaderBar.tsx`
+  - Wired query-driven filters into list rendering:
+    - `/projects/[id]` now parses `statuses` and `assignees` query params and passes them into `ProjectBoard`.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/projects/[id]/page.tsx`
+  - Refined Asana-like table visuals and alignment:
+    - Header row is label-only (no inline filter widgets).
+    - Added subtle vertical separators between columns.
+    - Tuned header typography and section row background for clearer hierarchy.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+  - Added i18n labels for filter status names.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/i18n.tsx`
+  - Extended E2E flow:
+    - Validates header filter usage and persistence across page reload.
+    - Updated section rename assertion to avoid strict-mode duplicate button-name ambiguity.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/mvp.spec.ts`
+- Why:
+  - Implement “header集約 + 複数選択フィルタ + 垂直整列” while preserving no-refresh UX and server-driven filtering behavior.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `docker compose -f infra/docker/docker-compose.yml up -d --build web-ui`
+  - `pnpm --filter @atlaspm/playwright e2e tests/mvp.spec.ts`
+- Risks/known gaps:
+  - Board/Calendar/Files views still use existing single-filter semantics; the new multi-filter popover is currently wired to list view data filtering.
+  - `mvp.spec.ts` showed one flaky first attempt around board drag polling before retry success; existing flake should be tracked separately.
+
+## 2026-02-26 - Column Alignment Fix + User-resizable Columns
+- What changed:
+  - Fixed header/task column drift by unifying all list tables under a shared column model:
+    - Added fixed top header table with shared `colgroup`.
+    - Applied the same `colgroup` widths to every section task table (`table-fixed`), so all rows align with header labels.
+  - Added interactive column resizing:
+    - Drag handle on each header boundary.
+    - Per-project width persistence in `localStorage` key `atlaspm:project-board-column-widths:<projectId>`.
+    - Min-width constraints per column to prevent collapse.
+  - File:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+- Why:
+  - Resolve visible header/data misalignment and support Asana-like user control of column widths.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm --filter @atlaspm/playwright e2e tests/mvp.spec.ts`
+  - `pnpm --filter @atlaspm/playwright e2e`
+- Risks/known gaps:
+  - Full E2E run still shows existing intermittent board DnD flake in `mvp.spec.ts` first attempt, then passes on retry (no regression introduced by this column change path).
+
+## 2026-02-26 - Task Detail Drawer Asana-like Polish (Low-noise + Borderless Editing)
+- What changed:
+  - Rebuilt task detail drawer shell to reduce visual noise and align with list UX:
+    - Added top-left `Mark complete / Mark incomplete` action with status-aware styling.
+    - Converted `Details / Comments / Activity` to low-emphasis underline tabs.
+    - Added compact top-right icon actions and retained close affordance.
+    - File:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/task-detail-drawer.tsx`
+  - Added borderless metadata rows with stealth edit interactions and autosave-on-commit behavior:
+    - Editable fields: title, assignee, due date, progress, status.
+    - Each change PATCHes immediately and syncs both task-detail cache and project list cache.
+    - Added complete/reopen endpoint wiring (`POST /tasks/:id/complete`) for instant list-detail consistency.
+    - File:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/task-detail-drawer.tsx`
+  - Reduced description editor noise:
+    - Toolbar now appears only while editor is focused.
+    - Description placeholder localized and more natural.
+    - Editor frame switched to low-contrast/borderless style.
+    - Files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/editor/TaskDescriptionEditor.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/editor/extensions/base.ts`
+  - Simplified subtask/dependency visual weight in task detail context:
+    - Empty states no longer use large framed boxes.
+    - Add actions changed to text-link-like ghost buttons.
+    - Files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/subtask-list.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/dependency-manager.tsx`
+  - i18n updates (EN/JA) for new task-detail/editor strings and dependency blocker singular wording.
+    - File:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/i18n.tsx`
+- Why:
+  - Bring task detail surface up to the same Asana-like “quiet, dense workspace” standard as the refined task list.
+  - Remove form-like heavy boxes and preserve immediate, no-refresh state synchronization.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm e2e:rebuild` (full suite; one intermittent `mvp.spec.ts` board DnD timeout)
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1 --retries=1`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/dependencies.spec.ts tests/subtasks.spec.ts --workers=1 --retries=1`
+  - `pnpm e2e:down`
+- Risks/known gaps:
+  - Full-suite run still shows intermittent board drag timeout in `tests/mvp.spec.ts` (existing flake). Isolated rerun passes.
+  - Metadata edits in task detail currently commit on immediate change/blur; no explicit save button is shown by design.
+
+## 2026-02-26 - Task Detail Polish Vol.2 (Complete Button + Table Visibility)
+- What changed:
+  - Fixed complete button wrapping in task detail:
+    - enforced inline icon+label (`whitespace-nowrap`) and minimum width for JA/EN labels.
+    - clear state styling (outline for incomplete, green-filled for complete).
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/task-detail-drawer.tsx`
+  - Improved Tiptap table readability and editing UX:
+    - global table styles: visible cell borders, header background, collapsed borders.
+    - table context controls (add/remove row/column, delete table) shown on hover/focus while cursor is inside table.
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/globals.css`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/editor/TaskDescriptionEditor.tsx`
+  - Strengthened detail->list sync after metadata and complete toggles:
+    - task detail updates now also invalidate grouped list query to guarantee immediate reflected state.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/task-detail-drawer.tsx`
+  - Added missing i18n strings for table controls.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/i18n.tsx`
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm e2e:up && pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1 --retries=1 && pnpm e2e:down`
+- Risks/known gaps:
+  - Table quick controls are context-sensitive (visible when table is active and editor is hovered/focused) and intentionally minimal for low-noise UI.

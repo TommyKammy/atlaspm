@@ -26,16 +26,17 @@ import {
 import {
   TooltipProvider,
 } from '@/components/ui/tooltip';
+import { useI18n } from '@/lib/i18n';
 
 type AddDependencyInput = {
   dependsOnId: string;
   type?: DependencyType;
 };
 
-const dependencyTypeLabels: Record<DependencyType, { label: string; color: string }> = {
-  BLOCKS: { label: 'Blocks', color: 'bg-red-100 text-red-700 border-red-200' },
-  BLOCKED_BY: { label: 'Blocked by', color: 'bg-orange-100 text-orange-700 border-orange-200' },
-  RELATES_TO: { label: 'Relates to', color: 'bg-blue-100 text-blue-700 border-blue-200' },
+const dependencyTypeLabels: Record<DependencyType, { labelKey: string; color: string }> = {
+  BLOCKS: { labelKey: 'dependencyBlocks', color: 'bg-red-100 text-red-700 border-red-200' },
+  BLOCKED_BY: { labelKey: 'dependencyBlockedBy', color: 'bg-orange-100 text-orange-700 border-orange-200' },
+  RELATES_TO: { labelKey: 'dependencyRelatesTo', color: 'bg-blue-100 text-blue-700 border-blue-200' },
 };
 
 function DependencyItem({
@@ -47,6 +48,7 @@ function DependencyItem({
   taskId: string;
   isIncoming?: boolean;
 }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const relatedTask = isIncoming ? undefined : dependency.dependsOnTask;
   const type = isIncoming ? 'BLOCKS' : dependency.type;
@@ -69,7 +71,7 @@ function DependencyItem({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <Badge className={typeInfo.color}>
-            {typeInfo.label}
+            {t(typeInfo.labelKey)}
           </Badge>
           {relatedTask && (
             <span className="text-sm truncate">{relatedTask.title}</span>
@@ -99,6 +101,7 @@ function AddDependencyDialog({
   existingTaskIds: string[];
   children: React.ReactNode;
 }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [dependsOnId, setDependsOnId] = useState('');
@@ -128,34 +131,34 @@ function AddDependencyDialog({
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add Dependency</DialogTitle>
+          <DialogTitle>{t('addDependency')}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium">Task ID</label>
+            <label className="text-sm font-medium">{t('taskIdLabel')}</label>
             <Input
               value={dependsOnId}
               onChange={(e) => {
                 setDependsOnId(e.target.value);
                 setError(null);
               }}
-              placeholder="Enter task ID to depend on"
+              placeholder={t('enterTaskIdToDependOn')}
             />
             <p className="text-xs text-muted-foreground">
-              Enter the ID of the task this task depends on.
+              {t('enterTaskIdHelp')}
             </p>
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium">Dependency Type</label>
+            <label className="text-sm font-medium">{t('dependencyType')}</label>
             <Select value={type} onValueChange={(v: string) => setType(v as DependencyType)}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="BLOCKS">Blocks (this task blocks the other)</SelectItem>
-                <SelectItem value="BLOCKED_BY">Blocked by (other task blocks this)</SelectItem>
-                <SelectItem value="RELATES_TO">Relates to (no blocking)</SelectItem>
+                <SelectItem value="BLOCKS">{t('blocksOption')}</SelectItem>
+                <SelectItem value="BLOCKED_BY">{t('blockedByOption')}</SelectItem>
+                <SelectItem value="RELATES_TO">{t('relatesToOption')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -172,7 +175,7 @@ function AddDependencyDialog({
             disabled={!isValidTaskId || addDependency.isPending}
             className="w-full"
           >
-            Add Dependency
+            {t('addDependency')}
           </Button>
         </div>
       </DialogContent>
@@ -185,6 +188,7 @@ export function DependencyManager({
 }: {
   taskId: string;
 }) {
+  const { t } = useI18n();
   const dependenciesQuery = useQuery<TaskDependency[]>({
     queryKey: queryKeys.taskDependencies(taskId),
     queryFn: () => api(`/tasks/${taskId}/dependencies`),
@@ -215,6 +219,10 @@ export function DependencyManager({
     ...dependencies.map((d) => d.dependsOnId),
     ...dependents.map((d) => d.taskId),
   ];
+  const blockersText =
+    unresolvedBlockers.length === 1
+      ? `1 ${t('blockingTaskPendingSingle')}`
+      : `${unresolvedBlockers.length} ${t('blockingTasksPending')}`;
 
   return (
     <TooltipProvider>
@@ -223,10 +231,8 @@ export function DependencyManager({
           <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 border border-red-200">
             <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
             <div className="flex-1">
-              <p className="text-sm font-medium text-red-800">This task is blocked</p>
-              <p className="text-xs text-red-600">
-                {unresolvedBlockers.length} blocking task{unresolvedBlockers.length !== 1 ? 's' : ''} must be completed first.
-              </p>
+              <p className="text-sm font-medium text-red-800">{t('thisTaskIsBlocked')}</p>
+              <p className="text-xs text-red-600">{blockersText}</p>
             </div>
           </div>
         )}
@@ -234,7 +240,7 @@ export function DependencyManager({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Link2 className="h-4 w-4" />
-            <h3 className="text-sm font-medium" data-testid="dependencies-heading">Dependencies</h3>
+            <h3 className="text-sm font-medium" data-testid="dependencies-heading">{t('dependencies')}</h3>
             {dependencies.length > 0 && (
               <Badge className="bg-secondary text-secondary-foreground" data-testid="dependencies-count">
                 {dependencies.length}
@@ -245,18 +251,23 @@ export function DependencyManager({
             taskId={taskId}
             existingTaskIds={existingTaskIds}
           >
-            <Button size="sm" variant="outline" data-testid="dependencies-add-btn">
-              <Plus className="h-3 w-3 mr-1" />
-              Add
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-auto px-1 py-0.5 text-sm font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
+              data-testid="dependencies-add-btn"
+            >
+              <Plus className="mr-1 h-3 w-3" />
+              {t('addDependency')}
             </Button>
           </AddDependencyDialog>
         </div>
 
         {dependenciesQuery.isLoading || dependentsQuery.isLoading ? (
-          <div className="text-sm text-muted-foreground">Loading dependencies...</div>
+          <div className="text-sm text-muted-foreground">{t('loadingDependencies')}</div>
         ) : dependencies.length === 0 && dependents.length === 0 ? (
-          <div className="text-sm text-muted-foreground py-4 text-center border rounded-lg bg-card" data-testid="dependencies-empty">
-            No dependencies yet. Add one to link related tasks.
+          <div className="py-1 text-sm text-muted-foreground" data-testid="dependencies-empty">
+            {t('noDependenciesYet')}
           </div>
         ) : (
           <div className="space-y-2">

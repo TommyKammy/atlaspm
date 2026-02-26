@@ -15,6 +15,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { useI18n } from '@/lib/i18n';
 
 type CreateSubtaskInput = {
   title: string;
@@ -137,6 +138,7 @@ function CreateSubtaskDialog({
   projectId: string;
   children: React.ReactNode;
 }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
@@ -160,24 +162,24 @@ function CreateSubtaskDialog({
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Create Subtask</DialogTitle>
+          <DialogTitle>{t('createSubtask')}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium">Title</label>
+            <label className="text-sm font-medium">{t('taskName')}</label>
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Enter subtask title"
+              placeholder={t('enterSubtaskTitle')}
               data-testid="create-subtask-title"
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">Description</label>
+            <label className="text-sm font-medium">{t('description')}</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Enter subtask description (optional)"
+              placeholder={t('enterSubtaskDescriptionOptional')}
               className="w-full min-h-[80px] px-3 py-2 text-sm border rounded-md resize-y"
               data-testid="create-subtask-description"
             />
@@ -188,7 +190,7 @@ function CreateSubtaskDialog({
             className="w-full"
             data-testid="create-subtask-submit"
           >
-            Create Subtask
+            {t('createSubtask')}
           </Button>
         </div>
       </DialogContent>
@@ -205,6 +207,7 @@ export function SubtaskList({
   projectId: string;
   onTaskClick: (taskId: string) => void;
 }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   
   const subtasksQuery = useQuery<TaskTree[]>({
@@ -253,19 +256,24 @@ export function SubtaskList({
       )}
 
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">Subtasks</h3>
+        <h3 className="text-sm font-medium">{t('subtasks')}</h3>
         <CreateSubtaskDialog parentTaskId={taskId} projectId={projectId}>
-          <Button size="sm" variant="outline" data-testid="subtasks-add-btn">
-            <Plus className="h-3 w-3 mr-1" />
-            Add
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-auto px-1 py-0.5 text-sm font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
+            data-testid="subtasks-add-btn"
+          >
+            <Plus className="mr-1 h-3 w-3" />
+            {t('addSubtaskInline')}
           </Button>
         </CreateSubtaskDialog>
       </div>
 
       {subtasksQuery.isLoading ? (
-        <div className="text-sm text-muted-foreground">Loading subtasks...</div>
+        <div className="text-sm text-muted-foreground">{t('loadingSubtasks')}</div>
       ) : hasSubtasks ? (
-        <div className="rounded-lg border bg-card">
+        <div className="rounded-md border border-border/50 bg-card/40">
           {tree.map((child) => (
             <SubtaskItem
               key={child.id}
@@ -279,8 +287,8 @@ export function SubtaskList({
           ))}
         </div>
       ) : (
-        <div className="text-sm text-muted-foreground py-4 text-center border rounded-lg bg-card" data-testid="subtasks-empty">
-          No subtasks yet. Create one to break down this task.
+        <div className="py-1 text-sm text-muted-foreground" data-testid="subtasks-empty">
+          {t('noSubtasksYet')}
         </div>
       )}
     </div>

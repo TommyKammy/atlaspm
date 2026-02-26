@@ -2,8 +2,19 @@
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Paperclip, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import {
+  Activity,
+  CalendarDays,
+  CheckCircle2,
+  Circle,
+  Clock3,
+  Gauge,
+  MessageSquare,
+  Paperclip,
+  UserCircle2,
+  X,
+} from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, apiBaseUrl } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type {
@@ -17,32 +28,33 @@ import type {
   TaskReminder,
   TaskTree,
 } from '@/lib/types';
-import { SubtaskList } from '@/components/subtask-list';
 import { DependencyManager } from '@/components/dependency-manager';
+import TaskDescriptionEditor from '@/components/editor/TaskDescriptionEditor';
+import { SubtaskList } from '@/components/subtask-list';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Separator } from '@/components/ui/separator';
-import TaskDescriptionEditor from '@/components/editor/TaskDescriptionEditor';
 import { Textarea } from '@/components/ui/textarea';
+import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 
-function formatAuditEvent(event: AuditEvent) {
+function formatAuditEvent(event: AuditEvent, t: (key: string) => string) {
   const action = event.action;
-  if (action === 'task.description.updated') return 'updated description';
-  if (action === 'task.description.snapshot_saved') return 'updated description';
-  if (action === 'task.comment.created') return 'added a comment';
-  if (action === 'task.comment.updated') return 'edited a comment';
-  if (action === 'task.comment.deleted') return 'deleted a comment';
-  if (action === 'task.reordered') return 'reordered task';
-  if (action === 'task.updated') return 'updated task';
-  if (action === 'task.mention.created') return 'added a mention';
-  if (action === 'task.mention.deleted') return 'removed a mention';
-  if (action === 'task.attachment.created') return 'added an attachment';
-  if (action === 'task.attachment.deleted') return 'deleted an attachment';
-  if (action === 'task.reminder.set') return 'set a reminder';
-  if (action === 'task.reminder.cleared') return 'cleared a reminder';
-  if (action === 'task.reminder.sent') return 'sent a reminder notification';
-  if (action === 'rule.applied') return 'applied rule';
+  if (action === 'task.description.updated') return t('activityUpdatedDescription');
+  if (action === 'task.description.snapshot_saved') return t('activityUpdatedDescription');
+  if (action === 'task.comment.created') return t('activityAddedComment');
+  if (action === 'task.comment.updated') return t('activityEditedComment');
+  if (action === 'task.comment.deleted') return t('activityDeletedComment');
+  if (action === 'task.reordered') return t('activityReorderedTask');
+  if (action === 'task.updated') return t('activityUpdatedTask');
+  if (action === 'task.mention.created') return t('activityAddedMention');
+  if (action === 'task.mention.deleted') return t('activityRemovedMention');
+  if (action === 'task.attachment.created') return t('activityAddedAttachment');
+  if (action === 'task.attachment.deleted') return t('activityDeletedAttachment');
+  if (action === 'task.reminder.set') return t('activitySetReminder');
+  if (action === 'task.reminder.cleared') return t('activityClearedReminder');
+  if (action === 'task.reminder.sent') return t('activitySentReminder');
+  if (action === 'rule.applied') return t('activityAppliedRule');
   return action;
 }
 
@@ -67,6 +79,51 @@ function parseCommentBody(body: string) {
   return output;
 }
 
+function statusLabel(status: Task['status'], t: (key: string) => string) {
+  if (status === 'TODO') return t('statusTodo');
+  if (status === 'IN_PROGRESS') return t('statusInProgress');
+  if (status === 'DONE') return t('statusDone');
+  if (status === 'BLOCKED') return t('statusBlocked');
+  return status;
+}
+
+function assigneeLabel(task: Task | undefined, members: ProjectMember[], t: (key: string) => string) {
+  if (!task?.assigneeUserId) return t('unassigned');
+  const member = members.find((item) => item.userId === task.assigneeUserId);
+  if (!member) return task.assigneeUserId;
+  return member.user.displayName || member.user.email || member.user.id;
+}
+
+function initials(value: string) {
+  const pieces = value.trim().split(/\s+/).slice(0, 2);
+  return pieces.map((piece) => piece.charAt(0).toUpperCase()).join('') || 'U';
+}
+
+function toDateInputValue(value?: string | null) {
+  if (!value) return '';
+  return String(value).slice(0, 10);
+}
+
+function MetadataRow({
+  icon,
+  label,
+  children,
+}: {
+  icon: ReactNode;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="grid grid-cols-[140px_1fr] items-center gap-2 py-1">
+      <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        {icon}
+        <span>{label}</span>
+      </div>
+      <div>{children}</div>
+    </div>
+  );
+}
+
 export default function TaskDetailDrawer({
   taskId,
   open,
@@ -78,6 +135,7 @@ export default function TaskDetailDrawer({
   onOpenChange: (open: boolean) => void;
   projectId: string;
 }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<'details' | 'comments' | 'activity'>('details');
   const [newComment, setNewComment] = useState('');
@@ -85,6 +143,11 @@ export default function TaskDetailDrawer({
   const [editingBody, setEditingBody] = useState('');
   const [commentMentionQuery, setCommentMentionQuery] = useState('');
   const [reminderAtInput, setReminderAtInput] = useState('');
+  const [titleInput, setTitleInput] = useState('');
+  const [progressInput, setProgressInput] = useState('0');
+  const [dueDateInput, setDueDateInput] = useState('');
+  const [assigneeInput, setAssigneeInput] = useState<string>('unassigned');
+  const [statusInput, setStatusInput] = useState<Task['status']>('TODO');
 
   const enabled = Boolean(taskId && open);
 
@@ -105,6 +168,7 @@ export default function TaskDetailDrawer({
     queryFn: () => api(`/tasks/${taskId}/attachments`),
     enabled,
   });
+
   const reminderQuery = useQuery<TaskReminder | null>({
     queryKey: taskId ? queryKeys.taskReminder(taskId) : ['task', 'none', 'reminder'],
     queryFn: () => api(`/tasks/${taskId}/reminder`),
@@ -122,11 +186,13 @@ export default function TaskDetailDrawer({
     queryFn: () => api(`/projects/${projectId}/members`),
     enabled,
   });
+
   const dependenciesQuery = useQuery<TaskDependency[]>({
     queryKey: taskId ? queryKeys.taskDependencies(taskId) : ['task', 'none', 'dependencies'],
     queryFn: () => api(`/tasks/${taskId}/dependencies`),
     enabled,
   });
+
   const subtasksTreeQuery = useQuery<TaskTree[]>({
     queryKey: taskId ? queryKeys.taskSubtaskTree(taskId) : ['task', 'none', 'subtasks', 'tree'],
     queryFn: () => api(`/tasks/${taskId}/subtasks/tree`),
@@ -136,6 +202,38 @@ export default function TaskDetailDrawer({
   const meQuery = useQuery<{ id: string }>({
     queryKey: queryKeys.me,
     queryFn: () => api('/me'),
+  });
+
+  const syncTaskCaches = (updated: Task) => {
+    queryClient.setQueryData(queryKeys.taskDetail(updated.id), updated);
+    queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) =>
+      current.map((group) => ({
+        ...group,
+        tasks: group.tasks.map((task) => (task.id === updated.id ? { ...task, ...updated } : task)),
+      })),
+    );
+  };
+
+  const patchTask = useMutation({
+    mutationFn: (body: Record<string, unknown>) => api(`/tasks/${taskId}`, { method: 'PATCH', body }) as Promise<Task>,
+    onSuccess: async (updated) => {
+      syncTaskCaches(updated);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(updated.id) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+    },
+  });
+
+  const toggleComplete = useMutation({
+    mutationFn: (done: boolean) =>
+      api(`/tasks/${taskId}/complete`, {
+        method: 'POST',
+        body: { done, version: taskQuery.data?.version },
+      }) as Promise<Task>,
+    onSuccess: async (updated) => {
+      syncTaskCaches(updated);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(updated.id) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+    },
   });
 
   const createComment = useMutation({
@@ -172,6 +270,7 @@ export default function TaskDetailDrawer({
       await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
     },
   });
+
   const setReminder = useMutation({
     mutationFn: (remindAt: string) => api(`/tasks/${taskId}/reminder`, { method: 'PUT', body: { remindAt } }),
     onSuccess: async () => {
@@ -179,6 +278,7 @@ export default function TaskDetailDrawer({
       await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
     },
   });
+
   const clearReminder = useMutation({
     mutationFn: () => api(`/tasks/${taskId}/reminder`, { method: 'DELETE' }),
     onSuccess: async () => {
@@ -198,6 +298,7 @@ export default function TaskDetailDrawer({
   const activity = useMemo(() => (activityQuery.data ?? []).slice().reverse(), [activityQuery.data]);
   const dependencies = dependenciesQuery.data ?? [];
   const blockingCount = dependencies.filter((dep) => dep.dependsOnTask && dep.dependsOnTask.status !== 'DONE').length;
+
   const subtaskProgress = useMemo(() => {
     const walk = (nodes: TaskTree[]): { total: number; done: number } =>
       nodes.reduce(
@@ -215,6 +316,15 @@ export default function TaskDetailDrawer({
     return { ...counted, percent };
   }, [subtasksTreeQuery.data]);
 
+  useEffect(() => {
+    if (!taskQuery.data) return;
+    setTitleInput(taskQuery.data.title);
+    setProgressInput(String(taskQuery.data.progressPercent ?? 0));
+    setDueDateInput(toDateInputValue(taskQuery.data.dueAt));
+    setAssigneeInput(taskQuery.data.assigneeUserId ?? 'unassigned');
+    setStatusInput(taskQuery.data.status);
+  }, [taskQuery.data]);
+
   const tryCommentMentionLookup = (text: string) => {
     const match = text.match(/(?:^|\s)@([a-zA-Z0-9._-]*)$/);
     if (!match) {
@@ -228,260 +338,453 @@ export default function TaskDetailDrawer({
     ? new Date(reminderQuery.data.remindAt).toISOString().slice(0, 16)
     : '';
   const reminderInput = reminderAtInput || reminderLocal;
+  const currentTask = taskQuery.data;
+  const currentAssignee = assigneeLabel(currentTask, members, t);
+  const isDone = currentTask?.status === 'DONE';
+
+  const commitTitle = () => {
+    if (!currentTask) return;
+    const nextTitle = titleInput.trim();
+    if (!nextTitle) {
+      setTitleInput(currentTask.title);
+      return;
+    }
+    if (nextTitle === currentTask.title) return;
+    patchTask.mutate({ title: nextTitle, version: currentTask.version });
+  };
+
+  const commitProgress = () => {
+    if (!currentTask) return;
+    const parsed = Number(progressInput);
+    if (Number.isNaN(parsed)) {
+      setProgressInput(String(currentTask.progressPercent));
+      return;
+    }
+    const normalized = Math.max(0, Math.min(100, Math.round(parsed)));
+    if (normalized === currentTask.progressPercent) return;
+    patchTask.mutate({ progressPercent: normalized, version: currentTask.version });
+  };
+
+  const commitDueDate = () => {
+    if (!currentTask) return;
+    const nextDueAt = dueDateInput ? `${dueDateInput}T00:00:00.000Z` : null;
+    const currentDueAt = currentTask.dueAt ? String(currentTask.dueAt).slice(0, 10) : '';
+    if (currentDueAt === dueDateInput) return;
+    patchTask.mutate({ dueAt: nextDueAt, version: currentTask.version });
+  };
+
+  const commitStatus = (nextStatus: Task['status']) => {
+    if (!currentTask || currentTask.status === nextStatus) return;
+    patchTask.mutate({ status: nextStatus, version: currentTask.version });
+  };
+
+  const commitAssignee = (nextAssignee: string) => {
+    if (!currentTask) return;
+    const assigneeUserId = nextAssignee === 'unassigned' ? null : nextAssignee;
+    if ((currentTask.assigneeUserId ?? null) === assigneeUserId) return;
+    patchTask.mutate({ assigneeUserId, version: currentTask.version });
+  };
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/50" />
-        <Dialog.Content className="fixed inset-y-0 right-0 z-50 w-[760px] max-w-full border-l bg-background p-4 shadow-2xl">
-          <div className="mb-3 flex items-center justify-between">
-            <Dialog.Title className="text-base font-semibold">{taskQuery.data?.title ?? 'Task detail'}</Dialog.Title>
-            <Dialog.Close asChild>
-              <Button variant="ghost" size="icon" aria-label="Close task detail">
-                <X className="h-4 w-4" />
-              </Button>
-            </Dialog.Close>
-          </div>
-
-          <div className="mb-4 flex gap-2">
-            <Button variant={tab === 'details' ? 'default' : 'outline'} size="sm" onClick={() => setTab('details')}>Details</Button>
-            <Button variant={tab === 'comments' ? 'default' : 'outline'} size="sm" onClick={() => setTab('comments')}>Comments</Button>
-            <Button variant={tab === 'activity' ? 'default' : 'outline'} size="sm" onClick={() => setTab('activity')}>Activity</Button>
-          </div>
-
-          {tab === 'details' ? (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-2 rounded-lg border bg-card p-3 text-sm">
-                <div>Status: {taskQuery.data?.status}</div>
-                <div>Progress: {taskQuery.data?.progressPercent ?? 0}%</div>
-                <div>Assignee: {taskQuery.data?.assigneeUserId ?? 'Unassigned'}</div>
-                <div>Due: {taskQuery.data?.dueAt ? String(taskQuery.data.dueAt).slice(0, 10) : '—'}</div>
-                <div className="col-span-2 flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-2 py-1.5">
-                  <div className="text-xs text-muted-foreground" data-testid="subtask-rollup">
-                    Subtasks: {subtaskProgress.done}/{subtaskProgress.total} ({subtaskProgress.percent}%)
-                  </div>
-                  <Badge
-                    variant={blockingCount > 0 ? 'destructive' : 'secondary'}
-                    data-testid="dependency-blocked-indicator"
-                  >
-                    {blockingCount > 0 ? `Blocked by ${blockingCount}` : 'Dependencies clear'}
-                  </Badge>
-                </div>
-              </div>
-              <section className="rounded-lg border bg-card p-3">
-                <div className="mb-2 text-sm font-medium">Due reminder</div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Input
-                    type="datetime-local"
-                    value={reminderInput}
-                    onChange={(event) => setReminderAtInput(event.target.value)}
-                    className="w-[240px]"
-                    data-testid="task-reminder-input"
-                  />
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      const iso = new Date(reminderInput).toISOString();
-                      setReminder.mutate(iso);
-                      setReminderAtInput('');
-                    }}
-                    disabled={!reminderInput || setReminder.isPending}
-                    data-testid="task-reminder-save"
-                  >
-                    {setReminder.isPending ? 'Saving...' : 'Save reminder'}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      clearReminder.mutate();
-                      setReminderAtInput('');
-                    }}
-                    disabled={!reminderQuery.data?.id || clearReminder.isPending}
-                    data-testid="task-reminder-clear"
-                  >
-                    Clear reminder
-                  </Button>
-                </div>
-              </section>
-              {taskId ? (
-                <TaskDescriptionEditor
-                  taskId={taskId}
-                  descriptionDoc={taskQuery.data?.descriptionDoc ?? null}
-                  descriptionVersion={taskQuery.data?.descriptionVersion ?? 0}
-                  members={members}
-                  onSaved={async (updated) => {
-                    queryClient.setQueryData(queryKeys.taskDetail(taskId), updated);
-                    queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) =>
-                      current.map((group) => ({
-                        ...group,
-                        tasks: group.tasks.map((task) => (task.id === updated.id ? { ...task, ...updated } : task)),
-                      })),
-                    );
-                    await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId) });
-                    await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+        <Dialog.Content className="fixed inset-y-0 right-0 z-50 flex h-dvh w-[760px] max-w-full flex-col border-l bg-background shadow-2xl">
+          <Dialog.Title className="sr-only">{t('taskDetail')}</Dialog.Title>
+          <div className="flex min-h-0 flex-1 flex-col p-4">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div className="flex min-w-0 flex-1 items-start gap-2">
+                <Button
+                  variant={isDone ? 'default' : 'outline'}
+                  size="sm"
+                  className={cn(
+                    'min-w-[152px] justify-center whitespace-nowrap px-3 text-xs sm:text-sm',
+                    isDone
+                      ? 'bg-emerald-600 text-white hover:bg-emerald-600/90'
+                      : 'border-border/70 text-foreground hover:bg-muted/40',
+                  )}
+                  onClick={() => {
+                    if (!currentTask || toggleComplete.isPending) return;
+                    toggleComplete.mutate(!isDone);
                   }}
-                  onReloadLatest={async () => {
-                    await queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(taskId) });
+                  disabled={!currentTask || toggleComplete.isPending}
+                >
+                  {isDone ? <CheckCircle2 className="mr-1 h-4 w-4 shrink-0" /> : <Circle className="mr-1 h-4 w-4 shrink-0" />}
+                  {isDone ? t('markIncomplete') : t('markComplete')}
+                </Button>
+                <Input
+                  value={titleInput}
+                  onChange={(event) => setTitleInput(event.target.value)}
+                  onBlur={commitTitle}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur();
                   }}
-                  onAttachmentChanged={() => {
-                    void queryClient.invalidateQueries({ queryKey: queryKeys.taskAttachments(taskId) });
-                    void queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId) });
-                  }}
+                  className="h-auto border-transparent bg-transparent px-1 py-0 text-2xl font-semibold shadow-none hover:bg-muted/20 focus-visible:border-border/50 focus-visible:bg-background"
+                  data-testid="task-detail-title-input"
                 />
+              </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-8 w-8"
+                  aria-label={t('details')}
+                  onClick={() => setTab('details')}
+                >
+                  <Paperclip className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-8 w-8"
+                  aria-label={t('comments')}
+                  onClick={() => setTab('comments')}
+                >
+                  <MessageSquare className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-8 w-8"
+                  aria-label={t('activity')}
+                  onClick={() => setTab('activity')}
+                >
+                  <Activity className="h-4 w-4" />
+                </Button>
+                <Dialog.Close asChild>
+                  <Button variant="ghost" size="icon" aria-label={t('closeTaskDetail')}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </Dialog.Close>
+              </div>
+            </div>
+
+            <div className="mb-4 flex items-center gap-5 border-b border-border/60">
+              {(['details', 'comments', 'activity'] as const).map((item) => (
+                <Button
+                  key={item}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setTab(item)}
+                  className={cn(
+                    'h-9 rounded-none border-b-2 px-0 text-sm',
+                    tab === item
+                      ? 'border-primary text-foreground'
+                      : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
+                  )}
+                >
+                  {t(item)}
+                </Button>
+              ))}
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+              {tab === 'details' ? (
+                <div className="space-y-5">
+                  <section className="space-y-1 border-b border-border/50 pb-4">
+                    <MetadataRow icon={<UserCircle2 className="h-3.5 w-3.5" />} label={t('assignee')}>
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-border/60 bg-muted/30 text-[11px] font-medium">
+                          {initials(currentAssignee)}
+                        </span>
+                        <select
+                          value={assigneeInput}
+                          onChange={(event) => {
+                            const next = event.target.value;
+                            setAssigneeInput(next);
+                            commitAssignee(next);
+                          }}
+                          className="h-8 rounded-md border border-transparent bg-transparent px-2 text-sm hover:bg-muted/30 focus:border-border focus:outline-none"
+                        >
+                          <option value="unassigned">{t('unassigned')}</option>
+                          {members.map((member) => {
+                            const label = member.user.displayName || member.user.email || member.user.id;
+                            return (
+                              <option key={member.userId} value={member.userId}>
+                                {label}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                    </MetadataRow>
+
+                    <MetadataRow icon={<CalendarDays className="h-3.5 w-3.5" />} label={t('dueDate')}>
+                      <Input
+                        type="date"
+                        value={dueDateInput}
+                        onChange={(event) => setDueDateInput(event.target.value)}
+                        onBlur={commitDueDate}
+                        className="h-8 w-[220px] border-transparent bg-transparent px-2 shadow-none hover:bg-muted/30 focus-visible:border-border"
+                        data-testid="task-detail-due-date"
+                      />
+                    </MetadataRow>
+
+                    <MetadataRow icon={<Gauge className="h-3.5 w-3.5" />} label={t('progress')}>
+                      <div className="flex items-center gap-3">
+                        <Input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={progressInput}
+                          onChange={(event) => setProgressInput(event.target.value)}
+                          onBlur={commitProgress}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') event.currentTarget.blur();
+                          }}
+                          className="h-8 w-[88px] border-transparent bg-transparent px-2 shadow-none hover:bg-muted/30 focus-visible:border-border"
+                        />
+                        <div className="h-[4px] w-40 overflow-hidden rounded bg-muted">
+                          <div
+                            className={cn('h-full rounded transition-all', (currentTask?.progressPercent ?? 0) >= 100 ? 'bg-emerald-500' : 'bg-primary')}
+                            style={{ width: `${Math.max(0, Math.min(100, currentTask?.progressPercent ?? 0))}%` }}
+                          />
+                        </div>
+                      </div>
+                    </MetadataRow>
+
+                    <MetadataRow icon={<CheckCircle2 className="h-3.5 w-3.5" />} label={t('status')}>
+                      <select
+                        value={statusInput}
+                        onChange={(event) => {
+                          const next = event.target.value as Task['status'];
+                          setStatusInput(next);
+                          commitStatus(next);
+                        }}
+                        className="h-8 min-w-[200px] rounded-full border border-transparent bg-transparent px-3 text-sm hover:bg-muted/30 focus:border-border focus:outline-none"
+                      >
+                        {(['TODO', 'IN_PROGRESS', 'DONE', 'BLOCKED'] as const).map((status) => (
+                          <option key={status} value={status}>
+                            {statusLabel(status, t)}
+                          </option>
+                        ))}
+                      </select>
+                    </MetadataRow>
+
+                    <div className="mt-2 flex items-center justify-between gap-2 rounded-md bg-muted/30 px-2 py-1.5">
+                      <div className="text-xs text-muted-foreground" data-testid="subtask-rollup">
+                        {t('subtasks')}: {subtaskProgress.done}/{subtaskProgress.total} ({subtaskProgress.percent}%)
+                      </div>
+                      <Badge variant={blockingCount > 0 ? 'destructive' : 'secondary'} data-testid="dependency-blocked-indicator">
+                        {blockingCount > 0 ? `${t('blockedBy')} ${blockingCount}` : t('dependenciesClear')}
+                      </Badge>
+                    </div>
+                  </section>
+
+                  <section className="space-y-2 border-b border-border/50 pb-4">
+                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t('dueReminder')}</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input
+                        type="datetime-local"
+                        value={reminderInput}
+                        onChange={(event) => setReminderAtInput(event.target.value)}
+                        className="h-8 w-[250px] border-transparent bg-transparent shadow-none hover:bg-muted/30 focus-visible:border-border"
+                        data-testid="task-reminder-input"
+                      />
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          const iso = new Date(reminderInput).toISOString();
+                          setReminder.mutate(iso);
+                          setReminderAtInput('');
+                        }}
+                        disabled={!reminderInput || setReminder.isPending}
+                        data-testid="task-reminder-save"
+                      >
+                        {setReminder.isPending ? t('saving') : t('saveReminder')}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          clearReminder.mutate();
+                          setReminderAtInput('');
+                        }}
+                        disabled={!reminderQuery.data?.id || clearReminder.isPending}
+                        data-testid="task-reminder-clear"
+                      >
+                        <Clock3 className="mr-1 h-4 w-4" />
+                        {t('clearReminder')}
+                      </Button>
+                    </div>
+                  </section>
+
+                  {taskId ? (
+                    <TaskDescriptionEditor
+                      taskId={taskId}
+                      descriptionDoc={taskQuery.data?.descriptionDoc ?? null}
+                      descriptionVersion={taskQuery.data?.descriptionVersion ?? 0}
+                      members={members}
+                      onSaved={async (updated) => {
+                        syncTaskCaches(updated);
+                        await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(updated.id) });
+                      }}
+                      onReloadLatest={async () => {
+                        await queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(taskId) });
+                      }}
+                      onAttachmentChanged={() => {
+                        void queryClient.invalidateQueries({ queryKey: queryKeys.taskAttachments(taskId) });
+                        void queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId) });
+                      }}
+                    />
+                  ) : null}
+
+                  <section className="space-y-2 border-b border-border/50 pb-4">
+                    <div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      <Paperclip className="h-4 w-4" /> {t('attachments')}
+                    </div>
+                    {!attachments.length ? <p className="text-sm text-muted-foreground">{t('noAttachmentsYet')}</p> : null}
+                    <div className="space-y-1">
+                      {attachments.map((item) => (
+                        <div key={item.id} className="flex items-center justify-between px-1 py-1 text-sm" data-testid={`attachment-${item.id}`}>
+                          <a href={`${apiBaseUrl}${item.url}`} target="_blank" rel="noreferrer" className="truncate hover:underline">
+                            {item.fileName}
+                          </a>
+                          <Button size="sm" variant="ghost" onClick={() => deleteAttachment.mutate(item.id)}>
+                            {t('delete')}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  {taskId && (
+                    <>
+                      <SubtaskList
+                        taskId={taskId}
+                        projectId={projectId}
+                        onTaskClick={(newTaskId) => {
+                          queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(newTaskId) });
+                          window.location.href = `/projects/${projectId}?task=${newTaskId}`;
+                        }}
+                      />
+                      <DependencyManager taskId={taskId} />
+                    </>
+                  )}
+                </div>
               ) : null}
 
-              <section className="rounded-lg border bg-card p-3">
-                <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-                  <Paperclip className="h-4 w-4" /> Attachments
-                </div>
-                {!attachments.length ? <p className="text-xs text-muted-foreground">No attachments yet.</p> : null}
-                <div className="space-y-2">
-                  {attachments.map((item) => (
-                    <div key={item.id} className="flex items-center justify-between rounded border px-2 py-1 text-sm" data-testid={`attachment-${item.id}`}>
-                      <a
-                        href={`${apiBaseUrl}${item.url}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="truncate hover:underline"
-                      >
-                        {item.fileName}
-                      </a>
-                      <Button size="sm" variant="ghost" onClick={() => deleteAttachment.mutate(item.id)}>Delete</Button>
-                    </div>
-                  ))}
-                </div>
-              </section>
+              {tab === 'comments' ? (
+                <div className="space-y-3">
+                  <div className="relative flex gap-2">
+                    <Textarea
+                      value={newComment}
+                      onChange={(event) => {
+                        setNewComment(event.target.value);
+                        tryCommentMentionLookup(event.target.value);
+                      }}
+                      placeholder={t('addCommentPlaceholder')}
+                      className="min-h-[88px] border-border/60"
+                      data-testid="comment-composer"
+                    />
+                    <Button
+                      onClick={() => createComment.mutate(newComment)}
+                      disabled={!newComment.trim() || createComment.isPending}
+                      data-testid="add-comment-btn"
+                    >
+                      {t('comment')}
+                    </Button>
 
-              {taskId && (
-                <>
-                  <SubtaskList
-                    taskId={taskId}
-                    projectId={projectId}
-                    onTaskClick={(newTaskId) => {
-                      queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(newTaskId) });
-                      window.location.href = `/projects/${projectId}?task=${newTaskId}`;
-                    }}
-                  />
-                  <DependencyManager taskId={taskId} />
-                </>
-              )}
-            </div>
-          ) : null}
+                    {commentMentionQuery && mentionCandidates.length ? (
+                      <div className="absolute left-2 top-[86px] z-20 w-72 rounded-md border bg-popover p-1 shadow" data-testid="comment-mention-menu">
+                        {mentionCandidates.slice(0, 6).map((member) => {
+                          const label = member.user.displayName ?? member.user.email ?? member.user.id;
+                          return (
+                            <button
+                              key={member.userId}
+                              type="button"
+                              className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-muted"
+                              data-testid={`comment-mention-option-${member.userId}`}
+                              onClick={() => {
+                                setNewComment((prev) => prev.replace(/(?:^|\s)@[a-zA-Z0-9._-]*$/, ` @[${member.userId}|${label}] `));
+                                setCommentMentionQuery('');
+                              }}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
 
-          {tab === 'comments' ? (
-            <div className="space-y-3">
-              <div className="relative flex gap-2">
-                <Textarea
-                  value={newComment}
-                  onChange={(e) => {
-                    setNewComment(e.target.value);
-                    tryCommentMentionLookup(e.target.value);
-                  }}
-                  placeholder="Add a comment (use @ to mention)"
-                  className="min-h-[80px]"
-                  data-testid="comment-composer"
-                />
-                <Button
-                  onClick={() => createComment.mutate(newComment)}
-                  disabled={!newComment.trim() || createComment.isPending}
-                  data-testid="add-comment-btn"
-                >
-                  Comment
-                </Button>
-
-                {commentMentionQuery && mentionCandidates.length ? (
-                  <div className="absolute left-2 top-[78px] z-20 w-72 rounded-md border bg-popover p-1 shadow" data-testid="comment-mention-menu">
-                    {mentionCandidates.slice(0, 6).map((member) => {
-                      const label = member.user.displayName ?? member.user.email ?? member.user.id;
+                  <div className="space-y-2">
+                    {comments.map((comment) => {
+                      const mine = comment.authorUserId === meQuery.data?.id;
                       return (
-                        <button
-                          key={member.userId}
-                          type="button"
-                          className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-muted"
-                          data-testid={`comment-mention-option-${member.userId}`}
-                          onClick={() => {
-                            setNewComment((prev) => prev.replace(/(?:^|\s)@[a-zA-Z0-9._-]*$/, ` @[${member.userId}|${label}] `));
-                            setCommentMentionQuery('');
-                          }}
-                        >
-                          {label}
-                        </button>
+                        <div key={comment.id} className="border-b border-border/60 pb-3" data-testid={`comment-${comment.id}`}>
+                          <div className="mb-1 text-xs text-muted-foreground">
+                            {comment.author?.displayName ?? comment.authorUserId} • {new Date(comment.createdAt).toLocaleString()}
+                          </div>
+                          {editingCommentId === comment.id ? (
+                            <div className="space-y-2">
+                              <Input value={editingBody} onChange={(event) => setEditingBody(event.target.value)} />
+                              <div className="flex gap-2">
+                                <Button size="sm" onClick={() => updateComment.mutate({ id: comment.id, body: editingBody })}>
+                                  {t('save')}
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => setEditingCommentId(null)}>
+                                  {t('cancel')}
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-sm">
+                              {parseCommentBody(comment.body).map((chunk, index) =>
+                                chunk.type === 'mention' ? (
+                                  <span
+                                    key={`${comment.id}-m-${index}`}
+                                    className="mr-1 inline-flex rounded bg-muted px-1 py-0.5 text-xs font-medium"
+                                    data-testid={`comment-mention-pill-${comment.id}`}
+                                  >
+                                    {chunk.value}
+                                  </span>
+                                ) : (
+                                  <span key={`${comment.id}-t-${index}`}>{chunk.value}</span>
+                                ),
+                              )}
+                            </div>
+                          )}
+                          {mine && editingCommentId !== comment.id ? (
+                            <div className="mt-2 flex gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setEditingCommentId(comment.id);
+                                  setEditingBody(comment.body);
+                                }}
+                              >
+                                {t('edit')}
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => deleteComment.mutate(comment.id)}>
+                                {t('delete')}
+                              </Button>
+                            </div>
+                          ) : null}
+                        </div>
                       );
                     })}
+                    {!comments.length ? <div className="text-sm text-muted-foreground">{t('noCommentsYet')}</div> : null}
                   </div>
-                ) : null}
-              </div>
-
-              <div className="space-y-2">
-                {comments.map((comment) => {
-                  const mine = comment.authorUserId === meQuery.data?.id;
-                  return (
-                    <div key={comment.id} className="rounded-md border bg-card p-3" data-testid={`comment-${comment.id}`}>
-                      <div className="mb-1 text-xs text-muted-foreground">
-                        {comment.author?.displayName ?? comment.authorUserId} • {new Date(comment.createdAt).toLocaleString()}
-                      </div>
-                      {editingCommentId === comment.id ? (
-                        <div className="space-y-2">
-                          <Input value={editingBody} onChange={(e) => setEditingBody(e.target.value)} />
-                          <div className="flex gap-2">
-                            <Button size="sm" onClick={() => updateComment.mutate({ id: comment.id, body: editingBody })}>Save</Button>
-                            <Button size="sm" variant="outline" onClick={() => setEditingCommentId(null)}>Cancel</Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="text-sm">
-                          {parseCommentBody(comment.body).map((chunk, index) =>
-                            chunk.type === 'mention' ? (
-                              <span
-                                key={`${comment.id}-m-${index}`}
-                                className="mr-1 inline-flex rounded bg-muted px-1 py-0.5 text-xs font-medium"
-                                data-testid={`comment-mention-pill-${comment.id}`}
-                              >
-                                {chunk.value}
-                              </span>
-                            ) : (
-                              <span key={`${comment.id}-t-${index}`}>{chunk.value}</span>
-                            ),
-                          )}
-                        </div>
-                      )}
-                      {mine && editingCommentId !== comment.id ? (
-                        <div className="mt-2 flex gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setEditingCommentId(comment.id);
-                              setEditingBody(comment.body);
-                            }}
-                          >
-                            Edit
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => deleteComment.mutate(comment.id)}>Delete</Button>
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-                {!comments.length ? <div className="text-sm text-muted-foreground">No comments yet.</div> : null}
-              </div>
-            </div>
-          ) : null}
-
-          {tab === 'activity' ? (
-            <div className="space-y-3">
-              {activity.map((event) => (
-                <div key={event.id} className="rounded-md border bg-card p-3" data-testid={`activity-${event.id}`}>
-                  <div className="text-sm font-medium">{event.actor} {formatAuditEvent(event)}</div>
-                  <div className="text-xs text-muted-foreground">{new Date(event.createdAt).toLocaleString()}</div>
                 </div>
-              ))}
-              {!activity.length ? <div className="text-sm text-muted-foreground">No activity yet.</div> : null}
-            </div>
-          ) : null}
+              ) : null}
 
-          <Separator className="mt-4" />
+              {tab === 'activity' ? (
+                <div className="space-y-2">
+                  {activity.map((event) => (
+                    <div key={event.id} className="border-b border-border/60 pb-2" data-testid={`activity-${event.id}`}>
+                      <div className="text-sm font-medium">
+                        {event.actor} {formatAuditEvent(event, t)}
+                      </div>
+                      <div className="text-xs text-muted-foreground">{new Date(event.createdAt).toLocaleString()}</div>
+                    </div>
+                  ))}
+                  {!activity.length ? <div className="text-sm text-muted-foreground">{t('noActivityYet')}</div> : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

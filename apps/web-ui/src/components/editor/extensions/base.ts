@@ -21,7 +21,7 @@ export const defaultTaskDoc: JSONContent = {
   content: [{ type: 'paragraph' }],
 };
 
-export function createTaskDescriptionExtensions() {
+export function createTaskDescriptionExtensions(placeholderText = 'Type / for blocks, @ for mentions...') {
   return [
     StarterKit.configure({
       heading: { levels: [1, 2, 3] },
@@ -61,6 +61,6 @@ export function createTaskDescriptionExtensions() {
     TableCell,
     TaskList,
     TaskItem.configure({ nested: true }),
-    Placeholder.configure({ placeholder: 'Type / for blocks, @ for mentions...' }),
+    Placeholder.configure({ placeholder: placeholderText }),
   ];
 }
