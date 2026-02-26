@@ -355,7 +355,15 @@ export default function TaskDescriptionEditor({
         <Button size="sm" variant="outline" disabled={isReadOnly} onClick={() => editor.chain().focus().toggleBulletList().run()}>Bullet</Button>
         <Button size="sm" variant="outline" disabled={isReadOnly} onClick={() => editor.chain().focus().toggleOrderedList().run()}>Number</Button>
         <Button size="sm" variant="outline" disabled={isReadOnly} onClick={() => editor.chain().focus().toggleTaskList().run()}>Check</Button>
-        <Button size="sm" variant="outline" disabled={isReadOnly} onClick={() => setLinkOpen(true)}>Link</Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={isReadOnly}
+          onClick={() => setLinkOpen(true)}
+          data-testid="link-toolbar-open"
+        >
+          Link
+        </Button>
         <Button size="sm" variant="outline" disabled={isReadOnly} onClick={() => fileInputRef.current?.click()}>Image</Button>
         {isCollabActive ? (
           <Badge data-testid="collab-presence-badge">
@@ -465,10 +473,16 @@ export default function TaskDescriptionEditor({
           <Dialog.Content className="fixed left-1/2 top-1/2 z-[80] w-[420px] max-w-[95vw] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-background p-4">
             <Dialog.Title className="text-sm font-semibold">Add link</Dialog.Title>
             <div className="mt-3 space-y-3">
-              <Input value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://example.com" />
+              <Input
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+                placeholder="https://example.com"
+                data-testid="link-dialog-input"
+              />
               <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setLinkOpen(false)}>Cancel</Button>
+                <Button variant="outline" onClick={() => setLinkOpen(false)} data-testid="link-dialog-cancel">Cancel</Button>
                 <Button
+                  data-testid="link-dialog-save"
                   onClick={() => {
                     if (!validLink(linkUrl)) return;
                     const isSelectionEmpty = editor.state.selection.empty;

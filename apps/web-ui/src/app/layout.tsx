@@ -39,7 +39,6 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           <AppShell
             initialSidebarMode={initialSidebarMode}
             initialContentLayout={initialContentLayout}
-            initialThemePreset={initialThemePreset}
           >
             {children}
           </AppShell>

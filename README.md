@@ -39,8 +39,10 @@ cp apps/collab-server/.env.example apps/collab-server/.env
 pnpm dev
 pnpm lint
 pnpm test
+pnpm verify:ci
 pnpm e2e:up
 pnpm e2e
+pnpm e2e:stability
 pnpm e2e:down
 pnpm e2e:rebuild
 pnpm db:migrate
@@ -48,7 +50,9 @@ pnpm db:seed
 ```
 
 - `pnpm test` expects local Postgres on `localhost:55432` (start with `docker compose -f infra/docker/docker-compose.yml up -d postgres`).
+- `pnpm verify:ci` runs lint + type-check + tests + E2E in DoD order.
 - `pnpm e2e` reuses existing Docker images for speed.
+- `pnpm e2e:stability` runs the full E2E suite multiple times (`E2E_STABILITY_RUNS`, default `3`).
 - `pnpm e2e:rebuild` forces `core-api` and `web-ui` image rebuilds after app code changes.
 - `pnpm e2e:up` starts postgres + core-api + collab-server + web-ui.
 - `pnpm e2e:down` tears down the docker compose stack.
@@ -82,6 +86,24 @@ docker compose up -d --build
 - Collaboration JWT/service secrets:
   - `COLLAB_JWT_SECRET`
   - `COLLAB_SERVICE_TOKEN`
+- Reminder worker controls:
+  - `REMINDER_WORKER_ENABLED` (default `true`)
+  - `REMINDER_WORKER_INTERVAL_MS` (default `30000`)
+  - `REMINDER_WORKER_BATCH_SIZE` (default `50`)
+- Task retention worker controls:
+  - `TASK_RETENTION_WORKER_ENABLED` (default `false`)
+  - `TASK_RETENTION_WORKER_INTERVAL_MS` (default `3600000`)
+  - `TASK_RETENTION_DAYS` (default `30`)
+  - `TASK_RETENTION_BATCH_SIZE` (default `100`)
+- Webhook delivery reliability controls:
+  - `WEBHOOK_DELIVERY_WORKER_ENABLED` (default `false`)
+  - `WEBHOOK_DELIVERY_INTERVAL_MS` (default `15000`)
+  - `WEBHOOK_DELIVERY_BATCH_SIZE` (default `25`)
+  - `WEBHOOK_DELIVERY_MAX_ATTEMPTS` (default `5`)
+  - `WEBHOOK_DELIVERY_BASE_DELAY_MS` (default `5000`)
+  - `WEBHOOK_DELIVERY_MAX_DELAY_MS` (default `60000`)
+  - `WEBHOOK_DELIVERY_REQUEST_TIMEOUT_MS` (default `8000`)
+  - `WEBHOOK_SIGNING_SECRET` (HMAC secret for outbound webhook signature headers)
 - Invitation link base URL:
   - `INVITE_BASE_URL` (defaults to `http://localhost:3000/login`)
 - Collaboration in web-ui is feature-gated and off by default: `NEXT_PUBLIC_COLLAB_ENABLED=false`.

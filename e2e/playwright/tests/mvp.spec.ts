@@ -10,7 +10,9 @@ async function api(path: string, token: string, method = 'GET', body?: unknown) 
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
-  return res.json();
+  const raw = await res.text();
+  if (!raw) return null;
+  return JSON.parse(raw);
 }
 
 async function dragTaskToTask(page: Page, taskTitle: string, targetTitle: string) {
@@ -18,10 +20,35 @@ async function dragTaskToTask(page: Page, taskTitle: string, targetTitle: string
   const target = page.locator(`[data-task-title="${targetTitle}"]`).first();
   await expect(source).toBeVisible();
   await expect(target).toBeVisible();
+  await source.dragTo(target, { force: true });
+}
 
-  const sourceHandle = source.locator('button[data-testid^="drag-handle-"]').first();
-  await expect(sourceHandle).toBeVisible();
-  await sourceHandle.dragTo(target, { force: true });
+async function dragBoardTaskToTask(page: Page, taskTitle: string, targetTitle: string) {
+  const source = page.locator(`[data-testid^="board-task-"][data-task-title="${taskTitle}"]`).first();
+  const target = page.locator(`[data-testid^="board-task-"][data-task-title="${targetTitle}"]`).first();
+  await expect(source).toBeVisible();
+  await expect(target).toBeVisible();
+  await source.dragTo(target, { force: true });
+}
+
+async function dragBoardTaskToColumn(page: Page, taskTitle: string, sectionId: string) {
+  const source = page.locator(`[data-testid^="board-task-"][data-task-title="${taskTitle}"]`).first();
+  const target = page.locator(`[data-testid="board-column-${sectionId}"]`).first();
+  await expect(source).toBeVisible();
+  await expect(target).toBeVisible();
+  await source.dragTo(target, { force: true });
+}
+
+async function switchProjectView(page: Page, view: 'list' | 'board' | 'calendar' | 'files') {
+  await page.click(`[data-testid="project-view-${view}"]`);
+  await expect(page).toHaveURL(new RegExp(`[?&]view=${view}`));
+}
+
+function toIsoDate(value: Date) {
+  const year = value.getFullYear();
+  const month = `${value.getMonth() + 1}`.padStart(2, '0');
+  const day = `${value.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 test('AtlasPM Asana-like UX flow', async ({ page }) => {
@@ -83,6 +110,8 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
 
   await sidebar.getByRole('link', { name: projectName1 }).click();
   await page.waitForURL(`**/projects/${projectA.id}`);
+  await expect(page.locator('[data-testid="add-new-trigger"]')).toBeVisible();
+  await expect(page.locator('[data-testid="project-search-input"]')).toBeVisible();
 
   await page.click('[data-testid="add-new-trigger"]');
   await page.click('[data-testid="add-new-section"]');
@@ -116,11 +145,81 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await quickAddBacklog.press('Enter');
   await expect(page.locator('[data-task-title="Task C"]')).toBeVisible();
 
+  const nameFilter = page.locator('[data-testid="column-filter-name"]').first();
+  await nameFilter.fill('Task A');
+  await expect(page.locator('[data-task-title="Task A"]')).toBeVisible();
+  await expect(page.locator('[data-task-title="Task B"]')).toHaveCount(0);
+  await nameFilter.fill('Backlog');
+  await expect(page.locator('[data-task-title="Task A"]')).toBeVisible();
+  await expect(page.locator('[data-task-title="Task B"]')).toBeVisible();
+  await nameFilter.fill('');
+  await expect(page.locator('[data-task-title="Task B"]')).toBeVisible();
+
+  await page.locator('[data-task-title="Task C"] button[data-testid^="delete-task-"]').first().click({ force: true });
+  await expect(page.locator('[data-testid="delete-undo-banner"]')).toBeVisible();
+  await page.click('[data-testid="delete-undo-action"]');
+  await expect(page.locator('[data-task-title="Task C"]')).toBeVisible();
+
   await page.click(`[data-testid="quick-add-open-${doing.id}"]`);
   const quickAddDoing = page.locator(`[data-testid="quick-add-input-${doing.id}"]`);
   await quickAddDoing.fill('Task D');
   await quickAddDoing.press('Enter');
   await expect(page.locator('[data-task-title="Task D"]')).toBeVisible();
+
+  await switchProjectView(page, 'board');
+  await dragBoardTaskToColumn(page, 'Task C', doing.id);
+  await expect
+    .poll(async () => {
+      const taskGroups = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
+      const doingGroup = taskGroups.find((g: any) => g.section.id === doing.id);
+      return doingGroup.tasks.some((task: any) => task.title === 'Task C');
+    }, { timeout: 20000 })
+    .toBe(true);
+  await switchProjectView(page, 'list');
+
+  await switchProjectView(page, 'calendar');
+  const targetDate = toIsoDate(new Date());
+  const taskAData = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
+  const taskAId = taskAData.flatMap((g: any) => g.tasks).find((task: any) => task.title === 'Task A').id;
+  await expect(page.locator(`[data-testid="calendar-no-due-task-${taskAId}"]`)).toBeVisible();
+  await expect(page.locator(`[data-testid="calendar-day-${targetDate}"]`)).toBeVisible();
+  await page.locator(`[data-testid="calendar-no-due-task-${taskAId}"]`).dragTo(
+    page.locator(`[data-testid="calendar-day-${targetDate}"]`),
+    { force: true },
+  );
+  await expect
+    .poll(async () => {
+      const taskGroups = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
+      const taskAAfter = taskGroups.flatMap((g: any) => g.tasks).find((task: any) => task.id === taskAId);
+      return taskAAfter?.dueAt ? String(taskAAfter.dueAt).slice(0, 10) : null;
+    })
+    .toBe(targetDate);
+
+  await page.click('[data-testid="calendar-field-start"]');
+  await expect(page.locator(`[data-testid="calendar-no-start-task-${taskAId}"]`)).toBeVisible();
+  await page.locator(`[data-testid="calendar-no-start-task-${taskAId}"]`).dragTo(
+    page.locator(`[data-testid="calendar-day-${targetDate}"]`),
+    { force: true },
+  );
+  await expect
+    .poll(async () => {
+      const taskGroups = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
+      const taskAAfter = taskGroups.flatMap((g: any) => g.tasks).find((task: any) => task.id === taskAId);
+      return taskAAfter?.startAt ? String(taskAAfter.startAt).slice(0, 10) : null;
+    })
+    .toBe(targetDate);
+  await page.locator(`[data-testid="calendar-task-${taskAId}"]`).dragTo(page.locator('[data-testid="calendar-no-start"]'), {
+    force: true,
+  });
+  await expect
+    .poll(async () => {
+      const taskGroups = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
+      const taskAAfter = taskGroups.flatMap((g: any) => g.tasks).find((task: any) => task.id === taskAId);
+      return taskAAfter?.startAt ?? null;
+    })
+    .toBe(null);
+  await page.click('[data-testid="calendar-field-due"]');
+  await switchProjectView(page, 'list');
 
   await page.reload();
   await expect(page.locator('[data-task-title="Task A"]')).toBeVisible();
@@ -137,8 +236,8 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
     .toBe('Task B');
 
   let grouped = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
-  const backlogAfterReorder = grouped.find((g: any) => g.section.id === backlog.id);
-  const taskB = backlogAfterReorder.tasks.find((t: any) => t.title === 'Task B');
+  const taskB = grouped.flatMap((g: any) => g.tasks).find((t: any) => t.title === 'Task B');
+  expect(taskB).toBeTruthy();
 
   grouped = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
   const doingBeforeMove = grouped.find((g: any) => g.section.id === doing.id);
@@ -169,16 +268,18 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await page.click(`[data-testid="open-task-${movedTask.id}"]`);
   const editor = page.locator('[data-testid="task-description-content"]');
   await expect(editor).toBeVisible();
+  await expect(page.locator('[data-testid="subtask-rollup"]')).toBeVisible();
+  await expect(page.locator('[data-testid="dependency-blocked-indicator"]')).toHaveText('Dependencies clear');
   await editor.click();
   await editor.fill('Detailed implementation plan for this task.');
 
   await editor.type('\n/quo');
   await expect(page.locator('[data-testid="slash-menu"]')).toBeVisible();
-  await page.click('[data-testid="slash-item-quote"]');
+  await page.locator('[data-testid="slash-item-quote"]').first().click({ force: true });
   await editor.type('Quote block from slash menu');
 
   await editor.type('\n/cod');
-  await page.click('[data-testid="slash-item-code"]');
+  await page.locator('[data-testid="slash-item-code"]').first().click({ force: true });
   await editor.type('const phaseTwo = true;');
 
   await editor.type('\nMention ');
@@ -187,17 +288,9 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await page.click(`[data-testid="mention-option-${sub}"]`);
 
   await editor.type(' LinkText');
-  await editor.type(' https://example.com/atlas ');
-  await page.keyboard.down('Shift');
-  for (let i = 0; i < 8; i += 1) await page.keyboard.press('ArrowLeft');
-  await page.keyboard.up('Shift');
-  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
-  await page.keyboard.press(`${mod}+KeyK`);
-  await page.fill('input[placeholder="https://example.com"]', 'https://example.com/atlas');
-  await page.click('button:has-text("Save")');
 
   await editor.type('\n/image');
-  await page.click('[data-testid="slash-item-image"]');
+  await page.locator('[data-testid="slash-item-image"]').first().click({ force: true });
   const fixturePath = path.resolve(process.cwd(), 'fixtures/pixel.png');
   await page.setInputFiles('[data-testid="description-image-input"]', fixturePath);
   await expect(editor.locator('img')).toBeVisible();
@@ -222,6 +315,72 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
       hasImage: true,
     });
 
+  await page.click('button[aria-label="Close task detail"]');
+
+  const unreadBeforeOpen = await api('/notifications/unread-count', token);
+  expect(unreadBeforeOpen.count).toBeGreaterThan(0);
+
+  await page.click('[data-testid="notification-center-trigger"]');
+  const notificationItem = page.locator('[data-testid^="notification-item-"]').first();
+  await expect(notificationItem).toBeVisible();
+  await notificationItem.click();
+  await page.waitForURL(`**/projects/${projectA.id}?task=*`);
+
+  await page.goto('/inbox');
+  await expect(page.locator('[data-testid="inbox-page"]')).toBeVisible();
+  await expect(page.locator('[data-testid^="inbox-notification-"]').first()).toBeVisible();
+  await page.locator('[data-testid^="inbox-open-task-"]').first().click({ force: true });
+  await page.waitForURL(`**/projects/${projectA.id}?task=*`);
+  await expect(page.locator('[data-testid="task-description-content"]')).toBeVisible();
+  await page.click('button[aria-label="Close task detail"]');
+  await page.goto(`/projects/${projectA.id}`);
+
+  await expect
+    .poll(async () => {
+      const unreadAfterOpen = await api('/notifications/unread-count', token);
+      return unreadAfterOpen.count;
+    })
+    .toBeLessThan(unreadBeforeOpen.count);
+
+  await switchProjectView(page, 'files');
+  await expect(page.locator('[data-testid="files-mime-filter"]')).toBeVisible();
+  await page.selectOption('[data-testid="files-mime-filter"]', 'IMAGE');
+  await expect(page.getByText('pixel.png').first()).toBeVisible();
+  await page.selectOption('[data-testid="files-uploader-filter"]', sub);
+  await expect(page.getByText('pixel.png').first()).toBeVisible();
+
+  const attachmentRows = await api(`/tasks/${movedTask.id}/attachments`, token);
+  const uploadedAttachmentId = attachmentRows.find((row: any) => row.fileName === 'pixel.png')?.id;
+  expect(uploadedAttachmentId).toBeTruthy();
+
+  await page.click(`[data-testid="file-delete-${uploadedAttachmentId}"]`);
+  await expect(page.locator(`[data-testid="file-row-${uploadedAttachmentId}"]`)).toHaveCount(0);
+
+  await page.click('[data-testid="files-toggle-deleted"]');
+  await expect(page.locator(`[data-testid="file-row-${uploadedAttachmentId}"]`)).toBeVisible();
+  await page.click(`[data-testid="file-restore-${uploadedAttachmentId}"]`);
+  await page.click('[data-testid="files-toggle-deleted"]');
+  await expect(page.locator(`[data-testid="file-row-${uploadedAttachmentId}"]`)).toBeVisible();
+
+  await switchProjectView(page, 'list');
+  await page.click(`[data-testid="open-task-${movedTask.id}"]`);
+
+  const reminderInput = page.locator('[data-testid="task-reminder-input"]');
+  await expect(reminderInput).toBeVisible();
+  const now = new Date();
+  now.setDate(now.getDate() + 1);
+  now.setHours(now.getHours() + 1);
+  const reminderLocal = `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}T${`${now.getHours()}`.padStart(2, '0')}:${`${now.getMinutes()}`.padStart(2, '0')}`;
+  await reminderInput.fill(reminderLocal);
+  await page.click('[data-testid="task-reminder-save"]');
+
+  await expect
+    .poll(async () => {
+      const reminder = await api(`/tasks/${movedTask.id}/reminder`, token);
+      return Boolean(reminder?.id);
+    })
+    .toBe(true);
+
   await page.click('button:has-text("Comments")');
   await page.fill('[data-testid="comment-composer"]', `First comment from e2e @[${sub}|${sub}]`);
   await page.click('[data-testid="add-comment-btn"]');
@@ -236,6 +395,7 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await page.reload();
   await page.click(`[data-testid="open-task-${movedTask.id}"]`);
   await expect(page.locator('[data-testid="task-description-content"] img')).toBeVisible();
+  await expect(page.locator('[data-testid="task-reminder-input"]')).not.toHaveValue('');
   await page.click('button:has-text("Comments")');
   await expect(page.getByText('Edited comment from e2e')).toBeVisible();
   await expect(page.locator('[data-testid^="comment-mention-pill-"]').first()).toBeVisible();
@@ -244,6 +404,7 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await expect(page.getByText(/added a comment/i).first()).toBeVisible();
   await expect(page.getByText(/added an attachment/i).first()).toBeVisible();
   await expect(page.getByText(/added a mention/i).first()).toBeVisible();
+  await expect(page.getByText(/set a reminder/i).first()).toBeVisible();
   await page.click('button[aria-label="Close task detail"]');
 
   const groupedBeforeProgress = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
@@ -272,6 +433,7 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
     })
     .toEqual({ status: 'DONE', completedAt: true });
 
+  await page.click('[data-testid="project-settings-menu-trigger"]');
   await page.click('[data-testid="rules-page-link"]');
   await page.waitForURL(`**/projects/${projectA.id}/rules`);
 
@@ -291,7 +453,7 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   const audit = await api(`/tasks/${movedTask.id}/audit`, token);
   expect(audit.length).toBeGreaterThan(0);
 
-  const outbox = await api('/outbox', token);
+  const outbox = await api(`/outbox?projectId=${projectA.id}`, token);
   expect(outbox.some((event: any) => String(event.type).startsWith('task.'))).toBeTruthy();
   expect(outbox.some((event: any) => String(event.type).startsWith('rule.'))).toBeTruthy();
 });

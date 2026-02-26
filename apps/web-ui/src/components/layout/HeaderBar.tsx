@@ -1,23 +1,25 @@
 'use client';
 
-import { Moon, Sun } from 'lucide-react';
+import { Menu, Moon, Search, Sun } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
-import { usePathname, useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import Link from 'next/link';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
 import { MobileNavSheet } from '@/components/layout/MobileNavSheet';
 import { GlobalSearch } from '@/components/global-search';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import type { ThemePreset } from '@/lib/layout-preferences';
 import type { Locale } from '@/lib/layout-preferences';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { Project } from '@/lib/types';
+import type { Project, Section } from '@/lib/types';
 import { useI18n } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { NotificationCenter } from '@/components/notification-center';
+import { Settings2, Layers3, Trash2 } from 'lucide-react';
 
 type Me = {
   id: string;
@@ -38,7 +40,12 @@ function ThemeToggle() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="icon" data-testid="theme-toggle">
+        <Button
+          variant="ghost"
+          size="icon"
+          data-testid="theme-toggle"
+          className="h-8 w-8 rounded-full hover:bg-muted/50"
+        >
           <Sun className="h-4 w-4 scale-100 rotate-0 transition-all dark:scale-0 dark:-rotate-90" />
           <Moon className="absolute h-4 w-4 scale-0 rotate-90 transition-all dark:scale-100 dark:rotate-0" />
           <span className="sr-only">{t('theme')}</span>
@@ -84,9 +91,9 @@ function PersonalSettingsMenu() {
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
-            variant="outline"
+            variant="ghost"
             size="icon"
-            className="h-8 w-8 rounded-full"
+            className="h-8 w-8 rounded-full hover:bg-muted/50"
             data-testid="personal-settings-trigger"
             aria-label={t('personalSettings')}
           >
@@ -188,72 +195,170 @@ function PersonalSettingsMenu() {
 }
 
 export function HeaderBar({
-  contentLayout,
-  onToggleContentLayout,
   onToggleSidebarMode,
-  themePreset,
-  onThemePresetChange,
 }: {
-  contentLayout?: 'full' | 'centered';
-  onToggleContentLayout?: () => void;
   onToggleSidebarMode?: () => void;
-  themePreset?: ThemePreset;
-  onThemePresetChange?: (value: ThemePreset) => void;
 }) {
   const { t } = useI18n();
+  const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { data: projects = [] } = useQuery<Project[]>({
     queryKey: queryKeys.projects,
     queryFn: () => api('/projects'),
   });
+  const projectId = useMemo(() => pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null, [pathname]);
+  const currentView = (searchParams.get('view') ?? 'list').toLowerCase();
+  const query = searchParams.get('q') ?? '';
+  const tabs = [
+    { id: 'list', label: t('list') },
+    { id: 'board', label: t('board') },
+    { id: 'calendar', label: t('calendar') },
+    { id: 'files', label: t('files') },
+  ] as const;
+
+  const sectionsQuery = useQuery<Section[]>({
+    queryKey: queryKeys.projectSections(projectId ?? ''),
+    queryFn: () => api(`/projects/${projectId}/sections`),
+    enabled: Boolean(projectId),
+  });
 
   const title = useMemo(() => {
-    const match = pathname.match(/^\/projects\/([^/]+)/);
-    if (!match) return t('projects');
-    return projects.find((project) => project.id === match[1])?.name ?? t('project');
-  }, [pathname, projects, t]);
+    if (!projectId) return t('projects');
+    return projects.find((project) => project.id === projectId)?.name ?? t('project');
+  }, [projectId, projects, t]);
+
+  const setProjectQueryParam = (key: string, value: string | null) => {
+    if (!projectId) return;
+    const params = new URLSearchParams(searchParams.toString());
+    if (value === null || value === '') {
+      params.delete(key);
+    } else {
+      params.set(key, value);
+    }
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  };
+
+  const [projectSearchInput, setProjectSearchInput] = useState(query);
+
+  useEffect(() => {
+    setProjectSearchInput(query);
+  }, [query]);
 
   return (
     <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:px-6">
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
+        {onToggleSidebarMode ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="hidden h-8 w-8 rounded-full hover:bg-muted/50 md:inline-flex"
+            onClick={onToggleSidebarMode}
+            data-testid="sidebar-toggle-icon"
+            aria-label={t('sidebar')}
+          >
+            <Menu className="h-4 w-4" />
+          </Button>
+        ) : null}
         <MobileNavSheet />
-        <div>
+        <div className="min-w-0">
           <p className="text-[11px] uppercase tracking-wider text-muted-foreground">AtlasPM</p>
-          <h1 className="text-sm font-medium">{title}</h1>
+          <div className="flex min-w-0 items-center gap-3">
+            <h1 className="truncate text-sm font-medium">{title}</h1>
+            {projectId ? (
+              <div className="hidden items-center gap-1 md:flex" data-testid="project-header-tabs">
+                {tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    className={tab.id === currentView ? 'border-b-2 border-primary px-1 py-1 text-xs font-medium' : 'px-1 py-1 text-xs text-muted-foreground'}
+                    onClick={() => setProjectQueryParam('view', tab.id)}
+                    data-testid={`project-view-${tab.id}`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
-      
-      <div className="flex-1 max-w-md mx-4">
-        <GlobalSearch />
+
+      <div className="mx-3 w-full max-w-xl md:ml-auto md:max-w-md">
+        {projectId ? (
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="text"
+              value={projectSearchInput}
+              onChange={(event) => {
+                const next = event.target.value;
+                setProjectSearchInput(next);
+                setProjectQueryParam('q', next.trim() ? next : null);
+              }}
+              placeholder={t('searchTasks')}
+              className="h-10 rounded-full border-transparent bg-muted/25 pl-10 pr-4 shadow-none transition-colors focus-visible:border-border focus-visible:bg-background/90"
+              data-testid="project-search-input"
+            />
+          </div>
+        ) : (
+          <GlobalSearch />
+        )}
       </div>
-      
-      <div className="flex items-center gap-2">
-        {onToggleSidebarMode ? (
-          <Button variant="outline" size="sm" onClick={onToggleSidebarMode} data-testid="sidebar-mode-toggle">
-            {t('sidebar')}
-          </Button>
-        ) : null}
-        {onToggleContentLayout ? (
-          <Button variant="outline" size="sm" onClick={onToggleContentLayout} data-testid="content-layout-toggle">
-            {contentLayout === 'centered' ? t('fullWidth') : t('centered')}
-          </Button>
-        ) : null}
-        {onThemePresetChange ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" data-testid="theme-preset-toggle">
-                {t('preset')}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => onThemePresetChange('default')}>
-                {t('defaultPreset')}{themePreset === 'default' ? ' ✓' : ''}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onThemePresetChange('tangerine')}>
-                {t('tangerinePreset')}{themePreset === 'tangerine' ? ' ✓' : ''}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+
+      <div className="flex items-center gap-1">
+        {projectId ? (
+          <>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="relative h-8 w-8 rounded-full hover:bg-muted/50" data-testid="project-sections-icon">
+                    <Layers3 className="h-4 w-4" />
+                    <span className="absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-muted px-1 text-[10px] text-muted-foreground">
+                      {sectionsQuery.data?.filter((section) => !section.isDefault).length ?? 0}
+                    </span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t('sections')}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 rounded-full hover:bg-muted/50"
+                    data-testid="project-trash-open-icon"
+                    onClick={() => setProjectQueryParam('trash', '1')}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t('trash')}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-muted/50" data-testid="project-settings-menu-trigger">
+                  <Settings2 className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem asChild>
+                  <Link href={`/projects/${projectId}/members`} data-testid="project-members-page-link">
+                    {t('members')}
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href={`/projects/${projectId}/rules`} data-testid="rules-page-link">
+                    {t('rules')}
+                  </Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
         ) : null}
         <TooltipProvider>
           <Tooltip>
@@ -265,6 +370,7 @@ export function HeaderBar({
             <TooltipContent>{t('theme')}</TooltipContent>
           </Tooltip>
         </TooltipProvider>
+        <NotificationCenter />
         <PersonalSettingsMenu />
       </div>
     </header>

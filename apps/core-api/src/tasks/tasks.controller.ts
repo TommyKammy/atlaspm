@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UploadedFile,
   UseGuards,
@@ -16,6 +17,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import {
+  IsBoolean,
   IsArray,
   IsEnum,
   IsInt,
@@ -46,6 +48,7 @@ import {
   templateDefinition,
   type RuleDefinition,
 } from '../rules/rule-definition';
+import { NotificationsService } from '../notifications/notifications.service';
 
 class TaskQuery {
   @IsOptional()
@@ -180,6 +183,14 @@ class PatchTaskDto {
   version?: number;
 }
 
+class CompleteTaskDto {
+  @IsBoolean()
+  done!: boolean;
+
+  @IsInt()
+  version!: number;
+}
+
 class BulkTaskDto {
   @IsArray()
   taskIds!: string[];
@@ -265,6 +276,11 @@ class CompleteAttachmentDto {
   attachmentId!: string;
 }
 
+class UpsertTaskReminderDto {
+  @IsISO8601()
+  remindAt!: string;
+}
+
 class CreateSubtaskDto {
   @IsString()
   title!: string;
@@ -321,6 +337,7 @@ export class TasksController {
     @Inject(DomainService) private readonly domain: DomainService,
     @Inject(SubtaskService) private readonly subtaskService: SubtaskService,
     @Inject(SearchService) private readonly searchService: SearchService,
+    @Inject(NotificationsService) private readonly notifications: NotificationsService,
   ) {}
 
   @Get('projects/:id/tasks')
@@ -346,6 +363,7 @@ export class TasksController {
         { title: { contains: query.q, mode: 'insensitive' } },
         { description: { contains: query.q, mode: 'insensitive' } },
         { descriptionText: { contains: query.q, mode: 'insensitive' } },
+        { section: { name: { contains: query.q, mode: 'insensitive' } } },
       ];
     }
 
@@ -467,6 +485,53 @@ export class TasksController {
         correlationId: req.correlationId,
         outboxType: 'task.updated',
         payload: updated,
+      });
+      await this.applyProgressRules(tx, id, req.correlationId);
+      return updated;
+    }).then((updated) => {
+      void this.searchService.indexTask(updated);
+      return updated;
+    });
+  }
+
+  @Post('tasks/:id/complete')
+  async complete(@Param('id') id: string, @Body() body: CompleteTaskDto, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    if (body.version !== task.version) throw new ConflictException('Version conflict');
+
+    const nextStatus = body.done ? TaskStatus.DONE : TaskStatus.IN_PROGRESS;
+    const nextProgress = body.done ? 100 : 0;
+    const nextCompletedAt = body.done ? task.completedAt ?? new Date() : null;
+    const action = body.done ? 'task.completed' : 'task.reopened';
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.task.update({
+        where: { id },
+        data: {
+          status: nextStatus,
+          progressPercent: nextProgress,
+          completedAt: nextCompletedAt,
+          version: { increment: 1 },
+        },
+      });
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'Task',
+        entityId: id,
+        action,
+        beforeJson: task,
+        afterJson: updated,
+        correlationId: req.correlationId,
+        outboxType: action,
+        payload: {
+          taskId: id,
+          projectId: task.projectId,
+          done: body.done,
+          status: updated.status,
+          progressPercent: updated.progressPercent,
+        },
       });
       await this.applyProgressRules(tx, id, req.correlationId);
       return updated;
@@ -818,11 +883,21 @@ export class TasksController {
   }
 
   @Get('tasks/:id/attachments')
-  async listAttachments(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
+  async listAttachments(
+    @Param('id') taskId: string,
+    @Query('includeDeleted') includeDeletedRaw: string | undefined,
+    @CurrentRequest() req: AppRequest,
+  ) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    const includeDeleted = String(includeDeletedRaw ?? '').toLowerCase() === 'true';
+    const where: Prisma.TaskAttachmentWhereInput = {
+      taskId,
+      completedAt: { not: null },
+      ...(includeDeleted ? {} : { deletedAt: null }),
+    };
     const attachments = await this.prisma.taskAttachment.findMany({
-      where: { taskId, deletedAt: null, completedAt: { not: null } },
+      where,
       orderBy: { createdAt: 'desc' },
     });
     return attachments.map((item) => ({
@@ -983,6 +1058,118 @@ export class TasksController {
         correlationId: req.correlationId,
         outboxType: 'task.attachment.deleted',
         payload: { taskId: attachment.taskId, attachmentId: id },
+      });
+      return deleted;
+    });
+  }
+
+  @Post('attachments/:id/restore')
+  async restoreAttachment(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
+    const attachment = await this.prisma.taskAttachment.findUniqueOrThrow({
+      where: { id },
+      include: { task: true },
+    });
+    await this.domain.requireProjectRole(attachment.task.projectId, req.user.sub, ProjectRole.MEMBER);
+    if (!attachment.deletedAt) return attachment;
+    return this.prisma.$transaction(async (tx) => {
+      const restored = await tx.taskAttachment.update({
+        where: { id },
+        data: { deletedAt: null },
+      });
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'Task',
+        entityId: attachment.taskId,
+        action: 'task.attachment.restored',
+        beforeJson: attachment,
+        afterJson: restored,
+        correlationId: req.correlationId,
+        outboxType: 'task.attachment.restored',
+        payload: { taskId: attachment.taskId, attachmentId: id },
+      });
+      return restored;
+    });
+  }
+
+  @Get('tasks/:id/reminder')
+  async getMyReminder(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    const reminder = await this.prisma.taskReminder.findFirst({
+      where: { taskId, userId: req.user.sub, deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+    return reminder ?? null;
+  }
+
+  @Put('tasks/:id/reminder')
+  async upsertMyReminder(
+    @Param('id') taskId: string,
+    @Body() body: UpsertTaskReminderDto,
+    @CurrentRequest() req: AppRequest,
+  ) {
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    const remindAt = new Date(body.remindAt);
+    if (Number.isNaN(+remindAt)) throw new ConflictException('Invalid remindAt');
+
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.taskReminder.findFirst({
+        where: { taskId, userId: req.user.sub, deletedAt: null },
+        orderBy: { createdAt: 'desc' },
+      });
+      const reminder = current
+        ? await tx.taskReminder.update({
+            where: { id: current.id },
+            data: { remindAt, deletedAt: null },
+          })
+        : await tx.taskReminder.create({
+            data: { taskId, userId: req.user.sub, remindAt },
+          });
+
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'Task',
+        entityId: taskId,
+        action: 'task.reminder.set',
+        beforeJson: current,
+        afterJson: reminder,
+        correlationId: req.correlationId,
+        outboxType: 'task.reminder.set',
+        payload: { taskId, userId: req.user.sub, remindAt: reminder.remindAt },
+      });
+      return reminder;
+    });
+  }
+
+  @Delete('tasks/:id/reminder')
+  async clearMyReminder(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    const current = await this.prisma.taskReminder.findFirst({
+      where: { taskId, userId: req.user.sub, deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!current) return { ok: true };
+
+    return this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.taskReminder.update({
+        where: { id: current.id },
+        data: { deletedAt: new Date() },
+      });
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'Task',
+        entityId: taskId,
+        action: 'task.reminder.cleared',
+        beforeJson: current,
+        afterJson: deleted,
+        correlationId: req.correlationId,
+        outboxType: 'task.reminder.cleared',
+        payload: { taskId, userId: req.user.sub },
       });
       return deleted;
     });
@@ -1273,12 +1460,12 @@ export class TasksController {
     req: AppRequest,
   ) {
     const sourceId = input.sourceId ?? '';
+    const task = await tx.task.findUniqueOrThrow({ where: { id: input.taskId }, select: { projectId: true } });
     const uniqueIncoming = [...new Set(input.mentionedUserIds)].filter(Boolean);
     const validUsers = uniqueIncoming.length
       ? await tx.projectMembership.findMany({
           where: {
-            projectId: (await tx.task.findUniqueOrThrow({ where: { id: input.taskId }, select: { projectId: true } }))
-              .projectId,
+            projectId: task.projectId,
             userId: { in: uniqueIncoming },
           },
           select: { userId: true },
@@ -1313,6 +1500,16 @@ export class TasksController {
           sourceType: input.sourceType,
           sourceId,
         },
+      });
+      await this.notifications.upsertMentionNotification(tx, {
+        userId,
+        projectId: task.projectId,
+        taskId: input.taskId,
+        sourceType: input.sourceType,
+        sourceId,
+        triggeredByUserId: req.user.sub,
+        actor: req.user.sub,
+        correlationId: req.correlationId,
       });
     }
 

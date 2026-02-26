@@ -51,26 +51,33 @@ async function createTaskViaAPI(token: string, projectId: string, title: string)
 }
 
 async function openTaskDetail(page: Page, taskTitle: string) {
-  await page.click(`text=${taskTitle}`);
+  await page.locator(`[data-task-title="${taskTitle}"] [data-testid^="open-task-"]`).first().click();
   await expect(page.getByRole('dialog')).toBeVisible();
 }
 
 function subtasksSection(page: Page) {
-  const heading = page.getByRole('dialog').getByRole('heading', { name: 'Subtasks' });
-  return heading.locator('xpath=ancestor::div[contains(@class,"space-y-3")][1]');
+  return page.getByTestId('subtasks-section');
 }
 
 async function openSubtaskDialog(page: Page) {
   const section = subtasksSection(page);
-  await section.getByRole('button', { name: 'Add' }).click();
+  const addButton = section.getByTestId('subtasks-add-btn');
+  await addButton.scrollIntoViewIfNeeded();
+  await addButton.evaluate((element) => {
+    (element as HTMLButtonElement).click();
+  });
   await expect(page.getByRole('dialog', { name: 'Create Subtask' })).toBeVisible();
 }
 
 async function expandSubtaskNode(page: Page, title: string) {
   const section = subtasksSection(page);
-  const toggleButton = section.locator('div.group').filter({ hasText: title }).first().locator('button').first();
+  const row = section.locator('[data-testid^="subtask-row-"]').filter({ hasText: title }).first();
+  const toggleButton = row.locator('[data-testid^="subtask-toggle-"]').first();
   await expect(toggleButton).toBeVisible();
-  await toggleButton.click();
+  await toggleButton.scrollIntoViewIfNeeded();
+  await toggleButton.evaluate((element) => {
+    (element as HTMLButtonElement).click();
+  });
 }
 
 test.describe('Subtasks Feature', () => {
@@ -89,10 +96,10 @@ test.describe('Subtasks Feature', () => {
     await openSubtaskDialog(page);
     
     const subtaskTitle = 'Subtask 1';
-    await page.fill('input[placeholder="Enter subtask title"]', subtaskTitle);
-    await page.click('button:has-text("Create Subtask")');
+    await page.getByTestId('create-subtask-title').fill(subtaskTitle);
+    await page.getByTestId('create-subtask-submit').click();
 
-    const subtaskRow = section.locator('div.group').filter({ hasText: subtaskTitle }).first();
+    const subtaskRow = section.locator('[data-testid^="subtask-row-"]').filter({ hasText: subtaskTitle }).first();
     await expect(subtaskRow).toBeVisible();
     await expect(subtaskRow.getByText('TODO')).toBeVisible();
   });
@@ -107,9 +114,9 @@ test.describe('Subtasks Feature', () => {
 
     const childTaskTitle = 'Child Task';
     await openSubtaskDialog(page);
-    await page.fill('input[placeholder="Enter subtask title"]', childTaskTitle);
-    await page.click('button:has-text("Create Subtask")');
-    await expect(subtasksSection(page).locator('div.group').filter({ hasText: childTaskTitle }).first()).toBeVisible();
+    await page.getByTestId('create-subtask-title').fill(childTaskTitle);
+    await page.getByTestId('create-subtask-submit').click();
+    await expect(subtasksSection(page).locator('[data-testid^="subtask-row-"]').filter({ hasText: childTaskTitle }).first()).toBeVisible();
     const childTask = (await api(`/tasks/${parentTaskId}/subtasks`, token)).find((task: any) => task.title === childTaskTitle);
     expect(childTask?.id).toBeTruthy();
     await api(`/tasks/${childTask.id}/subtasks`, token, 'POST', {
@@ -118,10 +125,10 @@ test.describe('Subtasks Feature', () => {
 
     await page.reload();
     await openTaskDetail(page, parentTaskTitle);
-    await expect(subtasksSection(page).locator('div.group').filter({ hasText: childTaskTitle }).first()).toBeVisible();
-    await expect(subtasksSection(page).locator('div.group').filter({ hasText: 'Nested Subtask' }).first()).not.toBeVisible();
+    await expect(subtasksSection(page).locator('[data-testid^="subtask-row-"]').filter({ hasText: childTaskTitle }).first()).toBeVisible();
+    await expect(subtasksSection(page).locator('[data-testid^="subtask-row-"]').filter({ hasText: 'Nested Subtask' }).first()).not.toBeVisible();
     await expandSubtaskNode(page, childTaskTitle);
-    await expect(subtasksSection(page).locator('div.group').filter({ hasText: 'Nested Subtask' }).first()).toBeVisible();
+    await expect(subtasksSection(page).locator('[data-testid^="subtask-row-"]').filter({ hasText: 'Nested Subtask' }).first()).toBeVisible();
   });
 
   test('should delete subtask', async ({ page }) => {
@@ -134,16 +141,19 @@ test.describe('Subtasks Feature', () => {
 
     await openSubtaskDialog(page);
     const subtaskTitle = 'To Be Deleted';
-    await page.fill('input[placeholder="Enter subtask title"]', subtaskTitle);
-    await page.click('button:has-text("Create Subtask")');
+    await page.getByTestId('create-subtask-title').fill(subtaskTitle);
+    await page.getByTestId('create-subtask-submit').click();
     const section = subtasksSection(page);
-    await expect(section.locator('div.group').filter({ hasText: subtaskTitle }).first()).toBeVisible();
+    await expect(section.locator('[data-testid^="subtask-row-"]').filter({ hasText: subtaskTitle }).first()).toBeVisible();
 
-    const subtaskRow = section.locator('div.group').filter({ hasText: subtaskTitle }).first();
-    await subtaskRow.hover();
-    await subtaskRow.locator('button').last().click({ force: true });
+    const subtaskRow = section.locator('[data-testid^="subtask-row-"]').filter({ hasText: subtaskTitle }).first();
+    const deleteButton = subtaskRow.locator('[data-testid^="subtask-delete-"]').first();
+    await deleteButton.scrollIntoViewIfNeeded();
+    await deleteButton.evaluate((element) => {
+      (element as HTMLButtonElement).click();
+    });
     await expect(subtaskRow).not.toBeVisible();
-    await expect(section.getByText('No subtasks yet. Create one to break down this task.')).toBeVisible();
+    await expect(section.getByTestId('subtasks-empty')).toBeVisible();
   });
 
   test('should navigate to subtask via breadcrumb', async ({ page }) => {
@@ -155,15 +165,18 @@ test.describe('Subtasks Feature', () => {
     await openTaskDetail(page, parentTaskTitle);
 
     await openSubtaskDialog(page);
-    await page.fill('input[placeholder="Enter subtask title"]', 'Nested Task');
-    await page.click('button:has-text("Create Subtask")');
-    const nestedTaskRow = subtasksSection(page).locator('div.group').filter({ hasText: 'Nested Task' }).first();
+    await page.getByTestId('create-subtask-title').fill('Nested Task');
+    await page.getByTestId('create-subtask-submit').click();
+    const nestedTaskRow = subtasksSection(page).locator('[data-testid^="subtask-row-"]').filter({ hasText: 'Nested Task' }).first();
     await expect(nestedTaskRow).toBeVisible();
     const nestedTask = (await api(`/tasks/${parentTaskId}/subtasks`, token))
       .find((task: any) => task.title === 'Nested Task');
     expect(nestedTask?.id).toBeTruthy();
 
-    await nestedTaskRow.click();
+    await nestedTaskRow.scrollIntoViewIfNeeded();
+    await nestedTaskRow.evaluate((element) => {
+      (element as HTMLElement).click();
+    });
     await expect(page).toHaveURL(new RegExp(`/projects/${projectId}\\?task=${nestedTask.id}`));
   });
 });

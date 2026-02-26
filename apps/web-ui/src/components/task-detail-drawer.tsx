@@ -6,9 +6,20 @@ import { Paperclip, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { api, apiBaseUrl } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { AuditEvent, ProjectMember, SectionTaskGroup, Task, TaskAttachment, TaskComment } from '@/lib/types';
+import type {
+  AuditEvent,
+  ProjectMember,
+  SectionTaskGroup,
+  Task,
+  TaskAttachment,
+  TaskComment,
+  TaskDependency,
+  TaskReminder,
+  TaskTree,
+} from '@/lib/types';
 import { SubtaskList } from '@/components/subtask-list';
 import { DependencyManager } from '@/components/dependency-manager';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
@@ -28,6 +39,9 @@ function formatAuditEvent(event: AuditEvent) {
   if (action === 'task.mention.deleted') return 'removed a mention';
   if (action === 'task.attachment.created') return 'added an attachment';
   if (action === 'task.attachment.deleted') return 'deleted an attachment';
+  if (action === 'task.reminder.set') return 'set a reminder';
+  if (action === 'task.reminder.cleared') return 'cleared a reminder';
+  if (action === 'task.reminder.sent') return 'sent a reminder notification';
   if (action === 'rule.applied') return 'applied rule';
   return action;
 }
@@ -70,6 +84,7 @@ export default function TaskDetailDrawer({
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingBody, setEditingBody] = useState('');
   const [commentMentionQuery, setCommentMentionQuery] = useState('');
+  const [reminderAtInput, setReminderAtInput] = useState('');
 
   const enabled = Boolean(taskId && open);
 
@@ -90,6 +105,11 @@ export default function TaskDetailDrawer({
     queryFn: () => api(`/tasks/${taskId}/attachments`),
     enabled,
   });
+  const reminderQuery = useQuery<TaskReminder | null>({
+    queryKey: taskId ? queryKeys.taskReminder(taskId) : ['task', 'none', 'reminder'],
+    queryFn: () => api(`/tasks/${taskId}/reminder`),
+    enabled,
+  });
 
   const activityQuery = useQuery<AuditEvent[]>({
     queryKey: taskId ? queryKeys.taskAudit(taskId) : ['task', 'none', 'audit'],
@@ -100,6 +120,16 @@ export default function TaskDetailDrawer({
   const membersQuery = useQuery<ProjectMember[]>({
     queryKey: queryKeys.projectMembers(projectId),
     queryFn: () => api(`/projects/${projectId}/members`),
+    enabled,
+  });
+  const dependenciesQuery = useQuery<TaskDependency[]>({
+    queryKey: taskId ? queryKeys.taskDependencies(taskId) : ['task', 'none', 'dependencies'],
+    queryFn: () => api(`/tasks/${taskId}/dependencies`),
+    enabled,
+  });
+  const subtasksTreeQuery = useQuery<TaskTree[]>({
+    queryKey: taskId ? queryKeys.taskSubtaskTree(taskId) : ['task', 'none', 'subtasks', 'tree'],
+    queryFn: () => api(`/tasks/${taskId}/subtasks/tree`),
     enabled,
   });
 
@@ -142,6 +172,20 @@ export default function TaskDetailDrawer({
       await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
     },
   });
+  const setReminder = useMutation({
+    mutationFn: (remindAt: string) => api(`/tasks/${taskId}/reminder`, { method: 'PUT', body: { remindAt } }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.taskReminder(taskId!) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
+    },
+  });
+  const clearReminder = useMutation({
+    mutationFn: () => api(`/tasks/${taskId}/reminder`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.taskReminder(taskId!) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
+    },
+  });
 
   const members = membersQuery.data ?? [];
   const mentionCandidates = members.filter((member) => {
@@ -152,6 +196,24 @@ export default function TaskDetailDrawer({
   const comments = commentsQuery.data ?? [];
   const attachments = attachmentsQuery.data ?? [];
   const activity = useMemo(() => (activityQuery.data ?? []).slice().reverse(), [activityQuery.data]);
+  const dependencies = dependenciesQuery.data ?? [];
+  const blockingCount = dependencies.filter((dep) => dep.dependsOnTask && dep.dependsOnTask.status !== 'DONE').length;
+  const subtaskProgress = useMemo(() => {
+    const walk = (nodes: TaskTree[]): { total: number; done: number } =>
+      nodes.reduce(
+        (acc, node) => {
+          const child = walk(node.children ?? []);
+          return {
+            total: acc.total + 1 + child.total,
+            done: acc.done + (node.status === 'DONE' ? 1 : 0) + child.done,
+          };
+        },
+        { total: 0, done: 0 },
+      );
+    const counted = walk(subtasksTreeQuery.data ?? []);
+    const percent = counted.total ? Math.round((counted.done / counted.total) * 100) : 0;
+    return { ...counted, percent };
+  }, [subtasksTreeQuery.data]);
 
   const tryCommentMentionLookup = (text: string) => {
     const match = text.match(/(?:^|\s)@([a-zA-Z0-9._-]*)$/);
@@ -161,6 +223,11 @@ export default function TaskDetailDrawer({
     }
     setCommentMentionQuery(match[1] ?? '');
   };
+
+  const reminderLocal = reminderQuery.data?.remindAt
+    ? new Date(reminderQuery.data.remindAt).toISOString().slice(0, 16)
+    : '';
+  const reminderInput = reminderAtInput || reminderLocal;
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -189,7 +256,54 @@ export default function TaskDetailDrawer({
                 <div>Progress: {taskQuery.data?.progressPercent ?? 0}%</div>
                 <div>Assignee: {taskQuery.data?.assigneeUserId ?? 'Unassigned'}</div>
                 <div>Due: {taskQuery.data?.dueAt ? String(taskQuery.data.dueAt).slice(0, 10) : '—'}</div>
+                <div className="col-span-2 flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-2 py-1.5">
+                  <div className="text-xs text-muted-foreground" data-testid="subtask-rollup">
+                    Subtasks: {subtaskProgress.done}/{subtaskProgress.total} ({subtaskProgress.percent}%)
+                  </div>
+                  <Badge
+                    variant={blockingCount > 0 ? 'destructive' : 'secondary'}
+                    data-testid="dependency-blocked-indicator"
+                  >
+                    {blockingCount > 0 ? `Blocked by ${blockingCount}` : 'Dependencies clear'}
+                  </Badge>
+                </div>
               </div>
+              <section className="rounded-lg border bg-card p-3">
+                <div className="mb-2 text-sm font-medium">Due reminder</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    type="datetime-local"
+                    value={reminderInput}
+                    onChange={(event) => setReminderAtInput(event.target.value)}
+                    className="w-[240px]"
+                    data-testid="task-reminder-input"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const iso = new Date(reminderInput).toISOString();
+                      setReminder.mutate(iso);
+                      setReminderAtInput('');
+                    }}
+                    disabled={!reminderInput || setReminder.isPending}
+                    data-testid="task-reminder-save"
+                  >
+                    {setReminder.isPending ? 'Saving...' : 'Save reminder'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      clearReminder.mutate();
+                      setReminderAtInput('');
+                    }}
+                    disabled={!reminderQuery.data?.id || clearReminder.isPending}
+                    data-testid="task-reminder-clear"
+                  >
+                    Clear reminder
+                  </Button>
+                </div>
+              </section>
               {taskId ? (
                 <TaskDescriptionEditor
                   taskId={taskId}

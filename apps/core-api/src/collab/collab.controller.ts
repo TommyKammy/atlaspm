@@ -6,6 +6,7 @@ import {
   Get,
   Headers,
   Inject,
+  Logger,
   Param,
   Post,
   UnauthorizedException,
@@ -20,6 +21,7 @@ import { AuthGuard } from '../auth/auth.guard';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { Prisma, ProjectRole } from '@prisma/client';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const MAX_DESCRIPTION_DOC_BYTES = 200_000;
 const MAX_DESCRIPTION_TEXT_LENGTH = 20_000;
@@ -43,9 +45,12 @@ class SnapshotBodyDto {
 
 @Controller()
 export class CollabController {
+  private readonly logger = new Logger(CollabController.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(NotificationsService) private readonly notifications: NotificationsService,
   ) {}
 
   @Post('tasks/:id/collab-token')
@@ -68,7 +73,7 @@ export class CollabController {
       .setExpirationTime(now + ttlSec)
       .sign(this.collabJwtKey());
 
-    return {
+    const response = {
       url: process.env.COLLAB_SERVER_URL ?? 'ws://localhost:18080',
       token,
       roomId,
@@ -79,15 +84,38 @@ export class CollabController {
         color: this.colorForUser(req.user.sub),
       },
     };
+    this.logger.log(
+      JSON.stringify({
+        event: 'collab.token.issued',
+        correlationId: req.correlationId ?? 'unknown',
+        taskId,
+        projectId: task.projectId,
+        roomId,
+        mode,
+        userId: req.user.sub,
+      }),
+    );
+    return response;
   }
 
   @Get('internal/tasks/:id/description')
   async getInternalTaskDescription(
     @Param('id') taskId: string,
     @Headers('x-collab-service-token') serviceToken?: string,
+    @Headers('x-correlation-id') correlationId?: string,
   ) {
     this.assertServiceToken(serviceToken);
+    const cid = (correlationId ?? randomUUID()).toString();
     const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    this.logger.log(
+      JSON.stringify({
+        event: 'collab.snapshot.load',
+        correlationId: cid,
+        taskId,
+        roomId: `task:${taskId}:description`,
+        descriptionVersion: task.descriptionVersion,
+      }),
+    );
     return {
       taskId,
       roomId: `task:${taskId}:description`,
@@ -153,10 +181,22 @@ export class CollabController {
         },
       });
 
-      return {
+      const result = {
         ok: true,
         descriptionVersion: updated.descriptionVersion,
       };
+      this.logger.log(
+        JSON.stringify({
+          event: 'collab.snapshot.saved',
+          correlationId: cid,
+          taskId,
+          roomId,
+          reason: body.reason,
+          participantCount: Array.isArray(body.participants) ? body.participants.length : 0,
+          descriptionVersion: updated.descriptionVersion,
+        }),
+      );
+      return result;
     });
   }
 
@@ -260,6 +300,15 @@ export class CollabController {
         correlationId,
         outboxType: 'task.mention.created',
         payload: { taskId, mentionedUserId: userId, sourceType: 'description', sourceId: '' },
+      });
+      await this.notifications.upsertMentionNotification(tx, {
+        userId,
+        projectId: task.projectId,
+        taskId,
+        sourceType: 'description',
+        sourceId: '',
+        actor: 'collab-server',
+        correlationId,
       });
     }
 

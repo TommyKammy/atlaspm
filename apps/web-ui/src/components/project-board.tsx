@@ -12,8 +12,8 @@ import {
 import { useSortable, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useRef, useState, type ReactNode } from 'react';
-import { Check, ChevronDown, ChevronRight, Plus, Trash2, User } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Check, ChevronDown, ChevronRight, Circle, Plus, Trash2, User } from 'lucide-react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { ProjectMember, SectionTaskGroup, Task } from '@/lib/types';
@@ -102,6 +102,20 @@ type TaskTreeNode = {
   children: TaskTreeNode[];
 };
 
+type UndoDeleteState = {
+  taskId: string;
+  title: string;
+};
+
+type DeleteTaskResponse = {
+  success: boolean;
+  deletedCount: number;
+  taskIds: string[];
+};
+
+type DueColumnFilter = 'ALL' | 'NO_DUE' | 'WITH_DUE' | 'OVERDUE';
+type ProgressColumnFilter = 'ALL' | 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETE';
+
 function buildSectionTaskTree(tasks: Task[]): TaskTreeNode[] {
   const byId = new Map<string, TaskTreeNode>();
   for (const task of tasks) byId.set(task.id, { task, children: [] });
@@ -158,6 +172,13 @@ function ProgressBar({ value }: { value: number }) {
   );
 }
 
+const statusBadgeClass: Record<Task['status'], string> = {
+  TODO: 'bg-slate-100 text-slate-700',
+  IN_PROGRESS: 'bg-sky-100 text-sky-700',
+  DONE: 'bg-emerald-100 text-emerald-700',
+  BLOCKED: 'bg-rose-100 text-rose-700',
+};
+
 function AssigneeCombobox({
   task,
   members,
@@ -182,7 +203,7 @@ function AssigneeCombobox({
                 variant="ghost"
                 size="icon"
                 data-testid={`assignee-trigger-${task.id}`}
-                className="h-6 w-6 rounded-full border"
+                className="h-6 w-6 rounded-full border-0 hover:bg-muted/40"
               >
                 {selected === 'unassigned' ? <Plus className="h-3 w-3" /> : <span className="text-[10px]">{initials(selectedLabel)}</span>}
               </Button>
@@ -239,6 +260,7 @@ function TaskRow({
   task,
   sectionId,
   onEdit,
+  onToggleDone,
   members,
   onOpen,
   projectName,
@@ -252,6 +274,7 @@ function TaskRow({
   task: Task;
   sectionId: string;
   onEdit: (taskId: string, patch: Partial<Task> & { version: number }) => void;
+  onToggleDone: (task: Task) => void;
   members: ProjectMember[];
   onOpen: (taskId: string) => void;
   projectName: string;
@@ -268,21 +291,34 @@ function TaskRow({
     data: { sectionId },
     disabled: !draggable,
   });
+  const isDone = task.status === 'DONE';
 
   return (
     <tr
       ref={setNodeRef as never}
       style={{ transform: CSS.Transform.toString(transform), transition: transition || 'transform 150ms ease' }}
-      className="h-11 border-b transition-colors hover:bg-muted/60"
+      className={cn(
+        'group h-9 border-b transition-colors hover:bg-muted/40',
+        draggable && 'cursor-grab active:cursor-grabbing',
+        isDone && 'opacity-50',
+      )}
       data-testid={`task-${task.id}`}
       data-task-title={task.title}
+      {...(draggable ? attributes : {})}
+      {...(draggable ? listeners : {})}
+      onPointerDownCapture={(event) => {
+        const target = event.target as HTMLElement;
+        if (target.closest('button,input,select,textarea,a,[data-no-dnd="true"]')) {
+          event.stopPropagation();
+        }
+      }}
     >
       <TableCell>
         <div className="flex items-center gap-2" style={{ paddingLeft: `${depth * 16}px` }}>
           <button
             type="button"
             className={cn(
-              'inline-flex h-6 w-6 items-center justify-center rounded border text-muted-foreground',
+              'inline-flex h-5 w-5 items-center justify-center rounded border text-muted-foreground',
               hasChildren ? 'opacity-100' : 'pointer-events-none opacity-0',
             )}
             onClick={(event) => {
@@ -295,23 +331,35 @@ function TaskRow({
             {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           </button>
           <button
-            className={cn(
-              'rounded-sm border px-1.5 py-0.5 text-[11px] text-muted-foreground',
-              draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed opacity-50',
-            )}
-            data-testid={`drag-handle-${task.id}`}
-            aria-label={`Drag ${task.title}`}
             type="button"
-            {...(draggable ? attributes : {})}
-            {...(draggable ? listeners : {})}
-            title={draggable ? t('dragToReorder') : t('nestedTasksCannotBeDragged')}
+            className={cn(
+              'inline-flex h-5 w-5 items-center justify-center rounded-full border transition-colors',
+              isDone ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-muted-foreground/40 text-muted-foreground',
+            )}
+            data-testid={`task-complete-${task.id}`}
+            aria-label={isDone ? `Reopen ${task.title}` : `Complete ${task.title}`}
+            onClick={() => onToggleDone(task)}
           >
-            Drag
+            {isDone ? <Check className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
           </button>
           <button
             type="button"
-            className="truncate text-left text-sm hover:underline"
-            onClick={() => onOpen(task.id)}
+            data-no-dnd="true"
+            className={cn(
+              'truncate text-left text-sm font-medium hover:underline',
+              isDone && 'line-through',
+            )}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpen(task.id);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                onOpen(task.id);
+              }
+            }}
             data-testid={`open-task-${task.id}`}
           >
             {task.title.trim() || t('untitledTask')}
@@ -335,7 +383,7 @@ function TaskRow({
               version: task.version,
             })
           }
-          className="h-8"
+          className="h-7 border-0 bg-transparent px-2 shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
         />
       </TableCell>
       <TableCell>
@@ -346,14 +394,18 @@ function TaskRow({
             max={100}
             value={task.progressPercent}
             onChange={(e) => onEdit(task.id, { progressPercent: Number(e.target.value), version: task.version })}
-            className="h-8"
+            className="h-7 w-16 border-0 bg-transparent px-2 shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
           />
           <ProgressBar value={task.progressPercent} />
         </div>
       </TableCell>
       <TableCell>
         <select
-          className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+          className={cn(
+            'h-7 w-full rounded-full border-0 bg-transparent px-2 text-xs font-medium',
+            'hover:bg-muted/40 focus:bg-muted/40',
+            statusBadgeClass[task.status],
+          )}
           value={task.status}
           onChange={(e) => onEdit(task.id, { status: e.target.value as Task['status'], version: task.version })}
         >
@@ -363,13 +415,9 @@ function TaskRow({
           <option value="BLOCKED">BLOCKED</option>
         </select>
       </TableCell>
-      <TableCell>
-        <Badge variant="secondary" className="max-w-40 truncate">
-          {projectName}
-        </Badge>
-      </TableCell>
-      <TableCell className="text-xs text-muted-foreground">-</TableCell>
-      <TableCell className="text-xs text-muted-foreground">{t('private')}</TableCell>
+      <TableCell className="text-[11px] text-muted-foreground">{projectName}</TableCell>
+      <TableCell className="text-[11px] text-muted-foreground">-</TableCell>
+      <TableCell className="text-[11px] text-muted-foreground">{t('private')}</TableCell>
       <TableCell>
         {task.assigneeUserId ? (
           <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border text-[10px]">
@@ -383,7 +431,7 @@ function TaskRow({
         <Button
           size="icon"
           variant="ghost"
-          className="h-7 w-7"
+          className="h-6 w-6"
           data-testid={`delete-task-${task.id}`}
           onClick={(event) => {
             event.stopPropagation();
@@ -420,23 +468,23 @@ function QuickAddTask({
 
   if (!open) {
     return (
-      <Button
-        variant="ghost"
-        size="sm"
+      <button
+        type="button"
         data-testid={`quick-add-open-${sectionId}`}
-        className="justify-start px-0 text-muted-foreground"
+        className="flex h-8 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         onClick={() => {
           setOpen(true);
           setTimeout(() => inputRef.current?.focus(), 0);
         }}
       >
-        + {t('addTask')}
-      </Button>
+        <Plus className="h-3.5 w-3.5" />
+        <span>{t('addTaskInline')}</span>
+      </button>
     );
   }
 
   return (
-    <div className="flex items-center gap-2 py-2">
+    <div className="py-1">
       <Input
         ref={inputRef}
         value={title}
@@ -451,12 +499,16 @@ function QuickAddTask({
             setTitle('');
           }
         }}
-        placeholder={t('taskName')}
+        onBlur={() => {
+          if (!title.trim()) {
+            setOpen(false);
+            setTitle('');
+          }
+        }}
+        placeholder={t('addTaskInline')}
         data-testid={`quick-add-input-${sectionId}`}
+        className="h-8 border-0 border-b border-border/60 rounded-none bg-transparent px-0 shadow-none focus-visible:ring-0"
       />
-      <Button size="sm" data-testid={`quick-add-submit-${sectionId}`} onClick={() => void submit()}>
-        {t('add')}
-      </Button>
     </div>
   );
 }
@@ -464,7 +516,7 @@ function QuickAddTask({
 function SectionDropTarget({
   sectionId,
   children,
-  frameless = false,
+  frameless = true,
 }: {
   sectionId: string;
   children: ReactNode;
@@ -477,27 +529,12 @@ function SectionDropTarget({
       ref={setNodeRef}
       data-testid={`section-${sectionId}`}
       className={cn(
-        frameless ? 'bg-transparent' : 'rounded-lg border bg-card',
+        frameless ? 'bg-transparent' : 'rounded-lg bg-card',
         isOver && 'ring-1 ring-ring',
       )}
     >
       {children}
     </section>
-  );
-}
-
-function SectionDropZone({ sectionId }: { sectionId: string }) {
-  const { t } = useI18n();
-  const { setNodeRef, isOver } = useDroppable({ id: `section-drop-zone-${sectionId}`, data: { sectionId } });
-
-  return (
-    <div
-      ref={setNodeRef}
-      data-testid={`section-drop-zone-${sectionId}`}
-      className={cn('rounded-md border border-dashed px-2 py-1 text-[11px] text-muted-foreground', isOver && 'border-ring text-foreground')}
-    >
-      {t('dropTasksHere')}
-    </div>
   );
 }
 
@@ -507,18 +544,44 @@ export default function ProjectBoard({
   search,
   statusFilter,
   priorityFilter,
+  initialTaskId,
 }: {
   projectId: string;
   projectName?: string;
   search: string;
   statusFilter: 'ALL' | Task['status'];
   priorityFilter: 'ALL' | NonNullable<Task['priority']>;
+  initialTaskId?: string | null;
 }) {
   const { t } = useI18n();
-  const sensors = useSensors(useSensor(PointerSensor));
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 6 },
+    }),
+  );
   const queryClient = useQueryClient();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [collapsedTaskIds, setCollapsedTaskIds] = useState<Set<string>>(new Set());
+  const [undoDelete, setUndoDelete] = useState<UndoDeleteState | null>(null);
+  const [nameFilter, setNameFilter] = useState('');
+  const [assigneeFilter, setAssigneeFilter] = useState<'ALL' | 'UNASSIGNED' | string>('ALL');
+  const [dueFilter, setDueFilter] = useState<DueColumnFilter>('ALL');
+  const [progressFilter, setProgressFilter] = useState<ProgressColumnFilter>('ALL');
+  const [statusColumnFilter, setStatusColumnFilter] = useState<'ALL' | Task['status']>('ALL');
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current) {
+        clearTimeout(undoTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!initialTaskId) return;
+    setSelectedTaskId(initialTaskId);
+  }, [initialTaskId]);
 
   const groupsQuery = useQuery<SectionTaskGroup[]>({
     queryKey: queryKeys.projectTasksGrouped(projectId),
@@ -541,6 +604,45 @@ export default function ProjectBoard({
           ...group,
           tasks: group.tasks.map((task) =>
             task.id === taskId ? { ...task, ...patch, version: task.version + 1 } : task,
+          ),
+        })),
+      );
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(queryKeys.projectTasksGrouped(projectId), context.previous);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) => {
+        const removed = removeTaskFromGroups(current, updated.id);
+        return upsertTaskInSection(removed, updated.sectionId, updated);
+      });
+    },
+  });
+
+  const completeTask = useMutation({
+    mutationFn: ({ taskId, done, version }: { taskId: string; done: boolean; version: number }) =>
+      api(`/tasks/${taskId}/complete`, {
+        method: 'POST',
+        body: { done, version },
+      }) as Promise<Task>,
+    onMutate: async ({ taskId, done }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      const previous = queryClient.getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId));
+      queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) =>
+        current.map((group) => ({
+          ...group,
+          tasks: group.tasks.map((task) =>
+            task.id === taskId
+              ? {
+                  ...task,
+                  status: done ? 'DONE' : 'IN_PROGRESS',
+                  progressPercent: done ? 100 : 0,
+                  completedAt: done ? new Date().toISOString() : null,
+                  version: task.version + 1,
+                }
+              : task,
           ),
         })),
       );
@@ -590,10 +692,12 @@ export default function ProjectBoard({
   });
 
   const deleteTask = useMutation({
-    mutationFn: (taskId: string) => api(`/tasks/${taskId}`, { method: 'DELETE' }),
+    mutationFn: (taskId: string) => api(`/tasks/${taskId}`, { method: 'DELETE' }) as Promise<DeleteTaskResponse>,
     onMutate: async (taskId) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
       const previous = queryClient.getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId));
+      const deletedTask =
+        previous?.flatMap((group) => group.tasks).find((task) => task.id === taskId) ?? null;
       queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) =>
         current.map((group) => ({
           ...group,
@@ -601,14 +705,37 @@ export default function ProjectBoard({
         })),
       );
       if (selectedTaskId === taskId) setSelectedTaskId(null);
-      return { previous };
+      return { previous, deletedTask };
     },
     onError: (_error, _taskId, context) => {
       if (context?.previous) queryClient.setQueryData(queryKeys.projectTasksGrouped(projectId), context.previous);
     },
+    onSuccess: (_result, taskId, context) => {
+      if (undoTimerRef.current) {
+        clearTimeout(undoTimerRef.current);
+      }
+      setUndoDelete({
+        taskId,
+        title: context?.deletedTask?.title.trim() || t('untitledTask'),
+      });
+      undoTimerRef.current = setTimeout(() => {
+        setUndoDelete(null);
+      }, 10000);
+    },
     onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksDeletedGrouped(projectId) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.projectSections(projectId) });
+    },
+  });
+
+  const restoreTask = useMutation({
+    mutationFn: (taskId: string) => api(`/tasks/${taskId}/restore`, { method: 'POST' }) as Promise<Task>,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksDeletedGrouped(projectId) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectSections(projectId) });
+      setUndoDelete(null);
     },
   });
 
@@ -616,16 +743,40 @@ export default function ProjectBoard({
   const members = membersQuery.data ?? [];
 
   const filteredGroups = useMemo(() => {
+    const normalizedSearch = [search.trim(), nameFilter.trim()].filter(Boolean).join(' ').trim().toLowerCase();
+    const normalizedProjectName = projectName.trim().toLowerCase();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     return groups.map((group) => ({
       ...group,
       tasks: group.tasks.filter((task) => {
-        const bySearch = !search.trim() || task.title.toLowerCase().includes(search.trim().toLowerCase());
-        const byStatus = statusFilter === 'ALL' || task.status === statusFilter;
+        const sectionMatches = Boolean(normalizedSearch) && group.section.name.toLowerCase().includes(normalizedSearch);
+        const titleMatches = task.title.toLowerCase().includes(normalizedSearch);
+        const projectMatches = Boolean(normalizedSearch) && normalizedProjectName.includes(normalizedSearch);
+        const bySearch =
+          !normalizedSearch || sectionMatches || titleMatches || projectMatches;
+        const byStatus =
+          (statusFilter === 'ALL' || task.status === statusFilter) &&
+          (statusColumnFilter === 'ALL' || task.status === statusColumnFilter);
         const byPriority = priorityFilter === 'ALL' || task.priority === priorityFilter;
-        return bySearch && byStatus && byPriority;
+        const byAssignee =
+          assigneeFilter === 'ALL' ||
+          (assigneeFilter === 'UNASSIGNED' ? !task.assigneeUserId : task.assigneeUserId === assigneeFilter);
+        const dueDate = task.dueAt ? new Date(task.dueAt) : null;
+        const byDue =
+          dueFilter === 'ALL' ||
+          (dueFilter === 'NO_DUE' && !dueDate) ||
+          (dueFilter === 'WITH_DUE' && dueDate !== null) ||
+          (dueFilter === 'OVERDUE' && dueDate !== null && dueDate < today);
+        const byProgress =
+          progressFilter === 'ALL' ||
+          (progressFilter === 'NOT_STARTED' && task.progressPercent <= 0) ||
+          (progressFilter === 'IN_PROGRESS' && task.progressPercent > 0 && task.progressPercent < 100) ||
+          (progressFilter === 'COMPLETE' && task.progressPercent >= 100);
+        return bySearch && byStatus && byPriority && byAssignee && byDue && byProgress;
       }),
     }));
-  }, [groups, search, statusFilter, priorityFilter]);
+  }, [assigneeFilter, dueFilter, groups, nameFilter, priorityFilter, progressFilter, projectName, search, statusColumnFilter, statusFilter]);
 
   const groupedVisibleRows = useMemo(() => {
     return filteredGroups.map((group) => {
@@ -646,12 +797,10 @@ export default function ProjectBoard({
     if (activeTask.parentId || activeHasChildren) return;
 
     const overTaskId = String(over.id);
-    const droppedOnSection = overTaskId.startsWith('section-drop-') || overTaskId.startsWith('section-drop-zone-');
-    const overSectionIdFromId = overTaskId.startsWith('section-drop-zone-')
-      ? overTaskId.replace('section-drop-zone-', '')
-      : overTaskId.startsWith('section-drop-')
-        ? overTaskId.replace('section-drop-', '')
-        : '';
+    const droppedOnSection = overTaskId.startsWith('section-drop-');
+    const overSectionIdFromId = overTaskId.startsWith('section-drop-')
+      ? overTaskId.replace('section-drop-', '')
+      : '';
     const fallbackSectionId = groups.find((group) => group.tasks.some((task) => task.id === overTaskId))?.section.id ?? '';
     const toSectionId = String(over.data.current?.sectionId ?? overSectionIdFromId ?? fallbackSectionId);
     if (!toSectionId) return;
@@ -678,10 +827,10 @@ export default function ProjectBoard({
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <div className="space-y-4">
-        {groupedVisibleRows.map(({ group, rows }) => {
+        {groupedVisibleRows.map(({ group, rows }, groupIndex) => {
           const isNoSection = group.section.isDefault || group.section.name.toLowerCase() === 'no section';
           return (
-          <SectionDropTarget key={group.section.id} sectionId={group.section.id} frameless={isNoSection}>
+          <SectionDropTarget key={group.section.id} sectionId={group.section.id}>
             {!isNoSection ? (
               <header className="flex items-center justify-between border-b px-4 py-2">
                 <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground">{group.section.name}</h3>
@@ -690,20 +839,100 @@ export default function ProjectBoard({
             ) : null}
 
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t('name')}</TableHead>
-                  <TableHead>{t('assignee')}</TableHead>
-                  <TableHead>{t('dueDate')}</TableHead>
-                  <TableHead>{t('progress')}</TableHead>
-                  <TableHead>{t('status')}</TableHead>
-                  <TableHead>{t('projects')}</TableHead>
-                  <TableHead>{t('dependencies')}</TableHead>
-                  <TableHead>{t('visibility')}</TableHead>
-                  <TableHead>{t('collaborators')}</TableHead>
-                  <TableHead>{t('actions')}</TableHead>
-                </TableRow>
-              </TableHeader>
+              {groupIndex === 0 ? (
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="min-w-[240px]">
+                      <div className="space-y-1">
+                        <p>{t('name')}</p>
+                        <Input
+                          value={nameFilter}
+                          onChange={(event) => setNameFilter(event.target.value)}
+                          placeholder={t('searchTasks')}
+                          className="h-7"
+                          data-testid="column-filter-name"
+                        />
+                      </div>
+                    </TableHead>
+                    <TableHead className="min-w-[140px]">
+                      <div className="space-y-1">
+                        <p>{t('assignee')}</p>
+                        <select
+                          value={assigneeFilter}
+                          onChange={(event) => setAssigneeFilter(event.target.value)}
+                          className="h-7 w-full rounded-md border bg-background px-2 text-xs"
+                          data-testid="column-filter-assignee"
+                        >
+                          <option value="ALL">{t('all')}</option>
+                          <option value="UNASSIGNED">{t('unassigned')}</option>
+                          {members.map((member) => {
+                            const label = member.user.displayName || member.user.email || member.user.id;
+                            return (
+                              <option key={member.id} value={member.userId}>
+                                {label}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                    </TableHead>
+                    <TableHead className="min-w-[130px]">
+                      <div className="space-y-1">
+                        <p>{t('dueDate')}</p>
+                        <select
+                          value={dueFilter}
+                          onChange={(event) => setDueFilter(event.target.value as DueColumnFilter)}
+                          className="h-7 w-full rounded-md border bg-background px-2 text-xs"
+                          data-testid="column-filter-due"
+                        >
+                          <option value="ALL">{t('all')}</option>
+                          <option value="NO_DUE">{t('noDueDate')}</option>
+                          <option value="WITH_DUE">{t('withDueDate')}</option>
+                          <option value="OVERDUE">{t('overdue')}</option>
+                        </select>
+                      </div>
+                    </TableHead>
+                    <TableHead className="min-w-[120px]">
+                      <div className="space-y-1">
+                        <p>{t('progress')}</p>
+                        <select
+                          value={progressFilter}
+                          onChange={(event) => setProgressFilter(event.target.value as ProgressColumnFilter)}
+                          className="h-7 w-full rounded-md border bg-background px-2 text-xs"
+                          data-testid="column-filter-progress"
+                        >
+                          <option value="ALL">{t('all')}</option>
+                          <option value="NOT_STARTED">{t('notStarted')}</option>
+                          <option value="IN_PROGRESS">1-99%</option>
+                          <option value="COMPLETE">{t('done')}</option>
+                        </select>
+                      </div>
+                    </TableHead>
+                    <TableHead className="min-w-[130px]">
+                      <div className="space-y-1">
+                        <p>{t('status')}</p>
+                        <select
+                          value={statusColumnFilter}
+                          onChange={(event) => setStatusColumnFilter(event.target.value as 'ALL' | Task['status'])}
+                          className="h-7 w-full rounded-md border bg-background px-2 text-xs"
+                          data-testid="column-filter-status"
+                        >
+                          <option value="ALL">{t('all')}</option>
+                          <option value="TODO">TODO</option>
+                          <option value="IN_PROGRESS">IN_PROGRESS</option>
+                          <option value="DONE">DONE</option>
+                          <option value="BLOCKED">BLOCKED</option>
+                        </select>
+                      </div>
+                    </TableHead>
+                    <TableHead>{t('projects')}</TableHead>
+                    <TableHead>{t('dependencies')}</TableHead>
+                    <TableHead>{t('visibility')}</TableHead>
+                    <TableHead>{t('collaborators')}</TableHead>
+                    <TableHead>{t('actions')}</TableHead>
+                  </TableRow>
+                </TableHeader>
+              ) : null}
               <TableBody>
                 <SortableContext items={rows.map((row) => row.task.id)} strategy={verticalListSortingStrategy}>
                   {rows.map((row) => (
@@ -712,6 +941,13 @@ export default function ProjectBoard({
                       task={row.task}
                       sectionId={group.section.id}
                       onEdit={onEdit}
+                      onToggleDone={(task) =>
+                        completeTask.mutate({
+                          taskId: task.id,
+                          done: task.status !== 'DONE',
+                          version: task.version,
+                        })
+                      }
                       members={members}
                       onOpen={setSelectedTaskId}
                       projectName={projectName}
@@ -740,8 +976,7 @@ export default function ProjectBoard({
               </div>
             ) : null}
 
-            <div className={cn('space-y-2 px-4 py-2', !isNoSection && 'border-t')}>
-              <SectionDropZone sectionId={group.section.id} />
+            <div className={cn('px-4 py-2', !isNoSection && 'border-t')}>
               <QuickAddTask
                 sectionId={group.section.id}
                 onCreate={async (sectionId, title) => {
@@ -755,6 +990,44 @@ export default function ProjectBoard({
         {!filteredGroups.length ? (
           <div className="rounded-lg border border-dashed bg-card p-6 text-center text-sm text-muted-foreground">
             {t('noSectionsYet')}
+          </div>
+        ) : null}
+
+        {undoDelete ? (
+          <div
+            className="fixed bottom-4 right-4 z-50 flex items-center gap-3 rounded-md border bg-background px-3 py-2 text-sm shadow-md"
+            data-testid="delete-undo-banner"
+          >
+            <span>
+              {t('taskDeletedLabel')}: {undoDelete.title}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              data-testid="delete-undo-action"
+              disabled={restoreTask.isPending}
+              onClick={() => {
+                if (undoTimerRef.current) {
+                  clearTimeout(undoTimerRef.current);
+                }
+                restoreTask.mutate(undoDelete.taskId);
+              }}
+            >
+              {restoreTask.isPending ? t('restoring') : t('undo')}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              data-testid="delete-undo-dismiss"
+              onClick={() => {
+                if (undoTimerRef.current) {
+                  clearTimeout(undoTimerRef.current);
+                }
+                setUndoDelete(null);
+              }}
+            >
+              {t('dismiss')}
+            </Button>
           </div>
         ) : null}
 

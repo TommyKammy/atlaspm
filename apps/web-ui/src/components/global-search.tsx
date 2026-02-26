@@ -84,7 +84,7 @@ export function GlobalSearch() {
             }
           }}
           onFocus={() => setShowResults(true)}
-          className="pl-10 pr-10"
+          className="h-10 rounded-full border-transparent bg-muted/25 pl-10 pr-10 shadow-none transition-colors focus-visible:border-border focus-visible:bg-background/90"
           data-testid="global-search-input"
         />
         {query && (

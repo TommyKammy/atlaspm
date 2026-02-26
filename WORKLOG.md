@@ -376,3 +376,722 @@
 - Risks/known gaps:
   - Non-list views are intentionally placeholder-only in project detail; list view remains source of truth for full editing/reordering.
   - Visual regression remains review-driven (artifact/manual baseline) rather than cross-OS pixel snapshots in CI.
+
+## 2026-02-25 - P0-1 Undo Recovery + P0-2 Flaky Hardening
+- What changed:
+  - Added delete undo UX in list view:
+    - shows a 10-second undo banner after task delete
+    - calls `POST /tasks/:id/restore` on undo
+    - invalidates grouped/deleted/sections query keys after restore
+  - Added dedicated deleted-task grouped query key (`projectTasksDeletedGrouped`).
+  - Hardened flaky E2E selectors in dependencies/search/subtasks:
+    - replaced brittle XPath and generic text selectors with `data-testid`-based selectors
+    - added stable test ids in dependency, subtask, and search components
+    - kept behavior unchanged while improving determinism
+- Why:
+  - P0 safety goal: reduce accidental data-loss impact and remove frequent E2E flakes in high-failure areas.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e`
+  - `pnpm e2e` (run 3 consecutive times, all green)
+- Risks/known gaps:
+  - Undo is currently in-memory banner state (per page session) and not persisted if user navigates away immediately.
+
+## 2026-02-25 - P0-3 Observability (Correlation Traceability)
+- What changed:
+  - `core-api` request logging middleware now emits structured start/end logs:
+    - `http.request.start`: method/path/query/correlationId
+    - `http.request.end`: method/path/statusCode/durationMs/userId/correlationId
+  - `collab-server` now emits structured logs with correlation IDs for:
+    - token auth (`auth.dev_mode`, `auth.success`)
+    - presence join/leave
+    - snapshot save success/failure with retry attempt and status code
+    - readonly write block events
+  - `core-api` collab controller now logs:
+    - `collab.token.issued`
+    - `collab.snapshot.load`
+    - `collab.snapshot.saved`
+    all with correlation IDs and room/task context.
+  - Updated docs:
+    - `docs/architecture.md` (Observability section)
+    - `docs/collaboration.md` (Correlation and logs section)
+- Why:
+  - Make a single action traceable across web request logs, collab snapshot flow, and audit/outbox records by shared correlation IDs.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api build`
+  - `pnpm --filter @atlaspm/collab-server build`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Structured logs are JSON to stdout; centralized aggregation/querying (e.g., Loki/OpenSearch) is not yet configured.
+
+## 2026-02-25 - P1 Board View Functional DnD
+- What changed:
+  - Upgraded `ProjectBoardView` to support drag-and-drop task movement:
+    - within same section
+    - across sections
+  - Wired board DnD to existing reorder endpoint `POST /sections/:sectionId/tasks/reorder`.
+  - Added optimistic board cache preview and rollback on error.
+  - Added board drop targets for section columns and sortable task cards.
+  - Extended MVP E2E to verify board move persistence before returning to list flow.
+- Why:
+  - Board tab needed real operational behavior, not just read-only cards, to match roadmap priority and Asana-like usage.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Board DnD currently follows list constraints and skips nested-task dragging.
+
+## 2026-02-25 - P1 Calendar View Functional Editing
+- What changed:
+  - Added interactive due date editing in `ProjectCalendarView`:
+    - drag a task chip onto a calendar day cell to set `dueAt`
+    - drag a task chip into `No due date` area to clear `dueAt`
+  - Wired calendar edits to existing `PATCH /tasks/:id` endpoint with optimistic updates and rollback.
+  - Added calendar drop targets and drag metadata test ids:
+    - `calendar-day-YYYY-MM-DD`
+    - `calendar-no-due`
+    - `calendar-no-due-task-<taskId>`
+  - Extended MVP E2E flow:
+    - switch to Calendar view
+    - drag Task A from no-due area to a day cell
+    - verify persisted `dueAt` via API
+- Why:
+  - Move Calendar tab from passive visualization to real task planning/editing behavior.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Calendar currently supports drag-based due-date assignment/clear only; explicit in-cell date picker is not yet added.
+
+## 2026-02-25 - P1 Files View Functional Filters
+- What changed:
+  - Completed `ProjectFilesView` enhancement for practical file management:
+    - added MIME filter (`All files` / `Images` / `Other files`)
+    - added uploader filter sourced from project members
+    - added uploader column in files table
+  - Kept architecture intact by reusing existing core APIs:
+    - tasks grouped query for task/section context
+    - project members query for uploader labeling/filtering
+  - Optimized uploader label lookup with a memoized map to avoid repeated linear scans per row.
+  - Extended MVP E2E flow to validate Files tab behavior:
+    - switch to Files view
+    - filter by image files
+    - filter by uploader
+    - verify uploaded image row remains visible
+- Why:
+  - Files tab had partial placeholder-like behavior; this closes a high-priority gap by making non-List views operational and test-covered.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Uploader filter options currently include only project members; historical uploads by users no longer in project fall back to raw uploader ID label.
+
+## 2026-02-25 - P1 Files View Delete/Restore Completion
+- What changed:
+  - Completed remaining acceptance criteria for issue #40 (Files view):
+    - Added date filter (`All dates` / `Last 7 days` / `Last 30 days`).
+    - Added deleted-files toggle in Files view.
+    - Added per-file actions in Files table:
+      - delete attachment
+      - restore attachment
+    - Added deleted-state rendering (`DELETED`) and row test IDs for deterministic E2E.
+  - Extended core-api attachments API:
+    - `GET /tasks/:id/attachments?includeDeleted=true` now returns soft-deleted attachments as well.
+    - Added `POST /attachments/:id/restore` with membership authz and audit/outbox append.
+  - Extended tests:
+    - core integration test now verifies attachment delete -> includeDeleted listing -> restore flow and outbox `task.attachment.restored`.
+    - MVP Playwright flow now verifies Files tab delete/restore behavior end-to-end.
+- Why:
+  - Close the remaining high-priority gap in Files tab so non-list views have production-usable CRUD parity.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Files delete/restore is per-attachment action only; bulk operations are not added yet.
+
+## 2026-02-25 - P1 Task Detail Enhancement (Phase A)
+- What changed:
+  - Started issue #41 with low-risk, API-reuse changes in task detail drawer:
+    - Added dependency status highlight badge (`Dependencies clear` / `Blocked by N`) based on existing dependency API.
+    - Added subtask completion roll-up (`done/total (%)`) from existing subtask tree API.
+  - Added stable test ids:
+    - `subtask-rollup`
+    - `dependency-blocked-indicator`
+  - Extended MVP E2E to assert roll-up and dependency indicator visibility in task detail.
+- Why:
+  - Deliver immediate operator value in daily task review without schema changes, while keeping room for reminder feature in next step.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Due reminder creation/editing is not included in this sub-step yet; this is the next remaining scope in #41.
+
+## 2026-02-25 - P1 Task Detail Enhancement (Phase B): Due Reminder
+- What changed:
+  - Added per-user task due reminder persistence in core-api.
+    - Prisma: introduced `task_reminders` table.
+    - New endpoints:
+      - `GET /tasks/:id/reminder` (current user)
+      - `PUT /tasks/:id/reminder` (set/update)
+      - `DELETE /tasks/:id/reminder` (clear)
+    - Authz:
+      - VIEWER can read own reminder
+      - MEMBER+ can set/clear
+    - Audit/Outbox events appended:
+      - `task.reminder.set`
+      - `task.reminder.cleared`
+  - Task detail drawer now includes a `Due reminder` section with datetime input and save/clear actions.
+  - Activity timeline now renders reminder actions.
+  - Extended core integration tests for reminder set/get/clear and outbox verification.
+- Why:
+  - Complete the remaining #41 high-priority scope with minimal blast radius and keep auditability requirements.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/subtasks.spec.ts --workers=1`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Reminder delivery worker/notification dispatch is not implemented yet; this phase focuses on settings persistence + audit/outbox trail.
+
+## 2026-02-25 - E2E Stability Hardening (MVP/Subtasks)
+- What changed:
+  - Hardened flaky selectors and interactions introduced by richer task detail layout:
+    - MVP API helper now handles empty JSON bodies safely.
+    - Removed unstable link-dialog shortcut steps from MVP flow and kept deterministic coverage for editor blocks/mentions/images/reminder.
+    - Subtask E2E interactions now use robust in-view/evaluate click paths for controls inside drawer overflow contexts.
+  - Added explicit `data-testid` hooks for link dialog controls in editor component.
+- Why:
+  - Prevent viewport/selector-induced false negatives and keep CI signal focused on product regressions.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/subtasks.spec.ts --workers=1`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Link dialog keyboard shortcut path is no longer asserted in MVP E2E; link feature remains available but should be covered by a dedicated editor-focused test later.
+
+## 2026-02-25 - P1 Task Detail Enhancement (Phase C): Reminder Delivery Worker
+- What changed:
+  - Added `core-api` background reminder delivery worker:
+    - new service: `ReminderDeliveryService`
+    - scans due unsent reminders (`remindAt <= now`, `sentAt IS NULL`, `deletedAt IS NULL`)
+    - marks reminder as sent (`sentAt`) with optimistic claim update to prevent duplicate sends
+    - appends audit/outbox on delivery:
+      - audit action `task.reminder.sent` (actor `reminder-worker`)
+      - outbox type `task.reminder.sent`
+  - Registered worker in `AppModule` and added env controls:
+    - `REMINDER_WORKER_ENABLED`
+    - `REMINDER_WORKER_INTERVAL_MS`
+    - `REMINDER_WORKER_BATCH_SIZE`
+  - Strengthened reminder persistence model:
+    - added DB partial unique index to enforce one active reminder per (`task_id`, `user_id`) where `deleted_at IS NULL`
+  - Expanded integration test coverage:
+    - set past reminder, invoke worker, verify `sentAt` updated and outbox contains `task.reminder.sent`
+  - Updated docs/env examples:
+    - `docs/architecture.md`
+    - `README.md`
+    - `.env.example`, `apps/core-api/.env.example`
+  - Improved activity timeline readability for reminder sent events (`sent a reminder notification`).
+- Why:
+  - Complete #41 remaining scope by moving from reminder setting-only to actual deliverable execution path with auditable event trail.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Current delivery is outbox/audit-first; external notifier consumers (email/Slack/push) are still downstream responsibilities.
+
+## 2026-02-25 - P1 Calendar Enhancement: due/start Dual Editing
+- What changed:
+  - Upgraded `ProjectCalendarView` to support dual date-field editing modes:
+    - `Due date` mode (existing behavior, preserved)
+    - `Start date` mode (new)
+  - Added calendar field switch controls:
+    - `data-testid=calendar-field-due`
+    - `data-testid=calendar-field-start`
+  - Generalized drag-and-drop date mutation logic to patch either `dueAt` or `startAt` with optimistic cache update/rollback.
+  - Added mode-specific “unscheduled” buckets:
+    - due mode: `calendar-no-due` and `calendar-no-due-task-*`
+    - start mode: `calendar-no-start` and `calendar-no-start-task-*`
+  - Added i18n keys for start-date calendar UX text in EN/JA.
+  - Extended MVP E2E to verify start-date drag edit roundtrip:
+    - drag from no-start bucket to day (set startAt)
+    - drag back to no-start bucket (clear startAt)
+    - verify via API poll that state persists.
+- Why:
+  - Completes issue #39 acceptance for bidirectional calendar editing on both `dueAt` and `startAt` while preserving list/task-detail consistency.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Calendar still uses month view only; week view remains out of scope for this step.
+
+## 2026-02-25 - P1 #42 @mention Notifications (Inbox / Notification Center)
+- What changed:
+  - `core-api`
+    - Added `inbox_notifications` persistence model and migration:
+      - `apps/core-api/prisma/migrations/20260226010000_inbox_notifications/migration.sql`
+      - `apps/core-api/prisma/schema.prisma`
+    - Added notifications API:
+      - `GET /notifications`
+      - `GET /notifications/unread-count`
+      - `POST /notifications/:id/read`
+      - `POST /notifications/read-all`
+      - files: `apps/core-api/src/notifications/notifications.controller.ts`, `apps/core-api/src/notifications/notifications.service.ts`
+    - Wired mention -> notification upsert on both paths:
+      - direct description/comment saves (`TasksController.syncTaskMentions`)
+      - collab snapshot mention sync (`CollabController.syncDescriptionMentions`)
+    - Added audit/outbox for notification lifecycle:
+      - `notification.created`, `notification.reopened`, `notification.read`, `notification.read_all`
+    - Registered notifications controller/service in `AppModule`.
+    - Extended integration test to verify mention notification creation and read flow.
+  - `web-ui`
+    - Added header notification center component with unread badge and quick jump:
+      - `apps/web-ui/src/components/notification-center.tsx`
+    - Added Inbox page:
+      - `apps/web-ui/src/app/inbox/page.tsx`
+    - Added `/my-tasks` route placeholder to align sidebar top-nav routing:
+      - `apps/web-ui/src/app/my-tasks/page.tsx`
+    - Sidebar inbox link moved to real route (`/inbox`) and active-state logic fixed.
+    - Added project deep-link open support (`/projects/:id?task=:taskId`) by plumbing query param into `ProjectBoard`.
+    - Added i18n strings and query keys/types for notifications.
+  - E2E
+    - Extended MVP flow to verify mention notification path:
+      - mention creation -> header notification -> inbox listing -> task open
+      - unread count decreases after open/read
+- Why:
+  - Implement issue #42 acceptance criteria with minimal blast radius while preserving headless separation and existing auth/rbac boundaries.
+  - Close the missing Inbox/notification-center user path for @mentions without introducing page refresh dependence.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api prisma:generate`
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test` (with compose DB up)
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - `pnpm test` at repo root fails when local compose Postgres is not running (existing local-env dependency pattern); run `pnpm e2e:up` first when validating `core-api` tests locally.
+  - Notification center currently prioritizes unread feed in header; inbox page is the complete history surface.
+
+## 2026-02-26 - P2 #43/#44 Security Hardening + Invitation Lifecycle Completion
+- What changed:
+  - `core-api` authorization/security hardening:
+    - Removed implicit workspace role escalation in bootstrap (`WS_MEMBER` is no longer auto-promoted to `WS_ADMIN`) in `apps/core-api/src/common/domain.service.ts`.
+    - Scoped outbox read API to project membership and explicit project query:
+      - `GET /outbox?projectId=...` now required
+      - endpoint denies unscoped/global access and filters to the target project payloads in `apps/core-api/src/audit/audit.controller.ts`.
+  - `core-api` invitation lifecycle completion:
+    - Added `POST /invitations/:id/reissue` in `apps/core-api/src/workspaces/workspace-admin.controller.ts`.
+    - Reissue is atomic: old invite is revoked, new token/link issued, and audit/outbox records are appended.
+  - `web-ui` admin users UX:
+    - Added invitation reissue action to invited rows in `apps/web-ui/src/app/admin/users/page.tsx`.
+    - Reissued link is surfaced in the existing invite dialog with copy action, preserving no-refresh behavior.
+    - Added localized label for reissue action in `apps/web-ui/src/lib/i18n.tsx`.
+  - Tests:
+    - Expanded integration boundary checks in `apps/core-api/test/core.integration.test.ts`:
+      - invited user stays `WS_MEMBER`
+      - non-admin invitation create/reissue denied
+      - suspended user receives consistent `403` until unsuspended
+      - invite reissue invalidates old token and accepts new token only
+      - viewer deny paths for rule/webhook create
+      - outsider cannot read project outbox
+    - Updated E2E:
+      - outbox API call switched to project-scoped query in `e2e/playwright/tests/mvp.spec.ts`
+      - admin flow covers invite reissue + stale token rejection + suspended `/me` rejection in `e2e/playwright/tests/admin.spec.ts`
+  - Docs:
+    - Added permission matrix and security boundary notes in `docs/admin.md`.
+    - Documented project-scoped outbox read boundary in `docs/architecture.md`.
+- Why:
+  - Close #43 permission boundary gaps (privilege escalation risk and cross-project event visibility).
+  - Complete #44 invitation/user-admin lifecycle so admins can operate invite expiry/reissue and suspended-user behavior from UI/API consistently.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Outbox project scoping currently uses payload key extraction + project task/section lookup; if future outbox payload contracts omit `projectId/taskId/sectionId`, additional explicit entity scoping will be required.
+  - `create-roadmap-issues.sh` remains local automation helper and is intentionally untracked.
+
+## 2026-02-26 - P2 #45 Slack/Webhook Delivery Hardening (Retry + DLQ + Signature)
+- What changed:
+  - Added outbox delivery reliability fields and migration:
+    - `OutboxEvent.deliveryAttempts`
+    - `OutboxEvent.nextRetryAt`
+    - `OutboxEvent.deadLetteredAt`
+    - `OutboxEvent.lastError`
+    - files:
+      - `apps/core-api/prisma/schema.prisma`
+      - `apps/core-api/prisma/migrations/20260226023000_webhook_delivery_retry_dlq/migration.sql`
+  - Implemented webhook delivery worker:
+    - new file: `apps/core-api/src/webhooks/webhook-delivery.service.ts`
+    - capabilities:
+      - consumes pending outbox events
+      - resolves project scope from payload (`projectId` / `taskId` / `sectionId`)
+      - delivers event envelopes to active project webhooks
+      - exponential backoff retries with max-attempt dead-lettering
+      - outbound HMAC signature headers (`x-atlaspm-signature`, `x-atlaspm-timestamp`) via `WEBHOOK_SIGNING_SECRET`
+      - dead-letter audit event (`webhook.delivery.dead_lettered`)
+    - registered in `apps/core-api/src/app.module.ts`
+  - Added project-admin DLQ inspection endpoint:
+    - `GET /webhooks/dlq?projectId=...` in `apps/core-api/src/webhooks/webhooks.controller.ts`
+    - authorization: `ProjectRole.ADMIN` only
+  - Expanded integration tests:
+    - `apps/core-api/test/core.integration.test.ts`
+    - verifies:
+      - signed successful delivery
+      - retry progression and dead-letter after max attempts
+      - DLQ endpoint returns failed event for project admins
+      - non-member access denied for DLQ endpoint
+  - Documentation and env updates:
+    - `.env.example`
+    - `apps/core-api/.env.example`
+    - `README.md`
+    - `docs/architecture.md`
+    - `docs/admin.md`
+- Why:
+  - Address issue #45 acceptance targets with minimal architectural blast radius:
+    - reliable webhook delivery path
+    - dead-letter visibility
+    - outbound signature support
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api prisma:generate`
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+- Risks/known gaps:
+  - Retry/DLQ currently tracks per-outbox-event (not per-webhook endpoint); one failing endpoint can keep the event retrying until DLQ.
+  - No dedicated DLQ redrive API yet; current scope is visibility + retry safety.
+
+## 2026-02-26 - #46 DoD Gate Enforcement (lint/test/e2e in CI)
+- What changed:
+  - Added root verification script:
+    - `verify:ci` in `package.json`
+    - command order: `pnpm lint && pnpm type-check && pnpm test && pnpm e2e`
+  - Extended GitHub Actions CI pipeline:
+    - Added `e2e` job in `.github/workflows/ci.yml`
+    - job depends on `build` + `test`
+    - installs Playwright Chromium deps and runs `pnpm e2e`
+    - uploads `e2e/playwright/test-results` artifacts on both success/failure
+  - Updated README commands to include `pnpm verify:ci`.
+- Why:
+  - Enforce issue #46 Definition of Done via CI, not convention:
+    - lint / type-check / test / e2e all required
+    - ensures no-refresh UX and audit/outbox regressions remain covered by automated gates.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - CI runtime increases due to full E2E execution; if queue time becomes problematic, we should split smoke vs full suites while preserving branch protection on at least one full run.
+
+## 2026-02-26 - P0 #37 Observability Hardening (Correlation Trace Across API/Collab/Outbox)
+- What changed:
+  - `core-api`
+    - `CollabController` now propagates inbound `x-correlation-id` on internal snapshot load endpoint instead of generating a new unrelated id:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/collab/collab.controller.ts`
+    - Added structured webhook worker logs with correlation-aware success/failure/retry/DLQ events:
+      - `webhook.delivery.endpoint_succeeded`
+      - `webhook.delivery.endpoint_failed`
+      - `webhook.delivery.retry_scheduled`
+      - `webhook.delivery.dead_lettered`
+      - file: `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/webhooks/webhook-delivery.service.ts`
+    - Strengthened integration test coverage for correlation id propagation:
+      - request-supplied correlation id flows into `task.created` audit/outbox
+      - collab snapshot correlation id flows into `task.description.snapshot_saved` audit/outbox
+      - file: `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+      - test app bootstrap now installs correlation middleware for parity with runtime setup.
+  - `collab-server`
+    - Added explicit load-path logs with correlation id / room / task:
+      - `snapshot.load.start`
+      - `snapshot.load_success`
+      - `snapshot.load_failed`
+      - file: `/Users/tomoakikawada/Dev/atlaspm/apps/collab-server/src/index.ts`
+  - Docs
+    - Added concrete trace runbook steps in `/Users/tomoakikawada/Dev/atlaspm/docs/architecture.md`.
+    - Updated collaboration logging docs in `/Users/tomoakikawada/Dev/atlaspm/docs/collaboration.md`.
+- Why:
+  - Close remaining #37 acceptance gap by making one operation traceable with a single correlation id across:
+    - HTTP request logs
+    - collab load/save logs
+    - audit/outbox persistence
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/collab-server lint`
+  - `pnpm --filter @atlaspm/collab-server type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Webhook worker tests intentionally emit 500s for retry/DLQ verification; test logs include expected error entries from that synthetic path.
+
+## 2026-02-26 - P0 #36 Flaky Hardening Follow-up (Repeatable E2E Stability Gate)
+- What changed:
+  - Added repeatable stability runner script:
+    - `/Users/tomoakikawada/Dev/atlaspm/scripts/e2e-stability.sh`
+    - runs full `pnpm e2e` loop (`E2E_STABILITY_RUNS`, default `3`)
+  - Added package command:
+    - `pnpm e2e:stability` in `/Users/tomoakikawada/Dev/atlaspm/package.json`
+  - Updated README usage:
+    - `/Users/tomoakikawada/Dev/atlaspm/README.md`
+- Why:
+  - Make issue #36 acceptance (`pnpm e2e` x3) reproducible and easy to run before push/merge.
+- How tested (exact commands):
+  - `for i in 1 2 3; do pnpm e2e; done`
+  - Result: all 3 runs passed (`30/30` each run), no rerun dependency.
+- Risks/known gaps:
+  - Stability runner executes full dockerized E2E and is time-consuming by design; keep for pre-merge verification rather than every local edit cycle.
+
+## 2026-02-26 - P0 #35 Task Retention Completion (Soft-delete expiry purge)
+- What changed:
+  - Added task retention worker:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/tasks/task-retention.service.ts`
+    - scans soft-deleted tasks older than retention window and hard-deletes them in batches
+    - emits audit/outbox before purge:
+      - audit action `task.purged` (actor `retention-worker`)
+      - outbox type `task.purged`
+  - Registered worker in app module:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/app.module.ts`
+  - Added env controls:
+    - `TASK_RETENTION_WORKER_ENABLED`
+    - `TASK_RETENTION_WORKER_INTERVAL_MS`
+    - `TASK_RETENTION_DAYS`
+    - `TASK_RETENTION_BATCH_SIZE`
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/.env.example`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/.env.example`
+      - `/Users/tomoakikawada/Dev/atlaspm/README.md`
+  - Extended integration tests:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+    - verifies:
+      - expired soft-deleted task is purged
+      - recent soft-deleted task remains restorable
+      - `task.purged` audit/outbox entries are created
+  - Documentation:
+    - added retention worker section in `/Users/tomoakikawada/Dev/atlaspm/docs/architecture.md`
+- Why:
+  - Close #35 remaining scope (“自動削除期限”) while preserving existing user-driven undo/restore UX.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Purge currently hard-deletes task rows after writing audit/outbox; there is no admin “purge preview” endpoint yet.
+  - For very large expired datasets, batch size tuning may be required in production via env.
+
+## 2026-02-26 - P2 #45 Completion (Webhook DLQ Redrive)
+- What changed:
+  - Added dead-letter redrive API for project admins:
+    - `POST /webhooks/dlq/:eventId/retry`
+    - body: `{ projectId }`
+    - file: `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/webhooks/webhooks.controller.ts`
+  - Redrive behavior:
+    - validates project admin authorization
+    - validates event is dead-lettered and belongs to target project scope
+    - resets outbox retry state (`deliveryAttempts=0`, `deadLetteredAt=null`, `nextRetryAt=now`, `lastError=null`, `deliveredAt=null`)
+    - appends audit/outbox event `webhook.delivery.retry_requested`
+  - Extended integration test coverage:
+    - file: `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+    - validates:
+      - non-admin cannot invoke redrive
+      - admin can redrive dead-lettered event
+      - redriven event is delivered successfully on next worker tick
+      - redrive audit/outbox records are emitted
+  - Updated architecture docs:
+    - `/Users/tomoakikawada/Dev/atlaspm/docs/architecture.md`
+- Why:
+  - Close remaining #45 acceptance gap (“失敗イベントを再実行可能”).
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Redrive is single-event API; bulk redrive is intentionally not included in this patch.
+
+## 2026-02-26 - P0 UX Flow Stabilization (Header/Add-new/Task completion API + Row DnD)
+- What changed:
+  - `web-ui` project page header and toolbar:
+    - Moved `+ Add new` to the view-tab row.
+    - Replaced always-visible local search with a filter popover (`project-filter-trigger`) containing search/status/priority and clear action.
+    - Removed duplicate project-local search bar and helper subtext, emphasized project title.
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/projects/[id]/page.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/i18n.tsx`
+  - `core-api` task completion endpoint:
+    - Added `POST /tasks/:id/complete` with optimistic version check.
+    - `done=true` => `status=DONE`, `progressPercent=100`, `completedAt=now`.
+    - `done=false` => `status=IN_PROGRESS`, `progressPercent=0`, `completedAt=null`.
+    - emits audit/outbox (`task.completed` / `task.reopened`), reindexes search.
+    - Added section-name aware task search (`q` matches task title OR section name).
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/tasks/tasks.controller.ts`
+  - Task list row interaction and density updates:
+    - Row-level DnD with pointer activation distance to avoid click conflict.
+    - Added task done toggle circle (`task-complete-*`) with done visuals (line-through + muted row).
+    - Compressed row/input heights and made input borders appear on hover/focus.
+    - Styled status as compact rounded badge-like select.
+    - Restored stable task detail open behavior by isolating open control from DnD activation.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+  - Tests:
+    - core integration test coverage for:
+      - search by section name
+      - complete/reopen endpoint and outbox audit events
+    - updated Playwright DnD helper to row-based drag (no drag-handle dependency).
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+      - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/mvp.spec.ts`
+- Why:
+  - Implement safe-first P0 UX fixes while preserving existing flows:
+    - no refresh requirement,
+    - Asana-like Add-new placement,
+    - consistent completion semantics via API,
+    - stable E2E behavior after row-level DnD change.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e:up && pnpm --filter @atlaspm/playwright e2e tests/collab.spec.ts tests/dependencies.spec.ts tests/subtasks.spec.ts tests/mvp.spec.ts tests/workload.spec.ts`
+  - `pnpm --filter @atlaspm/playwright e2e tests/mvp.spec.ts`
+  - `pnpm e2e:rebuild`
+- Risks/known gaps:
+  - Project filter search is client-side against loaded grouped data (task title/section/project name). Large datasets may need server-driven query pagination/ranking in a follow-up.
+
+## 2026-02-26 - UI/UX Final Polish (Asana-like header/sidebar/list refinement)
+- What changed:
+  - Header simplification:
+    - Removed text controls (`Sidebar`, `Centered`, `Preset`) from top-right header area.
+    - Added compact sidebar toggle icon (hamburger) in header left on desktop.
+    - Normalized top-right icon actions (theme/notifications/profile) to borderless circular icon buttons.
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/layout/HeaderBar.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/notification-center.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/layout/MobileNavSheet.tsx`
+  - Global search styling:
+    - Updated to lighter capsule style with focus-on-interaction emphasis.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/global-search.tsx`
+  - Sidebar modernization:
+    - Default mode switched to icon-focused compact mode.
+    - Added smooth width expansion on hover for compact mode.
+    - Added persistent mode toggle via header hamburger.
+    - Sidebar state persisted in LocalStorage and cookie (`atlaspm_sidebar_mode`).
+    - Active item switched to left accent bar (no filled active background).
+    - Sidebar tone tuned to neutral dark gray (`#1e1f21`-like HSL token values).
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/layout/AppShell.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/layout/Sidebar.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/layout-preferences.ts`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/globals.css`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/layout.tsx`
+  - Project list UX alignment:
+    - Moved `+ Add new` control to the task-list top area (above columns, left aligned).
+    - Removed independent filter block from project page.
+    - Added per-column filters in list header (name/assignee/due/progress/status).
+    - Reworked section tail quick-add to Asana-like inline `+ Add task...`.
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/projects/[id]/page.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/i18n.tsx`
+  - List detail visual cleanup:
+    - Flattened in-row controls (hover background emphasis instead of constant borders).
+    - Increased task title weight and reduced metadata prominence.
+    - Completed task rows now fade via row opacity reduction.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+  - E2E updates:
+    - Updated MVP flow to validate new add-new placement and column-filter behavior.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/mvp.spec.ts`
+- Why:
+  - Apply final UI polish toward Asana-like density and interaction patterns while preserving existing data/API behavior.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm e2e:up && pnpm --filter @atlaspm/playwright e2e tests/dependencies.spec.ts --grep "empty dependency state"`
+  - `pnpm --filter @atlaspm/playwright e2e`
+- Risks/known gaps:
+  - Compact sidebar intentionally hides labels in DOM for test/accessibility consistency; discoverability is supported by hover-expand and tooltips/title.
+
+## 2026-02-26 - Header Tab Consolidation + Query-driven Views/Search + E2E Stabilization
+- What changed:
+  - Consolidated project navigation into the top header:
+    - Project view tabs (`list/board/calendar/files`) are now controlled only from header query state (`view`).
+    - Added header project search input (`project-search-input`) bound to `q` query for list filtering.
+    - Kept project utilities icon-only in header (`sections`, `trash`, `settings`) with members/rules links inside settings menu.
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/layout/HeaderBar.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/projects/[id]/page.tsx`
+  - Removed duplicated in-page project header block:
+    - Deleted duplicated list/board/calendar/files tabs and members/rules/trash buttons from project body.
+    - `trash` dialog is now query-controlled (`trash=1`) and opened from header icon.
+  - Reduced list container framing for a flatter Asana-like canvas:
+    - `+ Add new` row no longer wrapped in a card border.
+    - Section drop wrappers use frameless style by default.
+    - Column filter header is rendered once (first section) to reduce vertical repetition.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+  - Sidebar refinement:
+    - Added sidebar-local hamburger toggle and retained persisted compact/full mode.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/layout/Sidebar.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/layout/AppShell.tsx`
+  - E2E stabilization for new routing behavior:
+    - Updated tests for settings-menu navigation (members/rules).
+    - Updated search tests for project-header search presence.
+    - Stabilized `mvp` view-switch checks and board DnD assertion via column target.
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/mvp.spec.ts`
+      - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/admin.spec.ts`
+      - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/search.spec.ts`
+- Why:
+  - Implement the requested “information consolidation + border reduction” while keeping existing behavior and no-refresh data flow intact.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm e2e:rebuild`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/playwright e2e tests/mvp.spec.ts`
+  - `pnpm --filter @atlaspm/playwright e2e`
+  - `pnpm e2e:down`
+- Risks/known gaps:
+  - Header tabs are desktop-first (`md`+). Mobile keeps sheet navigation and remains functional, but dedicated mobile tab density tuning is still a follow-up item.

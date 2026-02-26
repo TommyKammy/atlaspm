@@ -14,6 +14,23 @@
 - Every write appends:
   - `AuditEvent`: actor, entity, action, before/after, timestamp, correlationId
   - `OutboxEvent`: type, payload, createdAt, correlationId, deliveredAt
+- Outbox read API is project-scoped (`GET /outbox?projectId=...`) with membership authorization to prevent cross-project data exposure.
+
+## Observability (P0-3)
+- Correlation id propagation:
+  - `core-api` accepts `x-correlation-id` (or generates one), stores it on request context, and returns it in response headers.
+  - `collab-server` sends `x-correlation-id` when loading/saving snapshots to `core-api`.
+- Structured logs:
+  - `core-api` emits request start/end logs with `method`, `path`, `statusCode`, `durationMs`, `userId`, and `correlationId`.
+  - `collab-server` emits auth/presence/snapshot logs with `correlationId`, `roomId`, and `taskId`.
+- Traceability target:
+  - A single user action can be traced from HTTP request logs to audit/outbox entries and collab snapshot logs by `correlationId`.
+- Trace runbook (example):
+  1. Capture `x-correlation-id` from response headers (or provide it in request).
+  2. Find matching `http.request.start` / `http.request.end` logs in `core-api`.
+  3. Confirm matching `AuditEvent.correlationId` via `GET /tasks/:id/audit` (or project audit endpoint).
+  4. Confirm matching `OutboxEvent.correlationId` via `GET /outbox?projectId=...`.
+  5. For collaborative edits, match the same id in `collab-server` logs (`snapshot.load_*`, `snapshot.saved`) and `core-api` `task.description.snapshot_saved`.
 
 ## Rules Engine
 - Triggered on task write events.
@@ -58,6 +75,40 @@
   - Description updates emit `task.description.updated`.
   - Comment mutations emit `task.comment.created|updated|deleted`.
 
+## Task Reminder Delivery Worker
+- Persistence:
+  - Per-user reminder settings are stored in `task_reminders`.
+  - Active reminder uniqueness is enforced by a DB partial unique index on (`task_id`, `user_id`) where `deleted_at IS NULL`.
+- API:
+  - `GET /tasks/:id/reminder` (current user reminder)
+  - `PUT /tasks/:id/reminder` (set/update)
+  - `DELETE /tasks/:id/reminder` (soft clear)
+- Worker behavior:
+  - `core-api` runs a background reminder worker (env gated) that scans due unsent reminders and marks `sentAt`.
+  - Delivery action emits:
+    - audit action `task.reminder.sent` (actor: `reminder-worker`)
+    - outbox type `task.reminder.sent`
+  - Worker is idempotent via optimistic `sentAt IS NULL` claim update in transaction.
+- Worker controls:
+  - `REMINDER_WORKER_ENABLED=true|false`
+  - `REMINDER_WORKER_INTERVAL_MS`
+  - `REMINDER_WORKER_BATCH_SIZE`
+
+## Task Soft-Delete Retention Worker
+- Purpose:
+  - Keep user self-restore window while preventing unbounded growth of soft-deleted tasks.
+- Behavior:
+  - Scans soft-deleted tasks (`deletedAt` set) older than `TASK_RETENTION_DAYS`.
+  - Hard-deletes expired tasks in batches.
+  - Emits audit/outbox before purge:
+    - audit action `task.purged` (actor: `retention-worker`)
+    - outbox type `task.purged`
+- Worker controls:
+  - `TASK_RETENTION_WORKER_ENABLED=true|false`
+  - `TASK_RETENTION_WORKER_INTERVAL_MS`
+  - `TASK_RETENTION_DAYS`
+  - `TASK_RETENTION_BATCH_SIZE`
+
 ## Task Internals (Phase 2)
 - Editor model:
   - Description authoring keeps ProseMirror JSON as the canonical representation.
@@ -68,6 +119,14 @@
   - Comments use token syntax `@[userId|label]` in Phase 2.
   - Server normalizes mentions into `task_mentions` (`task_id`, `mentioned_user_id`, `source_type`, `source_id`).
   - Mention sync runs on description save and comment create/update/delete.
+- Inbox notifications for mentions:
+  - Mention create events upsert `inbox_notifications` rows (dedup key: `user_id + task_id + type + source_type + source_id`).
+  - Notification center/inbox read APIs:
+    - `GET /notifications`
+    - `GET /notifications/unread-count`
+    - `POST /notifications/:id/read`
+    - `POST /notifications/read-all`
+  - Notification list access is filtered by current project membership; removed members cannot read stale project notifications.
 - Attachments:
   - Metadata is stored in `task_attachments`.
   - Upload flow:
@@ -79,6 +138,7 @@
 - Audit/outbox additions:
   - `task.mention.created`, `task.mention.deleted`
   - `task.attachment.initiated`, `task.attachment.created`, `task.attachment.deleted`
+  - `notification.created`, `notification.reopened`, `notification.read`, `notification.read_all`
 
 ## Future readiness
 - `packages/domain` and `packages/rule-engine` provide extraction boundaries for phase 2.
@@ -117,6 +177,24 @@
   - `Project.ADMIN` can add/remove/change project members.
   - Added users must already be workspace members.
 - Admin audit/outbox events:
-  - `workspace.invite.created|accepted|revoked`
+  - `workspace.invite.created|accepted|revoked|reissued`
   - `workspace.user.suspended|unsuspended|display_name_updated`
   - `project.member.added|removed|role_changed`
+
+## Webhook Delivery Reliability (P2)
+- Registration:
+  - Project admin registers endpoints via `POST /webhooks`.
+- Delivery worker:
+  - `core-api` webhook worker consumes pending outbox events and sends event envelopes to active project webhooks.
+  - Worker is env-gated (`WEBHOOK_DELIVERY_WORKER_ENABLED=true`).
+  - Retries use exponential backoff with capped delay.
+- Dead letter queue (DLQ):
+  - Events that exceed retry limit are marked `deadLetteredAt` with `lastError`.
+  - Project admins can inspect by project via `GET /webhooks/dlq?projectId=...`.
+  - Project admins can request redrive for a dead-lettered event via `POST /webhooks/dlq/:eventId/retry` (`{ projectId }`).
+  - Redrive resets retry state (`deliveryAttempts=0`, `deadLetteredAt=null`) and emits audit/outbox event `webhook.delivery.retry_requested`.
+- Signature:
+  - Outbound webhook deliveries include HMAC signature headers when `WEBHOOK_SIGNING_SECRET` is configured:
+    - `x-atlaspm-signature` (`v1=<sha256>`)
+    - `x-atlaspm-timestamp`
+  - Signature base string: `${timestamp}.${rawJsonBody}`.

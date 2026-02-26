@@ -8,13 +8,19 @@ export const queryKeys = {
   projectSections: (projectId: string) => ['project', projectId, 'sections'] as const,
   projectTasksGrouped: (projectId: string) =>
     ['project', projectId, 'tasks', { groupBy: 'section' }] as const,
+  projectTasksDeletedGrouped: (projectId: string) =>
+    ['project', projectId, 'tasks', { groupBy: 'section', deleted: true }] as const,
   projectRules: (projectId: string) => ['project', projectId, 'rules'] as const,
   projectMembers: (projectId: string) => ['project', projectId, 'members'] as const,
+  notifications: (status: 'all' | 'unread' = 'all') => ['notifications', { status }] as const,
+  notificationsUnreadCount: ['notifications', 'unread-count'] as const,
   taskDetail: (taskId: string) => ['task', taskId] as const,
   taskComments: (taskId: string) => ['task', taskId, 'comments'] as const,
   taskAudit: (taskId: string) => ['task', taskId, 'audit'] as const,
   taskMentions: (taskId: string) => ['task', taskId, 'mentions'] as const,
-  taskAttachments: (taskId: string) => ['task', taskId, 'attachments'] as const,
+  taskAttachments: (taskId: string, options?: { includeDeleted?: boolean }) =>
+    ['task', taskId, 'attachments', options?.includeDeleted ? 'all' : 'active'] as const,
+  taskReminder: (taskId: string) => ['task', taskId, 'reminder'] as const,
 
   // Subtask keys
   taskSubtasks: (taskId: string) => ['task', taskId, 'subtasks'] as const,

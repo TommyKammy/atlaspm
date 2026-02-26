@@ -1,9 +1,8 @@
 'use client';
 
-import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Plus } from 'lucide-react';
 import ProjectBoard from '@/components/project-board';
 import { ProjectBoardView, ProjectCalendarView, ProjectFilesView } from '@/components/project-alt-views';
@@ -12,9 +11,8 @@ import { queryKeys } from '@/lib/query-keys';
 import type { Project, Section, SectionTaskGroup, Task } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { useI18n } from '@/lib/i18n';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   DropdownMenu,
@@ -26,17 +24,30 @@ import {
 export default function ProjectPage() {
   const { t } = useI18n();
   const params = useParams<{ id: string }>();
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const projectId = params.id;
+  const openTaskId = searchParams.get('task');
   const [newSection, setNewSection] = useState('');
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | Task['status']>('ALL');
-  const [priorityFilter, setPriorityFilter] = useState<'ALL' | NonNullable<Task['priority']>>('ALL');
-  const [view, setView] = useState<'List' | 'Board' | 'Calendar' | 'Files'>('List');
   const [showAddSectionInput, setShowAddSectionInput] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const addSectionInputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
-  const [trashOpen, setTrashOpen] = useState(false);
+  const viewParam = (searchParams.get('view') ?? 'list').toLowerCase();
+  const view: 'list' | 'board' | 'calendar' | 'files' =
+    viewParam === 'board' || viewParam === 'calendar' || viewParam === 'files' ? viewParam : 'list';
+  const trashOpen = searchParams.get('trash') === '1';
+  const search = searchParams.get('q') ?? '';
+  const statusFilter: 'ALL' | Task['status'] = 'ALL';
+  const priorityFilter: 'ALL' | NonNullable<Task['priority']> = 'ALL';
+
+  const setProjectQueryParam = useCallback((key: string, value: string | null) => {
+    const next = new URLSearchParams(searchParams.toString());
+    if (!value) next.delete(key);
+    else next.set(key, value);
+    const query = next.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }, [pathname, router, searchParams]);
 
   const projectsQuery = useQuery<Project[]>({
     queryKey: queryKeys.projects,
@@ -74,7 +85,7 @@ export default function ProjectPage() {
   });
 
   const deletedTasksQuery = useQuery<SectionTaskGroup[]>({
-    queryKey: [...queryKeys.projectTasksGrouped(projectId), 'deleted'],
+    queryKey: queryKeys.projectTasksDeletedGrouped(projectId),
     queryFn: () => api(`/projects/${projectId}/tasks?groupBy=section&deleted=true`),
     enabled: Boolean(projectId) && trashOpen,
   });
@@ -83,7 +94,7 @@ export default function ProjectPage() {
     mutationFn: (taskId: string) => api(`/tasks/${taskId}/restore`, { method: 'POST' }) as Promise<Task>,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
-      await queryClient.invalidateQueries({ queryKey: [...queryKeys.projectTasksGrouped(projectId), 'deleted'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksDeletedGrouped(projectId) });
     },
   });
 
@@ -95,7 +106,9 @@ export default function ProjectPage() {
       const isInputLike = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable;
       if (event.key === '/' && !isInputLike) {
         event.preventDefault();
-        searchInputRef.current?.focus();
+        const searchInput = (document.querySelector('[data-testid="project-search-input"]')
+          ?? document.querySelector('[data-testid="global-search-input"]')) as HTMLInputElement | null;
+        searchInput?.focus();
       }
       if ((event.key === 'c' || event.key === 'C') && !isInputLike) {
         const quickAddSectionId = sectionsQuery.data?.[0]?.id;
@@ -109,242 +122,169 @@ export default function ProjectPage() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [sectionsQuery.data]);
 
+  useEffect(() => {
+    if (openTaskId && view !== 'list') {
+      setProjectQueryParam('view', 'list');
+    }
+  }, [openTaskId, setProjectQueryParam, view]);
+
   return (
     <div className="space-y-4">
-      <header className="rounded-lg border bg-card p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold">{project?.name ?? t('project')}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">{t('taskListGroupedBySections')}</p>
-            <div className="mt-3 flex items-center gap-1">
-              {([
-                { key: 'List', label: t('list') },
-                { key: 'Board', label: t('board') },
-                { key: 'Calendar', label: t('calendar') },
-                { key: 'Files', label: t('files') },
-              ] as const).map((tab) => (
-                <Button
-                  key={tab.key}
-                  variant={view === tab.key ? 'default' : 'ghost'}
-                  size="sm"
-                  onClick={() => setView(tab.key)}
-                  className="h-8 px-3"
-                  data-testid={`project-view-${tab.key.toLowerCase()}`}
-                >
-                  {tab.label}
-                </Button>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge>{sectionsQuery.data?.length ?? 0} {t('sections')}</Badge>
-            <Dialog open={trashOpen} onOpenChange={setTrashOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline" size="sm" data-testid="project-trash-open">
-                  {t('trash')}
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-3xl">
-                <DialogHeader>
-                  <DialogTitle>{t('deletedTasks')}</DialogTitle>
-                  <DialogDescription>{t('trash')}</DialogDescription>
-                </DialogHeader>
-                <div className="max-h-[60vh] overflow-auto">
-                  {deletedTasksQuery.isLoading ? (
-                    <p className="text-sm text-muted-foreground">{t('loadingTasks')}</p>
-                  ) : null}
-                  {!deletedTasksQuery.isLoading && !(deletedTasksQuery.data ?? []).some((group) => group.tasks.length) ? (
-                    <p className="text-sm text-muted-foreground">{t('noDeletedTasks')}</p>
-                  ) : null}
-                  {(deletedTasksQuery.data ?? []).map((group) => {
-                    if (!group.tasks.length) return null;
-                    return (
-                      <div key={group.section.id} className="mb-4">
-                        <h4 className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">
-                          {group.section.name}
-                        </h4>
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>{t('name')}</TableHead>
-                              <TableHead>{t('deletedAt')}</TableHead>
-                              <TableHead>{t('actions')}</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {group.tasks.map((task) => (
-                              <TableRow key={task.id}>
-                                <TableCell>{task.title.trim() || t('untitledTask')}</TableCell>
-                                <TableCell>
-                                  {task.deletedAt ? new Date(task.deletedAt).toLocaleString() : '-'}
-                                </TableCell>
-                                <TableCell>
-                                  <Button
-                                    size="sm"
-                                    onClick={() => restoreTask.mutate(task.id)}
-                                    disabled={restoreTask.isPending}
-                                    data-testid={`restore-task-${task.id}`}
-                                  >
-                                    {restoreTask.isPending ? t('restoring') : t('restore')}
-                                  </Button>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    );
-                  })}
+      <Dialog open={trashOpen} onOpenChange={(open) => setProjectQueryParam('trash', open ? '1' : null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{t('deletedTasks')}</DialogTitle>
+            <DialogDescription>{t('trash')}</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-auto">
+            {deletedTasksQuery.isLoading ? (
+              <p className="text-sm text-muted-foreground">{t('loadingTasks')}</p>
+            ) : null}
+            {!deletedTasksQuery.isLoading && !(deletedTasksQuery.data ?? []).some((group) => group.tasks.length) ? (
+              <p className="text-sm text-muted-foreground">{t('noDeletedTasks')}</p>
+            ) : null}
+            {(deletedTasksQuery.data ?? []).map((group) => {
+              if (!group.tasks.length) return null;
+              return (
+                <div key={group.section.id} className="mb-4">
+                  <h4 className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">
+                    {group.section.name}
+                  </h4>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t('name')}</TableHead>
+                        <TableHead>{t('deletedAt')}</TableHead>
+                        <TableHead>{t('actions')}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {group.tasks.map((task) => (
+                        <TableRow key={task.id}>
+                          <TableCell>{task.title.trim() || t('untitledTask')}</TableCell>
+                          <TableCell>
+                            {task.deletedAt ? new Date(task.deletedAt).toLocaleString() : '-'}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              size="sm"
+                              onClick={() => restoreTask.mutate(task.id)}
+                              disabled={restoreTask.isPending}
+                              data-testid={`restore-task-${task.id}`}
+                            >
+                              {restoreTask.isPending ? t('restoring') : t('restore')}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
-              </DialogContent>
-            </Dialog>
-            <Link href={`/projects/${projectId}/members`}>
-              <Button variant="outline" size="sm" data-testid="project-members-page-link">{t('members')}</Button>
-            </Link>
-            <Link href={`/projects/${projectId}/rules`} data-testid="rules-page-link">
-              <Button variant="outline" size="sm">{t('rules')}</Button>
-            </Link>
+              );
+            })}
           </div>
-        </div>
-      </header>
+        </DialogContent>
+      </Dialog>
 
-      <section className="rounded-lg border bg-card p-4">
-        <div className="grid gap-2 md:grid-cols-6">
-          <Input
-            ref={searchInputRef}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('searchTasks')}
-            className="md:col-span-2"
-            data-testid="project-search-input"
+      {view === 'list' ? (
+        <>
+          <section className="pb-1">
+            <div className="flex items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" data-testid="add-new-trigger">
+                    <Plus className="mr-1 h-4 w-4" />
+                    {t('addNew')}
+                    <ChevronDown className="ml-1 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem
+                    data-testid="add-new-task"
+                    onClick={() => {
+                      const sectionId = sectionsQuery.data?.find((section) => !section.isDefault)?.id ?? sectionsQuery.data?.[0]?.id;
+                      const el = sectionId
+                        ? (document.querySelector(`[data-testid="quick-add-open-${sectionId}"]`) as HTMLButtonElement | null)
+                        : null;
+                      el?.click();
+                    }}
+                  >
+                    {t('addTask')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    data-testid="add-new-section"
+                    onClick={() => {
+                      setShowAddSectionInput(true);
+                      setTimeout(() => addSectionInputRef.current?.focus(), 0);
+                    }}
+                  >
+                    {t('addSection')}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+            {showAddSectionInput ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Input
+                  ref={addSectionInputRef}
+                  value={newSection}
+                  onChange={(e) => setNewSection(e.target.value)}
+                  placeholder={t('sectionName')}
+                  data-testid="new-section-input"
+                  className="min-w-56 flex-1"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newSection.trim() && !createSection.isPending) {
+                      void createSection.mutateAsync(newSection.trim());
+                    }
+                    if (e.key === 'Escape') {
+                      setShowAddSectionInput(false);
+                      setNewSection('');
+                    }
+                  }}
+                />
+                <Button
+                  data-testid="create-section-btn"
+                  onClick={() => void createSection.mutateAsync(newSection.trim())}
+                  disabled={!newSection.trim() || createSection.isPending}
+                >
+                  {createSection.isPending ? t('adding') : t('addSection')}
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setShowAddSectionInput(false);
+                    setNewSection('');
+                  }}
+                >
+                  {t('cancel')}
+                </Button>
+              </div>
+            ) : null}
+          </section>
+          <ProjectBoard
+            projectId={projectId}
+            projectName={project?.name ?? 'Project'}
+            search={search}
+            statusFilter={statusFilter}
+            priorityFilter={priorityFilter}
+            initialTaskId={openTaskId}
           />
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as 'ALL' | Task['status'])}
-            className="h-9 rounded-md border bg-background px-3 text-sm"
-            data-testid="status-filter"
-          >
-            <option value="ALL">{t('statusAll')}</option>
-            <option value="TODO">TODO</option>
-            <option value="IN_PROGRESS">IN_PROGRESS</option>
-            <option value="DONE">DONE</option>
-            <option value="BLOCKED">BLOCKED</option>
-          </select>
-          <select
-            value={priorityFilter}
-            onChange={(e) => setPriorityFilter(e.target.value as 'ALL' | NonNullable<Task['priority']>)}
-            className="h-9 rounded-md border bg-background px-3 text-sm"
-            data-testid="priority-filter"
-          >
-            <option value="ALL">{t('priorityAll')}</option>
-            <option value="LOW">LOW</option>
-            <option value="MEDIUM">MEDIUM</option>
-            <option value="HIGH">HIGH</option>
-            <option value="URGENT">URGENT</option>
-          </select>
-          <select
-            value={view}
-            onChange={(e) => setView(e.target.value as 'List' | 'Board' | 'Calendar' | 'Files')}
-            className="h-9 rounded-md border bg-background px-3 text-sm"
-          >
-            <option>{t('list')}</option>
-            <option>{t('board')}</option>
-          </select>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button className="md:justify-self-end" data-testid="add-new-trigger">
-                <Plus className="mr-1 h-4 w-4" />
-                {t('addNew')}
-                <ChevronDown className="ml-1 h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                data-testid="add-new-task"
-                onClick={() => {
-                  const sectionId = sectionsQuery.data?.find((section) => !section.isDefault)?.id ?? sectionsQuery.data?.[0]?.id;
-                  const el = sectionId
-                    ? (document.querySelector(`[data-testid="quick-add-open-${sectionId}"]`) as HTMLButtonElement | null)
-                    : null;
-                  el?.click();
-                }}
-              >
-                {t('addTask')}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                data-testid="add-new-section"
-                onClick={() => {
-                  setShowAddSectionInput(true);
-                  setTimeout(() => addSectionInputRef.current?.focus(), 0);
-                }}
-              >
-                {t('addSection')}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        {showAddSectionInput ? (
-          <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
-            <Input
-              ref={addSectionInputRef}
-              value={newSection}
-              onChange={(e) => setNewSection(e.target.value)}
-              placeholder={t('sectionName')}
-              data-testid="new-section-input"
-              className="min-w-56 flex-1"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && newSection.trim() && !createSection.isPending) {
-                  void createSection.mutateAsync(newSection.trim());
-                }
-                if (e.key === 'Escape') {
-                  setShowAddSectionInput(false);
-                  setNewSection('');
-                }
-              }}
-            />
-            <Button
-              data-testid="create-section-btn"
-              onClick={() => void createSection.mutateAsync(newSection.trim())}
-              disabled={!newSection.trim() || createSection.isPending}
-            >
-              {createSection.isPending ? t('adding') : t('addSection')}
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setShowAddSectionInput(false);
-                setNewSection('');
-              }}
-            >
-              {t('cancel')}
-            </Button>
-          </div>
-        ) : null}
-      </section>
-
-      {view === 'List' ? (
-        <ProjectBoard
-          projectId={projectId}
-          projectName={project?.name ?? 'Project'}
-          search={search}
-          statusFilter={statusFilter}
-          priorityFilter={priorityFilter}
-        />
-      ) : view === 'Board' ? (
+        </>
+      ) : view === 'board' ? (
         <ProjectBoardView
           projectId={projectId}
           search={search}
           statusFilter={statusFilter}
           priorityFilter={priorityFilter}
         />
-      ) : view === 'Calendar' ? (
+      ) : view === 'calendar' ? (
         <ProjectCalendarView
           projectId={projectId}
           search={search}
           statusFilter={statusFilter}
           priorityFilter={priorityFilter}
         />
-      ) : view === 'Files' ? (
+      ) : view === 'files' ? (
         <ProjectFilesView
           projectId={projectId}
           search={search}

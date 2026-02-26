@@ -15,6 +15,7 @@ export default function AdminUsersPage() {
   const { t } = useI18n();
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<'ALL' | 'ACTIVE' | 'SUSPENDED' | 'INVITED'>('ALL');
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'WS_ADMIN' | 'WS_MEMBER'>('WS_MEMBER');
   const [inviteLink, setInviteLink] = useState('');
@@ -52,6 +53,7 @@ export default function AdminUsersPage() {
     onSuccess: (data) => {
       setInviteLink(data.inviteLink);
       setInviteEmail('');
+      setInviteDialogOpen(true);
       queryClient.invalidateQueries({ queryKey: queryKeys.workspaceUsers(workspaceId!, { query, status }) });
       queryClient.invalidateQueries({ queryKey: queryKeys.workspaceInvitations(workspaceId!) });
     },
@@ -75,6 +77,19 @@ export default function AdminUsersPage() {
   const revokeInviteMutation = useMutation({
     mutationFn: (invitationId: string) => api(`/invitations/${invitationId}`, { method: 'DELETE' }),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.workspaceUsers(workspaceId!, { query, status }) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.workspaceInvitations(workspaceId!) });
+    },
+  });
+
+  const reissueInviteMutation = useMutation({
+    mutationFn: (invitationId: string) =>
+      api(`/invitations/${invitationId}/reissue`, {
+        method: 'POST',
+      }) as Promise<{ invitationId: string; inviteLink: string }>,
+    onSuccess: (data) => {
+      setInviteLink(data.inviteLink);
+      setInviteDialogOpen(true);
       queryClient.invalidateQueries({ queryKey: queryKeys.workspaceUsers(workspaceId!, { query, status }) });
       queryClient.invalidateQueries({ queryKey: queryKeys.workspaceInvitations(workspaceId!) });
     },
@@ -112,9 +127,25 @@ export default function AdminUsersPage() {
             <option value="INVITED">{t('invited')}</option>
           </select>
 
-          <Dialog.Root>
+          <Dialog.Root
+            open={inviteDialogOpen}
+            onOpenChange={(nextOpen) => {
+              setInviteDialogOpen(nextOpen);
+              if (!nextOpen) {
+                setInviteLink('');
+              }
+            }}
+          >
             <Dialog.Trigger asChild>
-              <Button data-testid="invite-user-open">{t('inviteUser')}</Button>
+              <Button
+                data-testid="invite-user-open"
+                onClick={() => {
+                  setInviteDialogOpen(true);
+                  setInviteLink('');
+                }}
+              >
+                {t('inviteUser')}
+              </Button>
             </Dialog.Trigger>
             <Dialog.Portal>
               <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/50" />
@@ -247,14 +278,25 @@ export default function AdminUsersPage() {
                       ) : null}
 
                       {isInvited && row.invitationId ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          data-testid={`admin-invite-revoke-${row.invitationId}`}
-                          onClick={() => revokeInviteMutation.mutate(row.invitationId!)}
-                        >
-                          {t('revoke')}
-                        </Button>
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            data-testid={`admin-invite-reissue-${row.invitationId}`}
+                            onClick={() => reissueInviteMutation.mutate(row.invitationId!)}
+                            disabled={reissueInviteMutation.isPending}
+                          >
+                            {t('reissue')}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            data-testid={`admin-invite-revoke-${row.invitationId}`}
+                            onClick={() => revokeInviteMutation.mutate(row.invitationId!)}
+                          >
+                            {t('revoke')}
+                          </Button>
+                        </>
                       ) : null}
                     </div>
                   </TableCell>

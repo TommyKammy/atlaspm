@@ -2,14 +2,23 @@ import { beforeAll, afterAll, describe, expect, test } from 'vitest';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import { createServer } from 'node:http';
+import { createHmac } from 'node:crypto';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { AuthService } from '../src/auth/auth.service';
+import { ReminderDeliveryService } from '../src/tasks/reminder-delivery.service';
+import { TaskRetentionService } from '../src/tasks/task-retention.service';
+import { WebhookDeliveryService } from '../src/webhooks/webhook-delivery.service';
+import { CorrelationIdMiddleware } from '../src/common/correlation.middleware';
 
 describe('Core API Integration', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let token: string;
+  let reminderWorker: ReminderDeliveryService;
+  let retentionWorker: TaskRetentionService;
+  let webhookWorker: WebhookDeliveryService;
 
   beforeAll(async () => {
     process.env.DEV_AUTH_ENABLED = 'true';
@@ -17,13 +26,25 @@ describe('Core API Integration', () => {
     process.env.COLLAB_JWT_SECRET = 'collab-jwt-secret';
     process.env.COLLAB_SERVICE_TOKEN = 'collab-service-secret';
     process.env.COLLAB_SERVER_URL = 'ws://localhost:18080';
+    process.env.REMINDER_WORKER_ENABLED = 'false';
+    process.env.TASK_RETENTION_WORKER_ENABLED = 'false';
+    process.env.TASK_RETENTION_DAYS = '30';
+    process.env.WEBHOOK_DELIVERY_WORKER_ENABLED = 'false';
+    process.env.WEBHOOK_DELIVERY_BASE_DELAY_MS = '0';
+    process.env.WEBHOOK_DELIVERY_MAX_DELAY_MS = '0';
+    process.env.WEBHOOK_DELIVERY_MAX_ATTEMPTS = '2';
+    process.env.WEBHOOK_SIGNING_SECRET = 'webhook-test-secret';
     process.env.DATABASE_URL =
       process.env.DATABASE_URL ?? 'postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public';
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
+    app.use(new CorrelationIdMiddleware().use);
     await app.init();
     prisma = moduleRef.get(PrismaService);
+    reminderWorker = moduleRef.get(ReminderDeliveryService);
+    retentionWorker = moduleRef.get(TaskRetentionService);
+    webhookWorker = moduleRef.get(WebhookDeliveryService);
 
     await prisma.$connect();
     const auth = moduleRef.get(AuthService);
@@ -70,9 +91,22 @@ describe('Core API Integration', () => {
       .send({ token: inviteToken })
       .expect(201);
 
+    const invitedWorkspaces = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${invitedToken}`)
+      .expect(200);
+    const invitedWorkspace = invitedWorkspaces.body.find((ws: any) => ws.id === workspaceId);
+    expect(invitedWorkspace?.role).toBe('WS_MEMBER');
+
     await request(app.getHttpServer())
       .get(`/workspaces/${workspaceId}/users`)
       .set('Authorization', `Bearer ${invitedToken}`)
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${invitedToken}`)
+      .send({ email: 'forbidden-invite@example.com', role: 'WS_MEMBER' })
       .expect(403);
 
     await request(app.getHttpServer())
@@ -80,11 +114,13 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ workspaceId, status: 'SUSPENDED' })
       .expect(200);
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${invitedToken}`).expect(403);
     await request(app.getHttpServer())
       .patch('/users/invited-1')
       .set('Authorization', `Bearer ${token}`)
       .send({ workspaceId, status: 'ACTIVE' })
       .expect(200);
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${invitedToken}`).expect(200);
 
     const revokedInvite = await request(app.getHttpServer())
       .post(`/workspaces/${workspaceId}/invitations`)
@@ -119,6 +155,45 @@ describe('Core API Integration', () => {
       .post('/invitations/accept')
       .set('Authorization', `Bearer ${expiredUserToken}`)
       .send({ token: expiredToken })
+      .expect(400);
+
+    const reissueInvite = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ email: 'reissue-1@example.com', role: 'WS_MEMBER' })
+      .expect(201);
+    const firstInvitationId = reissueInvite.body.invitationId;
+    const firstToken = String(reissueInvite.body.inviteLink).split('inviteToken=')[1];
+
+    await request(app.getHttpServer())
+      .post(`/invitations/${firstInvitationId}/reissue`)
+      .set('Authorization', `Bearer ${invitedToken}`)
+      .expect(403);
+
+    const reissuedInvite = await request(app.getHttpServer())
+      .post(`/invitations/${firstInvitationId}/reissue`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+    expect(reissuedInvite.body.invitationId).not.toBe(firstInvitationId);
+    const secondToken = String(reissuedInvite.body.inviteLink).split('inviteToken=')[1];
+    expect(secondToken).toBeTruthy();
+    expect(secondToken).not.toBe(firstToken);
+
+    const reissueUserToken = await auth.mintDevToken('reissue-1', 'reissue-1@example.com', 'Reissue One');
+    await request(app.getHttpServer())
+      .post('/invitations/accept')
+      .set('Authorization', `Bearer ${reissueUserToken}`)
+      .send({ token: firstToken })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/invitations/accept')
+      .set('Authorization', `Bearer ${reissueUserToken}`)
+      .send({ token: secondToken })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/invitations/${reissuedInvite.body.invitationId}/reissue`)
+      .set('Authorization', `Bearer ${token}`)
       .expect(400);
 
     const projectRes = await request(app.getHttpServer())
@@ -198,6 +273,25 @@ describe('Core API Integration', () => {
       .send({ userId: 'member-1', role: 'MEMBER' })
       .expect(201);
 
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/rules`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({
+        name: 'Viewer should not create',
+        templateKey: 'progress_to_done',
+        enabled: true,
+      })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post('/webhooks')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({
+        projectId,
+        targetUrl: 'http://localhost:9999/webhook',
+      })
+      .expect(403);
+
     const sectionsRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/sections`)
       .set('Authorization', `Bearer ${token}`)
@@ -207,25 +301,54 @@ describe('Core API Integration', () => {
     const secA = await request(app.getHttpServer())
       .post(`/projects/${projectId}/sections`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ name: 'A' })
+      .send({ name: 'Alpha Section' })
       .expect(201);
 
     const secB = await request(app.getHttpServer())
       .post(`/projects/${projectId}/sections`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ name: 'B' })
+      .send({ name: 'Beta Section' })
       .expect(201);
 
+    const createTaskCorrelationId = `it-task-create-${Date.now()}`;
     const t1 = await request(app.getHttpServer())
       .post(`/projects/${projectId}/tasks`)
       .set('Authorization', `Bearer ${token}`)
+      .set('x-correlation-id', createTaskCorrelationId)
       .send({ title: 'Task 1', sectionId: secA.body.id })
       .expect(201);
+    const observedCreateTaskCorrelationId = String(t1.headers['x-correlation-id'] ?? '');
+    expect(observedCreateTaskCorrelationId).toBe(createTaskCorrelationId);
     const t2 = await request(app.getHttpServer())
       .post(`/projects/${projectId}/tasks`)
       .set('Authorization', `Bearer ${token}`)
       .send({ title: 'Task 2', sectionId: secA.body.id })
       .expect(201);
+
+    const sectionSearch = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/tasks?q=${encodeURIComponent('Alpha Section')}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(sectionSearch.body.some((task: any) => task.id === t1.body.id)).toBe(true);
+    expect(sectionSearch.body.some((task: any) => task.id === t2.body.id)).toBe(true);
+
+    const completed = await request(app.getHttpServer())
+      .post(`/tasks/${t2.body.id}/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ done: true, version: t2.body.version })
+      .expect(201);
+    expect(completed.body.status).toBe('DONE');
+    expect(completed.body.progressPercent).toBe(100);
+    expect(Boolean(completed.body.completedAt)).toBe(true);
+
+    const reopened = await request(app.getHttpServer())
+      .post(`/tasks/${t2.body.id}/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ done: false, version: completed.body.version })
+      .expect(201);
+    expect(reopened.body.status).toBe('IN_PROGRESS');
+    expect(reopened.body.progressPercent).toBe(0);
+    expect(reopened.body.completedAt).toBeNull();
 
     await request(app.getHttpServer())
       .delete(`/tasks/${t2.body.id}`)
@@ -273,6 +396,9 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${outsiderToken}`)
       .expect(404);
 
+    const snapshotCorrelationId = `it-snapshot-${Date.now()}`;
+    const snapshotTaskId = t2.body.id;
+
     const p50 = await request(app.getHttpServer())
       .patch(`/tasks/${t1.body.id}`)
       .set('Authorization', `Bearer ${token}`)
@@ -288,6 +414,24 @@ describe('Core API Integration', () => {
       .expect(200);
     expect(p100.body.status).toBe('DONE');
     expect(p100.body.completedAt).toBeTruthy();
+
+    const snapshotSaved = await request(app.getHttpServer())
+      .post(`/tasks/${snapshotTaskId}/description/snapshot`)
+      .set('x-collab-service-token', 'collab-service-secret')
+      .set('x-correlation-id', snapshotCorrelationId)
+      .send({
+        roomId: `task:${snapshotTaskId}:description`,
+        descriptionDoc: {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'snapshot check' }] }],
+        },
+        descriptionText: 'snapshot check',
+        participants: [{ userId: 'member-1', mode: 'readwrite' }],
+        reason: 'idle',
+      })
+      .expect(201);
+    const observedSnapshotCorrelationId = String(snapshotSaved.headers['x-correlation-id'] ?? '');
+    expect(observedSnapshotCorrelationId).toBe(snapshotCorrelationId);
 
     await request(app.getHttpServer())
       .post(`/sections/${secA.body.id}/tasks/reorder`)
@@ -350,6 +494,34 @@ describe('Core API Integration', () => {
         (m: any) => m.sourceType === 'description' && m.mentionedUserId === 'member-1',
       ),
     ).toBe(true);
+
+    const memberNotifications = await request(app.getHttpServer())
+      .get('/notifications?status=unread')
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(200);
+    const mentionNotification = memberNotifications.body.find(
+      (item: any) => item.type === 'mention' && item.taskId === t1.body.id,
+    );
+    expect(mentionNotification).toBeTruthy();
+    expect(mentionNotification.project?.id).toBe(projectId);
+
+    const unreadCountBeforeRead = await request(app.getHttpServer())
+      .get('/notifications/unread-count')
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(200);
+    expect(unreadCountBeforeRead.body.count).toBeGreaterThan(0);
+
+    await request(app.getHttpServer())
+      .post(`/notifications/${mentionNotification.id}/read`)
+      .set('Authorization', `Bearer ${memberToken}`)
+      .send({ read: true })
+      .expect(201);
+
+    const unreadCountAfterRead = await request(app.getHttpServer())
+      .get('/notifications/unread-count')
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(200);
+    expect(unreadCountAfterRead.body.count).toBeLessThan(unreadCountBeforeRead.body.count);
 
     await request(app.getHttpServer())
       .patch(`/tasks/${t1.body.id}/description`)
@@ -445,6 +617,71 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
+    const attachmentsAfterDelete = await request(app.getHttpServer())
+      .get(`/tasks/${t1.body.id}/attachments`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(attachmentsAfterDelete.body.some((a: any) => a.id === attachmentInit.body.attachmentId)).toBe(false);
+
+    const attachmentsIncludingDeleted = await request(app.getHttpServer())
+      .get(`/tasks/${t1.body.id}/attachments?includeDeleted=true`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const deletedAttachment = attachmentsIncludingDeleted.body.find((a: any) => a.id === attachmentInit.body.attachmentId);
+    expect(deletedAttachment).toBeTruthy();
+    expect(Boolean(deletedAttachment.deletedAt)).toBe(true);
+
+    await request(app.getHttpServer())
+      .post(`/attachments/${attachmentInit.body.attachmentId}/restore`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+
+    const attachmentsAfterRestore = await request(app.getHttpServer())
+      .get(`/tasks/${t1.body.id}/attachments`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(attachmentsAfterRestore.body.some((a: any) => a.id === attachmentInit.body.attachmentId)).toBe(true);
+
+    const reminderSet = await request(app.getHttpServer())
+      .put(`/tasks/${t1.body.id}/reminder`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ remindAt: new Date(Date.now() + 86_400_000).toISOString() })
+      .expect(200);
+    expect(reminderSet.body.taskId).toBe(t1.body.id);
+
+    const reminderGet = await request(app.getHttpServer())
+      .get(`/tasks/${t1.body.id}/reminder`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(reminderGet.body.id).toBe(reminderSet.body.id);
+
+    await request(app.getHttpServer())
+      .delete(`/tasks/${t1.body.id}/reminder`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const reminderAfterClear = await request(app.getHttpServer())
+      .get(`/tasks/${t1.body.id}/reminder`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(reminderAfterClear.body?.id).toBeUndefined();
+
+    const pastReminder = await request(app.getHttpServer())
+      .put(`/tasks/${t1.body.id}/reminder`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ remindAt: new Date(Date.now() - 60_000).toISOString() })
+      .expect(200);
+    expect(pastReminder.body.id).toBeTruthy();
+
+    const deliveredCount = await reminderWorker.processDueReminders(new Date());
+    expect(deliveredCount).toBeGreaterThan(0);
+
+    const reminderAfterSend = await request(app.getHttpServer())
+      .get(`/tasks/${t1.body.id}/reminder`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(Boolean(reminderAfterSend.body?.sentAt)).toBe(true);
+
     const rulesRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/rules`)
       .set('Authorization', `Bearer ${token}`)
@@ -467,7 +704,7 @@ describe('Core API Integration', () => {
     expect(ruleUpdated.body.name).toBe('Progress to Done (Edited)');
 
     const outbox = await request(app.getHttpServer())
-      .get('/outbox')
+      .get(`/outbox?projectId=${projectId}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(outbox.body.some((e: any) => e.type === 'task.reordered')).toBe(true);
@@ -479,10 +716,336 @@ describe('Core API Integration', () => {
     expect(outbox.body.some((e: any) => e.type === 'task.mention.deleted')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.attachment.created')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.attachment.deleted')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'task.attachment.restored')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'task.reminder.set')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'task.reminder.cleared')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'task.reminder.sent')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.deleted')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'task.restored')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'task.completed')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'task.reopened')).toBe(true);
     expect(outbox.body.some((e: any) => e.type === 'rule.updated')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'notification.created')).toBe(true);
+    expect(outbox.body.some((e: any) => e.type === 'notification.read')).toBe(true);
+
+    const taskCreateOutbox = await prisma.outboxEvent.findFirst({
+      where: { type: 'task.created', correlationId: observedCreateTaskCorrelationId },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(taskCreateOutbox).toBeTruthy();
+    expect((taskCreateOutbox?.payload as any)?.id).toBe(t1.body.id);
+
+    const snapshotOutbox = await prisma.outboxEvent.findFirst({
+      where: { type: 'task.description.snapshot_saved', correlationId: observedSnapshotCorrelationId },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(snapshotOutbox).toBeTruthy();
+    expect((snapshotOutbox?.payload as any)?.taskId).toBe(snapshotTaskId);
+
+    await request(app.getHttpServer())
+      .get(`/outbox?projectId=${projectId}`)
+      .set('Authorization', `Bearer ${outsiderToken}`)
+      .expect(404);
+
+    const t1Audit = await request(app.getHttpServer())
+      .get(`/tasks/${t1.body.id}/audit`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(
+      t1Audit.body.some(
+        (e: any) => e.action === 'task.created' && e.correlationId === observedCreateTaskCorrelationId,
+      ),
+    ).toBe(true);
+    const t2Audit = await request(app.getHttpServer())
+      .get(`/tasks/${t2.body.id}/audit`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(
+      t2Audit.body.some(
+        (e: any) =>
+          e.action === 'task.description.snapshot_saved' &&
+          e.correlationId === observedSnapshotCorrelationId,
+      ),
+    ).toBe(true);
 
     expect(defaultSection).toBeTruthy();
+  });
+
+  test('task retention worker purges expired soft-deleted tasks and keeps recent deletions', async () => {
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Retention ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSection = sectionsRes.body.find((section: any) => section.isDefault);
+    expect(defaultSection?.id).toBeTruthy();
+
+    const expiredTask = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Retention expired', sectionId: defaultSection.id })
+      .expect(201);
+
+    const recentTask = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Retention recent', sectionId: defaultSection.id })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .delete(`/tasks/${expiredTask.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    await request(app.getHttpServer())
+      .delete(`/tasks/${recentTask.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const now = new Date();
+    const oldDeletedAt = new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000);
+    await prisma.task.update({
+      where: { id: expiredTask.body.id },
+      data: { deletedAt: oldDeletedAt },
+    });
+
+    const purgedCount = await retentionWorker.processExpiredDeletes(now);
+    expect(purgedCount).toBeGreaterThanOrEqual(1);
+
+    const expiredAfter = await prisma.task.findUnique({ where: { id: expiredTask.body.id } });
+    expect(expiredAfter).toBeNull();
+
+    const recentAfter = await prisma.task.findUnique({ where: { id: recentTask.body.id } });
+    expect(recentAfter).toBeTruthy();
+    expect(Boolean(recentAfter?.deletedAt)).toBe(true);
+
+    const purgeAudit = await prisma.auditEvent.findFirst({
+      where: { entityType: 'Task', entityId: expiredTask.body.id, action: 'task.purged' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(purgeAudit).toBeTruthy();
+    expect(typeof purgeAudit?.correlationId).toBe('string');
+    expect(purgeAudit?.correlationId.startsWith('task-retention-')).toBe(true);
+
+    const purgeOutbox = await prisma.outboxEvent.findFirst({
+      where: { type: 'task.purged' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(purgeOutbox).toBeTruthy();
+    expect((purgeOutbox?.payload as any)?.taskId).toBe(expiredTask.body.id);
+    expect((purgeOutbox?.payload as any)?.projectId).toBe(projectId);
+  });
+
+  test('webhook delivery worker retries failed events, signs payloads, and exposes DLQ', async () => {
+    await prisma.outboxEvent.deleteMany({});
+
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = wsRes.body[0].id;
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Webhook Delivery ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const received: Array<{ signature?: string; timestamp?: string; body: string }> = [];
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      req.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        if (req.url === '/ok') {
+          received.push({
+            signature: req.headers['x-atlaspm-signature']?.toString(),
+            timestamp: req.headers['x-atlaspm-timestamp']?.toString(),
+            body,
+          });
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false }));
+      });
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to obtain webhook test server port');
+    }
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const okWebhook = await request(app.getHttpServer())
+        .post('/webhooks')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ projectId, targetUrl: `${baseUrl}/ok` })
+        .expect(201);
+
+      await prisma.outboxEvent.deleteMany({});
+
+      const successEvent = await prisma.outboxEvent.create({
+        data: {
+          type: 'task.updated',
+          payload: { projectId, taskId: 'fake-task' },
+          correlationId: `webhook-success-${Date.now()}`,
+        },
+      });
+
+      await webhookWorker.processDueEvents(new Date());
+      const delivered = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: successEvent.id } });
+      expect(Boolean(delivered.deliveredAt)).toBe(true);
+      expect(delivered.deadLetteredAt).toBeNull();
+      const captured = received.find((entry) => {
+        try {
+          return JSON.parse(entry.body).id === successEvent.id;
+        } catch {
+          return false;
+        }
+      });
+      expect(captured).toBeTruthy();
+      expect(captured?.signature).toMatch(/^v1=/);
+      expect(captured?.timestamp).toBeTruthy();
+      const expectedSig = `v1=${createHmac('sha256', 'webhook-test-secret')
+        .update(`${captured?.timestamp}.${captured?.body}`, 'utf8')
+        .digest('hex')}`;
+      expect(captured?.signature).toBe(expectedSig);
+
+      await prisma.webhook.update({
+        where: { id: okWebhook.body.id },
+        data: { active: false },
+      });
+      const failWebhook = await request(app.getHttpServer())
+        .post('/webhooks')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ projectId, targetUrl: `${baseUrl}/fail` })
+        .expect(201);
+
+      const failingEvent = await prisma.outboxEvent.create({
+        data: {
+          type: 'task.updated',
+          payload: { projectId, taskId: 'fake-task' },
+          correlationId: `webhook-fail-${Date.now()}`,
+        },
+      });
+
+      await webhookWorker.processDueEvents(new Date());
+      let failedState = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: failingEvent.id } });
+      expect(failedState.deliveryAttempts).toBe(1);
+      expect(failedState.deadLetteredAt).toBeNull();
+      expect(failedState.deliveredAt).toBeNull();
+      expect(failedState.lastError).toContain('500');
+
+      await prisma.outboxEvent.update({
+        where: { id: failingEvent.id },
+        data: { nextRetryAt: new Date(Date.now() - 1_000) },
+      });
+      await webhookWorker.processDueEvents(new Date());
+      failedState = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: failingEvent.id } });
+      expect(failedState.deliveryAttempts).toBe(2);
+      expect(Boolean(failedState.deadLetteredAt)).toBe(true);
+      expect(failedState.deliveredAt).toBeNull();
+
+      const dlq = await request(app.getHttpServer())
+        .get(`/webhooks/dlq?projectId=${projectId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(dlq.body.some((event: any) => event.id === failingEvent.id)).toBe(true);
+
+      const auth = app.get(AuthService);
+      const projectMemberToken = await auth.mintDevToken(
+        `webhook-member-${Date.now()}`,
+        `webhook-member-${Date.now()}@example.com`,
+        'Webhook Member',
+      );
+      await request(app.getHttpServer())
+        .get(`/webhooks/dlq?projectId=${projectId}`)
+        .set('Authorization', `Bearer ${projectMemberToken}`)
+        .expect(404);
+
+      await request(app.getHttpServer())
+        .post(`/webhooks/dlq/${failingEvent.id}/retry`)
+        .set('Authorization', `Bearer ${projectMemberToken}`)
+        .send({ projectId })
+        .expect(404);
+
+      await prisma.webhook.update({
+        where: { id: okWebhook.body.id },
+        data: { active: true },
+      });
+      await prisma.webhook.update({
+        where: { id: failWebhook.body.id },
+        data: { active: false },
+      });
+
+      const redriveCorrelationId = `webhook-redrive-${Date.now()}`;
+      await request(app.getHttpServer())
+        .post(`/webhooks/dlq/${failingEvent.id}/retry`)
+        .set('Authorization', `Bearer ${token}`)
+        .set('x-correlation-id', redriveCorrelationId)
+        .send({ projectId })
+        .expect(201);
+
+      const resetState = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: failingEvent.id } });
+      expect(resetState.deadLetteredAt).toBeNull();
+      expect(resetState.deliveryAttempts).toBe(0);
+      expect(resetState.deliveredAt).toBeNull();
+
+      await webhookWorker.processDueEvents(new Date());
+      const redrivenState = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: failingEvent.id } });
+      expect(Boolean(redrivenState.deliveredAt)).toBe(true);
+      expect(redrivenState.deadLetteredAt).toBeNull();
+      const redriveDelivered = received.find((entry) => {
+        try {
+          return JSON.parse(entry.body).id === failingEvent.id;
+        } catch {
+          return false;
+        }
+      });
+      expect(redriveDelivered).toBeTruthy();
+
+      const redriveAudit = await prisma.auditEvent.findFirst({
+        where: {
+          entityType: 'OutboxEvent',
+          entityId: failingEvent.id,
+          action: 'webhook.delivery.retry_requested',
+          correlationId: redriveCorrelationId,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(redriveAudit).toBeTruthy();
+      const redriveOutbox = await prisma.outboxEvent.findFirst({
+        where: {
+          type: 'webhook.delivery.retry_requested',
+          correlationId: redriveCorrelationId,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(redriveOutbox).toBeTruthy();
+      expect((redriveOutbox?.payload as any)?.projectId).toBe(projectId);
+      expect((redriveOutbox?.payload as any)?.outboxEventId).toBe(failingEvent.id);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+    }
   });
 });

@@ -53,13 +53,13 @@ async function createTaskViaAPI(token: string, projectId: string, title: string)
 }
 
 async function openTaskDetail(page: Page, taskTitle: string) {
-  await page.click(`text=${taskTitle}`);
+  await page.locator(`[data-task-title="${taskTitle}"] [data-testid^="open-task-"]`).first().click();
   await expect(page.getByRole('dialog')).toBeVisible();
 }
 
 async function openDependencyDialog(page: Page) {
-  await page.getByRole('heading', { name: 'Dependencies', exact: true }).waitFor();
-  await page.locator("//h3[normalize-space()='Dependencies']/ancestor::div[contains(@class,'justify-between')][1]//button[normalize-space()='Add']").click();
+  await expect(page.getByTestId('dependencies-heading')).toBeVisible();
+  await page.getByTestId('dependencies-add-btn').click();
 }
 
 test.describe('Task Dependencies Feature', () => {
@@ -70,8 +70,8 @@ test.describe('Task Dependencies Feature', () => {
     await page.goto(`/projects/${projectId}`);
     await openTaskDetail(page, 'Task Without Dependencies');
 
-    await expect(page.getByRole('heading', { name: 'Dependencies', exact: true })).toBeVisible();
-    await expect(page.getByText('No dependencies yet. Add one to link related tasks.')).toBeVisible();
+    await expect(page.getByTestId('dependencies-heading')).toBeVisible();
+    await expect(page.getByTestId('dependencies-empty')).toBeVisible();
   });
 
   test('should add BLOCKS dependency', async ({ page }) => {
@@ -127,7 +127,7 @@ test.describe('Task Dependencies Feature', () => {
     const deleteButton = page.locator('[data-testid^="dependency-delete-"]').first();
     await deleteButton.dispatchEvent('click');
 
-    await expect(page.getByText('No dependencies yet. Add one to link related tasks.')).toBeVisible();
+    await expect(page.getByTestId('dependencies-empty')).toBeVisible();
   });
 
   test('should prevent circular dependency via API', async ({ page }) => {
@@ -177,9 +177,6 @@ test.describe('Task Dependencies Feature', () => {
     await page.goto(`/projects/${projectId}`);
     await openTaskDetail(page, 'Task With Multiple Dependencies');
 
-    await expect(page.getByRole('heading', { name: 'Dependencies', exact: true })
-      .locator('xpath=ancestor::div[1]')
-      .locator('text=2')
-      .first()).toBeVisible();
+    await expect(page.getByTestId('dependencies-count')).toHaveText('2');
   });
 });

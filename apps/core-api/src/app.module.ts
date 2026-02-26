@@ -12,9 +12,14 @@ import { AuditController } from './audit/audit.controller';
 import { DomainService } from './common/domain.service';
 import { SubtaskService } from './tasks/subtask.service';
 import { CycleDetectionService } from './tasks/cycle-detection.service';
+import { ReminderDeliveryService } from './tasks/reminder-delivery.service';
+import { TaskRetentionService } from './tasks/task-retention.service';
 import { PublicAttachmentsController } from './tasks/public-attachments.controller';
 import { CollabController } from './collab/collab.controller';
 import { WorkspaceAdminController } from './workspaces/workspace-admin.controller';
+import { NotificationsController } from './notifications/notifications.controller';
+import { NotificationsService } from './notifications/notifications.service';
+import { WebhookDeliveryService } from './webhooks/webhook-delivery.service';
 import { SearchModule } from './search/search.module';
 import { PortfoliosModule } from './portfolios/portfolios.module';
 import { WorkloadModule } from './workload/workload.module';
@@ -34,7 +39,17 @@ import { IntegrationsModule } from './integrations/integrations.module';
     PublicAttachmentsController,
     CollabController,
     WorkspaceAdminController,
+    NotificationsController,
   ],
-  providers: [PrismaService, DomainService, SubtaskService, CycleDetectionService],
+  providers: [
+    PrismaService,
+    DomainService,
+    SubtaskService,
+    CycleDetectionService,
+    ReminderDeliveryService,
+    TaskRetentionService,
+    WebhookDeliveryService,
+    NotificationsService,
+  ],
 })
 export class AppModule {}
