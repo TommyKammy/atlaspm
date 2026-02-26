@@ -627,9 +627,9 @@ export default function TaskDetailDrawer({
                     </div>
                   </section>
 
-                  <section ref={attachmentsSectionRef} className="space-y-2 border-b border-border/50 pb-4">
-                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t('dueReminder')}</div>
-                    <div className="flex flex-wrap items-center gap-2">
+                  <section className="space-y-2 pb-4">
+                    <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{t('dueReminder')}</div>
+                    <div className="flex flex-wrap items-center gap-2 rounded-md px-1 py-1 transition-colors hover:bg-muted/25">
                       <Input
                         type="datetime-local"
                         value={reminderInput}
@@ -685,24 +685,25 @@ export default function TaskDetailDrawer({
                     />
                   ) : null}
 
-                  <section className="space-y-2 border-b border-border/50 pb-4">
-                    <div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      <Paperclip className="h-4 w-4" /> {t('attachments')}
-                    </div>
-                    {!attachments.length ? <p className="text-sm text-muted-foreground">{t('noAttachmentsYet')}</p> : null}
-                    <div className="space-y-1">
-                      {attachments.map((item) => (
-                        <div key={item.id} className="flex items-center justify-between px-1 py-1 text-sm" data-testid={`attachment-${item.id}`}>
-                          <a href={`${apiBaseUrl}${item.url}`} target="_blank" rel="noreferrer" className="truncate hover:underline">
-                            {item.fileName}
-                          </a>
-                          <Button size="sm" variant="ghost" onClick={() => deleteAttachment.mutate(item.id)}>
-                            {t('delete')}
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
+                  {attachments.length ? (
+                    <section ref={attachmentsSectionRef} className="space-y-2 border-b border-border/50 pb-4">
+                      <div className="mb-1 flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                        <Paperclip className="h-4 w-4" /> {t('attachments')}
+                      </div>
+                      <div className="space-y-1">
+                        {attachments.map((item) => (
+                          <div key={item.id} className="flex items-center justify-between px-1 py-1 text-sm" data-testid={`attachment-${item.id}`}>
+                            <a href={`${apiBaseUrl}${item.url}`} target="_blank" rel="noreferrer" className="truncate hover:underline">
+                              {item.fileName}
+                            </a>
+                            <Button size="sm" variant="ghost" onClick={() => deleteAttachment.mutate(item.id)}>
+                              {t('delete')}
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
 
                   {taskId && (
                     <>

@@ -388,7 +388,7 @@ export default function TaskDescriptionEditor({
   return (
     <div ref={editorContainerRef} className="group/editor relative space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t('description')}</span>
+        <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{t('description')}</span>
         {isCollabActive ? (
           <Badge data-testid="collab-presence-badge">
             {presenceCount} {t('collabUsers')}
