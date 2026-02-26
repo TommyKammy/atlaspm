@@ -9,12 +9,13 @@ import {
   Circle,
   Clock3,
   Gauge,
+  List,
   MessageSquare,
   Paperclip,
   UserCircle2,
   X,
 } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, apiBaseUrl } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type {
@@ -167,6 +168,7 @@ export default function TaskDetailDrawer({
   const [dueDateInput, setDueDateInput] = useState('');
   const [assigneeInput, setAssigneeInput] = useState<string>('unassigned');
   const [statusInput, setStatusInput] = useState<Task['status']>('TODO');
+  const attachmentsSectionRef = useRef<HTMLElement | null>(null);
 
   const enabled = Boolean(taskId && open);
 
@@ -447,16 +449,26 @@ export default function TaskDetailDrawer({
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-8 w-8"
-                  aria-label={t('details')}
-                  onClick={() => setTab('details')}
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                  aria-label={t('attachments')}
+                  onClick={() => {
+                    setTab('details');
+                    requestAnimationFrame(() => {
+                      attachmentsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    });
+                  }}
                 >
                   <Paperclip className="h-4 w-4" />
                 </Button>
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-8 w-8"
+                  className={cn(
+                    'h-8 w-8 rounded-none border-b-2',
+                    tab === 'comments'
+                      ? 'border-primary text-foreground'
+                      : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
+                  )}
                   aria-label={t('comments')}
                   onClick={() => setTab('comments')}
                 >
@@ -465,11 +477,30 @@ export default function TaskDetailDrawer({
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-8 w-8"
+                  className={cn(
+                    'h-8 w-8 rounded-none border-b-2',
+                    tab === 'activity'
+                      ? 'border-primary text-foreground'
+                      : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
+                  )}
                   aria-label={t('activity')}
                   onClick={() => setTab('activity')}
                 >
                   <Activity className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className={cn(
+                    'h-8 w-8 rounded-none border-b-2',
+                    tab === 'details'
+                      ? 'border-primary text-foreground'
+                      : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
+                  )}
+                  aria-label={t('details')}
+                  onClick={() => setTab('details')}
+                >
+                  <List className="h-4 w-4" />
                 </Button>
                 <Dialog.Close asChild>
                   <Button variant="ghost" size="icon" aria-label={t('closeTaskDetail')}>
@@ -490,25 +521,6 @@ export default function TaskDetailDrawer({
                 className="h-auto w-full border-transparent bg-transparent px-1 py-0 text-2xl font-semibold shadow-none hover:bg-muted/20 focus-visible:border-border/50 focus-visible:bg-background"
                 data-testid="task-detail-title-input"
               />
-            </div>
-
-            <div className="mb-4 flex items-center gap-5 border-b border-border/60">
-              {(['details', 'comments', 'activity'] as const).map((item) => (
-                <Button
-                  key={item}
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setTab(item)}
-                  className={cn(
-                    'h-9 rounded-none border-b-2 px-0 text-sm',
-                    tab === item
-                      ? 'border-primary text-foreground'
-                      : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
-                  )}
-                >
-                  {t(item)}
-                </Button>
-              ))}
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">
@@ -615,7 +627,7 @@ export default function TaskDetailDrawer({
                     </div>
                   </section>
 
-                  <section className="space-y-2 border-b border-border/50 pb-4">
+                  <section ref={attachmentsSectionRef} className="space-y-2 border-b border-border/50 pb-4">
                     <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t('dueReminder')}</div>
                     <div className="flex flex-wrap items-center gap-2">
                       <Input
