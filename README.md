@@ -70,6 +70,14 @@ pnpm e2e
 - Rebuild when app code changes: `pnpm e2e:rebuild`
 - Keep containers up after tests (debug): `E2E_KEEP_UP=1 pnpm e2e`
 
+## Ubuntu Startup
+
+If you are cloning AtlasPM onto a fresh Ubuntu host, use:
+
+- `docs/startup-ubuntu.md`
+
+It includes end-to-end bring-up for Docker/Node/pnpm, env setup, and first-run verification.
+
 ## Colima + Docker compose
 
 ```bash

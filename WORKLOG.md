@@ -1259,3 +1259,17 @@
   - `pnpm e2e:up && pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1 --retries=1 && pnpm e2e:down`
 - Risks/known gaps:
   - Table quick controls are context-sensitive (visible when table is active and editor is hovered/focused) and intentionally minimal for low-noise UI.
+
+## 2026-02-26 - Ubuntu Startup Guide for Fresh Clone
+- What changed:
+  - Added Ubuntu-specific startup documentation covering clone, prerequisites, env setup, service bring-up, verification, and troubleshooting:
+    - `/Users/tomoakikawada/Dev/atlaspm/docs/startup-ubuntu.md`
+  - Linked the new guide from README under a dedicated `Ubuntu Startup` section:
+    - `/Users/tomoakikawada/Dev/atlaspm/README.md`
+- Why:
+  - Provide a deterministic first-run path for onboarding on non-Mac hosts (especially remote Ubuntu servers).
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+- Risks/known gaps:
+  - Guide assumes package names `docker.io` and `docker-compose-v2` are available from the host apt repos.
