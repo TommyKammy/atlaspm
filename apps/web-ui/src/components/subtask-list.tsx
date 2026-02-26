@@ -143,6 +143,14 @@ function CreateSubtaskDialog({
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const toSubtaskErrorMessage = (raw: string) => {
+    if (raw.includes('exp') && raw.includes('claim timestamp check failed')) {
+      return t('sessionExpiredPleaseLoginAgain');
+    }
+    return t('createSubtaskFailed');
+  };
 
   const createSubtask = useMutation({
     mutationFn: (data: CreateSubtaskInput) =>
@@ -150,15 +158,28 @@ function CreateSubtaskDialog({
     onSuccess: () => {
       setTitle('');
       setDescription('');
+      setError(null);
       setOpen(false);
       void queryClient.invalidateQueries({ queryKey: queryKeys.taskSubtasks(parentTaskId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.taskSubtaskTree(parentTaskId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
     },
+    onError: (err) => {
+      const message = err instanceof Error ? err.message : '';
+      setError(toSubtaskErrorMessage(message));
+    },
   });
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (!nextOpen) {
+          setError(null);
+        }
+      }}
+    >
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -184,6 +205,11 @@ function CreateSubtaskDialog({
               data-testid="create-subtask-description"
             />
           </div>
+          {error ? (
+            <p className="text-sm text-destructive" data-testid="create-subtask-error">
+              {error}
+            </p>
+          ) : null}
           <Button
             onClick={() => createSubtask.mutate({ title, description })}
             disabled={!title.trim() || createSubtask.isPending}

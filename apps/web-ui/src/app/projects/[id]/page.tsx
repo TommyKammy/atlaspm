@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 const TASK_STATUSES: Task['status'][] = ['TODO', 'IN_PROGRESS', 'DONE', 'BLOCKED'];
+type QuickAddIntent = { sectionId: string; nonce: number } | null;
 
 function parseListParam(raw: string | null): string[] {
   if (!raw) return [];
@@ -41,6 +42,9 @@ export default function ProjectPage() {
   const openTaskId = searchParams.get('task');
   const [newSection, setNewSection] = useState('');
   const [showAddSectionInput, setShowAddSectionInput] = useState(false);
+  const [quickAddIntent, setQuickAddIntent] = useState<QuickAddIntent>(null);
+  const [pendingQuickAdd, setPendingQuickAdd] = useState(false);
+  const [quickAddError, setQuickAddError] = useState<string | null>(null);
   const addSectionInputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
   const viewParam = (searchParams.get('view') ?? 'list').toLowerCase();
@@ -82,6 +86,10 @@ export default function ProjectPage() {
     () => projectsQuery.data?.find((item) => item.id === projectId) ?? null,
     [projectId, projectsQuery.data],
   );
+  const unsectionedQuickAddSectionId = useMemo(
+    () => sectionsQuery.data?.find((section) => section.isDefault)?.id ?? sectionsQuery.data?.[0]?.id ?? null,
+    [sectionsQuery.data],
+  );
 
   const createSection = useMutation({
     mutationFn: (name: string) =>
@@ -99,8 +107,38 @@ export default function ProjectPage() {
       });
       setNewSection('');
       setShowAddSectionInput(false);
+      setQuickAddError(null);
     },
   });
+
+  const dispatchQuickAddIntent = useCallback(
+    (sectionId: string) => {
+      setQuickAddIntent({ sectionId, nonce: Date.now() });
+      setQuickAddError(null);
+      if (view !== 'list') {
+        setProjectQueryParam('view', 'list');
+      }
+    },
+    [setProjectQueryParam, view],
+  );
+
+  const requestAddTask = useCallback(() => {
+    if (unsectionedQuickAddSectionId) {
+      dispatchQuickAddIntent(unsectionedQuickAddSectionId);
+      return;
+    }
+    if (sectionsQuery.isLoading) {
+      setPendingQuickAdd(true);
+      setQuickAddError(null);
+      return;
+    }
+    setQuickAddError(t('addTaskTargetUnavailable'));
+  }, [dispatchQuickAddIntent, sectionsQuery.isLoading, t, unsectionedQuickAddSectionId]);
+
+  const openAddSectionForm = useCallback(() => {
+    setShowAddSectionInput(true);
+    setQuickAddError(null);
+  }, []);
 
   const deletedTasksQuery = useQuery<SectionTaskGroup[]>({
     queryKey: queryKeys.projectTasksDeletedGrouped(projectId),
@@ -129,22 +167,30 @@ export default function ProjectPage() {
         searchInput?.focus();
       }
       if ((event.key === 'c' || event.key === 'C') && !isInputLike) {
-        const quickAddSectionId = sectionsQuery.data?.[0]?.id;
-        if (!quickAddSectionId) return;
         event.preventDefault();
-        const trigger = document.querySelector(`[data-testid="quick-add-open-${quickAddSectionId}"]`) as HTMLButtonElement | null;
-        trigger?.click();
+        requestAddTask();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [sectionsQuery.data]);
+  }, [requestAddTask]);
+
+  useEffect(() => {
+    if (!pendingQuickAdd || !unsectionedQuickAddSectionId) return;
+    setPendingQuickAdd(false);
+    dispatchQuickAddIntent(unsectionedQuickAddSectionId);
+  }, [dispatchQuickAddIntent, pendingQuickAdd, unsectionedQuickAddSectionId]);
 
   useEffect(() => {
     if (openTaskId && view !== 'list') {
       setProjectQueryParam('view', 'list');
     }
   }, [openTaskId, setProjectQueryParam, view]);
+
+  useEffect(() => {
+    if (!showAddSectionInput) return;
+    setTimeout(() => addSectionInputRef.current?.focus(), 0);
+  }, [showAddSectionInput]);
 
   return (
     <div className="space-y-4">
@@ -207,42 +253,55 @@ export default function ProjectPage() {
       {view === 'list' ? (
         <>
           <section className="pb-1">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-0">
+              <Button size="sm" data-testid="add-new-trigger" className="rounded-r-none" onClick={requestAddTask}>
+                <Plus className="mr-1 h-4 w-4" />
+                {t('addNewTask')}
+              </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button size="sm" data-testid="add-new-trigger">
-                    <Plus className="mr-1 h-4 w-4" />
-                    {t('addNew')}
-                    <ChevronDown className="ml-1 h-4 w-4" />
+                  <Button
+                    size="sm"
+                    variant="default"
+                    className="rounded-l-none border-l border-l-primary-foreground/20 px-2"
+                    data-testid="add-new-menu-trigger"
+                  >
+                    <ChevronDown className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start">
                   <DropdownMenuItem
-                    data-testid="add-new-task"
-                    onClick={() => {
-                      const sectionId = sectionsQuery.data?.find((section) => !section.isDefault)?.id ?? sectionsQuery.data?.[0]?.id;
-                      const el = sectionId
-                        ? (document.querySelector(`[data-testid="quick-add-open-${sectionId}"]`) as HTMLButtonElement | null)
-                        : null;
-                      el?.click();
-                    }}
-                  >
-                    {t('addTask')}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
                     data-testid="add-new-section"
-                    onClick={() => {
-                      setShowAddSectionInput(true);
-                      setTimeout(() => addSectionInputRef.current?.focus(), 0);
-                    }}
+                    onClick={openAddSectionForm}
                   >
                     {t('addSection')}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
+            {quickAddError ? (
+              <p className="mt-2 text-xs text-destructive" data-testid="add-task-error">
+                {quickAddError}
+              </p>
+            ) : null}
+          </section>
+          <ProjectBoard
+            projectId={projectId}
+            projectName={project?.name ?? 'Project'}
+            search={search}
+            statusFilter={statusFilter}
+            priorityFilter={priorityFilter}
+            statusFilters={statusFilters}
+            assigneeFilters={assigneeFilters}
+            initialTaskId={openTaskId}
+            quickAddIntent={quickAddIntent}
+            onQuickAddIntentHandled={(nonce) => {
+              setQuickAddIntent((current) => (current?.nonce === nonce ? null : current));
+            }}
+          />
+          <section className="pb-2">
             {showAddSectionInput ? (
-              <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Input
                   ref={addSectionInputRef}
                   value={newSection}
@@ -277,18 +336,18 @@ export default function ProjectPage() {
                   {t('cancel')}
                 </Button>
               </div>
-            ) : null}
+            ) : (
+              <button
+                type="button"
+                data-testid="add-section-bottom-trigger"
+                className="flex h-8 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+                onClick={openAddSectionForm}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>{t('addSection')}</span>
+              </button>
+            )}
           </section>
-          <ProjectBoard
-            projectId={projectId}
-            projectName={project?.name ?? 'Project'}
-            search={search}
-            statusFilter={statusFilter}
-            priorityFilter={priorityFilter}
-            statusFilters={statusFilters}
-            assigneeFilters={assigneeFilters}
-            initialTaskId={openTaskId}
-          />
         </>
       ) : view === 'board' ? (
         <ProjectBoardView

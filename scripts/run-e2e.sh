@@ -14,7 +14,7 @@ popd >/dev/null
 wait_for_url() {
   local url="$1"
   local name="$2"
-  local retries=60
+  local retries=90
   local sleep_sec=2
 
   for ((i=1; i<=retries; i++)); do
@@ -25,6 +25,14 @@ wait_for_url() {
   done
 
   echo "Timed out waiting for $name at $url" >&2
+  pushd infra/docker >/dev/null
+  docker compose ps >&2 || true
+  if [[ "$name" == "core-api" ]]; then
+    docker compose logs --tail=200 core-api postgres >&2 || true
+  elif [[ "$name" == "web-ui" ]]; then
+    docker compose logs --tail=200 web-ui core-api >&2 || true
+  fi
+  popd >/dev/null
   return 1
 }
 

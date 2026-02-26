@@ -10,6 +10,12 @@ services:
       - '55432:5432'
     volumes:
       - atlaspm_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U atlaspm -d atlaspm']
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 5s
 
   core-api:
     build:
@@ -22,6 +28,7 @@ services:
       DATABASE_URL: postgresql://atlaspm:atlaspm@postgres:5432/atlaspm?schema=public
       DEV_AUTH_ENABLED: 'true'
       DEV_AUTH_SECRET: dev-secret-change-me
+      DEV_AUTH_TOKEN_TTL: 8h
       COLLAB_JWT_SECRET: collab-jwt-secret-change-me
       COLLAB_SERVICE_TOKEN: collab-service-token-change-me
       COLLAB_SERVER_URL: ws://localhost:18080
@@ -30,7 +37,9 @@ services:
       OIDC_AUDIENCE: atlaspm
       OIDC_JWKS_URI: https://example.okta.com/oauth2/default/v1/keys
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+    restart: on-failure
     ports:
       - '3001:3001'
 
@@ -56,8 +65,10 @@ services:
       NEXT_PUBLIC_COLLAB_SERVER_URL: ws://localhost:18080
       NEXT_PUBLIC_COLLAB_DEV_MODE: 'false'
     depends_on:
-      - core-api
-      - collab-server
+      core-api:
+        condition: service_started
+      collab-server:
+        condition: service_started
     ports:
       - '3000:3000'
 
@@ -74,7 +85,8 @@ services:
       COLLAB_SERVICE_TOKEN: collab-service-token-change-me
       COLLAB_DEV_MODE: 'false'
     depends_on:
-      - core-api
+      core-api:
+        condition: service_started
     ports:
       - '18080:8080'
 
