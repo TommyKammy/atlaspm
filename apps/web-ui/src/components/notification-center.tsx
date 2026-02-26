@@ -80,7 +80,12 @@ export function NotificationCenter() {
       }}
     >
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="icon" className="relative" data-testid="notification-center-trigger">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative h-8 w-8 rounded-full hover:bg-muted/50"
+          data-testid="notification-center-trigger"
+        >
           <Bell className="h-4 w-4" />
           {unreadCount > 0 ? (
             <span className="absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] text-primary-foreground">

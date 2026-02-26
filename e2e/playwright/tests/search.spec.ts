@@ -54,14 +54,16 @@ async function createTaskViaAPI(token: string, projectId: string, title: string,
 }
 
 test.describe('Search Feature', () => {
-  test('should display global search input in header', async ({ page }) => {
+  test('should display project search input in project header', async ({ page }) => {
     await loginAndCreateProject(page);
     
-    await expect(page.getByTestId('global-search-input')).toBeVisible();
+    await expect(page.getByTestId('project-search-input')).toBeVisible();
   });
 
   test('should navigate to search page from global search', async ({ page }) => {
     await loginAndCreateProject(page);
+    await page.goto('/');
+    await expect(page.getByTestId('global-search-input')).toBeVisible();
     
     const globalSearch = page.getByTestId('global-search-input');
     await globalSearch.fill('test query');

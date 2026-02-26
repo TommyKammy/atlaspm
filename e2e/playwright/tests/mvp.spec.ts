@@ -31,6 +31,19 @@ async function dragBoardTaskToTask(page: Page, taskTitle: string, targetTitle: s
   await source.dragTo(target, { force: true });
 }
 
+async function dragBoardTaskToColumn(page: Page, taskTitle: string, sectionId: string) {
+  const source = page.locator(`[data-testid^="board-task-"][data-task-title="${taskTitle}"]`).first();
+  const target = page.locator(`[data-testid="board-column-${sectionId}"]`).first();
+  await expect(source).toBeVisible();
+  await expect(target).toBeVisible();
+  await source.dragTo(target, { force: true });
+}
+
+async function switchProjectView(page: Page, view: 'list' | 'board' | 'calendar' | 'files') {
+  await page.click(`[data-testid="project-view-${view}"]`);
+  await expect(page).toHaveURL(new RegExp(`[?&]view=${view}`));
+}
+
 function toIsoDate(value: Date) {
   const year = value.getFullYear();
   const month = `${value.getMonth() + 1}`.padStart(2, '0');
@@ -97,9 +110,8 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
 
   await sidebar.getByRole('link', { name: projectName1 }).click();
   await page.waitForURL(`**/projects/${projectA.id}`);
-  await expect(page.locator('[data-testid="project-view-tabs-row"] [data-testid="add-new-trigger"]')).toBeVisible();
-  await expect(page.locator('[data-testid="global-search-input"]')).toBeVisible();
-  await expect(page.locator('[data-testid="project-search-input"]')).toHaveCount(0);
+  await expect(page.locator('[data-testid="add-new-trigger"]')).toBeVisible();
+  await expect(page.locator('[data-testid="project-search-input"]')).toBeVisible();
 
   await page.click('[data-testid="add-new-trigger"]');
   await page.click('[data-testid="add-new-section"]');
@@ -133,14 +145,14 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await quickAddBacklog.press('Enter');
   await expect(page.locator('[data-task-title="Task C"]')).toBeVisible();
 
-  await page.click('[data-testid="project-filter-trigger"]');
-  await page.fill('[data-testid="project-filter-search-input"]', 'Task A');
+  const nameFilter = page.locator('[data-testid="column-filter-name"]').first();
+  await nameFilter.fill('Task A');
   await expect(page.locator('[data-task-title="Task A"]')).toBeVisible();
   await expect(page.locator('[data-task-title="Task B"]')).toHaveCount(0);
-  await page.fill('[data-testid="project-filter-search-input"]', 'Backlog');
+  await nameFilter.fill('Backlog');
   await expect(page.locator('[data-task-title="Task A"]')).toBeVisible();
   await expect(page.locator('[data-task-title="Task B"]')).toBeVisible();
-  await page.click('[data-testid="project-filter-clear"]');
+  await nameFilter.fill('');
   await expect(page.locator('[data-task-title="Task B"]')).toBeVisible();
 
   await page.locator('[data-task-title="Task C"] button[data-testid^="delete-task-"]').first().click({ force: true });
@@ -154,8 +166,8 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await quickAddDoing.press('Enter');
   await expect(page.locator('[data-task-title="Task D"]')).toBeVisible();
 
-  await page.click('[data-testid="project-view-board"]');
-  await dragBoardTaskToTask(page, 'Task C', 'Task D');
+  await switchProjectView(page, 'board');
+  await dragBoardTaskToColumn(page, 'Task C', doing.id);
   await expect
     .poll(async () => {
       const taskGroups = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
@@ -163,9 +175,9 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
       return doingGroup.tasks.some((task: any) => task.title === 'Task C');
     }, { timeout: 20000 })
     .toBe(true);
-  await page.click('[data-testid="project-view-list"]');
+  await switchProjectView(page, 'list');
 
-  await page.click('[data-testid="project-view-calendar"]');
+  await switchProjectView(page, 'calendar');
   const targetDate = toIsoDate(new Date());
   const taskAData = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
   const taskAId = taskAData.flatMap((g: any) => g.tasks).find((task: any) => task.title === 'Task A').id;
@@ -207,7 +219,7 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
     })
     .toBe(null);
   await page.click('[data-testid="calendar-field-due"]');
-  await page.click('[data-testid="project-view-list"]');
+  await switchProjectView(page, 'list');
 
   await page.reload();
   await expect(page.locator('[data-task-title="Task A"]')).toBeVisible();
@@ -330,7 +342,7 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
     })
     .toBeLessThan(unreadBeforeOpen.count);
 
-  await page.click('[data-testid="project-view-files"]');
+  await switchProjectView(page, 'files');
   await expect(page.locator('[data-testid="files-mime-filter"]')).toBeVisible();
   await page.selectOption('[data-testid="files-mime-filter"]', 'IMAGE');
   await expect(page.getByText('pixel.png').first()).toBeVisible();
@@ -350,7 +362,7 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   await page.click('[data-testid="files-toggle-deleted"]');
   await expect(page.locator(`[data-testid="file-row-${uploadedAttachmentId}"]`)).toBeVisible();
 
-  await page.click('[data-testid="project-view-list"]');
+  await switchProjectView(page, 'list');
   await page.click(`[data-testid="open-task-${movedTask.id}"]`);
 
   const reminderInput = page.locator('[data-testid="task-reminder-input"]');
@@ -421,6 +433,7 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
     })
     .toEqual({ status: 'DONE', completedAt: true });
 
+  await page.click('[data-testid="project-settings-menu-trigger"]');
   await page.click('[data-testid="rules-page-link"]');
   await page.waitForURL(`**/projects/${projectA.id}/rules`);
 

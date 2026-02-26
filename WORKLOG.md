@@ -995,3 +995,103 @@
   - `pnpm e2e:rebuild`
 - Risks/known gaps:
   - Project filter search is client-side against loaded grouped data (task title/section/project name). Large datasets may need server-driven query pagination/ranking in a follow-up.
+
+## 2026-02-26 - UI/UX Final Polish (Asana-like header/sidebar/list refinement)
+- What changed:
+  - Header simplification:
+    - Removed text controls (`Sidebar`, `Centered`, `Preset`) from top-right header area.
+    - Added compact sidebar toggle icon (hamburger) in header left on desktop.
+    - Normalized top-right icon actions (theme/notifications/profile) to borderless circular icon buttons.
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/layout/HeaderBar.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/notification-center.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/layout/MobileNavSheet.tsx`
+  - Global search styling:
+    - Updated to lighter capsule style with focus-on-interaction emphasis.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/global-search.tsx`
+  - Sidebar modernization:
+    - Default mode switched to icon-focused compact mode.
+    - Added smooth width expansion on hover for compact mode.
+    - Added persistent mode toggle via header hamburger.
+    - Sidebar state persisted in LocalStorage and cookie (`atlaspm_sidebar_mode`).
+    - Active item switched to left accent bar (no filled active background).
+    - Sidebar tone tuned to neutral dark gray (`#1e1f21`-like HSL token values).
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/layout/AppShell.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/layout/Sidebar.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/layout-preferences.ts`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/globals.css`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/layout.tsx`
+  - Project list UX alignment:
+    - Moved `+ Add new` control to the task-list top area (above columns, left aligned).
+    - Removed independent filter block from project page.
+    - Added per-column filters in list header (name/assignee/due/progress/status).
+    - Reworked section tail quick-add to Asana-like inline `+ Add task...`.
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/projects/[id]/page.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/i18n.tsx`
+  - List detail visual cleanup:
+    - Flattened in-row controls (hover background emphasis instead of constant borders).
+    - Increased task title weight and reduced metadata prominence.
+    - Completed task rows now fade via row opacity reduction.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+  - E2E updates:
+    - Updated MVP flow to validate new add-new placement and column-filter behavior.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/mvp.spec.ts`
+- Why:
+  - Apply final UI polish toward Asana-like density and interaction patterns while preserving existing data/API behavior.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm e2e:up && pnpm --filter @atlaspm/playwright e2e tests/dependencies.spec.ts --grep "empty dependency state"`
+  - `pnpm --filter @atlaspm/playwright e2e`
+- Risks/known gaps:
+  - Compact sidebar intentionally hides labels in DOM for test/accessibility consistency; discoverability is supported by hover-expand and tooltips/title.
+
+## 2026-02-26 - Header Tab Consolidation + Query-driven Views/Search + E2E Stabilization
+- What changed:
+  - Consolidated project navigation into the top header:
+    - Project view tabs (`list/board/calendar/files`) are now controlled only from header query state (`view`).
+    - Added header project search input (`project-search-input`) bound to `q` query for list filtering.
+    - Kept project utilities icon-only in header (`sections`, `trash`, `settings`) with members/rules links inside settings menu.
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/layout/HeaderBar.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/projects/[id]/page.tsx`
+  - Removed duplicated in-page project header block:
+    - Deleted duplicated list/board/calendar/files tabs and members/rules/trash buttons from project body.
+    - `trash` dialog is now query-controlled (`trash=1`) and opened from header icon.
+  - Reduced list container framing for a flatter Asana-like canvas:
+    - `+ Add new` row no longer wrapped in a card border.
+    - Section drop wrappers use frameless style by default.
+    - Column filter header is rendered once (first section) to reduce vertical repetition.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+  - Sidebar refinement:
+    - Added sidebar-local hamburger toggle and retained persisted compact/full mode.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/layout/Sidebar.tsx`
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/layout/AppShell.tsx`
+  - E2E stabilization for new routing behavior:
+    - Updated tests for settings-menu navigation (members/rules).
+    - Updated search tests for project-header search presence.
+    - Stabilized `mvp` view-switch checks and board DnD assertion via column target.
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/mvp.spec.ts`
+      - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/admin.spec.ts`
+      - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/search.spec.ts`
+- Why:
+  - Implement the requested “information consolidation + border reduction” while keeping existing behavior and no-refresh data flow intact.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm e2e:rebuild`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/playwright e2e tests/mvp.spec.ts`
+  - `pnpm --filter @atlaspm/playwright e2e`
+  - `pnpm e2e:down`
+- Risks/known gaps:
+  - Header tabs are desktop-first (`md`+). Mobile keeps sheet navigation and remains functional, but dedicated mobile tab density tuning is still a follow-up item.

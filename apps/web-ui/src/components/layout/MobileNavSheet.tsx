@@ -10,7 +10,7 @@ export function MobileNavSheet() {
     <div className="md:hidden">
       <Sheet>
         <SheetTrigger asChild>
-          <Button variant="outline" size="icon" aria-label="Open sidebar">
+          <Button variant="ghost" size="icon" aria-label="Open sidebar" className="h-8 w-8 rounded-full hover:bg-muted/50">
             <Menu className="h-4 w-4" />
           </Button>
         </SheetTrigger>

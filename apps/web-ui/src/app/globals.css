@@ -23,12 +23,12 @@
   --input: 214.3 31.8% 91.4%;
   --ring: 221 83% 53%;
   --radius: 0.6rem;
-  --sidebar-background: 220 9% 13%;
-  --sidebar-foreground: 210 9% 92%;
-  --sidebar-muted-foreground: 215 8% 68%;
-  --sidebar-hover: 220 8% 22%;
-  --sidebar-active: 220 8% 28%;
-  --sidebar-border: 220 8% 24%;
+  --sidebar-background: 220 5% 13%;
+  --sidebar-foreground: 210 12% 94%;
+  --sidebar-muted-foreground: 216 8% 66%;
+  --sidebar-hover: 220 6% 20%;
+  --sidebar-active: 220 6% 20%;
+  --sidebar-border: 220 5% 23%;
 }
 
 .dark {
@@ -51,12 +51,12 @@
   --border: 223 20% 20%;
   --input: 223 20% 20%;
   --ring: 221 100% 67%;
-  --sidebar-background: 220 9% 13%;
-  --sidebar-foreground: 210 9% 92%;
-  --sidebar-muted-foreground: 215 8% 68%;
-  --sidebar-hover: 220 8% 22%;
-  --sidebar-active: 220 8% 28%;
-  --sidebar-border: 220 8% 24%;
+  --sidebar-background: 220 5% 13%;
+  --sidebar-foreground: 210 12% 94%;
+  --sidebar-muted-foreground: 216 8% 66%;
+  --sidebar-hover: 220 6% 20%;
+  --sidebar-active: 220 6% 20%;
+  --sidebar-border: 220 5% 23%;
 }
 
 @theme inline {

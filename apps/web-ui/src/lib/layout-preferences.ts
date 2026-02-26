@@ -8,13 +8,13 @@ export type ContentLayout = 'full' | 'centered';
 export type ThemePreset = 'default' | 'tangerine';
 export type Locale = 'en' | 'ja';
 
-export const DEFAULT_SIDEBAR_MODE: SidebarMode = 'full';
+export const DEFAULT_SIDEBAR_MODE: SidebarMode = 'icon';
 export const DEFAULT_CONTENT_LAYOUT: ContentLayout = 'full';
 export const DEFAULT_THEME_PRESET: ThemePreset = 'default';
 export const DEFAULT_LOCALE: Locale = 'en';
 
 export function parseSidebarMode(value?: string): SidebarMode {
-  return value === 'icon' ? 'icon' : DEFAULT_SIDEBAR_MODE;
+  return value === 'full' ? 'full' : value === 'icon' ? 'icon' : DEFAULT_SIDEBAR_MODE;
 }
 
 export function parseContentLayout(value?: string): ContentLayout {

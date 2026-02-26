@@ -116,6 +116,7 @@ test('admin users and project members management', async ({ browser, page }) => 
   await api('/me', invitedTokenJwt);
 
   await page.goto(`/projects/${project.id}`);
+  await page.click('[data-testid="project-settings-menu-trigger"]');
   await page.click('[data-testid="project-members-page-link"]');
   await page.waitForURL(`**/projects/${project.id}/members`);
 

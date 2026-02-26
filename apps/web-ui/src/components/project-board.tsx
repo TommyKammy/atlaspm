@@ -113,6 +113,9 @@ type DeleteTaskResponse = {
   taskIds: string[];
 };
 
+type DueColumnFilter = 'ALL' | 'NO_DUE' | 'WITH_DUE' | 'OVERDUE';
+type ProgressColumnFilter = 'ALL' | 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETE';
+
 function buildSectionTaskTree(tasks: Task[]): TaskTreeNode[] {
   const byId = new Map<string, TaskTreeNode>();
   for (const task of tasks) byId.set(task.id, { task, children: [] });
@@ -200,7 +203,7 @@ function AssigneeCombobox({
                 variant="ghost"
                 size="icon"
                 data-testid={`assignee-trigger-${task.id}`}
-                className="h-6 w-6 rounded-full border"
+                className="h-6 w-6 rounded-full border-0 hover:bg-muted/40"
               >
                 {selected === 'unassigned' ? <Plus className="h-3 w-3" /> : <span className="text-[10px]">{initials(selectedLabel)}</span>}
               </Button>
@@ -297,7 +300,7 @@ function TaskRow({
       className={cn(
         'group h-9 border-b transition-colors hover:bg-muted/40',
         draggable && 'cursor-grab active:cursor-grabbing',
-        isDone && 'text-muted-foreground/80',
+        isDone && 'opacity-50',
       )}
       data-testid={`task-${task.id}`}
       data-task-title={task.title}
@@ -343,7 +346,7 @@ function TaskRow({
             type="button"
             data-no-dnd="true"
             className={cn(
-              'truncate text-left text-sm hover:underline',
+              'truncate text-left text-sm font-medium hover:underline',
               isDone && 'line-through',
             )}
             onPointerDown={(event) => event.stopPropagation()}
@@ -380,7 +383,7 @@ function TaskRow({
               version: task.version,
             })
           }
-          className="h-7 border-transparent bg-transparent px-2 shadow-none hover:border-border focus-visible:border-border"
+          className="h-7 border-0 bg-transparent px-2 shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
         />
       </TableCell>
       <TableCell>
@@ -391,7 +394,7 @@ function TaskRow({
             max={100}
             value={task.progressPercent}
             onChange={(e) => onEdit(task.id, { progressPercent: Number(e.target.value), version: task.version })}
-            className="h-7 w-16 border-transparent bg-transparent px-2 shadow-none hover:border-border focus-visible:border-border"
+            className="h-7 w-16 border-0 bg-transparent px-2 shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
           />
           <ProgressBar value={task.progressPercent} />
         </div>
@@ -399,8 +402,8 @@ function TaskRow({
       <TableCell>
         <select
           className={cn(
-            'h-7 w-full rounded-full border border-transparent bg-transparent px-2 text-xs font-medium',
-            'hover:border-border focus:border-border',
+            'h-7 w-full rounded-full border-0 bg-transparent px-2 text-xs font-medium',
+            'hover:bg-muted/40 focus:bg-muted/40',
             statusBadgeClass[task.status],
           )}
           value={task.status}
@@ -412,13 +415,9 @@ function TaskRow({
           <option value="BLOCKED">BLOCKED</option>
         </select>
       </TableCell>
-      <TableCell>
-        <Badge variant="secondary" className="max-w-40 truncate">
-          {projectName}
-        </Badge>
-      </TableCell>
-      <TableCell className="text-xs text-muted-foreground">-</TableCell>
-      <TableCell className="text-xs text-muted-foreground">{t('private')}</TableCell>
+      <TableCell className="text-[11px] text-muted-foreground">{projectName}</TableCell>
+      <TableCell className="text-[11px] text-muted-foreground">-</TableCell>
+      <TableCell className="text-[11px] text-muted-foreground">{t('private')}</TableCell>
       <TableCell>
         {task.assigneeUserId ? (
           <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border text-[10px]">
@@ -469,23 +468,23 @@ function QuickAddTask({
 
   if (!open) {
     return (
-      <Button
-        variant="ghost"
-        size="sm"
+      <button
+        type="button"
         data-testid={`quick-add-open-${sectionId}`}
-        className="justify-start px-0 text-muted-foreground"
+        className="flex h-8 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         onClick={() => {
           setOpen(true);
           setTimeout(() => inputRef.current?.focus(), 0);
         }}
       >
-        + {t('addTask')}
-      </Button>
+        <Plus className="h-3.5 w-3.5" />
+        <span>{t('addTaskInline')}</span>
+      </button>
     );
   }
 
   return (
-    <div className="flex items-center gap-2 py-2">
+    <div className="py-1">
       <Input
         ref={inputRef}
         value={title}
@@ -500,12 +499,16 @@ function QuickAddTask({
             setTitle('');
           }
         }}
-        placeholder={t('taskName')}
+        onBlur={() => {
+          if (!title.trim()) {
+            setOpen(false);
+            setTitle('');
+          }
+        }}
+        placeholder={t('addTaskInline')}
         data-testid={`quick-add-input-${sectionId}`}
+        className="h-8 border-0 border-b border-border/60 rounded-none bg-transparent px-0 shadow-none focus-visible:ring-0"
       />
-      <Button size="sm" data-testid={`quick-add-submit-${sectionId}`} onClick={() => void submit()}>
-        {t('add')}
-      </Button>
     </div>
   );
 }
@@ -513,7 +516,7 @@ function QuickAddTask({
 function SectionDropTarget({
   sectionId,
   children,
-  frameless = false,
+  frameless = true,
 }: {
   sectionId: string;
   children: ReactNode;
@@ -526,27 +529,12 @@ function SectionDropTarget({
       ref={setNodeRef}
       data-testid={`section-${sectionId}`}
       className={cn(
-        frameless ? 'bg-transparent' : 'rounded-lg border bg-card',
+        frameless ? 'bg-transparent' : 'rounded-lg bg-card',
         isOver && 'ring-1 ring-ring',
       )}
     >
       {children}
     </section>
-  );
-}
-
-function SectionDropZone({ sectionId }: { sectionId: string }) {
-  const { t } = useI18n();
-  const { setNodeRef, isOver } = useDroppable({ id: `section-drop-zone-${sectionId}`, data: { sectionId } });
-
-  return (
-    <div
-      ref={setNodeRef}
-      data-testid={`section-drop-zone-${sectionId}`}
-      className={cn('rounded-md border border-dashed px-2 py-1 text-[11px] text-muted-foreground', isOver && 'border-ring text-foreground')}
-    >
-      {t('dropTasksHere')}
-    </div>
   );
 }
 
@@ -575,6 +563,11 @@ export default function ProjectBoard({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [collapsedTaskIds, setCollapsedTaskIds] = useState<Set<string>>(new Set());
   const [undoDelete, setUndoDelete] = useState<UndoDeleteState | null>(null);
+  const [nameFilter, setNameFilter] = useState('');
+  const [assigneeFilter, setAssigneeFilter] = useState<'ALL' | 'UNASSIGNED' | string>('ALL');
+  const [dueFilter, setDueFilter] = useState<DueColumnFilter>('ALL');
+  const [progressFilter, setProgressFilter] = useState<ProgressColumnFilter>('ALL');
+  const [statusColumnFilter, setStatusColumnFilter] = useState<'ALL' | Task['status']>('ALL');
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -750,8 +743,10 @@ export default function ProjectBoard({
   const members = membersQuery.data ?? [];
 
   const filteredGroups = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
+    const normalizedSearch = [search.trim(), nameFilter.trim()].filter(Boolean).join(' ').trim().toLowerCase();
     const normalizedProjectName = projectName.trim().toLowerCase();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     return groups.map((group) => ({
       ...group,
       tasks: group.tasks.filter((task) => {
@@ -760,12 +755,28 @@ export default function ProjectBoard({
         const projectMatches = Boolean(normalizedSearch) && normalizedProjectName.includes(normalizedSearch);
         const bySearch =
           !normalizedSearch || sectionMatches || titleMatches || projectMatches;
-        const byStatus = statusFilter === 'ALL' || task.status === statusFilter;
+        const byStatus =
+          (statusFilter === 'ALL' || task.status === statusFilter) &&
+          (statusColumnFilter === 'ALL' || task.status === statusColumnFilter);
         const byPriority = priorityFilter === 'ALL' || task.priority === priorityFilter;
-        return bySearch && byStatus && byPriority;
+        const byAssignee =
+          assigneeFilter === 'ALL' ||
+          (assigneeFilter === 'UNASSIGNED' ? !task.assigneeUserId : task.assigneeUserId === assigneeFilter);
+        const dueDate = task.dueAt ? new Date(task.dueAt) : null;
+        const byDue =
+          dueFilter === 'ALL' ||
+          (dueFilter === 'NO_DUE' && !dueDate) ||
+          (dueFilter === 'WITH_DUE' && dueDate !== null) ||
+          (dueFilter === 'OVERDUE' && dueDate !== null && dueDate < today);
+        const byProgress =
+          progressFilter === 'ALL' ||
+          (progressFilter === 'NOT_STARTED' && task.progressPercent <= 0) ||
+          (progressFilter === 'IN_PROGRESS' && task.progressPercent > 0 && task.progressPercent < 100) ||
+          (progressFilter === 'COMPLETE' && task.progressPercent >= 100);
+        return bySearch && byStatus && byPriority && byAssignee && byDue && byProgress;
       }),
     }));
-  }, [groups, priorityFilter, projectName, search, statusFilter]);
+  }, [assigneeFilter, dueFilter, groups, nameFilter, priorityFilter, progressFilter, projectName, search, statusColumnFilter, statusFilter]);
 
   const groupedVisibleRows = useMemo(() => {
     return filteredGroups.map((group) => {
@@ -786,12 +797,10 @@ export default function ProjectBoard({
     if (activeTask.parentId || activeHasChildren) return;
 
     const overTaskId = String(over.id);
-    const droppedOnSection = overTaskId.startsWith('section-drop-') || overTaskId.startsWith('section-drop-zone-');
-    const overSectionIdFromId = overTaskId.startsWith('section-drop-zone-')
-      ? overTaskId.replace('section-drop-zone-', '')
-      : overTaskId.startsWith('section-drop-')
-        ? overTaskId.replace('section-drop-', '')
-        : '';
+    const droppedOnSection = overTaskId.startsWith('section-drop-');
+    const overSectionIdFromId = overTaskId.startsWith('section-drop-')
+      ? overTaskId.replace('section-drop-', '')
+      : '';
     const fallbackSectionId = groups.find((group) => group.tasks.some((task) => task.id === overTaskId))?.section.id ?? '';
     const toSectionId = String(over.data.current?.sectionId ?? overSectionIdFromId ?? fallbackSectionId);
     if (!toSectionId) return;
@@ -818,10 +827,10 @@ export default function ProjectBoard({
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <div className="space-y-4">
-        {groupedVisibleRows.map(({ group, rows }) => {
+        {groupedVisibleRows.map(({ group, rows }, groupIndex) => {
           const isNoSection = group.section.isDefault || group.section.name.toLowerCase() === 'no section';
           return (
-          <SectionDropTarget key={group.section.id} sectionId={group.section.id} frameless={isNoSection}>
+          <SectionDropTarget key={group.section.id} sectionId={group.section.id}>
             {!isNoSection ? (
               <header className="flex items-center justify-between border-b px-4 py-2">
                 <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground">{group.section.name}</h3>
@@ -830,20 +839,100 @@ export default function ProjectBoard({
             ) : null}
 
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t('name')}</TableHead>
-                  <TableHead>{t('assignee')}</TableHead>
-                  <TableHead>{t('dueDate')}</TableHead>
-                  <TableHead>{t('progress')}</TableHead>
-                  <TableHead>{t('status')}</TableHead>
-                  <TableHead>{t('projects')}</TableHead>
-                  <TableHead>{t('dependencies')}</TableHead>
-                  <TableHead>{t('visibility')}</TableHead>
-                  <TableHead>{t('collaborators')}</TableHead>
-                  <TableHead>{t('actions')}</TableHead>
-                </TableRow>
-              </TableHeader>
+              {groupIndex === 0 ? (
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="min-w-[240px]">
+                      <div className="space-y-1">
+                        <p>{t('name')}</p>
+                        <Input
+                          value={nameFilter}
+                          onChange={(event) => setNameFilter(event.target.value)}
+                          placeholder={t('searchTasks')}
+                          className="h-7"
+                          data-testid="column-filter-name"
+                        />
+                      </div>
+                    </TableHead>
+                    <TableHead className="min-w-[140px]">
+                      <div className="space-y-1">
+                        <p>{t('assignee')}</p>
+                        <select
+                          value={assigneeFilter}
+                          onChange={(event) => setAssigneeFilter(event.target.value)}
+                          className="h-7 w-full rounded-md border bg-background px-2 text-xs"
+                          data-testid="column-filter-assignee"
+                        >
+                          <option value="ALL">{t('all')}</option>
+                          <option value="UNASSIGNED">{t('unassigned')}</option>
+                          {members.map((member) => {
+                            const label = member.user.displayName || member.user.email || member.user.id;
+                            return (
+                              <option key={member.id} value={member.userId}>
+                                {label}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                    </TableHead>
+                    <TableHead className="min-w-[130px]">
+                      <div className="space-y-1">
+                        <p>{t('dueDate')}</p>
+                        <select
+                          value={dueFilter}
+                          onChange={(event) => setDueFilter(event.target.value as DueColumnFilter)}
+                          className="h-7 w-full rounded-md border bg-background px-2 text-xs"
+                          data-testid="column-filter-due"
+                        >
+                          <option value="ALL">{t('all')}</option>
+                          <option value="NO_DUE">{t('noDueDate')}</option>
+                          <option value="WITH_DUE">{t('withDueDate')}</option>
+                          <option value="OVERDUE">{t('overdue')}</option>
+                        </select>
+                      </div>
+                    </TableHead>
+                    <TableHead className="min-w-[120px]">
+                      <div className="space-y-1">
+                        <p>{t('progress')}</p>
+                        <select
+                          value={progressFilter}
+                          onChange={(event) => setProgressFilter(event.target.value as ProgressColumnFilter)}
+                          className="h-7 w-full rounded-md border bg-background px-2 text-xs"
+                          data-testid="column-filter-progress"
+                        >
+                          <option value="ALL">{t('all')}</option>
+                          <option value="NOT_STARTED">{t('notStarted')}</option>
+                          <option value="IN_PROGRESS">1-99%</option>
+                          <option value="COMPLETE">{t('done')}</option>
+                        </select>
+                      </div>
+                    </TableHead>
+                    <TableHead className="min-w-[130px]">
+                      <div className="space-y-1">
+                        <p>{t('status')}</p>
+                        <select
+                          value={statusColumnFilter}
+                          onChange={(event) => setStatusColumnFilter(event.target.value as 'ALL' | Task['status'])}
+                          className="h-7 w-full rounded-md border bg-background px-2 text-xs"
+                          data-testid="column-filter-status"
+                        >
+                          <option value="ALL">{t('all')}</option>
+                          <option value="TODO">TODO</option>
+                          <option value="IN_PROGRESS">IN_PROGRESS</option>
+                          <option value="DONE">DONE</option>
+                          <option value="BLOCKED">BLOCKED</option>
+                        </select>
+                      </div>
+                    </TableHead>
+                    <TableHead>{t('projects')}</TableHead>
+                    <TableHead>{t('dependencies')}</TableHead>
+                    <TableHead>{t('visibility')}</TableHead>
+                    <TableHead>{t('collaborators')}</TableHead>
+                    <TableHead>{t('actions')}</TableHead>
+                  </TableRow>
+                </TableHeader>
+              ) : null}
               <TableBody>
                 <SortableContext items={rows.map((row) => row.task.id)} strategy={verticalListSortingStrategy}>
                   {rows.map((row) => (
@@ -887,8 +976,7 @@ export default function ProjectBoard({
               </div>
             ) : null}
 
-            <div className={cn('space-y-2 px-4 py-2', !isNoSection && 'border-t')}>
-              <SectionDropZone sectionId={group.section.id} />
+            <div className={cn('px-4 py-2', !isNoSection && 'border-t')}>
               <QuickAddTask
                 sectionId={group.section.id}
                 onCreate={async (sectionId, title) => {
