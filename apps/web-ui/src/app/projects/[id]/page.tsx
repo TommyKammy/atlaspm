@@ -192,6 +192,17 @@ export default function ProjectPage() {
     setTimeout(() => addSectionInputRef.current?.focus(), 0);
   }, [showAddSectionInput]);
 
+  useEffect(() => {
+    const onRequestAddSection = () => {
+      if (view !== 'list') {
+        setProjectQueryParam('view', 'list');
+      }
+      openAddSectionForm();
+    };
+    window.addEventListener('atlaspm:add-section', onRequestAddSection);
+    return () => window.removeEventListener('atlaspm:add-section', onRequestAddSection);
+  }, [openAddSectionForm, setProjectQueryParam, view]);
+
   return (
     <div className="space-y-4">
       <Dialog open={trashOpen} onOpenChange={(open) => setProjectQueryParam('trash', open ? '1' : null)}>

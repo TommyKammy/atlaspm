@@ -257,6 +257,11 @@ export function HeaderBar({
     queryFn: () => api(`/projects/${projectId}/sections`),
     enabled: Boolean(projectId),
   });
+  const groupedTasksQuery = useQuery<{ section: Section; tasks: Task[] }[]>({
+    queryKey: queryKeys.projectTasksGrouped(projectId ?? ''),
+    queryFn: () => api(`/projects/${projectId}/tasks?groupBy=section`),
+    enabled: Boolean(projectId),
+  });
   const membersQuery = useQuery<ProjectMember[]>({
     queryKey: queryKeys.projectMembers(projectId ?? ''),
     queryFn: () => api(`/projects/${projectId}/members`),
@@ -327,8 +332,47 @@ export function HeaderBar({
     applyProjectFilters([], []);
   }, [applyProjectFilters]);
   const filterCount = selectedStatuses.length + selectedAssignees.length;
+  const [sectionsOpen, setSectionsOpen] = useState(false);
 
   const [projectSearchInput, setProjectSearchInput] = useState(query);
+  const sectionTaskCounts = useMemo(
+    () => new Map((groupedTasksQuery.data ?? []).map((group) => [group.section.id, group.tasks.length])),
+    [groupedTasksQuery.data],
+  );
+  const navigableSections = useMemo(
+    () =>
+      (sectionsQuery.data ?? [])
+        .filter((section) => !section.isDefault)
+        .sort((left, right) => left.position - right.position),
+    [sectionsQuery.data],
+  );
+
+  const focusSection = useCallback(
+    (sectionId: string) => {
+      const emitFocus = () => {
+        window.dispatchEvent(new CustomEvent('atlaspm:focus-section', { detail: { sectionId } }));
+      };
+      if (currentView !== 'list') {
+        setProjectQueryParam('view', 'list');
+        setTimeout(emitFocus, 220);
+      } else {
+        requestAnimationFrame(emitFocus);
+      }
+    },
+    [currentView, setProjectQueryParam],
+  );
+
+  const openAddSectionFromHeader = useCallback(() => {
+    const emitAdd = () => {
+      window.dispatchEvent(new CustomEvent('atlaspm:add-section'));
+    };
+    if (currentView !== 'list') {
+      setProjectQueryParam('view', 'list');
+      setTimeout(emitAdd, 220);
+    } else {
+      requestAnimationFrame(emitAdd);
+    }
+  }, [currentView, setProjectQueryParam]);
 
   useEffect(() => {
     setProjectSearchInput(query);
@@ -427,19 +471,64 @@ export function HeaderBar({
       <div className="flex items-center gap-1">
         {projectId ? (
           <>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="relative h-8 w-8 rounded-full hover:bg-muted/50" data-testid="project-sections-icon">
-                    <Layers3 className="h-4 w-4" />
-                    <span className="absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-muted px-1 text-[10px] text-muted-foreground">
-                      {sectionsQuery.data?.filter((section) => !section.isDefault).length ?? 0}
-                    </span>
+            <Popover open={sectionsOpen} onOpenChange={setSectionsOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="relative h-8 w-8 rounded-full hover:bg-muted/50"
+                  data-testid="project-sections-icon"
+                  aria-label={t('sections')}
+                >
+                  <Layers3 className="h-4 w-4" />
+                  <span className="absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-muted px-1 text-[10px] text-muted-foreground">
+                    {navigableSections.length}
+                  </span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72 p-0" data-testid="project-sections-popover">
+                <div className="flex items-center justify-between border-b px-3 py-2">
+                  <p className="text-xs font-medium">{t('sections')}</p>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs"
+                    data-testid="project-sections-add"
+                    onClick={() => {
+                      setSectionsOpen(false);
+                      openAddSectionFromHeader();
+                    }}
+                  >
+                    {t('addSection')}
                   </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t('sections')}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+                </div>
+                <div className="max-h-72 overflow-auto p-2">
+                  {!navigableSections.length ? (
+                    <p className="px-1 py-2 text-sm text-muted-foreground">{t('noSectionsYet')}</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {navigableSections.map((section) => (
+                        <button
+                          key={section.id}
+                          type="button"
+                          className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-muted/40"
+                          data-testid={`project-sections-jump-${section.id}`}
+                          onClick={() => {
+                            setSectionsOpen(false);
+                            focusSection(section.id);
+                          }}
+                        >
+                          <span className="truncate">{section.name}</span>
+                          <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                            {sectionTaskCounts.get(section.id) ?? 0}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
             <Popover>
               <PopoverTrigger asChild>
                 <Button

@@ -171,6 +171,19 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   expect(backlog).toBeTruthy();
   expect(doing).toBeTruthy();
 
+  await page.click('[data-testid="project-sections-icon"]');
+  await expect(page.locator('[data-testid="project-sections-popover"]')).toBeVisible();
+  await expect(page.locator(`[data-testid="project-sections-jump-${backlog.id}"]`)).toBeVisible();
+  await expect(page.locator(`[data-testid="project-sections-jump-${doing.id}"]`)).toBeVisible();
+  await page.click(`[data-testid="project-sections-jump-${doing.id}"]`);
+  await expect(page.locator(`[data-testid="section-${doing.id}"]`)).toHaveAttribute('data-highlighted', 'true');
+
+  await page.click('[data-testid="project-sections-icon"]');
+  await page.click('[data-testid="project-sections-add"]');
+  await page.fill('[data-testid="new-section-input"]', 'Later');
+  await page.click('[data-testid="create-section-btn"]');
+  await expect(page.getByText('Later').first()).toBeVisible();
+
   await page.click('[data-testid="add-new-trigger"]');
   const quickAddNoSection = page.locator(`[data-testid="quick-add-input-${noSection.id}"]`);
   await expect(quickAddNoSection).toBeVisible();

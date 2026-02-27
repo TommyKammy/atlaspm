@@ -1400,3 +1400,31 @@
   - `pnpm e2e`
 - Risks/known gaps:
   - My Tasks aggregation currently fetches assigned tasks per project and merges client-side; if project count grows very large, a dedicated core endpoint (`GET /my/tasks`) will be more efficient.
+
+## 2026-02-27 - Header Section Icon: Actionable Popover + Section Jump
+- What changed:
+  - Implemented actionable behavior for header section icon in project page:
+    - click opens sections popover with non-default section list and task counts.
+    - added `Add section` action in popover.
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/layout/HeaderBar.tsx`
+  - Implemented section focus flow from header to list view:
+    - click section row in popover triggers jump-to-section (auto-switch to list if needed).
+    - target section auto-expands if collapsed and gets temporary highlight ring.
+    - files:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+  - Wired global `add-section` intent from header into project page add-section input flow.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/projects/[id]/page.tsx`
+  - Extended MVP E2E:
+    - validates sections popover rendering, section jump, and add-section action from sections icon menu.
+    - file:
+      - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/mvp.spec.ts`
+- Why:
+  - Remove dead-click behavior and provide direct, Asana-like section navigation/management affordance from header utility area.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm e2e:up && pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1 --reporter=line && pnpm e2e:down`
+- Risks/known gaps:
+  - Popover currently lists only non-default sections by design; default/no-section group is intentionally omitted from this navigator.

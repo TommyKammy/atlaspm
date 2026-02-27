@@ -733,10 +733,12 @@ function SectionDropTarget({
   sectionId,
   children,
   frameless = true,
+  highlighted = false,
 }: {
   sectionId: string;
   children: ReactNode;
   frameless?: boolean;
+  highlighted?: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `section-drop-${sectionId}`, data: { sectionId } });
 
@@ -744,9 +746,11 @@ function SectionDropTarget({
     <section
       ref={setNodeRef}
       data-testid={`section-${sectionId}`}
+      data-highlighted={highlighted ? 'true' : 'false'}
       className={cn(
         frameless ? 'bg-transparent' : 'rounded-lg bg-card',
         isOver && 'ring-1 ring-ring',
+        highlighted && 'ring-1 ring-primary/60',
       )}
     >
       {children}
@@ -787,6 +791,7 @@ export default function ProjectBoard({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [collapsedTaskIds, setCollapsedTaskIds] = useState<Set<string>>(new Set());
   const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<string>>(new Set());
+  const [highlightedSectionId, setHighlightedSectionId] = useState<string | null>(null);
   const [undoDelete, setUndoDelete] = useState<UndoDeleteState | null>(null);
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [sectionNameDraft, setSectionNameDraft] = useState('');
@@ -794,6 +799,7 @@ export default function ProjectBoard({
   const [columnWidthsLoaded, setColumnWidthsLoaded] = useState(false);
   const [hasStoredColumnWidths, setHasStoredColumnWidths] = useState(false);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resizeStateRef = useRef<{ key: BoardColumnKey; startX: number; startWidth: number } | null>(null);
   const scrollSyncLockRef = useRef(false);
   const headerScrollRef = useRef<HTMLDivElement | null>(null);
@@ -954,6 +960,38 @@ export default function ProjectBoard({
       return next;
     });
   }, [quickAddIntent]);
+
+  useEffect(() => {
+    const onFocusSection = (event: Event) => {
+      const detail = (event as CustomEvent<{ sectionId?: string }>).detail;
+      const sectionId = detail?.sectionId;
+      if (!sectionId) return;
+
+      setCollapsedSectionIds((current) => {
+        if (!current.has(sectionId)) return current;
+        const next = new Set(current);
+        next.delete(sectionId);
+        return next;
+      });
+
+      requestAnimationFrame(() => {
+        const element = document.querySelector<HTMLElement>(`[data-testid="section-${sectionId}"]`);
+        element?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+
+      setHighlightedSectionId(sectionId);
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = setTimeout(() => {
+        setHighlightedSectionId((current) => (current === sectionId ? null : current));
+      }, 1600);
+    };
+
+    window.addEventListener('atlaspm:focus-section', onFocusSection as EventListener);
+    return () => {
+      window.removeEventListener('atlaspm:focus-section', onFocusSection as EventListener);
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    };
+  }, []);
 
   const groupsQuery = useQuery<SectionTaskGroup[]>({
     queryKey: queryKeys.projectTasksGrouped(projectId),
@@ -1379,7 +1417,11 @@ export default function ProjectBoard({
         {groupedVisibleRows.map(({ group, rows, sectionCollapsed }) => {
           const isNoSection = group.section.isDefault || group.section.name.toLowerCase() === 'no section';
           return (
-          <SectionDropTarget key={group.section.id} sectionId={group.section.id}>
+          <SectionDropTarget
+            key={group.section.id}
+            sectionId={group.section.id}
+            highlighted={highlightedSectionId === group.section.id}
+          >
             {!isNoSection ? (
               <header className="flex items-center justify-between border-b border-[#eceff2] bg-[#f7f8f9] px-4 py-3.5 dark:border-border/50 dark:bg-muted/20">
                 <div className="flex items-center gap-2">
