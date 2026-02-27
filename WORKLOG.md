@@ -1977,3 +1977,28 @@
   - `pnpm e2e` (32 passed)
 - Risks/known gaps:
   - 比較レポートはローカル開発データ依存で、Q1/Q2 は改善よりもプラン変更による揺らぎが見える。実運用相当データで再計測して最終判断する必要あり。
+
+## 2026-02-27 - Security hardening: transitive dependency vulnerabilities (lodash/js-yaml)
+- What changed:
+  - Added root-level pnpm overrides:
+    - `/Users/tomoakikawada/Dev/atlaspm/package.json`
+    - `lodash` pinned to `4.17.23`
+    - `js-yaml` pinned to `4.1.1`
+  - Updated lockfile resolution:
+    - `/Users/tomoakikawada/Dev/atlaspm/pnpm-lock.yaml`
+- Why:
+  - `pnpm audit --prod` reported moderate prototype-pollution advisories in transitive dependencies used by core-api path:
+    - `lodash@4.17.21` (CVE-2025-13465)
+    - `js-yaml@4.1.0` (CVE-2025-64718)
+  - Fix required without relaxing tests or changing architecture.
+- How tested (exact commands):
+  - `pnpm install`
+  - `pnpm why lodash js-yaml --filter @atlaspm/core-api`
+  - `pnpm audit --prod --json` (result: 0 vulnerabilities)
+  - `pnpm -r --if-present lint`
+  - `pnpm -r --if-present type-check`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm -r --if-present build`
+  - `pnpm e2e` (32 passed)
+- Risks/known gaps:
+  - Overrides may need periodic review when NestJS transitive ranges change; keep audit checks in CI cadence.

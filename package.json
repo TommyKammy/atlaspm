@@ -7,6 +7,12 @@
     "node": ">=20.0.0 <21.0.0",
     "pnpm": ">=9.0.0 <10.0.0"
   },
+  "pnpm": {
+    "overrides": {
+      "lodash": "4.17.23",
+      "js-yaml": "4.1.1"
+    }
+  },
   "scripts": {
     "dev": "pnpm -r --parallel --if-present dev",
     "build": "pnpm -r --if-present build",
