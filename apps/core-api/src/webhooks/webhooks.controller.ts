@@ -6,6 +6,7 @@ import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { ProjectRole } from '@prisma/client';
+import { ProjectRoleGuard, RequireProjectRole } from '../auth/role.guard';
 
 class CreateWebhookDto {
   @IsUUID()
@@ -22,7 +23,7 @@ class RetryDeadLetterDto {
 }
 
 @Controller('webhooks')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ProjectRoleGuard)
 export class WebhooksController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -30,8 +31,8 @@ export class WebhooksController {
   ) {}
 
   @Post()
+  @RequireProjectRole(ProjectRole.ADMIN, { source: 'body', key: 'projectId' })
   async create(@Body() body: CreateWebhookDto, @CurrentRequest() req: AppRequest) {
-    await this.domain.requireProjectRole(body.projectId, req.user.sub, ProjectRole.ADMIN);
     return this.prisma.$transaction(async (tx) => {
       const webhook = await tx.webhook.create({ data: body });
       await this.domain.appendAuditOutbox({
@@ -73,13 +74,12 @@ export class WebhooksController {
   }
 
   @Post('dlq/:eventId/retry')
+  @RequireProjectRole(ProjectRole.ADMIN, { source: 'body', key: 'projectId' })
   async retryDeadLetterEvent(
     @Param('eventId') eventId: string,
     @Body() body: RetryDeadLetterDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(body.projectId, req.user.sub, ProjectRole.ADMIN);
-
     const [projectTaskRows, projectSectionRows, event] = await Promise.all([
       this.prisma.task.findMany({ where: { projectId: body.projectId }, select: { id: true } }),
       this.prisma.section.findMany({ where: { projectId: body.projectId }, select: { id: true } }),

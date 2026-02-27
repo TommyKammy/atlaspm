@@ -1637,3 +1637,39 @@
 - Risks/known gaps:
   - `SELECT` option editor currently uses line-based input (`label|value`) for speed and low dependency footprint; richer drag/drop option editor can be added later without API change.
   - `pnpm e2e` without rebuild may still use stale docker images after code changes; use `pnpm e2e:rebuild` when app code changed.
+
+## 2026-02-27 - P4-1 (Wave 1) Role Authorization Guard Foundation
+- What changed:
+  - Added reusable role-guard infrastructure in core-api:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/auth/role.guard.ts`
+    - `RequireProjectRole(...)` decorator + `ProjectRoleGuard`
+    - `RequireWorkspaceRole(...)` decorator + `WorkspaceRoleGuard`
+    - supports id resolution from `params/body/query`.
+  - Extended request typing so resolved role can be attached to request context:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/common/types.ts`
+  - Registered new guards in app DI container:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/app.module.ts`
+  - Migrated direct-id endpoints from ad-hoc authorization checks to guard+decorator:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/projects/projects.controller.ts`
+      - create (workspace role from body.workspaceId)
+      - members list/add/update/remove (project role from params.id)
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/sections/sections.controller.ts`
+      - list/create/reorder (project role)
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/rules/rules.controller.ts`
+      - list/create (project role)
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/webhooks/webhooks.controller.ts`
+      - create/retry DLQ (project role)
+      - kept `/webhooks/dlq` explicit check for backward-compatible validation message behavior.
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/workspaces/workspace-admin.controller.ts`
+      - workspace users list / invitations create+list (workspace role)
+      - kept conditional admin/self-update flows on `PATCH /users/:id` and invite revoke/reissue manual.
+- Why:
+  - Start P4 authz hardening by centralizing role checks for straightforward endpoints while preserving existing behavior.
+  - Reduce repeated controller-level role-check boilerplate and prepare for full role policy unification.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/core-api test`
+- Risks/known gaps:
+  - Endpoints requiring resource lookup indirection (e.g., `taskId -> projectId`, `invitationId -> workspaceId`) still use manual checks and are targeted for next wave.
+  - Full UI disable/tooltip reason alignment is not part of this backend-first wave.

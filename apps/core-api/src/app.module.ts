@@ -26,6 +26,7 @@ import { WorkloadModule } from './workload/workload.module';
 import { DashboardsModule } from './dashboards/dashboards.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { CustomFieldsController } from './custom-fields/custom-fields.controller';
+import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, SearchModule, PortfoliosModule, WorkloadModule, DashboardsModule, IntegrationsModule],
@@ -52,6 +53,8 @@ import { CustomFieldsController } from './custom-fields/custom-fields.controller
     TaskRetentionService,
     WebhookDeliveryService,
     NotificationsService,
+    ProjectRoleGuard,
+    WorkspaceRoleGuard,
   ],
 })
 export class AppModule {}

@@ -16,6 +16,7 @@ import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { ProjectRole } from '@prisma/client';
+import { ProjectRoleGuard, RequireProjectRole } from '../auth/role.guard';
 
 class CreateSectionDto {
   @IsString()
@@ -37,7 +38,7 @@ class ReorderSectionDto {
 }
 
 @Controller()
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ProjectRoleGuard)
 export class SectionsController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -45,18 +46,18 @@ export class SectionsController {
   ) {}
 
   @Get('projects/:id/sections')
-  async list(@Param('id') projectId: string, @CurrentRequest() req: AppRequest) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+  @RequireProjectRole(ProjectRole.VIEWER)
+  async list(@Param('id') projectId: string) {
     return this.prisma.section.findMany({ where: { projectId }, orderBy: { position: 'asc' } });
   }
 
   @Post('projects/:id/sections')
+  @RequireProjectRole(ProjectRole.MEMBER)
   async create(
     @Param('id') projectId: string,
     @Body() body: CreateSectionDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
     const last = await this.prisma.section.findFirst({ where: { projectId }, orderBy: { position: 'desc' } });
     return this.prisma.$transaction(async (tx) => {
       const section = await tx.section.create({
@@ -101,8 +102,8 @@ export class SectionsController {
   }
 
   @Post('sections/reorder')
+  @RequireProjectRole(ProjectRole.MEMBER, { source: 'body', key: 'projectId' })
   async reorder(@Body() body: ReorderSectionDto, @CurrentRequest() req: AppRequest) {
-    await this.domain.requireProjectRole(body.projectId, req.user.sub, ProjectRole.MEMBER);
     const sections = await this.prisma.section.findMany({ where: { projectId: body.projectId }, orderBy: { position: 'asc' } });
     const ids = new Set(sections.map((s) => s.id));
     if (body.orderedSectionIds.some((id) => !ids.has(id)) || body.orderedSectionIds.length !== sections.length) {

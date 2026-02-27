@@ -6,6 +6,7 @@ import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { ProjectRole, WorkspaceRole } from '@prisma/client';
+import { ProjectRoleGuard, RequireProjectRole, RequireWorkspaceRole, WorkspaceRoleGuard } from '../auth/role.guard';
 
 class CreateProjectDto {
   @IsUUID()
@@ -29,7 +30,7 @@ class UpdateProjectMemberDto {
 }
 
 @Controller('projects')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, WorkspaceRoleGuard, ProjectRoleGuard)
 export class ProjectsController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -45,8 +46,8 @@ export class ProjectsController {
   }
 
   @Post()
+  @RequireWorkspaceRole(WorkspaceRole.WS_MEMBER, { source: 'body', key: 'workspaceId' })
   async create(@Body() body: CreateProjectDto, @CurrentRequest() req: AppRequest) {
-    await this.domain.requireWorkspaceRole(body.workspaceId, req.user.sub, WorkspaceRole.WS_MEMBER);
     const wsMembership = await this.prisma.workspaceMembership.findUnique({
       where: { workspaceId_userId: { workspaceId: body.workspaceId, userId: req.user.sub } },
     });
@@ -80,8 +81,8 @@ export class ProjectsController {
   }
 
   @Get(':id/members')
-  async members(@Param('id') projectId: string, @CurrentRequest() req: AppRequest) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+  @RequireProjectRole(ProjectRole.VIEWER)
+  async members(@Param('id') projectId: string) {
     const members = await this.prisma.projectMembership.findMany({
       where: { projectId },
       include: { user: true },
@@ -103,12 +104,12 @@ export class ProjectsController {
   }
 
   @Post(':id/members')
+  @RequireProjectRole(ProjectRole.ADMIN)
   async addMember(
     @Param('id') projectId: string,
     @Body() body: AddMemberDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.ADMIN);
     const project = await this.prisma.project.findUniqueOrThrow({ where: { id: projectId } });
     const workspaceMembership = await this.prisma.workspaceMembership.findUnique({
       where: {
@@ -140,13 +141,13 @@ export class ProjectsController {
   }
 
   @Patch(':id/members/:userId')
+  @RequireProjectRole(ProjectRole.ADMIN)
   async updateMember(
     @Param('id') projectId: string,
     @Param('userId') userId: string,
     @Body() body: UpdateProjectMemberDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.ADMIN);
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.projectMembership.findUniqueOrThrow({
         where: { projectId_userId: { projectId, userId } },
@@ -172,12 +173,12 @@ export class ProjectsController {
   }
 
   @Delete(':id/members/:userId')
+  @RequireProjectRole(ProjectRole.ADMIN)
   async removeMember(
     @Param('id') projectId: string,
     @Param('userId') userId: string,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.ADMIN);
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.projectMembership.findUniqueOrThrow({
         where: { projectId_userId: { projectId, userId } },

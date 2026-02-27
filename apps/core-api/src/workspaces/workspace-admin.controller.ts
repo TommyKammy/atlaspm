@@ -20,6 +20,7 @@ import { AuthGuard } from '../auth/auth.guard';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { UserStatus, WorkspaceRole } from '@prisma/client';
+import { RequireWorkspaceRole, WorkspaceRoleGuard } from '../auth/role.guard';
 
 class CreateInvitationDto {
   @IsEmail()
@@ -50,7 +51,7 @@ class AcceptInvitationDto {
 }
 
 @Controller()
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, WorkspaceRoleGuard)
 export class WorkspaceAdminController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -58,14 +59,12 @@ export class WorkspaceAdminController {
   ) {}
 
   @Get('workspaces/:id/users')
+  @RequireWorkspaceRole(WorkspaceRole.WS_ADMIN)
   async listWorkspaceUsers(
     @Param('id') workspaceId: string,
     @Query('query') query: string | undefined,
     @Query('status') status: 'ACTIVE' | 'SUSPENDED' | 'INVITED' | undefined,
-    @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireWorkspaceRole(workspaceId, req.user.sub, WorkspaceRole.WS_ADMIN);
-
     const memberships = await this.prisma.workspaceMembership.findMany({
       where: { workspaceId },
       include: { user: true },
@@ -185,12 +184,12 @@ export class WorkspaceAdminController {
   }
 
   @Post('workspaces/:id/invitations')
+  @RequireWorkspaceRole(WorkspaceRole.WS_ADMIN)
   async createInvitation(
     @Param('id') workspaceId: string,
     @Body() body: CreateInvitationDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireWorkspaceRole(workspaceId, req.user.sub, WorkspaceRole.WS_ADMIN);
     const role = body.role ?? WorkspaceRole.WS_MEMBER;
     const rawToken = randomBytes(24).toString('hex');
     const tokenHash = createHash('sha256').update(rawToken).digest('hex');
@@ -236,8 +235,8 @@ export class WorkspaceAdminController {
   }
 
   @Get('workspaces/:id/invitations')
-  async listInvitations(@Param('id') workspaceId: string, @CurrentRequest() req: AppRequest) {
-    await this.domain.requireWorkspaceRole(workspaceId, req.user.sub, WorkspaceRole.WS_ADMIN);
+  @RequireWorkspaceRole(WorkspaceRole.WS_ADMIN)
+  async listInvitations(@Param('id') workspaceId: string) {
     return this.prisma.invitation.findMany({
       where: { workspaceId },
       orderBy: { createdAt: 'desc' },

@@ -1,5 +1,5 @@
 import type { Request } from 'express';
-import type { ProjectRole } from '@prisma/client';
+import type { ProjectRole, WorkspaceRole } from '@prisma/client';
 
 export interface AuthUser {
   sub: string;
@@ -11,4 +11,5 @@ export type AppRequest = Request & {
   user: AuthUser;
   correlationId: string;
   projectRole?: ProjectRole;
+  workspaceRole?: WorkspaceRole;
 };

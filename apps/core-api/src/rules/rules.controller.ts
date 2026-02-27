@@ -7,6 +7,7 @@ import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { Prisma, ProjectRole } from '@prisma/client';
 import { parseRuleDefinition, templateDefinition } from './rule-definition';
+import { ProjectRoleGuard, RequireProjectRole } from '../auth/role.guard';
 
 class CreateRuleDto {
   @IsString()
@@ -43,7 +44,7 @@ class PatchRuleDto {
 }
 
 @Controller()
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ProjectRoleGuard)
 export class RulesController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -51,14 +52,14 @@ export class RulesController {
   ) {}
 
   @Get('projects/:id/rules')
-  async list(@Param('id') projectId: string, @CurrentRequest() req: AppRequest) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+  @RequireProjectRole(ProjectRole.VIEWER)
+  async list(@Param('id') projectId: string) {
     return this.prisma.rule.findMany({ where: { projectId }, orderBy: { createdAt: 'asc' } });
   }
 
   @Post('projects/:id/rules')
+  @RequireProjectRole(ProjectRole.MEMBER)
   async create(@Param('id') projectId: string, @Body() body: CreateRuleDto, @CurrentRequest() req: AppRequest) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
     return this.prisma.$transaction(async (tx) => {
       const rule = await tx.rule.create({
         data: {
