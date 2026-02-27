@@ -20,7 +20,16 @@ async function dragTaskToTask(page: Page, taskTitle: string, targetTitle: string
   const target = page.locator(`[data-task-title="${targetTitle}"]`).first();
   await expect(source).toBeVisible();
   await expect(target).toBeVisible();
-  await source.dragTo(target, { force: true });
+  await source.scrollIntoViewIfNeeded();
+  await target.scrollIntoViewIfNeeded();
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error('Unable to resolve drag coordinates for list task');
+  await page.mouse.move(sourceBox.x + 24, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sourceBox.x + 36, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.move(targetBox.x + 24, targetBox.y + targetBox.height / 2, { steps: 16 });
+  await page.mouse.up();
 }
 
 async function dragBoardTaskToTask(page: Page, taskTitle: string, targetTitle: string) {
@@ -28,7 +37,16 @@ async function dragBoardTaskToTask(page: Page, taskTitle: string, targetTitle: s
   const target = page.locator(`[data-testid^="board-task-"][data-task-title="${targetTitle}"]`).first();
   await expect(source).toBeVisible();
   await expect(target).toBeVisible();
-  await source.dragTo(target, { force: true });
+  await source.scrollIntoViewIfNeeded();
+  await target.scrollIntoViewIfNeeded();
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error('Unable to resolve drag coordinates for board task');
+  await page.mouse.move(sourceBox.x + 24, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sourceBox.x + 36, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.move(targetBox.x + 24, targetBox.y + targetBox.height / 2, { steps: 16 });
+  await page.mouse.up();
 }
 
 async function switchProjectView(page: Page, view: 'list' | 'board' | 'calendar' | 'files') {
@@ -481,6 +499,18 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
     .poll(async () => {
       const reminder = await api(`/tasks/${movedTask.id}/reminder`, token);
       return Boolean(reminder?.id);
+    })
+    .toBe(true);
+
+  const subtaskTitle = `Subtask from e2e ${Date.now()}`;
+  await page.click('[data-testid="subtasks-add-btn"]');
+  await page.fill('[data-testid="create-subtask-title"]', subtaskTitle);
+  await page.click('[data-testid="create-subtask-submit"]');
+  await expect(page.locator('[data-testid="subtasks-section"]').getByText(subtaskTitle)).toBeVisible();
+  await expect
+    .poll(async () => {
+      const subtasks = await api(`/tasks/${movedTask.id}/subtasks`, token);
+      return subtasks.some((task: any) => task.title === subtaskTitle);
     })
     .toBe(true);
 
