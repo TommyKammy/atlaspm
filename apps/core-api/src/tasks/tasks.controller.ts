@@ -215,6 +215,10 @@ class CompleteTaskDto {
 
   @IsInt()
   version!: number;
+
+  @IsOptional()
+  @IsBoolean()
+  force?: boolean;
 }
 
 class PatchTaskCustomFieldValueDto {
@@ -783,6 +787,27 @@ export class TasksController {
     const action = body.done ? 'task.completed' : 'task.reopened';
 
     return this.prisma.$transaction(async (tx) => {
+      if (body.done && !body.force) {
+        const subtreeIds = await this.collectSubtreeIds(tx, id);
+        const subtaskIds = subtreeIds.filter((taskId) => taskId !== id);
+        if (subtaskIds.length > 0) {
+          const openSubtaskCount = await tx.task.count({
+            where: {
+              id: { in: subtaskIds },
+              deletedAt: null,
+              status: { not: TaskStatus.DONE },
+            },
+          });
+          if (openSubtaskCount > 0) {
+            throw new ConflictException({
+              message: 'Cannot complete parent task with incomplete subtasks',
+              code: 'INCOMPLETE_SUBTASKS',
+              openSubtaskCount,
+            });
+          }
+        }
+      }
+
       const updated = await tx.task.update({
         where: { id },
         data: {

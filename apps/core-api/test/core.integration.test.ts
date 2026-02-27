@@ -350,6 +350,16 @@ describe('Core API Integration', () => {
       .send({ title: 'Task 2', sectionId: secA.body.id })
       .expect(201);
 
+    const childTaskCreated = await prisma.task.create({
+      data: {
+        projectId,
+        sectionId: secA.body.id,
+        parentId: t2.body.id,
+        title: 'Task 2 child',
+        position: t2.body.position - 1,
+      },
+    });
+
     const sectionSearch = await request(app.getHttpServer())
       .get(`/projects/${projectId}/tasks?q=${encodeURIComponent('Alpha Section')}`)
       .set('Authorization', `Bearer ${token}`)
@@ -357,23 +367,51 @@ describe('Core API Integration', () => {
     expect(sectionSearch.body.some((task: any) => task.id === t1.body.id)).toBe(true);
     expect(sectionSearch.body.some((task: any) => task.id === t2.body.id)).toBe(true);
 
+    const openSubtasksBeforeComplete = await prisma.task.count({
+      where: { parentId: t2.body.id, deletedAt: null, status: { not: 'DONE' } },
+    });
+    expect(openSubtasksBeforeComplete).toBeGreaterThan(0);
+
     const completed = await request(app.getHttpServer())
       .post(`/tasks/${t2.body.id}/complete`)
       .set('Authorization', `Bearer ${token}`)
       .send({ done: true, version: t2.body.version })
+      .expect(409);
+    const conflictCode = completed.body?.error?.details?.code ?? completed.body?.code;
+    const conflictOpenCount =
+      completed.body?.error?.details?.openSubtaskCount ?? completed.body?.openSubtaskCount;
+    expect(conflictCode).toBe('INCOMPLETE_SUBTASKS');
+    expect(conflictOpenCount).toBeGreaterThan(0);
+
+    const completedForced = await request(app.getHttpServer())
+      .post(`/tasks/${t2.body.id}/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ done: true, version: t2.body.version, force: true })
       .expect(201);
-    expect(completed.body.status).toBe('DONE');
-    expect(completed.body.progressPercent).toBe(100);
-    expect(Boolean(completed.body.completedAt)).toBe(true);
+    expect(completedForced.body.status).toBe('DONE');
+    expect(completedForced.body.progressPercent).toBe(100);
+    expect(Boolean(completedForced.body.completedAt)).toBe(true);
 
     const reopened = await request(app.getHttpServer())
       .post(`/tasks/${t2.body.id}/complete`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ done: false, version: completed.body.version })
+      .send({ done: false, version: completedForced.body.version })
       .expect(201);
     expect(reopened.body.status).toBe('IN_PROGRESS');
     expect(reopened.body.progressPercent).toBe(0);
     expect(reopened.body.completedAt).toBeNull();
+
+    await prisma.task.update({
+      where: { id: childTaskCreated.id },
+      data: { status: 'DONE', progressPercent: 100, completedAt: new Date(), version: { increment: 1 } },
+    });
+
+    const parentCompletedAfterChild = await request(app.getHttpServer())
+      .post(`/tasks/${t2.body.id}/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ done: true, version: reopened.body.version })
+      .expect(201);
+    expect(parentCompletedAfterChild.body.status).toBe('DONE');
 
     await request(app.getHttpServer())
       .delete(`/tasks/${t2.body.id}`)

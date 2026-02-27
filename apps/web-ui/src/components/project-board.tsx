@@ -1853,10 +1853,20 @@ export default function ProjectBoard({
   });
 
   const completeTask = useMutation({
-    mutationFn: ({ taskId, done, version }: { taskId: string; done: boolean; version: number }) =>
+    mutationFn: ({
+      taskId,
+      done,
+      version,
+      force,
+    }: {
+      taskId: string;
+      done: boolean;
+      version: number;
+      force?: boolean;
+    }) =>
       api(`/tasks/${taskId}/complete`, {
         method: 'POST',
-        body: { done, version },
+        body: { done, version, ...(force ? { force: true } : {}) },
       }) as Promise<Task>,
     onMutate: async ({ taskId, done }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
@@ -1920,12 +1930,13 @@ export default function ProjectBoard({
   });
 
   const runToggleDone = useCallback(
-    (task: Task, done: boolean) => {
+    (task: Task, done: boolean, force: boolean = false) => {
       completeTask.mutate(
         {
           taskId: task.id,
           done,
           version: task.version,
+          force,
         },
         {
           onSuccess: () => {
@@ -2853,7 +2864,7 @@ export default function ProjectBoard({
                 data-testid="complete-parent-warning-confirm"
                 onClick={() => {
                   if (!pendingCompleteWarning) return;
-                  runToggleDone(pendingCompleteWarning.task, true);
+                  runToggleDone(pendingCompleteWarning.task, true, true);
                   setPendingCompleteWarning(null);
                 }}
               >

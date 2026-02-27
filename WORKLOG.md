@@ -2063,3 +2063,27 @@
   - `pnpm e2e:down`
 - Risks/known gaps:
   - Completion warning currently evaluates descendant openness at click-time; if concurrent updates happen immediately after confirmation, standard optimistic concurrency still governs final write.
+
+## 2026-02-27 - Parent completion safety hardening (server-enforced guard + UI force flow)
+- What changed:
+  - Added server-side guard to prevent completing parent tasks with incomplete subtasks unless explicitly forced:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/tasks/tasks.controller.ts`
+    - `POST /tasks/:id/complete` now supports optional `force?: boolean`.
+    - when `done=true` and `force` is absent/false, API checks descendant subtree and returns 409 with `code: INCOMPLETE_SUBTASKS` if open subtasks exist.
+  - Updated list/detail completion clients to pass `force: true` only after explicit user confirmation in warning dialogs:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/task-detail-drawer.tsx`
+  - Extended integration test coverage for guarded completion:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+    - verifies non-forced parent completion returns 409 and forced completion succeeds.
+- Why:
+  - UI warning alone is bypassable via direct API call; this hardening enforces the same safety invariant at the core API boundary.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm --filter @atlaspm/core-api test` (13 passed)
+  - `pnpm --filter @atlaspm/playwright e2e` (33 passed)
+- Risks/known gaps:
+  - Existing clients/integrations that call `POST /tasks/:id/complete` directly may now receive 409 for parent tasks with open subtasks and must retry with `force: true` intentionally.

@@ -406,10 +406,10 @@ export default function TaskDetailDrawer({
   });
 
   const toggleComplete = useMutation({
-    mutationFn: ({ done, version }: { done: boolean; version: number }) =>
+    mutationFn: ({ done, version, force }: { done: boolean; version: number; force?: boolean }) =>
       api(`/tasks/${taskId}/complete`, {
         method: 'POST',
-        body: { done, version },
+        body: { done, version, ...(force ? { force: true } : {}) },
       }) as Promise<Task>,
     onSuccess: async (updated) => {
       syncTaskCaches(updated);
@@ -575,10 +575,10 @@ export default function TaskDetailDrawer({
     [subtasksTreeQuery.data],
   );
 
-  const runToggleComplete = (done: boolean) => {
+  const runToggleComplete = (done: boolean, force: boolean = false) => {
     if (!currentTask || toggleComplete.isPending) return;
     toggleComplete.mutate(
-      { done, version: currentTask.version },
+      { done, version: currentTask.version, force },
       {
         onSuccess: () => {
           if (!done) return;
@@ -1184,7 +1184,7 @@ export default function TaskDetailDrawer({
                   data-testid="task-detail-complete-warning-confirm"
                   onClick={() => {
                     setPendingCompleteWarningCount(null);
-                    runToggleComplete(true);
+                    runToggleComplete(true, true);
                   }}
                 >
                   {t('completeAnyway')}
