@@ -606,6 +606,46 @@ export class TasksController {
         payload: updated,
       });
       await this.applyProgressRules(tx, id, req.correlationId);
+
+      const newAssigneeId = body.assigneeUserId;
+      const assigneeChanged = newAssigneeId !== undefined && newAssigneeId !== task.assigneeUserId && newAssigneeId;
+      if (assigneeChanged) {
+        await this.notifications.createTaskAssignmentNotification(tx, {
+          userId: newAssigneeId,
+          projectId: task.projectId,
+          taskId: id,
+          triggeredByUserId: req.user.sub,
+          actor: req.user.sub,
+          correlationId: req.correlationId,
+        });
+      }
+
+      const currentAssigneeId = task.assigneeUserId;
+      const dueDateChanged = body.dueAt !== undefined && body.dueAt !== task.dueAt && currentAssigneeId;
+      if (dueDateChanged) {
+        await this.notifications.createDueDateNotification(tx, {
+          userId: currentAssigneeId,
+          projectId: task.projectId,
+          taskId: id,
+          triggeredByUserId: req.user.sub,
+          actor: req.user.sub,
+          correlationId: req.correlationId,
+        });
+      }
+
+      const statusChanged = status !== task.status;
+      const shouldNotifyAssigneeOfStatus = statusChanged && currentAssigneeId && currentAssigneeId !== req.user.sub;
+      if (shouldNotifyAssigneeOfStatus) {
+        await this.notifications.createStatusChangeNotification(tx, {
+          userId: currentAssigneeId,
+          projectId: task.projectId,
+          taskId: id,
+          triggeredByUserId: req.user.sub,
+          actor: req.user.sub,
+          correlationId: req.correlationId,
+        });
+      }
+
       return updated;
     }).then((updated) => {
       void this.indexTaskWithCustomFields(updated);
@@ -1081,6 +1121,21 @@ export class TasksController {
         },
         req,
       );
+
+      const taskAssigneeId = task.assigneeUserId;
+      const assigneeShouldBeNotified = taskAssigneeId && taskAssigneeId !== req.user.sub;
+      if (assigneeShouldBeNotified) {
+        await this.notifications.createCommentNotification(tx, {
+          userId: taskAssigneeId,
+          projectId: task.projectId,
+          taskId,
+          commentId: comment.id,
+          triggeredByUserId: req.user.sub,
+          actor: req.user.sub,
+          correlationId: req.correlationId,
+        });
+      }
+
       return comment;
     });
   }
