@@ -1455,3 +1455,35 @@
   - `pnpm --filter @atlaspm/core-api test`
 - Risks/known gaps:
   - API endpoints and UI wiring for custom fields are not added yet (handled in subsequent P1 issues).
+
+## 2026-02-27 - P1 #64 Custom Field Definition APIs (CRUD + RBAC + Audit/Outbox)
+- What changed:
+  - Added custom field definition controller endpoints:
+    - `GET /projects/:id/custom-fields` (default excludes archived; `?includeArchived=true` supported)
+    - `POST /projects/:id/custom-fields`
+    - `PATCH /custom-fields/:id`
+    - `DELETE /custom-fields/:id` (archive/soft-delete)
+  - Enforced role policy:
+    - list: `VIEWER+`
+    - create/update/delete: `MEMBER+`
+  - Added audit/outbox events for create/update/archive:
+    - `custom_field.created`
+    - `custom_field.updated`
+    - `custom_field.archived`
+  - Added integration coverage in core API test suite for:
+    - RBAC (viewer cannot create)
+    - create/list/update/archive flow
+    - archived visibility behavior
+    - audit/outbox emission assertions
+  - Files:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/custom-fields/custom-fields.controller.ts`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/app.module.ts`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+- Why:
+  - Deliver issue #64 backend CRUD boundary with security and eventing guarantees before UI integration.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api build`
+  - `pnpm --filter @atlaspm/core-api test`
+- Risks/known gaps:
+  - Patch currently supports full option replacement semantics for select fields (archives previous active options); UI-side granular option editing is tracked in subsequent issues.

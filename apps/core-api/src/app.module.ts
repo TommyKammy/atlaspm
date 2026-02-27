@@ -25,6 +25,7 @@ import { PortfoliosModule } from './portfolios/portfolios.module';
 import { WorkloadModule } from './workload/workload.module';
 import { DashboardsModule } from './dashboards/dashboards.module';
 import { IntegrationsModule } from './integrations/integrations.module';
+import { CustomFieldsController } from './custom-fields/custom-fields.controller';
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, SearchModule, PortfoliosModule, WorkloadModule, DashboardsModule, IntegrationsModule],
@@ -40,6 +41,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
     CollabController,
     WorkspaceAdminController,
     NotificationsController,
+    CustomFieldsController,
   ],
   providers: [
     PrismaService,
