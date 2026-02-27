@@ -1487,3 +1487,33 @@
   - `pnpm --filter @atlaspm/core-api test`
 - Risks/known gaps:
   - Patch currently supports full option replacement semantics for select fields (archives previous active options); UI-side granular option editing is tracked in subsequent issues.
+
+## 2026-02-27 - P1 #65 Task Custom Field Value APIs (Patch/Read + Version Conflict)
+- What changed:
+  - Added task custom field value update API:
+    - `PATCH /tasks/:id/custom-fields`
+    - accepts per-field value updates with optimistic concurrency (`version` required).
+    - supports clear (`value: null`) and typed validation (`TEXT/NUMBER/DATE/SELECT/BOOLEAN`).
+  - Added stale-write conflict handling:
+    - returns `409` on version mismatch with `latestVersion`.
+  - Extended task read responses to include custom field values:
+    - `GET /tasks/:id`
+    - `GET /projects/:id/tasks` (including grouped list path)
+  - Added audit/outbox emission for value updates:
+    - `task.custom_fields.updated`
+  - Added integration coverage:
+    - stale version conflict
+    - successful value patch
+    - read-path exposure on task detail + task list
+    - audit/outbox assertions
+  - Files:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/tasks/tasks.controller.ts`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+- Why:
+  - Deliver issue #65 backend contract so UI can safely add custom field inline editing without race-condition corruption.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api build`
+  - `pnpm --filter @atlaspm/core-api test`
+- Risks/known gaps:
+  - Multi-field transactional partial update behavior is atomic, but UI batch ergonomics and column rendering are handled in upcoming web-ui issues (#66/#67).

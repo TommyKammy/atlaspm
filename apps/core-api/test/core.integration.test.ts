@@ -900,6 +900,103 @@ describe('Core API Integration', () => {
     expect(outbox.body.some((event: any) => event.type === 'custom_field.archived')).toBe(true);
   });
 
+  test('task custom field value APIs enforce optimistic locking and expose values on task responses', async () => {
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Task Custom Values ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSection = sectionsRes.body.find((section: any) => section.isDefault);
+    expect(defaultSection?.id).toBeTruthy();
+
+    const textField = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/custom-fields`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Customer Note', type: 'TEXT' })
+      .expect(201);
+
+    const selectField = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/custom-fields`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: 'Customer Segment',
+        type: 'SELECT',
+        options: [
+          { label: 'Enterprise', value: 'enterprise' },
+          { label: 'SMB', value: 'smb' },
+        ],
+      })
+      .expect(201);
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Task with custom values', sectionId: defaultSection.id })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+
+    await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/custom-fields`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        version: taskRes.body.version + 1,
+        values: [{ fieldId: textField.body.id, value: 'stale write' }],
+      })
+      .expect(409);
+
+    const patchRes = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/custom-fields`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        version: taskRes.body.version,
+        values: [
+          { fieldId: textField.body.id, value: 'important account' },
+          { fieldId: selectField.body.id, value: selectField.body.options[0].id },
+        ],
+      })
+      .expect(200);
+    expect(patchRes.body.version).toBe(taskRes.body.version + 1);
+    expect(patchRes.body.customFieldValues.length).toBe(2);
+
+    const taskDetail = await request(app.getHttpServer())
+      .get(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(taskDetail.body.customFieldValues.some((value: any) => value.fieldId === textField.body.id)).toBe(true);
+
+    const listRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const listedTask = listRes.body.find((item: any) => item.id === taskId);
+    expect(listedTask).toBeTruthy();
+    expect(listedTask.customFieldValues.some((value: any) => value.fieldId === selectField.body.id)).toBe(true);
+
+    const customFieldAudit = await prisma.auditEvent.findFirst({
+      where: { entityType: 'Task', entityId: taskId, action: 'task.custom_fields.updated' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(customFieldAudit).toBeTruthy();
+
+    const outbox = await request(app.getHttpServer())
+      .get(`/outbox?projectId=${projectId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(outbox.body.some((event: any) => event.type === 'task.custom_fields.updated')).toBe(true);
+  });
+
   test('task retention worker purges expired soft-deleted tasks and keeps recent deletions', async () => {
     const wsRes = await request(app.getHttpServer())
       .get('/workspaces')
