@@ -5,14 +5,17 @@ import { useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check } from 'lucide-react';
+import Link from 'next/link';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { Project, ProjectMember, Workspace, WorkspaceUserRow } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { useI18n } from '@/lib/i18n';
 
 export default function ProjectMembersPage() {
+  const { t } = useI18n();
   const params = useParams<{ id: string }>();
   const projectId = params.id;
   const queryClient = useQueryClient();
@@ -77,25 +80,35 @@ export default function ProjectMembersPage() {
   return (
     <div className="space-y-4">
       <header className="rounded-lg border bg-card p-4">
-        <h2 className="text-base font-semibold">Project Members</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Manage project membership roles for {project?.name ?? 'project'}.</p>
+        <h2 className="text-base font-semibold">{t('projectMembers')}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {t('projectMembersDescription')} {project?.name ?? t('project').toLowerCase()}.
+        </p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          {t('projectMembersWorkspaceHint')}{' '}
+          {workspace?.id ? (
+            <Link href="/admin/users" className="underline hover:text-foreground" data-testid="project-members-admin-users-link">
+              {t('inviteUser')}
+            </Link>
+          ) : null}
+        </p>
       </header>
 
       <section className="rounded-lg border bg-card p-4">
         <div className="mb-3 flex justify-end">
           <Dialog.Root open={addOpen} onOpenChange={setAddOpen}>
             <Dialog.Trigger asChild>
-              <Button data-testid="project-members-add-open">Add member</Button>
+              <Button data-testid="project-members-add-open">{t('addMember')}</Button>
             </Dialog.Trigger>
             <Dialog.Portal>
               <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/50" />
               <Dialog.Content className="fixed left-1/2 top-1/2 z-[80] w-[520px] max-w-[95vw] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-background p-4">
-                <Dialog.Title className="text-sm font-semibold">Add project member</Dialog.Title>
+                <Dialog.Title className="text-sm font-semibold">{t('addProjectMember')}</Dialog.Title>
                 <div className="mt-3 space-y-3">
                   <Command className="rounded-md border" data-testid="project-members-combobox">
-                    <CommandInput placeholder="Search workspace users..." />
+                    <CommandInput placeholder={t('searchWorkspaceUsers')} />
                     <CommandList>
-                      <CommandEmpty>No users found.</CommandEmpty>
+                      <CommandEmpty>{t('noUsersFound')}</CommandEmpty>
                       <CommandGroup>
                         {candidates.map((candidate) => {
                           const id = String(candidate.id);
@@ -132,7 +145,7 @@ export default function ProjectMembersPage() {
                     disabled={!selectedUserId || memberUserIds.has(selectedUserId) || addMember.isPending}
                     data-testid="project-members-add-submit"
                   >
-                    Add
+                    {t('add')}
                   </Button>
                 </div>
               </Dialog.Content>
@@ -143,10 +156,10 @@ export default function ProjectMembersPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>User</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Actions</TableHead>
+              <TableHead>{t('users')}</TableHead>
+              <TableHead>{t('email')}</TableHead>
+              <TableHead>{t('role')}</TableHead>
+              <TableHead>{t('actions')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -180,7 +193,7 @@ export default function ProjectMembersPage() {
                       onClick={() => removeMember.mutate(member.userId)}
                       data-testid={`project-member-remove-${member.userId}`}
                     >
-                      Remove
+                      {t('remove')}
                     </Button>
                   </TableCell>
                 </TableRow>

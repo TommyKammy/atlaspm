@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Users } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '@/lib/api';
@@ -9,6 +10,7 @@ import type { Project, Workspace } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 
 export default function HomePage() {
   const { t } = useI18n();
@@ -78,9 +80,20 @@ export default function HomePage() {
         ) : (
           <ul className="mt-3 space-y-2">
             {projects.map((p) => (
-              <li key={p.id}>
+              <li key={p.id} className="flex items-center justify-between gap-2 rounded-md border border-border/70 px-3 py-2">
                 <Link className="text-sm font-medium hover:text-primary" href={`/projects/${p.id}`}>
                   {p.name}
+                </Link>
+                <Link
+                  href={`/projects/${p.id}/members`}
+                  data-testid={`home-project-add-member-${p.id}`}
+                  className={cn(
+                    'inline-flex h-8 items-center justify-center rounded-md border bg-background px-3 text-xs font-medium',
+                    'transition-colors hover:bg-accent hover:text-accent-foreground',
+                  )}
+                >
+                  <Users className="mr-1 h-3.5 w-3.5" />
+                  {t('addMember')}
                 </Link>
               </li>
             ))}

@@ -1923,3 +1923,25 @@
   - `pnpm e2e` (32 passed)
 - Risks/known gaps:
   - Auto-accept is email-based; in dev-auth mode this assumes the entered email is intentional/trusted for local testing.
+
+## 2026-02-27 - Project member add discoverability improvements
+- What changed:
+  - Added direct "Add member" entry point on Home project board cards:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/page.tsx`
+    - each project row now links to `/projects/:id/members`
+  - Improved project members page guidance and localization:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/projects/[id]/members/page.tsx`
+    - added explicit hint that only ACTIVE users in the same workspace are candidate members
+    - added Admin Users link to invite missing users
+    - localized labels/placeholders/buttons
+  - Added i18n keys:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/i18n.tsx`
+- Why:
+  - Reduce confusion when users are not selectable due to workspace scope and improve discoverability of member-management actions.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm e2e` (32 passed)
+- Risks/known gaps:
+  - Candidate list remains intentionally workspace-scoped; cross-workspace user assignment is still unsupported by design.
