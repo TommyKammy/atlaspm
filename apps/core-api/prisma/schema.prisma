@@ -43,6 +43,14 @@ enum DependencyType {
   RELATES_TO
 }
 
+enum CustomFieldType {
+  TEXT
+  NUMBER
+  DATE
+  SELECT
+  BOOLEAN
+}
+
 model Workspace {
   id          String   @id @default(uuid())
   name        String
@@ -117,6 +125,7 @@ model Project {
   webhooks    Webhook[]
   portfolios  PortfolioProject[]
   notifications InboxNotification[]
+  customFieldDefinitions CustomFieldDefinition[]
 }
 
 model ProjectMembership {
@@ -188,10 +197,72 @@ model Task {
   // Dependencies
   dependencies TaskDependency[] @relation("TaskDependencies")
   dependents   TaskDependency[] @relation("TaskDependents")
+  customFieldValues TaskCustomFieldValue[]
 
   @@index([projectId, sectionId, position])
   @@index([parentId])
   @@index([projectId, deletedAt])
+}
+
+model CustomFieldDefinition {
+  id          String          @id @default(uuid())
+  projectId   String          @map("project_id")
+  name        String
+  type        CustomFieldType
+  description String?
+  required    Boolean         @default(false)
+  position    Int             @default(1000)
+  archivedAt  DateTime?       @map("archived_at")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  options CustomFieldOption[]
+  values  TaskCustomFieldValue[]
+
+  @@index([projectId, archivedAt, position])
+  @@map("custom_field_definitions")
+}
+
+model CustomFieldOption {
+  id         String    @id @default(uuid())
+  fieldId    String    @map("field_id")
+  label      String
+  value      String
+  color      String?
+  position   Int       @default(1000)
+  archivedAt DateTime? @map("archived_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  field  CustomFieldDefinition @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  values TaskCustomFieldValue[]
+
+  @@unique([fieldId, value])
+  @@index([fieldId, archivedAt, position])
+  @@map("custom_field_options")
+}
+
+model TaskCustomFieldValue {
+  id           String    @id @default(uuid())
+  taskId       String    @map("task_id")
+  fieldId      String    @map("field_id")
+  optionId     String?   @map("option_id")
+  valueText    String?   @map("value_text")
+  valueNumber  Decimal?  @map("value_number")
+  valueDate    DateTime? @map("value_date")
+  valueBoolean Boolean?  @map("value_boolean")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  task   Task                  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  field  CustomFieldDefinition @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  option CustomFieldOption?    @relation(fields: [optionId], references: [id], onDelete: SetNull)
+
+  @@unique([taskId, fieldId])
+  @@index([fieldId])
+  @@index([optionId])
+  @@map("task_custom_field_values")
 }
 
 model InboxNotification {

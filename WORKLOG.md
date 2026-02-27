@@ -1428,3 +1428,30 @@
   - `pnpm e2e:up && pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1 --reporter=line && pnpm e2e:down`
 - Risks/known gaps:
   - Popover currently lists only non-default sections by design; default/no-section group is intentionally omitted from this navigator.
+
+## 2026-02-27 - P1 #63 Custom Field Foundation (Schema + Migration + Validation)
+- What changed:
+  - Added Prisma enum and tables for custom fields:
+    - `CustomFieldType` enum (`TEXT | NUMBER | DATE | SELECT | BOOLEAN`)
+    - `custom_field_definitions`
+    - `custom_field_options`
+    - `task_custom_field_values` (`taskId + fieldId` unique)
+  - Added `archived_at` support to definitions/options and relational links from `Project` / `Task`.
+  - Added backend validation utilities with consistent `BadRequestException` shapes:
+    - field definition validation (type constraints, select option rules, size limits)
+    - typed value validation (`text/number/date/select/boolean`) with archived checks
+  - Added validation test coverage:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/custom-field.validation.test.ts`
+  - Files:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/prisma/schema.prisma`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/prisma/migrations/20260227005439_custom_fields_foundation/migration.sql`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/custom-fields/custom-field.validation.ts`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/custom-field.validation.test.ts`
+- Why:
+  - Start P1 custom fields implementation from lowest-risk backend foundation before wiring API/UI, with strict type validation and soft-archive readiness.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api build`
+  - `pnpm --filter @atlaspm/core-api test`
+- Risks/known gaps:
+  - API endpoints and UI wiring for custom fields are not added yet (handled in subsequent P1 issues).
