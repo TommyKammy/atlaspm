@@ -1582,3 +1582,22 @@
   - `pnpm e2e` (32 tests passed)
 - Risks/known gaps:
   - `cf` query payload is JSON in URL; very large filter sets may increase URL length. Current UX scope (project-local, few fields) is within practical bounds.
+
+## 2026-02-27 - P2 Webhook DLQ Redrive Hardening (Race-safe retry)
+- What changed:
+  - Hardened DLQ redrive endpoint against concurrent duplicate retries.
+  - Updated `POST /webhooks/dlq/:eventId/retry` to claim/reset only when the target event is still in DLQ state (`deadLetteredAt IS NOT NULL`) using atomic `updateMany`.
+  - Added explicit `409 Conflict` response when another actor already redrives the same event first.
+  - Added integration assertion that second redrive attempt for the same event returns `409`.
+  - Files:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/webhooks/webhooks.controller.ts`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+- Why:
+  - Prevent duplicate `retry_requested` audit/outbox emissions and race-induced state churn during parallel admin operations.
+  - Keep DLQ redrive behavior deterministic under concurrent requests.
+- How tested (exact commands):
+  - `docker compose -f infra/docker/docker-compose.yml up -d postgres`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e` (32 tests passed)
+- Risks/known gaps:
+  - Redrive remains single-event; bulk redrive orchestration is still intentionally out of scope.

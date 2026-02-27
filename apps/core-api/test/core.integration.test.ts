@@ -1227,6 +1227,12 @@ describe('Core API Integration', () => {
         .send({ projectId })
         .expect(201);
 
+      await request(app.getHttpServer())
+        .post(`/webhooks/dlq/${failingEvent.id}/retry`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ projectId })
+        .expect(409);
+
       const resetState = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: failingEvent.id } });
       expect(resetState.deadLetteredAt).toBeNull();
       expect(resetState.deliveryAttempts).toBe(0);
