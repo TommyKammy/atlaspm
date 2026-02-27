@@ -64,18 +64,35 @@ test('custom field filter persists after reload and clears correctly', async ({ 
   const taskBeta = groupedTasks.flatMap((group: any) => group.tasks).find((task: any) => task.title === 'Task Beta');
   expect(taskBeta).toBeTruthy();
 
-  const stageField = await api(`/projects/${project.id}/custom-fields`, token, 'POST', {
-    name: `Stage ${ts}`,
-    type: 'SELECT',
-    options: [{ label: 'Option A', value: 'option_a' }],
-  });
+  const stageFieldName = `Stage ${ts}`;
+  await page.click('[data-testid="add-custom-field-trigger"]');
+  await page.fill('[data-testid="custom-field-name-input"]', stageFieldName);
+  await page.selectOption('[data-testid="custom-field-type-select"]', 'SELECT');
+  await page.click('[data-testid="create-custom-field-btn"]');
+  await expect(page.getByText(stageFieldName).first()).toBeVisible();
+
+  let stageField: any = null;
+  await expect
+    .poll(async () => {
+      const fields = await api(`/projects/${project.id}/custom-fields`, token);
+      stageField = fields.find((field: any) => field.name === stageFieldName) ?? null;
+      return Boolean(stageField?.id);
+    })
+    .toBe(true);
   const stageOption = stageField.options.find((option: any) => !option.archivedAt);
   expect(stageOption?.id).toBeTruthy();
 
-  await api(`/tasks/${taskBeta.id}/custom-fields`, token, 'PATCH', {
-    version: taskBeta.version,
-    values: [{ fieldId: stageField.id, value: stageOption.id }],
-  });
+  await page.selectOption(
+    `[data-testid="task-custom-select-${taskBeta.id}-${stageField.id}"]`,
+    stageOption.id,
+  );
+  await expect
+    .poll(async () => {
+      const groups = await api(`/projects/${project.id}/tasks?groupBy=section`, token);
+      const beta = groups.flatMap((group: any) => group.tasks).find((task: any) => task.id === taskBeta.id);
+      return beta?.customFieldValues?.find((value: any) => value.fieldId === stageField.id)?.optionId ?? null;
+    })
+    .toBe(stageOption.id);
 
   await page.reload();
   await page.click('[data-testid="project-filter-trigger"]');

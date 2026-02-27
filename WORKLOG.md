@@ -1563,7 +1563,7 @@
     - date from/to
   - Added e2e coverage:
     - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/custom-fields-filter.spec.ts`
-    - verifies filter apply, reload persistence, and clear behavior.
+    - verifies custom field creation via UI, value edit via UI, filter apply, reload persistence, and clear behavior.
   - Stabilized query/array dependencies to prevent reload-time React update-depth errors in filtered project views:
     - stabilized URLSearchParams usage in page/header
     - stabilized empty custom-field array fallback in project board
