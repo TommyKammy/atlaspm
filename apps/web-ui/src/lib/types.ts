@@ -39,6 +39,57 @@ export type Section = {
   isDefault: boolean;
 };
 
+export type CustomFieldType = 'TEXT' | 'NUMBER' | 'DATE' | 'SELECT' | 'BOOLEAN';
+
+export type CustomFieldOption = {
+  id: string;
+  label: string;
+  value: string;
+  color?: string | null;
+  position: number;
+  archivedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type CustomFieldDefinition = {
+  id: string;
+  projectId: string;
+  name: string;
+  type: CustomFieldType;
+  description?: string | null;
+  required: boolean;
+  position: number;
+  archivedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  options: CustomFieldOption[];
+};
+
+export type TaskCustomFieldValue = {
+  id: string;
+  taskId: string;
+  fieldId: string;
+  optionId?: string | null;
+  valueText?: string | null;
+  valueNumber?: number | null;
+  valueDate?: string | null;
+  valueBoolean?: boolean | null;
+  field?: {
+    id: string;
+    name: string;
+    type: CustomFieldType;
+    required?: boolean;
+    position?: number;
+  } | null;
+  option?: {
+    id: string;
+    label: string;
+    value: string;
+    color?: string | null;
+  } | null;
+};
+
 export type Task = {
   id: string;
   projectId: string;
@@ -61,6 +112,7 @@ export type Task = {
   deletedByUserId?: string | null;
   version: number;
   position: number;
+  customFieldValues?: TaskCustomFieldValue[];
 };
 
 export type TaskComment = {

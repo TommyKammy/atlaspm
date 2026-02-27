@@ -1517,3 +1517,33 @@
   - `pnpm --filter @atlaspm/core-api test`
 - Risks/known gaps:
   - Multi-field transactional partial update behavior is atomic, but UI batch ergonomics and column rendering are handled in upcoming web-ui issues (#66/#67).
+
+## 2026-02-27 - P1 #66 Web UI Custom Field Columns (Add Field + Inline Edit)
+- What changed:
+  - Added web-ui types for custom field definitions/options/task values.
+  - Added React Query key for project custom fields:
+    - `queryKeys.projectCustomFields(projectId)`.
+  - Upgraded project list board to support dynamic columns:
+    - base columns + custom field columns in one synchronized header/body table.
+    - custom columns participate in stored width/resizing state.
+  - Added “Add column” UX (dialog) to create custom fields from list view:
+    - supports creating `TEXT/NUMBER/DATE/SELECT/BOOLEAN`.
+    - `SELECT` creation seeds one default option for backend schema validity.
+  - Added inline custom field editing in task rows:
+    - text/number/date/select/boolean cell editors
+    - optimistic cache update with rollback on error
+    - mutation via `PATCH /tasks/:id/custom-fields`
+  - Added localized copy (EN/JA) for custom field actions and errors.
+  - Files:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/i18n.tsx`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/query-keys.ts`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/types.ts`
+- Why:
+  - Deliver issue #66 with no-refresh custom column workflow while preserving existing list DnD/edit behavior.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm e2e` (31 tests passed)
+- Risks/known gaps:
+  - Select-type custom field creation currently seeds a default option (`Option/選択肢`) and expects option management UX in follow-up work.
