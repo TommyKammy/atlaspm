@@ -2,14 +2,26 @@
 
 import {
   DndContext,
+  DragOverlay,
+  MouseSensor,
   PointerSensor,
+  TouchSensor,
   closestCenter,
+  pointerWithin,
   useDroppable,
   useSensor,
   useSensors,
+  type DragOverEvent,
   type DragEndEvent,
+  type DragStartEvent,
 } from '@dnd-kit/core';
-import { useSortable, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import {
+  SortableContext,
+  arrayMove,
+  horizontalListSortingStrategy,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
@@ -38,7 +50,7 @@ import {
 } from '@/components/ui/command';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Table, TableBody, TableCell, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import TaskDetailDrawer from '@/components/task-detail-drawer';
@@ -339,6 +351,15 @@ type BoardColumnConfig = {
   customField?: CustomFieldDefinition;
 };
 
+function getColumnDragId(key: string) {
+  return `column:${key}`;
+}
+
+function parseColumnDragId(id: string): string | null {
+  if (!id.startsWith('column:')) return null;
+  return id.slice('column:'.length);
+}
+
 const BOARD_BASE_COLUMN_WIDTHS: Record<BaseBoardColumnKey, number> = BOARD_BASE_COLUMNS.reduce((acc, column) => {
   acc[column.key] = column.defaultWidth;
   return acc;
@@ -348,6 +369,65 @@ const BOARD_BASE_MIN_COLUMN_WIDTHS: Record<BaseBoardColumnKey, number> = BOARD_B
   acc[column.key] = column.minWidth;
   return acc;
 }, {} as Record<BaseBoardColumnKey, number>);
+
+function SortableColumnHead({
+  column,
+  index,
+  activeColumnKey,
+  overColumnKey,
+  startColumnResize,
+}: {
+  column: BoardColumnConfig;
+  index: number;
+  activeColumnKey: string | null;
+  overColumnKey: string | null;
+  startColumnResize: (key: string, event: ReactPointerEvent<HTMLElement>) => void;
+}) {
+  const isFixed = column.key === 'name';
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: getColumnDragId(column.key),
+    disabled: isFixed,
+  });
+  const isActive = activeColumnKey === column.key;
+  const isOver = overColumnKey === column.key;
+
+  return (
+    <th
+      className={cn(
+        'relative px-3 text-[11px] font-medium normal-case tracking-normal text-[#6d6e6f] dark:text-muted-foreground',
+        index > 0 && 'border-l border-[#f0f0f0] dark:border-border/40',
+        isOver && !isActive && 'bg-muted/30',
+      )}
+      data-testid={`column-head-${column.key}`}
+    >
+      <div
+        ref={setNodeRef as never}
+        className={cn(
+          'h-full w-full py-3 touch-none select-none',
+          !isFixed && 'cursor-grab active:cursor-grabbing hover:bg-muted/30',
+          (isActive || isDragging) && 'opacity-50',
+        )}
+        style={{ transform: CSS.Transform.toString(transform), transition }}
+        {...(!isFixed ? attributes : {})}
+        {...(!isFixed ? listeners : {})}
+      >
+        <span>{column.label}</span>
+      </div>
+      <button
+        type="button"
+        className="absolute right-0 top-0 h-full w-3 touch-none cursor-col-resize bg-transparent transition-colors hover:bg-muted/35"
+        onPointerDown={(event) => {
+          event.stopPropagation();
+          startColumnResize(column.key, event);
+        }}
+        aria-label={`Resize ${column.label} column`}
+        data-testid={`column-resize-${column.key}`}
+      >
+        <span className="absolute inset-y-2 left-1/2 w-px -translate-x-1/2 bg-[#e4e7eb] dark:bg-border/60" />
+      </button>
+    </th>
+  );
+}
 
 function AssigneeCombobox({
   task,
@@ -527,6 +607,7 @@ function CompactDateField({
 function TaskRow({
   task,
   sectionId,
+  boardColumns,
   onEdit,
   onToggleDone,
   members,
@@ -538,11 +619,11 @@ function TaskRow({
   onToggleCollapse,
   draggable,
   onDelete,
-  customFields,
   onEditCustomField,
 }: {
   task: Task;
   sectionId: string;
+  boardColumns: BoardColumnConfig[];
   onEdit: (taskId: string, patch: Partial<Task> & { version: number }) => void;
   onToggleDone: (task: Task) => void;
   members: ProjectMember[];
@@ -554,7 +635,6 @@ function TaskRow({
   onToggleCollapse: (taskId: string) => void;
   draggable: boolean;
   onDelete: (taskId: string) => void;
-  customFields: CustomFieldDefinition[];
   onEditCustomField: (task: Task, field: CustomFieldDefinition, value: unknown) => void;
 }) {
   const { t } = useI18n();
@@ -583,27 +663,9 @@ function TaskRow({
     setIsEditingTitle(false);
   };
 
-  return (
-    <tr
-      ref={setNodeRef as never}
-      style={{ transform: CSS.Transform.toString(transform), transition: transition || 'transform 150ms ease' }}
-      className={cn(
-        'group h-9 border-b border-[#f0f0f0] transition-colors hover:bg-muted/35 dark:border-border/40',
-        draggable && 'cursor-grab active:cursor-grabbing',
-        isDone && 'opacity-50',
-      )}
-      data-testid={`task-${task.id}`}
-      data-task-title={task.title}
-      {...(draggable ? attributes : {})}
-      {...(draggable ? listeners : {})}
-      onPointerDownCapture={(event) => {
-        const target = event.target as HTMLElement;
-        if (target.closest('button,input,select,textarea,a,[data-no-dnd="true"]')) {
-          event.stopPropagation();
-        }
-      }}
-    >
-      <TableCell>
+  const renderCellContent = (column: BoardColumnConfig) => {
+    if (column.key === 'name') {
+      return (
         <div className="flex items-center gap-2" style={{ paddingLeft: `${depth * 16}px` }}>
           <button
             type="button"
@@ -634,30 +696,30 @@ function TaskRow({
               {isDone ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
             </button>
             {isEditingTitle ? (
-            <Input
-              autoFocus
-              value={titleDraft}
-              data-no-dnd="true"
-              data-testid={`task-title-input-${task.id}`}
-              className={cn(
-                'h-7 border-0 bg-transparent px-1 text-sm font-medium shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0',
-                isDone && 'line-through',
-              )}
-              onPointerDown={(event) => event.stopPropagation()}
-              onChange={(event) => setTitleDraft(event.target.value)}
-              onBlur={saveTitle}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  saveTitle();
-                }
-                if (event.key === 'Escape') {
-                  event.preventDefault();
-                  setTitleDraft(task.title);
-                  setIsEditingTitle(false);
-                }
-              }}
-            />
+              <Input
+                autoFocus
+                value={titleDraft}
+                data-no-dnd="true"
+                data-testid={`task-title-input-${task.id}`}
+                className={cn(
+                  'h-7 border-0 bg-transparent px-1 text-sm font-medium shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0',
+                  isDone && 'line-through',
+                )}
+                onPointerDown={(event) => event.stopPropagation()}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                onBlur={saveTitle}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    saveTitle();
+                  }
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    setTitleDraft(task.title);
+                    setIsEditingTitle(false);
+                  }
+                }}
+              />
             ) : (
               <button
                 type="button"
@@ -694,15 +756,21 @@ function TaskRow({
             <ExternalLink className="h-3.5 w-3.5" />
           </Button>
         </div>
-      </TableCell>
-      <TableCell className="border-l border-[#f0f0f0] dark:border-border/40">
+      );
+    }
+
+    if (column.key === 'assignee') {
+      return (
         <AssigneeCombobox
           task={task}
           members={members}
           onSelect={(assigneeUserId) => onEdit(task.id, { assigneeUserId, version: task.version })}
         />
-      </TableCell>
-      <TableCell className="border-l border-[#f0f0f0] dark:border-border/40">
+      );
+    }
+
+    if (column.key === 'dueDate') {
+      return (
         <div className="grid grid-cols-2 gap-1">
           <CompactDateField
             value={task.startAt}
@@ -727,8 +795,11 @@ function TaskRow({
             }
           />
         </div>
-      </TableCell>
-      <TableCell className="border-l border-[#f0f0f0] dark:border-border/40">
+      );
+    }
+
+    if (column.key === 'progress') {
+      return (
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <Input
@@ -743,8 +814,11 @@ function TaskRow({
           </div>
           <ProgressBar value={task.progressPercent} />
         </div>
-      </TableCell>
-      <TableCell className="border-l border-[#f0f0f0] dark:border-border/40">
+      );
+    }
+
+    if (column.key === 'status') {
+      return (
         <select
           className={cn(
             'h-7 w-full rounded-full border-0 bg-transparent px-2 text-[11px] font-medium',
@@ -759,124 +833,147 @@ function TaskRow({
           <option value="DONE">DONE</option>
           <option value="BLOCKED">BLOCKED</option>
         </select>
-      </TableCell>
-      {customFields.map((field) => {
-        const customValue = findTaskCustomFieldValue(task, field.id);
-        const textValue = customValue?.valueText ?? '';
-        const numberValue =
-          customValue?.valueNumber === null || customValue?.valueNumber === undefined
-            ? ''
-            : String(customValue.valueNumber);
-        const dateValue = customValue?.valueDate ?? null;
-        const selectValue = customValue?.optionId ?? '';
-        const boolValue = Boolean(customValue?.valueBoolean);
+      );
+    }
 
+    if (column.customField) {
+      const field = column.customField;
+      const customValue = findTaskCustomFieldValue(task, field.id);
+      const textValue = customValue?.valueText ?? '';
+      const numberValue =
+        customValue?.valueNumber === null || customValue?.valueNumber === undefined
+          ? ''
+          : String(customValue.valueNumber);
+      const dateValue = customValue?.valueDate ?? null;
+      const selectValue = customValue?.optionId ?? '';
+      const boolValue = Boolean(customValue?.valueBoolean);
+
+      if (field.type === 'TEXT') {
         return (
-          <TableCell key={`task-${task.id}-field-${field.id}`} className="border-l border-[#f0f0f0] dark:border-border/40">
-            {field.type === 'TEXT' ? (
-              <Input
-                key={`task-${task.id}-field-${field.id}-${textValue}`}
-                defaultValue={textValue}
-                data-no-dnd="true"
-                data-testid={`task-custom-text-${task.id}-${field.id}`}
-                className="h-7 border-0 bg-transparent px-2 text-[11px] shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
-                onPointerDown={(event) => event.stopPropagation()}
-                onBlur={(event) => {
-                  const next = event.currentTarget.value.trim();
-                  if (next !== textValue) onEditCustomField(task, field, next || null);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    const next = (event.currentTarget as HTMLInputElement).value.trim();
-                    if (next !== textValue) onEditCustomField(task, field, next || null);
-                    (event.currentTarget as HTMLInputElement).blur();
-                  }
-                }}
-              />
-            ) : null}
-            {field.type === 'NUMBER' ? (
-              <Input
-                key={`task-${task.id}-field-${field.id}-${numberValue}`}
-                type="number"
-                defaultValue={numberValue}
-                data-no-dnd="true"
-                data-testid={`task-custom-number-${task.id}-${field.id}`}
-                className="h-7 border-0 bg-transparent px-2 text-[11px] shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
-                onPointerDown={(event) => event.stopPropagation()}
-                onBlur={(event) => {
-                  const raw = event.currentTarget.value.trim();
-                  if (!raw && numberValue) {
-                    onEditCustomField(task, field, null);
-                    return;
-                  }
-                  if (!raw) return;
-                  const parsed = Number(raw);
-                  if (!Number.isFinite(parsed)) return;
-                  if (parsed !== Number(numberValue || '0')) onEditCustomField(task, field, parsed);
-                }}
-              />
-            ) : null}
-            {field.type === 'DATE' ? (
-              <CompactDateField
-                value={dateValue}
-                ariaLabel={`${field.name} ${task.title}`}
-                testId={`task-custom-date-${task.id}-${field.id}`}
-                onCommit={(next) => onEditCustomField(task, field, next)}
-              />
-            ) : null}
-            {field.type === 'SELECT' ? (
-              <select
-                className="h-7 w-full rounded-md border-0 bg-transparent px-2 text-[11px] hover:bg-muted/40 focus:bg-muted/40"
-                value={selectValue}
-                data-testid={`task-custom-select-${task.id}-${field.id}`}
-                onChange={(event) => onEditCustomField(task, field, event.target.value || null)}
-              >
-                <option value="">{t('noneOption')}</option>
-                {field.options
-                  .filter((option) => !option.archivedAt)
-                  .map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                    </option>
-                  ))}
-              </select>
-            ) : null}
-            {field.type === 'BOOLEAN' ? (
-              <button
-                type="button"
-                data-no-dnd="true"
-                data-testid={`task-custom-boolean-${task.id}-${field.id}`}
-                className={cn(
-                  'inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-muted',
-                  boolValue ? 'text-emerald-600' : 'text-muted-foreground',
-                )}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onEditCustomField(task, field, !boolValue);
-                }}
-                aria-label={`${field.name} ${task.title}`}
-              >
-                {boolValue ? <CheckCircle2 className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
-              </button>
-            ) : null}
-          </TableCell>
+          <Input
+            key={`task-${task.id}-field-${field.id}-${textValue}`}
+            defaultValue={textValue}
+            data-no-dnd="true"
+            data-testid={`task-custom-text-${task.id}-${field.id}`}
+            className="h-7 border-0 bg-transparent px-2 text-[11px] shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
+            onPointerDown={(event) => event.stopPropagation()}
+            onBlur={(event) => {
+              const next = event.currentTarget.value.trim();
+              if (next !== textValue) onEditCustomField(task, field, next || null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                const next = (event.currentTarget as HTMLInputElement).value.trim();
+                if (next !== textValue) onEditCustomField(task, field, next || null);
+                (event.currentTarget as HTMLInputElement).blur();
+              }
+            }}
+          />
         );
-      })}
-      <TableCell className="border-l border-[#f0f0f0] text-[11px] text-muted-foreground dark:border-border/40">{projectName}</TableCell>
-      <TableCell className="border-l border-[#f0f0f0] text-[11px] text-muted-foreground dark:border-border/40">-</TableCell>
-      <TableCell className="border-l border-[#f0f0f0] text-[11px] text-muted-foreground dark:border-border/40">{t('private')}</TableCell>
-      <TableCell className="border-l border-[#f0f0f0] dark:border-border/40">
-        {task.assigneeUserId ? (
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border text-[10px]">
-            {initials(resolveAssigneeLabel(task, members))}
-          </span>
-        ) : (
-          <span className="text-xs text-muted-foreground">-</span>
-        )}
-      </TableCell>
-      <TableCell className="border-l border-[#f0f0f0] dark:border-border/40">
+      }
+
+      if (field.type === 'NUMBER') {
+        return (
+          <Input
+            key={`task-${task.id}-field-${field.id}-${numberValue}`}
+            type="number"
+            defaultValue={numberValue}
+            data-no-dnd="true"
+            data-testid={`task-custom-number-${task.id}-${field.id}`}
+            className="h-7 border-0 bg-transparent px-2 text-[11px] shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
+            onPointerDown={(event) => event.stopPropagation()}
+            onBlur={(event) => {
+              const raw = event.currentTarget.value.trim();
+              if (!raw && numberValue) {
+                onEditCustomField(task, field, null);
+                return;
+              }
+              if (!raw) return;
+              const parsed = Number(raw);
+              if (!Number.isFinite(parsed)) return;
+              if (parsed !== Number(numberValue || '0')) onEditCustomField(task, field, parsed);
+            }}
+          />
+        );
+      }
+
+      if (field.type === 'DATE') {
+        return (
+          <CompactDateField
+            value={dateValue}
+            ariaLabel={`${field.name} ${task.title}`}
+            testId={`task-custom-date-${task.id}-${field.id}`}
+            onCommit={(next) => onEditCustomField(task, field, next)}
+          />
+        );
+      }
+
+      if (field.type === 'SELECT') {
+        return (
+          <select
+            className="h-7 w-full rounded-md border-0 bg-transparent px-2 text-[11px] hover:bg-muted/40 focus:bg-muted/40"
+            value={selectValue}
+            data-testid={`task-custom-select-${task.id}-${field.id}`}
+            onChange={(event) => onEditCustomField(task, field, event.target.value || null)}
+          >
+            <option value="">{t('noneOption')}</option>
+            {field.options
+              .filter((option) => !option.archivedAt)
+              .map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+          </select>
+        );
+      }
+
+      return (
+        <button
+          type="button"
+          data-no-dnd="true"
+          data-testid={`task-custom-boolean-${task.id}-${field.id}`}
+          className={cn(
+            'inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-muted',
+            boolValue ? 'text-emerald-600' : 'text-muted-foreground',
+          )}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onEditCustomField(task, field, !boolValue);
+          }}
+          aria-label={`${field.name} ${task.title}`}
+        >
+          {boolValue ? <CheckCircle2 className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
+        </button>
+      );
+    }
+
+    if (column.key === 'projects') {
+      return <span className="text-[11px] text-muted-foreground">{projectName}</span>;
+    }
+
+    if (column.key === 'dependencies') {
+      return <span className="text-[11px] text-muted-foreground">-</span>;
+    }
+
+    if (column.key === 'visibility') {
+      return <span className="text-[11px] text-muted-foreground">{t('private')}</span>;
+    }
+
+    if (column.key === 'collaborators') {
+      return task.assigneeUserId ? (
+        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border text-[10px]">
+          {initials(resolveAssigneeLabel(task, members))}
+        </span>
+      ) : (
+        <span className="text-xs text-muted-foreground">-</span>
+      );
+    }
+
+    if (column.key === 'actions') {
+      return (
         <Button
           size="icon"
           variant="ghost"
@@ -890,7 +987,40 @@ function TaskRow({
         >
           <Trash2 className="h-4 w-4" />
         </Button>
-      </TableCell>
+      );
+    }
+
+    return null;
+  };
+
+  return (
+    <tr
+      ref={setNodeRef as never}
+      style={{ transform: CSS.Transform.toString(transform), transition: transition || 'transform 150ms ease' }}
+      className={cn(
+        'group h-9 border-b border-[#f0f0f0] transition-colors hover:bg-muted/35 dark:border-border/40',
+        draggable && 'cursor-grab active:cursor-grabbing',
+        isDone && 'opacity-50',
+      )}
+      data-testid={`task-${task.id}`}
+      data-task-title={task.title}
+      {...(draggable ? attributes : {})}
+      {...(draggable ? listeners : {})}
+      onPointerDownCapture={(event) => {
+        const target = event.target as HTMLElement;
+        if (target.closest('button,input,select,textarea,a,[data-no-dnd="true"]')) {
+          event.stopPropagation();
+        }
+      }}
+    >
+      {boardColumns.map((column, index) => (
+        <TableCell
+          key={`task-${task.id}-column-${column.key}`}
+          className={cn(index > 0 && 'border-l border-[#f0f0f0] dark:border-border/40')}
+        >
+          {renderCellContent(column)}
+        </TableCell>
+      ))}
     </tr>
   );
 }
@@ -1040,9 +1170,17 @@ export default function ProjectBoard({
   onQuickAddIntentHandled?: (nonce: number) => void;
 }) {
   const { t } = useI18n();
-  const sensors = useSensors(
+  const taskSensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
+    }),
+  );
+  const columnSensors = useSensors(
+    useSensor(MouseSensor, {
+      activationConstraint: { distance: 2 },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 120, tolerance: 8 },
     }),
   );
   const queryClient = useQueryClient();
@@ -1054,6 +1192,9 @@ export default function ProjectBoard({
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [sectionNameDraft, setSectionNameDraft] = useState('');
   const [columnWidths, setColumnWidths] = useState<BoardColumnWidths>(BOARD_BASE_COLUMN_WIDTHS);
+  const [columnOrder, setColumnOrder] = useState<string[]>([]);
+  const [activeColumnKey, setActiveColumnKey] = useState<string | null>(null);
+  const [overColumnKey, setOverColumnKey] = useState<string | null>(null);
   const [columnWidthsLoaded, setColumnWidthsLoaded] = useState(false);
   const [hasStoredColumnWidths, setHasStoredColumnWidths] = useState(false);
   const [createFieldDialogOpen, setCreateFieldDialogOpen] = useState(false);
@@ -1070,8 +1211,13 @@ export default function ProjectBoard({
   const sectionScrollRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const autoSizedColumnsRef = useRef(false);
   const textMeasureCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const lastColumnOverRef = useRef<string | null>(null);
   const columnStorageKey = useMemo(
     () => `atlaspm:project-board-column-widths:${projectId}`,
+    [projectId],
+  );
+  const columnOrderStorageKey = useMemo(
+    () => `atlaspm:project-board-column-order:${projectId}`,
     [projectId],
   );
 
@@ -1153,6 +1299,57 @@ export default function ProjectBoard({
       ...baseColumns.slice(insertBeforeProjectsAt),
     ];
   }, [boardColumnLabels, customFields]);
+
+  useEffect(() => {
+    const reorderableKeys = boardColumns.filter((column) => column.key !== 'name').map((column) => column.key);
+    if (typeof window === 'undefined') {
+      setColumnOrder(reorderableKeys);
+      return;
+    }
+
+    const raw = window.localStorage.getItem(columnOrderStorageKey);
+    if (!raw) {
+      setColumnOrder(reorderableKeys);
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        setColumnOrder(reorderableKeys);
+        return;
+      }
+      const uniqueParsed = parsed
+        .map((value) => String(value))
+        .filter((key, index, list) => reorderableKeys.includes(key) && list.indexOf(key) === index);
+      const merged = [...uniqueParsed, ...reorderableKeys.filter((key) => !uniqueParsed.includes(key))];
+      setColumnOrder(merged);
+    } catch {
+      setColumnOrder(reorderableKeys);
+    }
+  }, [boardColumns, columnOrderStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(columnOrderStorageKey, JSON.stringify(columnOrder));
+  }, [columnOrder, columnOrderStorageKey]);
+
+  const orderedBoardColumns = useMemo(() => {
+    const reorderableColumns = boardColumns.filter((column) => column.key !== 'name');
+    const fixedName = boardColumns.find((column) => column.key === 'name');
+    const fallbackOrder = reorderableColumns.map((column) => column.key);
+    const mergedOrder = [
+      ...columnOrder.filter((key) => fallbackOrder.includes(key)),
+      ...fallbackOrder.filter((key) => !columnOrder.includes(key)),
+    ];
+    const indexByKey = new Map(
+      mergedOrder.map((key, index) => [key, index]),
+    );
+    const ordered = [...reorderableColumns].sort(
+      (a, b) => (indexByKey.get(a.key) ?? Number.MAX_SAFE_INTEGER) - (indexByKey.get(b.key) ?? Number.MAX_SAFE_INTEGER),
+    );
+    return fixedName ? [fixedName, ...ordered] : ordered;
+  }, [boardColumns, columnOrder]);
 
   useEffect(() => {
     return () => {
@@ -1323,6 +1520,17 @@ export default function ProjectBoard({
     return () => {
       window.removeEventListener('atlaspm:focus-section', onFocusSection as EventListener);
       if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onOpenCreateField = () => setCreateFieldDialogOpen(true);
+    const onOpenManageFields = () => setManageFieldsDialogOpen(true);
+    window.addEventListener('atlaspm:open-create-custom-field', onOpenCreateField);
+    window.addEventListener('atlaspm:open-manage-custom-fields', onOpenManageFields);
+    return () => {
+      window.removeEventListener('atlaspm:open-create-custom-field', onOpenCreateField);
+      window.removeEventListener('atlaspm:open-manage-custom-fields', onOpenManageFields);
     };
   }, []);
 
@@ -1830,10 +2038,58 @@ export default function ProjectBoard({
     });
   }, [collapsedSectionIds, filteredGroups, collapsedTaskIds]);
 
-  const onDragEnd = (event: DragEndEvent) => {
+  const reorderableColumnKeys = useMemo(
+    () => orderedBoardColumns.filter((column) => column.key !== 'name').map((column) => column.key),
+    [orderedBoardColumns],
+  );
+
+  const reorderColumnOrder = useCallback((activeKey: string, overKey: string) => {
+    if (!activeKey || !overKey || activeKey === overKey || activeKey === 'name' || overKey === 'name') return;
+    setColumnOrder((current) => {
+      const working = current.length ? [...current] : [...reorderableColumnKeys];
+      const from = working.indexOf(activeKey);
+      const to = working.indexOf(overKey);
+      if (from < 0 || to < 0 || from === to) return current.length ? current : working;
+      return arrayMove(working, from, to);
+    });
+  }, [reorderableColumnKeys]);
+
+  const onColumnDragStart = (event: DragStartEvent) => {
+    const key = parseColumnDragId(String(event.active.id));
+    if (!key || key === 'name') return;
+    setActiveColumnKey(key);
+    setOverColumnKey(key);
+    lastColumnOverRef.current = key;
+  };
+
+  const onColumnDragOver = (event: DragOverEvent) => {
+    const activeKey = parseColumnDragId(String(event.active.id));
+    if (!activeKey || activeKey === 'name') return;
+    if (!event.over) return;
+    const overKey = parseColumnDragId(String(event.over.id));
+    if (!overKey || overKey === 'name' || overKey === activeKey) return;
+    if (lastColumnOverRef.current === overKey) return;
+    reorderColumnOrder(activeKey, overKey);
+    setOverColumnKey(overKey);
+    lastColumnOverRef.current = overKey;
+  };
+
+  const onColumnDragEnd = (event?: DragEndEvent) => {
+    if (event?.over) {
+      const activeKey = parseColumnDragId(String(event.active.id));
+      const overKey = parseColumnDragId(String(event.over.id));
+      if (activeKey && overKey) {
+        reorderColumnOrder(activeKey, overKey);
+      }
+    }
+    setActiveColumnKey(null);
+    setOverColumnKey(null);
+    lastColumnOverRef.current = null;
+  };
+
+  const onTaskDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over) return;
-
     const activeTaskId = String(active.id);
     const activeTask = groups.flatMap((group) => group.tasks).find((task) => task.id === activeTaskId);
     if (!activeTask) return;
@@ -1876,7 +2132,7 @@ export default function ProjectBoard({
 
   const renderColumnGroup = () => (
     <colgroup>
-      {boardColumns.map((column) => (
+      {orderedBoardColumns.map((column) => (
         <col key={column.key} style={{ width: `${columnWidths[column.key] ?? column.defaultWidth}px` }} />
       ))}
     </colgroup>
@@ -1887,36 +2143,12 @@ export default function ProjectBoard({
   }
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <div className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              data-testid="add-custom-field-trigger"
-              onClick={() => setCreateFieldDialogOpen(true)}
-            >
-              <Plus className="mr-1 h-3.5 w-3.5" />
-              {t('addColumn')}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              data-testid="manage-custom-field-trigger"
-              onClick={() => setManageFieldsDialogOpen(true)}
-            >
-              {t('customFields')}
-            </Button>
-          </div>
-          {customFieldError ? (
-            <p className="text-xs text-destructive" data-testid="custom-field-error">
-              {customFieldError}
-            </p>
-          ) : null}
-        </div>
+        {customFieldError ? (
+          <p className="text-xs text-destructive" data-testid="custom-field-error">
+            {customFieldError}
+          </p>
+        ) : null}
 
         <Dialog open={createFieldDialogOpen} onOpenChange={setCreateFieldDialogOpen}>
           <DialogContent className="sm:max-w-md">
@@ -2066,92 +2298,87 @@ export default function ProjectBoard({
           </DialogContent>
         </Dialog>
 
-        <Table
-          className="w-max min-w-full table-fixed"
-          containerRef={headerScrollRef}
-          onContainerScroll={(event) => syncHorizontalScroll(event.currentTarget)}
+        <DndContext
+          sensors={columnSensors}
+          collisionDetection={pointerWithin}
+          onDragStart={onColumnDragStart}
+          onDragOver={onColumnDragOver}
+          onDragEnd={onColumnDragEnd}
+          onDragCancel={onColumnDragEnd}
         >
-          {renderColumnGroup()}
-          <TableHeader className="border-b border-[#f0f0f0] bg-transparent dark:border-border/40">
-            <TableRow className="h-11 hover:bg-transparent">
-              {boardColumns.map((column, index) => (
-                <TableHead
-                  key={column.key}
-                  className={cn(
-                    'relative px-3 text-[11px] font-medium normal-case tracking-normal text-[#6d6e6f] dark:text-muted-foreground',
-                    index > 0 && 'border-l border-[#f0f0f0] dark:border-border/40',
-                  )}
-                  onPointerDown={(event) => {
-                    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-                    if (rect.right - event.clientX <= 12) {
-                      startColumnResize(column.key, event);
-                    }
-                  }}
+          <div className="sticky top-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+            <Table
+              className="w-max min-w-full table-fixed"
+              containerRef={headerScrollRef}
+              onContainerScroll={(event) => syncHorizontalScroll(event.currentTarget)}
+            >
+              {renderColumnGroup()}
+              <TableHeader className="border-b border-[#f0f0f0] bg-transparent dark:border-border/40">
+                <SortableContext
+                  items={orderedBoardColumns.filter((column) => column.key !== 'name').map((column) => getColumnDragId(column.key))}
+                  strategy={horizontalListSortingStrategy}
                 >
-                  <span>{column.label}</span>
-                  {index < boardColumns.length - 1 ? (
+                  <TableRow className="h-11 hover:bg-transparent">
+                    {orderedBoardColumns.map((column, index) => (
+                      <SortableColumnHead
+                        key={column.key}
+                        column={column}
+                        index={index}
+                        activeColumnKey={activeColumnKey}
+                        overColumnKey={overColumnKey}
+                        startColumnResize={startColumnResize}
+                      />
+                    ))}
+                  </TableRow>
+                </SortableContext>
+              </TableHeader>
+            </Table>
+          </div>
+          <DragOverlay>
+            {activeColumnKey ? (
+              <div className="pointer-events-none rounded-md border bg-background/90 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm opacity-75">
+                {orderedBoardColumns.find((column) => column.key === activeColumnKey)?.label ?? ''}
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
+
+        <DndContext sensors={taskSensors} collisionDetection={closestCenter} onDragEnd={onTaskDragEnd}>
+          {groupedVisibleRows.map(({ group, rows, sectionCollapsed }) => {
+            const isNoSection = group.section.isDefault || group.section.name.toLowerCase() === 'no section';
+            return (
+            <SectionDropTarget
+              key={group.section.id}
+              sectionId={group.section.id}
+              highlighted={highlightedSectionId === group.section.id}
+            >
+              {!isNoSection ? (
+                <header className="flex items-center justify-between border-b border-[#eceff2] bg-[#f7f8f9] px-4 py-3.5 dark:border-border/50 dark:bg-muted/20">
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      className="absolute right-0 top-0 h-full w-3 touch-none cursor-col-resize bg-transparent transition-colors hover:bg-muted/35"
-                      onPointerDown={(event) => startColumnResize(column.key, event)}
-                      aria-label={`Resize ${column.label} column`}
-                      data-testid={`column-resize-${column.key}`}
+                      className="inline-flex h-5 w-5 items-center justify-center rounded hover:bg-muted/70"
+                      data-testid={`section-collapse-${group.section.id}`}
+                      onClick={() =>
+                        setCollapsedSectionIds((current) => {
+                          const next = new Set(current);
+                          if (next.has(group.section.id)) next.delete(group.section.id);
+                          else next.add(group.section.id);
+                          return next;
+                        })
+                      }
+                      aria-label={sectionCollapsed ? `Expand ${group.section.name}` : `Collapse ${group.section.name}`}
                     >
-                      <span className="absolute inset-y-2 left-1/2 w-px -translate-x-1/2 bg-[#e4e7eb] dark:bg-border/60" />
+                      <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', sectionCollapsed && '-rotate-90')} />
                     </button>
-                  ) : null}
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-        </Table>
-
-        {groupedVisibleRows.map(({ group, rows, sectionCollapsed }) => {
-          const isNoSection = group.section.isDefault || group.section.name.toLowerCase() === 'no section';
-          return (
-          <SectionDropTarget
-            key={group.section.id}
-            sectionId={group.section.id}
-            highlighted={highlightedSectionId === group.section.id}
-          >
-            {!isNoSection ? (
-              <header className="flex items-center justify-between border-b border-[#eceff2] bg-[#f7f8f9] px-4 py-3.5 dark:border-border/50 dark:bg-muted/20">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="inline-flex h-5 w-5 items-center justify-center rounded hover:bg-muted/70"
-                    data-testid={`section-collapse-${group.section.id}`}
-                    onClick={() =>
-                      setCollapsedSectionIds((current) => {
-                        const next = new Set(current);
-                        if (next.has(group.section.id)) next.delete(group.section.id);
-                        else next.add(group.section.id);
-                        return next;
-                      })
-                    }
-                    aria-label={sectionCollapsed ? `Expand ${group.section.name}` : `Collapse ${group.section.name}`}
-                  >
-                    <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', sectionCollapsed && '-rotate-90')} />
-                  </button>
-                  {editingSectionId === group.section.id ? (
-                    <Input
-                      autoFocus
-                      value={sectionNameDraft}
-                      data-testid={`section-name-input-${group.section.id}`}
-                      className="h-7 max-w-xs border-0 bg-transparent px-1 text-[11px] uppercase tracking-wider text-muted-foreground shadow-none focus-visible:bg-muted/40 focus-visible:ring-0"
-                      onChange={(event) => setSectionNameDraft(event.target.value)}
-                      onBlur={() => {
-                        const next = sectionNameDraft.trim();
-                        if (!next || next === group.section.name) {
-                          setEditingSectionId(null);
-                          setSectionNameDraft('');
-                          return;
-                        }
-                        patchSection.mutate({ sectionId: group.section.id, name: next });
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault();
+                    {editingSectionId === group.section.id ? (
+                      <Input
+                        autoFocus
+                        value={sectionNameDraft}
+                        data-testid={`section-name-input-${group.section.id}`}
+                        className="h-7 max-w-xs border-0 bg-transparent px-1 text-[11px] uppercase tracking-wider text-muted-foreground shadow-none focus-visible:bg-muted/40 focus-visible:ring-0"
+                        onChange={(event) => setSectionNameDraft(event.target.value)}
+                        onBlur={() => {
                           const next = sectionNameDraft.trim();
                           if (!next || next === group.section.name) {
                             setEditingSectionId(null);
@@ -2159,100 +2386,112 @@ export default function ProjectBoard({
                             return;
                           }
                           patchSection.mutate({ sectionId: group.section.id, name: next });
-                        }
-                        if (event.key === 'Escape') {
-                          event.preventDefault();
-                          setEditingSectionId(null);
-                          setSectionNameDraft('');
-                        }
-                      }}
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      className="text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-                      data-testid={`section-name-label-${group.section.id}`}
-                      onClick={() => {
-                        setEditingSectionId(group.section.id);
-                        setSectionNameDraft(group.section.name);
-                      }}
-                    >
-                      {group.section.name}
-                    </button>
-                  )}
-                </div>
-                <Badge>{group.tasks.length}</Badge>
-              </header>
-            ) : null}
-
-            {!sectionCollapsed ? (
-              <>
-                <Table
-                  className="w-max min-w-full table-fixed"
-                  containerRef={registerSectionScrollRef(group.section.id)}
-                  onContainerScroll={(event) => syncHorizontalScroll(event.currentTarget)}
-                >
-                  {renderColumnGroup()}
-                  <TableBody>
-                    <SortableContext items={rows.map((row) => row.task.id)} strategy={verticalListSortingStrategy}>
-                      {rows.map((row) => (
-                        <TaskRow
-                          key={row.task.id}
-                          task={row.task}
-                          sectionId={group.section.id}
-                          onEdit={onEdit}
-                          onToggleDone={(task) =>
-                            completeTask.mutate({
-                              taskId: task.id,
-                              done: task.status !== 'DONE',
-                              version: task.version,
-                            })
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            const next = sectionNameDraft.trim();
+                            if (!next || next === group.section.name) {
+                              setEditingSectionId(null);
+                              setSectionNameDraft('');
+                              return;
+                            }
+                            patchSection.mutate({ sectionId: group.section.id, name: next });
                           }
-                          members={members}
-                          onOpen={setSelectedTaskId}
-                          projectName={projectName}
-                          depth={row.depth}
-                          hasChildren={row.hasChildren}
-                          collapsed={collapsedTaskIds.has(row.task.id)}
-                          draggable={!row.task.parentId && !row.hasChildren}
-                          onDelete={(taskId) => deleteTask.mutate(taskId)}
-                          customFields={customFields}
-                          onEditCustomField={onEditCustomField}
-                          onToggleCollapse={(taskId) => {
-                            setCollapsedTaskIds((current) => {
-                              const next = new Set(current);
-                              if (next.has(taskId)) next.delete(taskId);
-                              else next.add(taskId);
-                              return next;
-                            });
-                          }}
-                        />
-                      ))}
-                    </SortableContext>
-                  </TableBody>
-                </Table>
-
-                {!group.tasks.length && !isNoSection ? (
-                  <div className="px-4 py-3 text-sm text-muted-foreground" data-testid={`empty-section-${group.section.id}`}>
-                    {t('noTasksInSection')}
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            setEditingSectionId(null);
+                            setSectionNameDraft('');
+                          }
+                        }}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                        data-testid={`section-name-label-${group.section.id}`}
+                        onClick={() => {
+                          setEditingSectionId(group.section.id);
+                          setSectionNameDraft(group.section.name);
+                        }}
+                      >
+                        {group.section.name}
+                      </button>
+                    )}
                   </div>
-                ) : null}
+                  <Badge>{group.tasks.length}</Badge>
+                </header>
+              ) : null}
 
-                <div className={cn('px-4 py-2', !isNoSection && 'border-t border-border/50')}>
-                  <QuickAddTask
-                    sectionId={group.section.id}
-                    onCreate={async (sectionId, title) => {
-                      await createTask.mutateAsync({ sectionId, title });
-                    }}
-                    openSignal={quickAddIntent?.sectionId === group.section.id ? quickAddIntent.nonce : null}
-                    showClosedTrigger={!isNoSection}
-                    {...(onQuickAddIntentHandled ? { onOpenSignalHandled: onQuickAddIntentHandled } : {})}
-                  />
-                </div>
-              </>
-            ) : null}
-          </SectionDropTarget>
-        )})}
+              {!sectionCollapsed ? (
+                <>
+                  <Table
+                    className="w-max min-w-full table-fixed"
+                    containerRef={registerSectionScrollRef(group.section.id)}
+                    onContainerScroll={(event) => syncHorizontalScroll(event.currentTarget)}
+                  >
+                    {renderColumnGroup()}
+                    <TableBody>
+                      <SortableContext items={rows.map((row) => row.task.id)} strategy={verticalListSortingStrategy}>
+                        {rows.map((row) => (
+                          <TaskRow
+                            key={row.task.id}
+                            task={row.task}
+                            sectionId={group.section.id}
+                            onEdit={onEdit}
+                            onToggleDone={(task) =>
+                              completeTask.mutate({
+                                taskId: task.id,
+                                done: task.status !== 'DONE',
+                                version: task.version,
+                              })
+                            }
+                            members={members}
+                            onOpen={setSelectedTaskId}
+                            projectName={projectName}
+                            boardColumns={orderedBoardColumns}
+                            depth={row.depth}
+                            hasChildren={row.hasChildren}
+                            collapsed={collapsedTaskIds.has(row.task.id)}
+                            draggable={!row.task.parentId && !row.hasChildren}
+                            onDelete={(taskId) => deleteTask.mutate(taskId)}
+                            onEditCustomField={onEditCustomField}
+                            onToggleCollapse={(taskId) => {
+                              setCollapsedTaskIds((current) => {
+                                const next = new Set(current);
+                                if (next.has(taskId)) next.delete(taskId);
+                                else next.add(taskId);
+                                return next;
+                              });
+                            }}
+                          />
+                        ))}
+                      </SortableContext>
+                    </TableBody>
+                  </Table>
+
+                  {!group.tasks.length && !isNoSection ? (
+                    <div className="px-4 py-3 text-sm text-muted-foreground" data-testid={`empty-section-${group.section.id}`}>
+                      {t('noTasksInSection')}
+                    </div>
+                  ) : null}
+
+                  <div className={cn('px-4 py-2', !isNoSection && 'border-t border-border/50')}>
+                    <QuickAddTask
+                      sectionId={group.section.id}
+                      onCreate={async (sectionId, title) => {
+                        await createTask.mutateAsync({ sectionId, title });
+                      }}
+                      openSignal={quickAddIntent?.sectionId === group.section.id ? quickAddIntent.nonce : null}
+                      showClosedTrigger={!isNoSection}
+                      {...(onQuickAddIntentHandled ? { onOpenSignalHandled: onQuickAddIntentHandled } : {})}
+                    />
+                  </div>
+                </>
+              ) : null}
+            </SectionDropTarget>
+          );})}
+        </DndContext>
 
         {!filteredGroups.length ? (
           <div className="rounded-lg border border-dashed bg-card p-6 text-center text-sm text-muted-foreground">
@@ -2307,6 +2546,5 @@ export default function ProjectBoard({
           projectId={projectId}
         />
       </div>
-    </DndContext>
   );
 }

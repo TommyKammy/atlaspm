@@ -148,6 +148,14 @@ export default function ProjectPage() {
     setQuickAddError(null);
   }, []);
 
+  const openCreateCustomField = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('atlaspm:open-create-custom-field'));
+  }, []);
+
+  const openManageCustomFields = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('atlaspm:open-manage-custom-fields'));
+  }, []);
+
   const deletedTasksQuery = useQuery<SectionTaskGroup[]>({
     queryKey: queryKeys.projectTasksDeletedGrouped(projectId),
     queryFn: () => api(`/projects/${projectId}/tasks?groupBy=section&deleted=true`),
@@ -272,31 +280,52 @@ export default function ProjectPage() {
       {view === 'list' ? (
         <>
           <section className="pb-1">
-            <div className="flex items-center gap-0">
-              <Button size="sm" data-testid="add-new-trigger" className="rounded-r-none" onClick={requestAddTask}>
-                <Plus className="mr-1 h-4 w-4" />
-                {t('addNewTask')}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-0">
+                <Button size="sm" data-testid="add-new-trigger" className="rounded-r-none" onClick={requestAddTask}>
+                  <Plus className="mr-1 h-4 w-4" />
+                  {t('addNewTask')}
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="rounded-l-none border-l border-l-primary-foreground/20 px-2"
+                      data-testid="add-new-menu-trigger"
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuItem
+                      data-testid="add-new-section"
+                      onClick={openAddSectionForm}
+                    >
+                      {t('addSection')}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="add-custom-field-trigger"
+                onClick={openCreateCustomField}
+              >
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                {t('addColumn')}
               </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="default"
-                    className="rounded-l-none border-l border-l-primary-foreground/20 px-2"
-                    data-testid="add-new-menu-trigger"
-                  >
-                    <ChevronDown className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  <DropdownMenuItem
-                    data-testid="add-new-section"
-                    onClick={openAddSectionForm}
-                  >
-                    {t('addSection')}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="manage-custom-field-trigger"
+                onClick={openManageCustomFields}
+              >
+                {t('customFields')}
+              </Button>
             </div>
             {quickAddError ? (
               <p className="mt-2 text-xs text-destructive" data-testid="add-task-error">
