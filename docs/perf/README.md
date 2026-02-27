@@ -6,7 +6,11 @@ Use this flow before changing indexes:
 2. Run:
 
 ```bash
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/atlaspm_dev ./scripts/db-explain-baseline.sh
+# Option A: local psql (set DATABASE_URL)
+DATABASE_URL=postgresql://atlaspm:atlaspm@localhost:55432/atlaspm ./scripts/db-explain-baseline.sh
+
+# Option B: no local psql needed (uses docker exec atlaspm-postgres)
+./scripts/db-explain-baseline.sh
 ```
 
 3. Review the generated report:

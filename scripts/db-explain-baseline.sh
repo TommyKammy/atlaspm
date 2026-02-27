@@ -1,11 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -z "${DATABASE_URL:-}" ]]; then
-  echo "DATABASE_URL is required"
-  echo "Example: DATABASE_URL=postgresql://postgres:postgres@localhost:5432/atlaspm_dev ./scripts/db-explain-baseline.sh"
+has_local_psql() {
+  command -v psql >/dev/null 2>&1
+}
+
+has_postgres_container() {
+  docker ps --format '{{.Names}}' | grep -q '^atlaspm-postgres$'
+}
+
+run_psql() {
+  if has_local_psql; then
+    if [[ -z "${DATABASE_URL:-}" ]]; then
+      echo "DATABASE_URL is required when using local psql"
+      echo "Example: DATABASE_URL=postgresql://atlaspm:atlaspm@localhost:55432/atlaspm ./scripts/db-explain-baseline.sh"
+      exit 1
+    fi
+    psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1
+    return
+  fi
+
+  if has_postgres_container; then
+    docker exec -i atlaspm-postgres psql -U atlaspm -d atlaspm -X -v ON_ERROR_STOP=1
+    return
+  fi
+
+  echo "No psql client available."
+  echo "Install psql locally, or start docker compose DB (container: atlaspm-postgres)."
   exit 1
-fi
+}
 
 REPORT_PATH="${1:-docs/perf/EXPLAIN_BASELINE.md}"
 mkdir -p "$(dirname "$REPORT_PATH")"
@@ -14,12 +37,17 @@ mkdir -p "$(dirname "$REPORT_PATH")"
   echo "# AtlasPM DB EXPLAIN Baseline"
   echo
   echo "- GeneratedAtUTC: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  echo "- Command: \`DATABASE_URL=*** ./scripts/db-explain-baseline.sh\`"
+  if has_local_psql; then
+    echo "- Mode: local psql (DATABASE_URL)"
+  else
+    echo "- Mode: docker exec atlaspm-postgres (atlaspm/atlaspm)"
+  fi
+  echo "- Command: \`./scripts/db-explain-baseline.sh\`"
   echo
   echo "> This report is generated from the current local dataset and is intended for before/after index comparison."
   echo
   echo '```text'
-  psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 <<'SQL'
+  run_psql <<'SQL'
 \pset pager off
 \timing on
 
@@ -31,7 +59,7 @@ WITH p AS (
 SELECT t.id, t."sectionId", t.position
 FROM "Task" t
 WHERE t."projectId" = (SELECT id FROM p)
-  AND t."deletedAt" IS NULL
+  AND t.deleted_at IS NULL
 ORDER BY t."sectionId" ASC, t.position ASC
 LIMIT 500;
 
@@ -46,7 +74,7 @@ u AS (
 SELECT t.id, t.status, t."assigneeUserId", t."dueAt"
 FROM "Task" t
 WHERE t."projectId" = (SELECT id FROM p)
-  AND t."deletedAt" IS NULL
+  AND t.deleted_at IS NULL
   AND t.status IN ('TODO', 'IN_PROGRESS')
   AND (t."assigneeUserId" = (SELECT id FROM u) OR t."assigneeUserId" IS NULL)
   AND (t."dueAt" IS NULL OR t."dueAt" >= now() - interval '30 days')
@@ -61,7 +89,7 @@ WITH p AS (
 SELECT t.id, t."updatedAt"
 FROM "Task" t
 WHERE t."projectId" = (SELECT id FROM p)
-  AND t."deletedAt" IS NULL
+  AND t.deleted_at IS NULL
 ORDER BY t."updatedAt" DESC
 LIMIT 200;
 
@@ -82,11 +110,11 @@ EXPLAIN (ANALYZE, BUFFERS)
 WITH u AS (
   SELECT id FROM "User" ORDER BY "createdAt" DESC LIMIT 1
 )
-SELECT n.id, n.type, n."createdAt"
-FROM "InboxNotification" n
-WHERE n."userId" = (SELECT id FROM u)
-  AND n."readAt" IS NULL
-ORDER BY n."createdAt" DESC
+SELECT n.id, n.type, n.created_at AS "createdAt"
+FROM inbox_notifications n
+WHERE n.user_id = (SELECT id FROM u)
+  AND n.read_at IS NULL
+ORDER BY n.created_at DESC
 LIMIT 200;
 SQL
   echo '```'

@@ -1884,3 +1884,16 @@
   - `bash -n scripts/db-explain-baseline.sh`
 - Risks/known gaps:
   - Results depend on local data volume/distribution; use representative seed data before using numbers for p95 claims.
+
+## 2026-02-27 - P4-3 (Step 1b) Baseline report generated
+- What changed:
+  - Improved baseline script to support environments without local `psql` by falling back to `docker exec atlaspm-postgres`.
+  - Generated baseline report:
+    - `/Users/tomoakikawada/Dev/atlaspm/docs/perf/EXPLAIN_BASELINE.md`
+- Why:
+  - This host did not have local `psql`, so docker fallback was needed for reproducible execution across developer machines.
+- How tested (exact commands):
+  - `pnpm e2e:up`
+  - `./scripts/db-explain-baseline.sh`
+- Risks/known gaps:
+  - Report reflects current local data shape; rerun after bulk seed for production-like selectivity.
