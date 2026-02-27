@@ -34,6 +34,13 @@ import TaskDescriptionEditor from '@/components/editor/TaskDescriptionEditor';
 import { SubtaskList } from '@/components/subtask-list';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog as UiDialog,
+  DialogContent as UiDialogContent,
+  DialogFooter as UiDialogFooter,
+  DialogHeader as UiDialogHeader,
+  DialogTitle as UiDialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/lib/i18n';
@@ -257,6 +264,18 @@ function toDateInputValue(value?: string | null) {
   return String(value).slice(0, 10);
 }
 
+function countOpenSubtasks(nodes: TaskTree[]) {
+  let count = 0;
+  const queue = [...nodes];
+  while (queue.length > 0) {
+    const node = queue.shift();
+    if (!node) continue;
+    if (node.status !== 'DONE') count += 1;
+    if (node.children?.length) queue.push(...node.children);
+  }
+  return count;
+}
+
 function MetadataRow({
   icon,
   label,
@@ -302,7 +321,15 @@ export default function TaskDetailDrawer({
   const [dueDateInput, setDueDateInput] = useState('');
   const [assigneeInput, setAssigneeInput] = useState<string>('unassigned');
   const [statusInput, setStatusInput] = useState<Task['status']>('TODO');
+  const [undoComplete, setUndoComplete] = useState<{
+    taskId: string;
+    title: string;
+    previousStatus: Task['status'];
+    previousProgressPercent: number;
+  } | null>(null);
+  const [pendingCompleteWarningCount, setPendingCompleteWarningCount] = useState<number | null>(null);
   const attachmentsSectionRef = useRef<HTMLElement | null>(null);
+  const undoCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const enabled = Boolean(taskId && open);
 
@@ -379,12 +406,34 @@ export default function TaskDetailDrawer({
   });
 
   const toggleComplete = useMutation({
-    mutationFn: (done: boolean) =>
+    mutationFn: ({ done, version }: { done: boolean; version: number }) =>
       api(`/tasks/${taskId}/complete`, {
         method: 'POST',
-        body: { done, version: taskQuery.data?.version },
+        body: { done, version },
       }) as Promise<Task>,
     onSuccess: async (updated) => {
+      syncTaskCaches(updated);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(updated.id) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+    },
+  });
+
+  const restoreComplete = useMutation({
+    mutationFn: ({
+      version,
+      status,
+      progressPercent,
+    }: {
+      version: number;
+      status: Task['status'];
+      progressPercent: number;
+    }) =>
+      api(`/tasks/${taskId}`, {
+        method: 'PATCH',
+        body: { version, status, progressPercent },
+      }) as Promise<Task>,
+    onSuccess: async (updated) => {
+      setUndoComplete(null);
       syncTaskCaches(updated);
       await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(updated.id) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
@@ -479,6 +528,14 @@ export default function TaskDetailDrawer({
   }, [subtasksTreeQuery.data]);
 
   useEffect(() => {
+    return () => {
+      if (undoCompleteTimerRef.current) {
+        clearTimeout(undoCompleteTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (!taskQuery.data) return;
     setTitleInput(taskQuery.data.title);
     setProgressInput(String(taskQuery.data.progressPercent ?? 0));
@@ -487,6 +544,15 @@ export default function TaskDetailDrawer({
     setAssigneeInput(taskQuery.data.assigneeUserId ?? 'unassigned');
     setStatusInput(taskQuery.data.status);
   }, [taskQuery.data]);
+
+  useEffect(() => {
+    if (open) return;
+    setPendingCompleteWarningCount(null);
+    if (undoCompleteTimerRef.current) {
+      clearTimeout(undoCompleteTimerRef.current);
+    }
+    setUndoComplete(null);
+  }, [open]);
 
   const tryCommentMentionLookup = (text: string) => {
     const match = text.match(/(?:^|\s)@([a-zA-Z0-9._-]*)$/);
@@ -504,6 +570,48 @@ export default function TaskDetailDrawer({
   const currentTask = taskQuery.data;
   const currentAssignee = assigneeLabel(currentTask, members, t);
   const isDone = currentTask?.status === 'DONE';
+  const openSubtaskCount = useMemo(
+    () => countOpenSubtasks(subtasksTreeQuery.data ?? []),
+    [subtasksTreeQuery.data],
+  );
+
+  const runToggleComplete = (done: boolean) => {
+    if (!currentTask || toggleComplete.isPending) return;
+    toggleComplete.mutate(
+      { done, version: currentTask.version },
+      {
+        onSuccess: () => {
+          if (!done) return;
+          if (undoCompleteTimerRef.current) {
+            clearTimeout(undoCompleteTimerRef.current);
+          }
+          setUndoComplete({
+            taskId: currentTask.id,
+            title: currentTask.title || t('untitledTask'),
+            previousStatus: currentTask.status,
+            previousProgressPercent: currentTask.progressPercent,
+          });
+          undoCompleteTimerRef.current = setTimeout(() => {
+            setUndoComplete(null);
+          }, 7000);
+        },
+      },
+    );
+  };
+
+  const handleToggleCompleteClick = () => {
+    if (!currentTask || toggleComplete.isPending) return;
+    const done = currentTask.status !== 'DONE';
+    if (!done) {
+      runToggleComplete(false);
+      return;
+    }
+    if (openSubtaskCount > 0) {
+      setPendingCompleteWarningCount(openSubtaskCount);
+      return;
+    }
+    runToggleComplete(true);
+  };
 
   const commitTitle = () => {
     if (!currentTask) return;
@@ -573,10 +681,7 @@ export default function TaskDetailDrawer({
                     ? 'bg-emerald-600 text-white hover:bg-emerald-600/90'
                     : 'border-border/70 text-foreground hover:bg-muted/40',
                 )}
-                onClick={() => {
-                  if (!currentTask || toggleComplete.isPending) return;
-                  toggleComplete.mutate(!isDone);
-                }}
+                onClick={handleToggleCompleteClick}
                 disabled={!currentTask || toggleComplete.isPending}
               >
                 {isDone ? <CheckCircle2 className="mr-1 h-4 w-4 shrink-0" /> : <Circle className="mr-1 h-4 w-4 shrink-0" />}
@@ -1008,6 +1113,85 @@ export default function TaskDetailDrawer({
               ) : null}
             </div>
           </div>
+
+          {undoComplete ? (
+            <div
+              className="fixed bottom-4 left-4 z-[60] flex items-center gap-3 rounded-md border bg-background px-3 py-2 text-sm shadow-md"
+              data-testid="task-detail-complete-undo-banner"
+            >
+              <span>
+                {t('taskCompletedLabel')}: {undoComplete.title}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                data-testid="task-detail-complete-undo-action"
+                disabled={restoreComplete.isPending}
+                onClick={() => {
+                  if (undoCompleteTimerRef.current) {
+                    clearTimeout(undoCompleteTimerRef.current);
+                  }
+                  const latest = queryClient.getQueryData<Task>(queryKeys.taskDetail(undoComplete.taskId));
+                  if (!latest) {
+                    setUndoComplete(null);
+                    return;
+                  }
+                  restoreComplete.mutate({
+                    version: latest.version,
+                    status: undoComplete.previousStatus,
+                    progressPercent: undoComplete.previousProgressPercent,
+                  });
+                }}
+              >
+                {restoreComplete.isPending ? t('restoring') : t('undo')}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  if (undoCompleteTimerRef.current) {
+                    clearTimeout(undoCompleteTimerRef.current);
+                  }
+                  setUndoComplete(null);
+                }}
+              >
+                {t('dismiss')}
+              </Button>
+            </div>
+          ) : null}
+
+          <UiDialog
+            open={pendingCompleteWarningCount !== null}
+            onOpenChange={(nextOpen: boolean) => {
+              if (!nextOpen) setPendingCompleteWarningCount(null);
+            }}
+          >
+            <UiDialogContent className="max-w-md" data-testid="task-detail-complete-warning-dialog">
+              <UiDialogHeader>
+                <UiDialogTitle>{t('incompleteSubtasksWarningTitle')}</UiDialogTitle>
+              </UiDialogHeader>
+              <p className="text-sm text-muted-foreground">
+                {t('incompleteSubtasksWarningDescription').replace(
+                  '{count}',
+                  String(pendingCompleteWarningCount ?? 0),
+                )}
+              </p>
+              <UiDialogFooter>
+                <Button variant="outline" onClick={() => setPendingCompleteWarningCount(null)}>
+                  {t('cancel')}
+                </Button>
+                <Button
+                  data-testid="task-detail-complete-warning-confirm"
+                  onClick={() => {
+                    setPendingCompleteWarningCount(null);
+                    runToggleComplete(true);
+                  }}
+                >
+                  {t('completeAnyway')}
+                </Button>
+              </UiDialogFooter>
+            </UiDialogContent>
+          </UiDialog>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

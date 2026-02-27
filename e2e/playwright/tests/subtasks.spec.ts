@@ -50,6 +50,10 @@ async function createTaskViaAPI(token: string, projectId: string, title: string)
   return task.id;
 }
 
+async function getTaskById(token: string, taskId: string) {
+  return api(`/tasks/${taskId}`, token);
+}
+
 async function openTaskDetail(page: Page, taskTitle: string) {
   await page.locator(`[data-task-title="${taskTitle}"] [data-testid^="open-task-"]`).first().click();
   await expect(page.getByRole('dialog')).toBeVisible();
@@ -178,5 +182,33 @@ test.describe('Subtasks Feature', () => {
       (element as HTMLElement).click();
     });
     await expect(page).toHaveURL(new RegExp(`/projects/${projectId}\\?task=${nestedTask.id}`));
+  });
+
+  test('should warn before completing parent with open subtasks and allow undo', async ({ page }) => {
+    const { projectId, token } = await loginAndCreateProject(page);
+
+    const parentTaskTitle = 'Parent with open subtasks';
+    const parentTaskId = await createTaskViaAPI(token, projectId, parentTaskTitle);
+    await api(`/tasks/${parentTaskId}/subtasks`, token, 'POST', { title: 'Open child task' });
+    const initialParent = await getTaskById(token, parentTaskId);
+
+    await page.goto(`/projects/${projectId}`);
+    await page.click(`[data-testid="task-complete-${parentTaskId}"]`);
+
+    await expect(page.getByTestId('complete-parent-warning-dialog')).toBeVisible();
+    await page.getByTestId('complete-parent-warning-confirm').click();
+
+    await expect(page.getByTestId('complete-undo-banner')).toBeVisible();
+    await page.getByTestId('complete-undo-action').click();
+
+    await expect.poll(async () => {
+      const task = await getTaskById(token, parentTaskId);
+      return task.status;
+    }).toBe(initialParent.status);
+
+    await expect.poll(async () => {
+      const task = await getTaskById(token, parentTaskId);
+      return task.progressPercent;
+    }).toBe(initialParent.progressPercent);
   });
 });

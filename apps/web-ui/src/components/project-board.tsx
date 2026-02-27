@@ -35,6 +35,7 @@ import type {
   Section,
   SectionTaskGroup,
   Task,
+  TaskTree,
   TaskCustomFieldValue,
 } from '@/lib/types';
 import type { CustomFieldFilter } from '@/lib/project-filters';
@@ -260,11 +261,56 @@ type UndoDeleteState = {
   title: string;
 };
 
+type UndoCompleteState = {
+  taskId: string;
+  title: string;
+  previousStatus: Task['status'];
+  previousProgressPercent: number;
+};
+
+type PendingCompleteWarningState = {
+  task: Task;
+  openSubtaskCount: number;
+};
+
 type DeleteTaskResponse = {
   success: boolean;
   deletedCount: number;
   taskIds: string[];
 };
+
+function countOpenDescendants(taskId: string, tasks: Task[]) {
+  const childrenByParent = new Map<string, Task[]>();
+  for (const task of tasks) {
+    if (!task.parentId) continue;
+    const current = childrenByParent.get(task.parentId) ?? [];
+    current.push(task);
+    childrenByParent.set(task.parentId, current);
+  }
+
+  let openCount = 0;
+  const queue = [...(childrenByParent.get(taskId) ?? [])];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) continue;
+    if (current.status !== 'DONE') openCount += 1;
+    const descendants = childrenByParent.get(current.id);
+    if (descendants?.length) queue.push(...descendants);
+  }
+  return openCount;
+}
+
+function countOpenSubtasksInTree(nodes: TaskTree[]) {
+  let count = 0;
+  const queue = [...nodes];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) continue;
+    if (current.status !== 'DONE') count += 1;
+    if (current.children?.length) queue.push(...current.children);
+  }
+  return count;
+}
 
 function buildSectionTaskTree(tasks: Task[]): TaskTreeNode[] {
   const byId = new Map<string, TaskTreeNode>();
@@ -1247,6 +1293,8 @@ export default function ProjectBoard({
   const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<string>>(new Set());
   const [highlightedSectionId, setHighlightedSectionId] = useState<string | null>(null);
   const [undoDelete, setUndoDelete] = useState<UndoDeleteState | null>(null);
+  const [undoComplete, setUndoComplete] = useState<UndoCompleteState | null>(null);
+  const [pendingCompleteWarning, setPendingCompleteWarning] = useState<PendingCompleteWarningState | null>(null);
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [sectionNameDraft, setSectionNameDraft] = useState('');
   const [columnWidths, setColumnWidths] = useState<BoardColumnWidths>(BOARD_BASE_COLUMN_WIDTHS);
@@ -1262,6 +1310,7 @@ export default function ProjectBoard({
   const [fieldDrafts, setFieldDrafts] = useState<Record<string, CustomFieldEditorDraft>>({});
   const [customFieldError, setCustomFieldError] = useState<string | null>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const undoCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resizeStateRef = useRef<{ key: string; startX: number; startWidth: number } | null>(null);
   const scrollSyncLockRef = useRef(false);
@@ -1313,6 +1362,16 @@ export default function ProjectBoard({
   const activeCustomFieldFilters = useMemo(
     () => customFieldFilters.filter((filter) => customFields.some((field) => field.id === filter.fieldId && !field.archivedAt)),
     [customFieldFilters, customFields],
+  );
+  const allTasks = useMemo(() => (groupsQuery.data ?? []).flatMap((group) => group.tasks), [groupsQuery.data]);
+
+  const lookupTaskById = useCallback(
+    (taskId: string) =>
+      queryClient
+        .getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId))
+        ?.flatMap((group) => group.tasks)
+        .find((task) => task.id === taskId) ?? null,
+    [projectId, queryClient],
   );
 
   useEffect(() => {
@@ -1413,6 +1472,9 @@ export default function ProjectBoard({
     return () => {
       if (undoTimerRef.current) {
         clearTimeout(undoTimerRef.current);
+      }
+      if (undoCompleteTimerRef.current) {
+        clearTimeout(undoCompleteTimerRef.current);
       }
     };
   }, []);
@@ -1828,6 +1890,95 @@ export default function ProjectBoard({
       });
     },
   });
+
+  const restoreTaskCompletion = useMutation({
+    mutationFn: ({
+      taskId,
+      status,
+      progressPercent,
+      version,
+    }: {
+      taskId: string;
+      status: Task['status'];
+      progressPercent: number;
+      version: number;
+    }) =>
+      api(`/tasks/${taskId}`, {
+        method: 'PATCH',
+        body: { status, progressPercent, version },
+      }) as Promise<Task>,
+    onSuccess: (updated) => {
+      queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) => {
+        const removed = removeTaskFromGroups(current, updated.id);
+        return upsertTaskInSection(removed, updated.sectionId, updated);
+      });
+      setUndoComplete(null);
+    },
+    onError: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+    },
+  });
+
+  const runToggleDone = useCallback(
+    (task: Task, done: boolean) => {
+      completeTask.mutate(
+        {
+          taskId: task.id,
+          done,
+          version: task.version,
+        },
+        {
+          onSuccess: () => {
+            if (!done) return;
+            if (undoCompleteTimerRef.current) {
+              clearTimeout(undoCompleteTimerRef.current);
+            }
+            setUndoComplete({
+              taskId: task.id,
+              title: task.title || t('untitledTask'),
+              previousStatus: task.status,
+              previousProgressPercent: task.progressPercent,
+            });
+            undoCompleteTimerRef.current = setTimeout(() => {
+              setUndoComplete(null);
+            }, 7000);
+          },
+        },
+      );
+    },
+    [completeTask, t],
+  );
+
+  const onToggleDoneWithWarning = useCallback(
+    (task: Task) => {
+      if (!canEdit) return;
+      const done = task.status !== 'DONE';
+      if (!done) {
+        runToggleDone(task, false);
+        return;
+      }
+      const localOpenSubtaskCount = countOpenDescendants(task.id, allTasks);
+      if (localOpenSubtaskCount > 0) {
+        setPendingCompleteWarning({ task, openSubtaskCount: localOpenSubtaskCount });
+        return;
+      }
+
+      void (async () => {
+        try {
+          const subtaskTree = (await api(`/tasks/${task.id}/subtasks/tree`)) as TaskTree[];
+          const remoteOpenSubtaskCount = countOpenSubtasksInTree(subtaskTree);
+          if (remoteOpenSubtaskCount > 0) {
+            setPendingCompleteWarning({ task, openSubtaskCount: remoteOpenSubtaskCount });
+            return;
+          }
+        } catch {
+          // If subtask lookup fails, preserve existing completion behavior.
+        }
+        runToggleDone(task, true);
+      })();
+    },
+    [allTasks, canEdit, runToggleDone],
+  );
 
   const createTask = useMutation({
     mutationFn: ({ sectionId, title }: { sectionId: string; title: string }) =>
@@ -2531,13 +2682,7 @@ export default function ProjectBoard({
                             task={row.task}
                             sectionId={group.section.id}
                             onEdit={onEdit}
-                            onToggleDone={(task) =>
-                              completeTask.mutate({
-                                taskId: task.id,
-                                done: task.status !== 'DONE',
-                                version: task.version,
-                              })
-                            }
+                            onToggleDone={(task) => onToggleDoneWithWarning(task)}
                             members={members}
                             onOpen={setSelectedTaskId}
                             projectName={projectName}
@@ -2631,6 +2776,92 @@ export default function ProjectBoard({
             </Button>
           </div>
         ) : null}
+
+        {undoComplete ? (
+          <div
+            className="fixed bottom-4 left-4 z-50 flex items-center gap-3 rounded-md border bg-background px-3 py-2 text-sm shadow-md"
+            data-testid="complete-undo-banner"
+          >
+            <span>
+              {t('taskCompletedLabel')}: {undoComplete.title}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              data-testid="complete-undo-action"
+              disabled={restoreTaskCompletion.isPending}
+              onClick={() => {
+                if (undoCompleteTimerRef.current) {
+                  clearTimeout(undoCompleteTimerRef.current);
+                }
+                const latest = lookupTaskById(undoComplete.taskId);
+                if (!latest) {
+                  setUndoComplete(null);
+                  return;
+                }
+                restoreTaskCompletion.mutate({
+                  taskId: undoComplete.taskId,
+                  status: undoComplete.previousStatus,
+                  progressPercent: undoComplete.previousProgressPercent,
+                  version: latest.version,
+                });
+              }}
+            >
+              {restoreTaskCompletion.isPending ? t('restoring') : t('undo')}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              data-testid="complete-undo-dismiss"
+              onClick={() => {
+                if (undoCompleteTimerRef.current) {
+                  clearTimeout(undoCompleteTimerRef.current);
+                }
+                setUndoComplete(null);
+              }}
+            >
+              {t('dismiss')}
+            </Button>
+          </div>
+        ) : null}
+
+        <Dialog
+          open={Boolean(pendingCompleteWarning)}
+          onOpenChange={(open) => {
+            if (!open) setPendingCompleteWarning(null);
+          }}
+        >
+          <DialogContent className="max-w-md" data-testid="complete-parent-warning-dialog">
+            <DialogHeader>
+              <DialogTitle>{t('incompleteSubtasksWarningTitle')}</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              {t('incompleteSubtasksWarningDescription').replace(
+                '{count}',
+                String(pendingCompleteWarning?.openSubtaskCount ?? 0),
+              )}
+            </p>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                data-testid="complete-parent-warning-cancel"
+                onClick={() => setPendingCompleteWarning(null)}
+              >
+                {t('cancel')}
+              </Button>
+              <Button
+                data-testid="complete-parent-warning-confirm"
+                onClick={() => {
+                  if (!pendingCompleteWarning) return;
+                  runToggleDone(pendingCompleteWarning.task, true);
+                  setPendingCompleteWarning(null);
+                }}
+              >
+                {t('completeAnyway')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <TaskDetailDrawer
           taskId={selectedTaskId}

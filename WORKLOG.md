@@ -2031,3 +2031,35 @@
 - Risks/known gaps:
   - Prod-like は合成データであり、本番データ分布と完全一致ではない。次段でステージングスナップショット再計測が必要。
   - Q4/Q5 は誤差範囲で微増減があるため、継続監視前提。
+
+## 2026-02-27 - Parent task close safeguard + undo for accidental completion
+- What changed:
+  - Added parent-close safeguard in project board list view:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+    - before marking a parent task `DONE`, UI checks open descendants and shows warning dialog if any remain open.
+    - added fallback subtask-tree API check (`GET /tasks/:id/subtasks/tree`) to avoid stale/local race conditions.
+  - Added undo banner for completion action in list view:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+    - fixed-position left-bottom banner with `Undo` and `Dismiss`, 7-second timeout.
+  - Added same safeguard + undo behavior in task detail drawer:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/task-detail-drawer.tsx`
+    - warning dialog before completing parent with open subtasks.
+    - undo action restores previous status/progress via `PATCH /tasks/:id`.
+  - Added i18n keys for warning/undo labels:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/i18n.tsx`
+  - Added/updated E2E coverage:
+    - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/subtasks.spec.ts`
+    - verifies warning appears, completion can proceed, and undo restores original task state.
+- Why:
+  - Prevent destructive bulk-close mistakes when parent has incomplete subtasks.
+  - Provide fast recovery path (Asana-like undo toast) without manual hand-fix.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm e2e -- --grep "warn before completing parent"` (initially failed; fixed)
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/subtasks.spec.ts -g "warn before completing parent"`
+  - `pnpm --filter @atlaspm/playwright e2e` (33 passed)
+  - `pnpm e2e:down`
+- Risks/known gaps:
+  - Completion warning currently evaluates descendant openness at click-time; if concurrent updates happen immediately after confirmation, standard optimistic concurrency still governs final write.
