@@ -1428,3 +1428,176 @@
   - `pnpm e2e:up && pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1 --reporter=line && pnpm e2e:down`
 - Risks/known gaps:
   - Popover currently lists only non-default sections by design; default/no-section group is intentionally omitted from this navigator.
+
+## 2026-02-27 - P1 #63 Custom Field Foundation (Schema + Migration + Validation)
+- What changed:
+  - Added Prisma enum and tables for custom fields:
+    - `CustomFieldType` enum (`TEXT | NUMBER | DATE | SELECT | BOOLEAN`)
+    - `custom_field_definitions`
+    - `custom_field_options`
+    - `task_custom_field_values` (`taskId + fieldId` unique)
+  - Added `archived_at` support to definitions/options and relational links from `Project` / `Task`.
+  - Added backend validation utilities with consistent `BadRequestException` shapes:
+    - field definition validation (type constraints, select option rules, size limits)
+    - typed value validation (`text/number/date/select/boolean`) with archived checks
+  - Added validation test coverage:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/custom-field.validation.test.ts`
+  - Files:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/prisma/schema.prisma`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/prisma/migrations/20260227005439_custom_fields_foundation/migration.sql`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/custom-fields/custom-field.validation.ts`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/custom-field.validation.test.ts`
+- Why:
+  - Start P1 custom fields implementation from lowest-risk backend foundation before wiring API/UI, with strict type validation and soft-archive readiness.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api build`
+  - `pnpm --filter @atlaspm/core-api test`
+- Risks/known gaps:
+  - API endpoints and UI wiring for custom fields are not added yet (handled in subsequent P1 issues).
+
+## 2026-02-27 - P1 #64 Custom Field Definition APIs (CRUD + RBAC + Audit/Outbox)
+- What changed:
+  - Added custom field definition controller endpoints:
+    - `GET /projects/:id/custom-fields` (default excludes archived; `?includeArchived=true` supported)
+    - `POST /projects/:id/custom-fields`
+    - `PATCH /custom-fields/:id`
+    - `DELETE /custom-fields/:id` (archive/soft-delete)
+  - Enforced role policy:
+    - list: `VIEWER+`
+    - create/update/delete: `MEMBER+`
+  - Added audit/outbox events for create/update/archive:
+    - `custom_field.created`
+    - `custom_field.updated`
+    - `custom_field.archived`
+  - Added integration coverage in core API test suite for:
+    - RBAC (viewer cannot create)
+    - create/list/update/archive flow
+    - archived visibility behavior
+    - audit/outbox emission assertions
+  - Files:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/custom-fields/custom-fields.controller.ts`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/app.module.ts`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+- Why:
+  - Deliver issue #64 backend CRUD boundary with security and eventing guarantees before UI integration.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api build`
+  - `pnpm --filter @atlaspm/core-api test`
+- Risks/known gaps:
+  - Patch currently supports full option replacement semantics for select fields (archives previous active options); UI-side granular option editing is tracked in subsequent issues.
+
+## 2026-02-27 - P1 #65 Task Custom Field Value APIs (Patch/Read + Version Conflict)
+- What changed:
+  - Added task custom field value update API:
+    - `PATCH /tasks/:id/custom-fields`
+    - accepts per-field value updates with optimistic concurrency (`version` required).
+    - supports clear (`value: null`) and typed validation (`TEXT/NUMBER/DATE/SELECT/BOOLEAN`).
+  - Added stale-write conflict handling:
+    - returns `409` on version mismatch with `latestVersion`.
+  - Extended task read responses to include custom field values:
+    - `GET /tasks/:id`
+    - `GET /projects/:id/tasks` (including grouped list path)
+  - Added audit/outbox emission for value updates:
+    - `task.custom_fields.updated`
+  - Added integration coverage:
+    - stale version conflict
+    - successful value patch
+    - read-path exposure on task detail + task list
+    - audit/outbox assertions
+  - Files:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/tasks/tasks.controller.ts`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+- Why:
+  - Deliver issue #65 backend contract so UI can safely add custom field inline editing without race-condition corruption.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api build`
+  - `pnpm --filter @atlaspm/core-api test`
+- Risks/known gaps:
+  - Multi-field transactional partial update behavior is atomic, but UI batch ergonomics and column rendering are handled in upcoming web-ui issues (#66/#67).
+
+## 2026-02-27 - P1 #66 Web UI Custom Field Columns (Add Field + Inline Edit)
+- What changed:
+  - Added web-ui types for custom field definitions/options/task values.
+  - Added React Query key for project custom fields:
+    - `queryKeys.projectCustomFields(projectId)`.
+  - Upgraded project list board to support dynamic columns:
+    - base columns + custom field columns in one synchronized header/body table.
+    - custom columns participate in stored width/resizing state.
+  - Added “Add column” UX (dialog) to create custom fields from list view:
+    - supports creating `TEXT/NUMBER/DATE/SELECT/BOOLEAN`.
+    - `SELECT` creation seeds one default option for backend schema validity.
+  - Added inline custom field editing in task rows:
+    - text/number/date/select/boolean cell editors
+    - optimistic cache update with rollback on error
+    - mutation via `PATCH /tasks/:id/custom-fields`
+  - Added localized copy (EN/JA) for custom field actions and errors.
+  - Files:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/i18n.tsx`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/query-keys.ts`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/types.ts`
+- Why:
+  - Deliver issue #66 with no-refresh custom column workflow while preserving existing list DnD/edit behavior.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm e2e` (31 tests passed)
+- Risks/known gaps:
+  - Select-type custom field creation currently seeds a default option (`Option/選択肢`) and expects option management UX in follow-up work.
+
+## 2026-02-27 - P1 #67/#68 Custom Field Filters + Quality Gate
+- What changed:
+  - Added project-level custom-field filter serialization helpers:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/project-filters.ts`
+    - supported predicates: `SELECT`, `BOOLEAN`, `NUMBER`, `DATE`
+  - Wired filter query parsing from URL in project page:
+    - `cf` query param is parsed and passed to `ProjectBoard`.
+  - Extended list filtering logic to apply custom-field predicates without mutating manual order.
+  - Added custom-field filters to Header filter popover:
+    - select option multi-checkbox
+    - boolean any/true/false
+    - number min/max
+    - date from/to
+  - Added e2e coverage:
+    - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/custom-fields-filter.spec.ts`
+    - verifies custom field creation via UI, value edit via UI, filter apply, reload persistence, and clear behavior.
+  - Stabilized query/array dependencies to prevent reload-time React update-depth errors in filtered project views:
+    - stabilized URLSearchParams usage in page/header
+    - stabilized empty custom-field array fallback in project board
+  - Updated design/architecture docs for custom-field filtering and URL-driven cache strategy:
+    - `/Users/tomoakikawada/Dev/atlaspm/docs/ui-design.md`
+    - `/Users/tomoakikawada/Dev/atlaspm/docs/architecture.md`
+- Why:
+  - Deliver #67 custom-field filter UX with no-refresh persistence.
+  - Close #68 quality gate with explicit docs and stable E2E behavior, including regression coverage for prior reload crash.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm --filter @atlaspm/playwright e2e -- tests/mvp.spec.ts`
+  - `pnpm --filter @atlaspm/playwright e2e -- tests/custom-fields-filter.spec.ts`
+  - `pnpm e2e` (32 tests passed)
+- Risks/known gaps:
+  - `cf` query payload is JSON in URL; very large filter sets may increase URL length. Current UX scope (project-local, few fields) is within practical bounds.
+
+## 2026-02-27 - P2 Webhook DLQ Redrive Hardening (Race-safe retry)
+- What changed:
+  - Hardened DLQ redrive endpoint against concurrent duplicate retries.
+  - Updated `POST /webhooks/dlq/:eventId/retry` to claim/reset only when the target event is still in DLQ state (`deadLetteredAt IS NOT NULL`) using atomic `updateMany`.
+  - Added explicit `409 Conflict` response when another actor already redrives the same event first.
+  - Added integration assertion that second redrive attempt for the same event returns `409`.
+  - Files:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/webhooks/webhooks.controller.ts`
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+- Why:
+  - Prevent duplicate `retry_requested` audit/outbox emissions and race-induced state churn during parallel admin operations.
+  - Keep DLQ redrive behavior deterministic under concurrent requests.
+- How tested (exact commands):
+  - `docker compose -f infra/docker/docker-compose.yml up -d postgres`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e` (32 tests passed)
+- Risks/known gaps:
+  - Redrive remains single-event; bulk redrive orchestration is still intentionally out of scope.

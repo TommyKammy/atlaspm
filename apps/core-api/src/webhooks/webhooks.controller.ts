@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Get, Inject, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { IsString, IsUrl, IsUUID } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
@@ -86,7 +86,6 @@ export class WebhooksController {
       this.prisma.outboxEvent.findUnique({ where: { id: eventId } }),
     ]);
     if (!event) throw new BadRequestException('outbox event not found');
-    if (!event.deadLetteredAt) throw new BadRequestException('outbox event is not in dead letter state');
 
     const projectTaskIds = new Set(projectTaskRows.map((row) => row.id));
     const projectSectionIds = new Set(projectSectionRows.map((row) => row.id));
@@ -95,8 +94,11 @@ export class WebhooksController {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.outboxEvent.update({
-        where: { id: eventId },
+      const claimed = await tx.outboxEvent.updateMany({
+        where: {
+          id: eventId,
+          deadLetteredAt: { not: null },
+        },
         data: {
           deadLetteredAt: null,
           deliveryAttempts: 0,
@@ -104,6 +106,12 @@ export class WebhooksController {
           lastError: null,
           deliveredAt: null,
         },
+      });
+      if (!claimed.count) {
+        throw new ConflictException('outbox event is no longer in dead letter state');
+      }
+      const updated = await tx.outboxEvent.findUniqueOrThrow({
+        where: { id: eventId },
       });
       await this.domain.appendAuditOutbox({
         tx,

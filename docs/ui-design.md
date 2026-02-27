@@ -29,6 +29,11 @@
 ## Task List Structure
 - Header tabs: `List / Board / Calendar / Files` (non-list views are placeholder unless implemented).
 - Toolbar: search, status filter, priority filter, add action.
+- Filter popover supports project member/status plus custom-field filters:
+  - `SELECT`: multi-select options
+  - `BOOLEAN`: any/true/false
+  - `NUMBER`: min/max
+  - `DATE`: from/to
 - Section groups:
   - uppercase section header + task count badge
   - section-scoped quick add row
@@ -56,6 +61,7 @@
 - `['project', projectId, 'sections']`
 - `['project', projectId, 'tasks', { groupBy: 'section' }]`
 - `['project', projectId, 'members']`
+- `['project', projectId, 'custom-fields']`
 - `['project', projectId, 'rules']`
 - `['notifications', { status: 'all' | 'unread' }]`
 - `['notifications', 'unread-count']`
@@ -64,6 +70,11 @@
 - Use targeted optimistic updates for inline edits and reorder.
 - Invalidate only affected keys on settle/error.
 - No page reloads required for section/task create, edits, or reorder.
+- Project filter state is URL-driven:
+  - `statuses` (comma list)
+  - `assignees` (comma list, includes `UNASSIGNED`)
+  - `cf` (serialized custom-field filters JSON)
+- `localStorage` mirrors the latest filter state for user continuity, while URL params remain source of truth.
 
 ## Keyboard Shortcuts
 - `/`: focus project search input (when not typing in an input/editor).

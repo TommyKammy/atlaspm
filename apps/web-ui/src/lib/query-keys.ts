@@ -13,6 +13,7 @@ export const queryKeys = {
     ['project', projectId, 'tasks', { groupBy: 'section', deleted: true }] as const,
   projectRules: (projectId: string) => ['project', projectId, 'rules'] as const,
   projectMembers: (projectId: string) => ['project', projectId, 'members'] as const,
+  projectCustomFields: (projectId: string) => ['project', projectId, 'custom-fields'] as const,
   notifications: (status: 'all' | 'unread' = 'all') => ['notifications', { status }] as const,
   notificationsUnreadCount: ['notifications', 'unread-count'] as const,
   taskDetail: (taskId: string) => ['task', taskId] as const,

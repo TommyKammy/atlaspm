@@ -771,6 +771,232 @@ describe('Core API Integration', () => {
     expect(defaultSection).toBeTruthy();
   });
 
+  test('custom field definition APIs enforce RBAC and emit audit/outbox', async () => {
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Custom Field ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const auth = app.get(AuthService);
+    const memberId = `cf-member-${Date.now()}`;
+    const viewerId = `cf-viewer-${Date.now()}`;
+    for (const userId of [memberId, viewerId]) {
+      await prisma.user.upsert({
+        where: { id: userId },
+        create: {
+          id: userId,
+          email: `${userId}@example.com`,
+          displayName: userId,
+          status: 'ACTIVE',
+        },
+        update: {},
+      });
+      await prisma.workspaceMembership.upsert({
+        where: { workspaceId_userId: { workspaceId, userId } },
+        create: { workspaceId, userId, role: 'WS_MEMBER' },
+        update: {},
+      });
+    }
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/members`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: memberId, role: 'MEMBER' })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/members`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: viewerId, role: 'VIEWER' })
+      .expect(201);
+
+    const memberToken = await auth.mintDevToken(memberId, `${memberId}@example.com`, 'CF Member');
+    const viewerToken = await auth.mintDevToken(viewerId, `${viewerId}@example.com`, 'CF Viewer');
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/custom-fields`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({ name: 'Blocked Create', type: 'TEXT' })
+      .expect(403);
+
+    const createRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/custom-fields`)
+      .set('Authorization', `Bearer ${memberToken}`)
+      .send({
+        name: 'Customer Tier',
+        type: 'SELECT',
+        required: true,
+        options: [
+          { label: 'Gold', value: 'gold' },
+          { label: 'Silver', value: 'silver' },
+        ],
+      })
+      .expect(201);
+    expect(createRes.body.id).toBeTruthy();
+    expect(createRes.body.options.length).toBe(2);
+    const fieldId = createRes.body.id as string;
+
+    const viewerList = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/custom-fields`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(200);
+    expect(viewerList.body.some((field: any) => field.id === fieldId)).toBe(true);
+
+    const patchRes = await request(app.getHttpServer())
+      .patch(`/custom-fields/${fieldId}`)
+      .set('Authorization', `Bearer ${memberToken}`)
+      .send({
+        name: 'Customer Segment',
+        options: [
+          { label: 'Enterprise', value: 'enterprise' },
+          { label: 'SMB', value: 'smb' },
+        ],
+      })
+      .expect(200);
+    expect(patchRes.body.name).toBe('Customer Segment');
+    expect(patchRes.body.options.map((option: any) => option.value)).toEqual(['enterprise', 'smb']);
+
+    await request(app.getHttpServer())
+      .delete(`/custom-fields/${fieldId}`)
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(200);
+
+    const activeList = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/custom-fields`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(activeList.body.some((field: any) => field.id === fieldId)).toBe(false);
+
+    const includeArchivedList = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/custom-fields?includeArchived=true`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const archivedField = includeArchivedList.body.find((field: any) => field.id === fieldId);
+    expect(archivedField).toBeTruthy();
+    expect(Boolean(archivedField.archivedAt)).toBe(true);
+
+    const customFieldAudit = await prisma.auditEvent.findMany({
+      where: { entityType: 'CustomFieldDefinition', entityId: fieldId },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(customFieldAudit.map((event) => event.action)).toEqual([
+      'custom_field.created',
+      'custom_field.updated',
+      'custom_field.archived',
+    ]);
+
+    const outbox = await request(app.getHttpServer())
+      .get(`/outbox?projectId=${projectId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(outbox.body.some((event: any) => event.type === 'custom_field.created')).toBe(true);
+    expect(outbox.body.some((event: any) => event.type === 'custom_field.updated')).toBe(true);
+    expect(outbox.body.some((event: any) => event.type === 'custom_field.archived')).toBe(true);
+  });
+
+  test('task custom field value APIs enforce optimistic locking and expose values on task responses', async () => {
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Task Custom Values ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSection = sectionsRes.body.find((section: any) => section.isDefault);
+    expect(defaultSection?.id).toBeTruthy();
+
+    const textField = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/custom-fields`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Customer Note', type: 'TEXT' })
+      .expect(201);
+
+    const selectField = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/custom-fields`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: 'Customer Segment',
+        type: 'SELECT',
+        options: [
+          { label: 'Enterprise', value: 'enterprise' },
+          { label: 'SMB', value: 'smb' },
+        ],
+      })
+      .expect(201);
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Task with custom values', sectionId: defaultSection.id })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+
+    await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/custom-fields`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        version: taskRes.body.version + 1,
+        values: [{ fieldId: textField.body.id, value: 'stale write' }],
+      })
+      .expect(409);
+
+    const patchRes = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/custom-fields`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        version: taskRes.body.version,
+        values: [
+          { fieldId: textField.body.id, value: 'important account' },
+          { fieldId: selectField.body.id, value: selectField.body.options[0].id },
+        ],
+      })
+      .expect(200);
+    expect(patchRes.body.version).toBe(taskRes.body.version + 1);
+    expect(patchRes.body.customFieldValues.length).toBe(2);
+
+    const taskDetail = await request(app.getHttpServer())
+      .get(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(taskDetail.body.customFieldValues.some((value: any) => value.fieldId === textField.body.id)).toBe(true);
+
+    const listRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const listedTask = listRes.body.find((item: any) => item.id === taskId);
+    expect(listedTask).toBeTruthy();
+    expect(listedTask.customFieldValues.some((value: any) => value.fieldId === selectField.body.id)).toBe(true);
+
+    const customFieldAudit = await prisma.auditEvent.findFirst({
+      where: { entityType: 'Task', entityId: taskId, action: 'task.custom_fields.updated' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(customFieldAudit).toBeTruthy();
+
+    const outbox = await request(app.getHttpServer())
+      .get(`/outbox?projectId=${projectId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(outbox.body.some((event: any) => event.type === 'task.custom_fields.updated')).toBe(true);
+  });
+
   test('task retention worker purges expired soft-deleted tasks and keeps recent deletions', async () => {
     const wsRes = await request(app.getHttpServer())
       .get('/workspaces')
@@ -1000,6 +1226,12 @@ describe('Core API Integration', () => {
         .set('x-correlation-id', redriveCorrelationId)
         .send({ projectId })
         .expect(201);
+
+      await request(app.getHttpServer())
+        .post(`/webhooks/dlq/${failingEvent.id}/retry`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ projectId })
+        .expect(409);
 
       const resetState = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: failingEvent.id } });
       expect(resetState.deadLetteredAt).toBeNull();

@@ -17,6 +17,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import {
+  Allow,
   IsBoolean,
   IsArray,
   IsEnum,
@@ -29,6 +30,7 @@ import {
   MaxLength,
   Max,
   Min,
+  ValidateNested,
 } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
@@ -49,6 +51,11 @@ import {
   type RuleDefinition,
 } from '../rules/rule-definition';
 import { NotificationsService } from '../notifications/notifications.service';
+import { Type } from 'class-transformer';
+import {
+  parseCustomFieldValue,
+  type ParsedCustomFieldValue,
+} from '../custom-fields/custom-field.validation';
 
 class TaskQuery {
   @IsOptional()
@@ -186,6 +193,24 @@ class PatchTaskDto {
 class CompleteTaskDto {
   @IsBoolean()
   done!: boolean;
+
+  @IsInt()
+  version!: number;
+}
+
+class PatchTaskCustomFieldValueDto {
+  @IsUUID()
+  fieldId!: string;
+
+  @Allow()
+  value?: unknown;
+}
+
+class PatchTaskCustomFieldsDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PatchTaskCustomFieldValueDto)
+  values!: PatchTaskCustomFieldValueDto[];
 
   @IsInt()
   version!: number;
@@ -329,6 +354,39 @@ const MAX_COMMENT_BODY_LENGTH = 5000;
 const MAX_IMAGE_UPLOAD_BYTES = 5_000_000;
 const IMAGE_MIME_ALLOWLIST = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
+type TaskCustomFieldValueWithRelations = Prisma.TaskCustomFieldValueGetPayload<{
+  include: {
+    field: { select: { id: true; name: true; type: true; required: true; archivedAt: true; position: true } };
+    option: { select: { id: true; label: true; value: true; color: true; archivedAt: true } };
+  };
+}>;
+
+type SerializedTaskCustomFieldValue = {
+  id: string;
+  taskId: string;
+  fieldId: string;
+  optionId: string | null;
+  valueText: string | null;
+  valueNumber: number | null;
+  valueDate: Date | null;
+  valueBoolean: boolean | null;
+  createdAt: Date;
+  updatedAt: Date;
+  field: {
+    id: string;
+    name: string;
+    type: string;
+    required: boolean;
+    position: number;
+  } | null;
+  option: {
+    id: string;
+    label: string;
+    value: string;
+    color: string | null;
+  } | null;
+};
+
 @Controller()
 @UseGuards(AuthGuard)
 export class TasksController {
@@ -372,21 +430,25 @@ export class TasksController {
       : [{ sectionId: 'asc' as const }, { position: 'asc' as const }];
 
     const tasks = await this.prisma.task.findMany({ where, orderBy });
+    const hydratedTasks = await this.hydrateTasksWithCustomFieldValues(tasks);
     if (query.groupBy === 'section') {
       const sections = await this.prisma.section.findMany({ where: { projectId }, orderBy: { position: 'asc' } });
       return sections.map((section) => ({
         section,
-        tasks: tasks.filter((t) => t.sectionId === section.id).sort((a, b) => (query.sortBy ? 0 : a.position - b.position)),
+        tasks: hydratedTasks
+          .filter((t) => t.sectionId === section.id)
+          .sort((a, b) => (query.sortBy ? 0 : Number(a.position) - Number(b.position))),
       }));
     }
-    return tasks;
+    return hydratedTasks;
   }
 
   @Get('tasks/:id')
   async getOne(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
-    return task;
+    const [hydratedTask] = await this.hydrateTasksWithCustomFieldValues([task]);
+    return hydratedTask;
   }
 
   @Post('projects/:id/tasks')
@@ -491,6 +553,150 @@ export class TasksController {
     }).then((updated) => {
       void this.searchService.indexTask(updated);
       return updated;
+    });
+  }
+
+  @Patch('tasks/:id/custom-fields')
+  async patchCustomFields(
+    @Param('id') id: string,
+    @Body() body: PatchTaskCustomFieldsDto,
+    @CurrentRequest() req: AppRequest,
+  ) {
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+
+    if (body.version !== task.version) {
+      throw new ConflictException({
+        message: 'Version conflict',
+        latestVersion: task.version,
+      });
+    }
+
+    const seenFieldIds = new Set<string>();
+    for (const entry of body.values) {
+      if (!Object.prototype.hasOwnProperty.call(entry, 'value')) {
+        throw new ConflictException(`value is required for field ${entry.fieldId}`);
+      }
+      if (seenFieldIds.has(entry.fieldId)) {
+        throw new ConflictException(`Duplicate field update: ${entry.fieldId}`);
+      }
+      seenFieldIds.add(entry.fieldId);
+    }
+
+    const targetFieldIds = [...seenFieldIds];
+    const definitions = await this.prisma.customFieldDefinition.findMany({
+      where: {
+        id: { in: targetFieldIds },
+        projectId: task.projectId,
+        archivedAt: null,
+      },
+      include: {
+        options: {
+          where: { archivedAt: null },
+        },
+      },
+    });
+    if (definitions.length !== targetFieldIds.length) {
+      throw new ConflictException('Unknown or archived custom field definition');
+    }
+    const definitionById = new Map(definitions.map((definition) => [definition.id, definition]));
+
+    const parsedUpdates = body.values.map((entry) => {
+      const definition = definitionById.get(entry.fieldId);
+      if (!definition) throw new ConflictException(`Unknown custom field: ${entry.fieldId}`);
+      const parsed = parseCustomFieldValue(
+        {
+          id: definition.id,
+          type: definition.type,
+          archivedAt: definition.archivedAt,
+          options: definition.options.map((option) => ({
+            id: option.id,
+            value: option.value,
+            archivedAt: option.archivedAt,
+          })),
+        },
+        entry.value,
+      );
+      if (definition.required && parsed === null) {
+        throw new ConflictException(`Required custom field cannot be empty: ${definition.name}`);
+      }
+      return { definition, parsed };
+    });
+
+    const beforeValues = await this.prisma.taskCustomFieldValue.findMany({
+      where: {
+        taskId: id,
+        field: { archivedAt: null },
+      },
+      include: {
+        field: { select: { id: true, name: true, type: true, required: true, archivedAt: true, position: true } },
+        option: { select: { id: true, label: true, value: true, color: true, archivedAt: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    const serializedBefore = beforeValues.map((value) => this.serializeTaskCustomFieldValue(value));
+
+    return this.prisma.$transaction(async (tx) => {
+      for (const update of parsedUpdates) {
+        if (update.parsed === null) {
+          await tx.taskCustomFieldValue.deleteMany({
+            where: { taskId: id, fieldId: update.definition.id },
+          });
+          continue;
+        }
+        const storage = this.toCustomFieldStorage(update.parsed);
+        await tx.taskCustomFieldValue.upsert({
+          where: { taskId_fieldId: { taskId: id, fieldId: update.definition.id } },
+          create: {
+            taskId: id,
+            fieldId: update.definition.id,
+            ...storage,
+          },
+          update: storage,
+        });
+      }
+
+      const updatedTask = await tx.task.update({
+        where: { id },
+        data: { version: { increment: 1 } },
+      });
+
+      const currentValues = await tx.taskCustomFieldValue.findMany({
+        where: {
+          taskId: id,
+          field: { archivedAt: null },
+        },
+        include: {
+          field: { select: { id: true, name: true, type: true, required: true, archivedAt: true, position: true } },
+          option: { select: { id: true, label: true, value: true, color: true, archivedAt: true } },
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+      const serializedCurrent = currentValues.map((value) => this.serializeTaskCustomFieldValue(value));
+
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'Task',
+        entityId: id,
+        action: 'task.custom_fields.updated',
+        beforeJson: { customFieldValues: serializedBefore, version: task.version },
+        afterJson: { customFieldValues: serializedCurrent, version: updatedTask.version },
+        correlationId: req.correlationId,
+        outboxType: 'task.custom_fields.updated',
+        payload: {
+          taskId: id,
+          projectId: task.projectId,
+          version: updatedTask.version,
+          customFieldValues: serializedCurrent,
+        },
+      });
+
+      return {
+        id: updatedTask.id,
+        version: updatedTask.version,
+        customFieldValues: serializedCurrent,
+      };
     });
   }
 
@@ -1393,6 +1599,124 @@ export class TasksController {
   async getDependencyGraph(@Param('id') projectId: string, @CurrentRequest() req: AppRequest) {
     await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
     return this.subtaskService.getDependencyGraph(projectId);
+  }
+
+  private async hydrateTasksWithCustomFieldValues(
+    tasks: Array<Record<string, unknown> & { id: string }>,
+  ): Promise<Array<Record<string, unknown> & { id: string; customFieldValues: SerializedTaskCustomFieldValue[] }>> {
+    if (!tasks.length) return tasks.map((task) => ({ ...task, customFieldValues: [] }));
+    const taskIds = tasks.map((task) => task.id);
+    const values = await this.prisma.taskCustomFieldValue.findMany({
+      where: {
+        taskId: { in: taskIds },
+        field: { archivedAt: null },
+      },
+      include: {
+        field: { select: { id: true, name: true, type: true, required: true, archivedAt: true, position: true } },
+        option: { select: { id: true, label: true, value: true, color: true, archivedAt: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    const byTaskId = new Map<string, SerializedTaskCustomFieldValue[]>();
+    for (const value of values) {
+      const serialized = this.serializeTaskCustomFieldValue(value);
+      const bucket = byTaskId.get(value.taskId);
+      if (bucket) {
+        bucket.push(serialized);
+      } else {
+        byTaskId.set(value.taskId, [serialized]);
+      }
+    }
+    for (const bucket of byTaskId.values()) {
+      bucket.sort((a, b) => {
+        const left = a.field?.position ?? Number.MAX_SAFE_INTEGER;
+        const right = b.field?.position ?? Number.MAX_SAFE_INTEGER;
+        if (left === right) return a.fieldId.localeCompare(b.fieldId);
+        return left - right;
+      });
+    }
+    return tasks.map((task) => ({
+      ...task,
+      customFieldValues: byTaskId.get(task.id) ?? [],
+    }));
+  }
+
+  private serializeTaskCustomFieldValue(value: TaskCustomFieldValueWithRelations): SerializedTaskCustomFieldValue {
+    return {
+      id: value.id,
+      taskId: value.taskId,
+      fieldId: value.fieldId,
+      optionId: value.optionId,
+      valueText: value.valueText,
+      valueNumber: value.valueNumber === null ? null : Number(value.valueNumber),
+      valueDate: value.valueDate,
+      valueBoolean: value.valueBoolean,
+      createdAt: value.createdAt,
+      updatedAt: value.updatedAt,
+      field: value.field
+        ? {
+            id: value.field.id,
+            name: value.field.name,
+            type: value.field.type,
+            required: value.field.required,
+            position: value.field.position,
+          }
+        : null,
+      option: value.option
+        ? {
+            id: value.option.id,
+            label: value.option.label,
+            value: value.option.value,
+            color: value.option.color,
+          }
+        : null,
+    };
+  }
+
+  private toCustomFieldStorage(parsed: ParsedCustomFieldValue) {
+    if (parsed.type === 'TEXT') {
+      return {
+        optionId: null,
+        valueText: parsed.valueText,
+        valueNumber: null,
+        valueDate: null,
+        valueBoolean: null,
+      };
+    }
+    if (parsed.type === 'NUMBER') {
+      return {
+        optionId: null,
+        valueText: null,
+        valueNumber: parsed.valueNumber,
+        valueDate: null,
+        valueBoolean: null,
+      };
+    }
+    if (parsed.type === 'DATE') {
+      return {
+        optionId: null,
+        valueText: null,
+        valueNumber: null,
+        valueDate: parsed.valueDate,
+        valueBoolean: null,
+      };
+    }
+    if (parsed.type === 'BOOLEAN') {
+      return {
+        optionId: null,
+        valueText: null,
+        valueNumber: null,
+        valueDate: null,
+        valueBoolean: parsed.valueBoolean,
+      };
+    }
+    return {
+      optionId: parsed.optionId,
+      valueText: parsed.valueText,
+      valueNumber: null,
+      valueDate: null,
+      valueBoolean: null,
+    };
   }
 
   private validateDescriptionDoc(descriptionDoc: Record<string, unknown>) {

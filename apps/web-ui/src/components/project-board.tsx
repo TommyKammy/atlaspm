@@ -16,7 +16,16 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { Calendar, Check, CheckCircle2, ChevronDown, ChevronRight, Circle, ExternalLink, Plus, Trash2, User } from 'lucide-react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { ProjectMember, Section, SectionTaskGroup, Task } from '@/lib/types';
+import type {
+  CustomFieldDefinition,
+  CustomFieldType,
+  ProjectMember,
+  Section,
+  SectionTaskGroup,
+  Task,
+  TaskCustomFieldValue,
+} from '@/lib/types';
+import type { CustomFieldFilter } from '@/lib/project-filters';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -34,10 +43,13 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { cn } from '@/lib/utils';
 import TaskDetailDrawer from '@/components/task-detail-drawer';
 import { useI18n } from '@/lib/i18n';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 function sortByPosition(tasks: Task[]) {
   return [...tasks].sort((a, b) => a.position - b.position);
 }
+
+const EMPTY_CUSTOM_FIELDS: CustomFieldDefinition[] = [];
 
 function removeTaskFromGroups(groups: SectionTaskGroup[], taskId: string) {
   return groups.map((group) => ({
@@ -95,6 +107,96 @@ function resolveAssigneeLabel(task: Task, members: ProjectMember[]) {
 function initials(label: string) {
   const pieces = label.trim().split(/\s+/).slice(0, 2);
   return pieces.map((piece) => piece.charAt(0).toUpperCase()).join('') || 'U';
+}
+
+function customFieldColumnKey(fieldId: string) {
+  return `cf:${fieldId}`;
+}
+
+function findTaskCustomFieldValue(task: Task, fieldId: string): TaskCustomFieldValue | null {
+  return task.customFieldValues?.find((value) => value.fieldId === fieldId) ?? null;
+}
+
+function taskMatchesCustomFieldFilter(task: Task, filter: CustomFieldFilter): boolean {
+  const value = findTaskCustomFieldValue(task, filter.fieldId);
+  if (!value) return false;
+
+  if (filter.type === 'SELECT') {
+    if (!filter.optionIds?.length) return true;
+    return Boolean(value.optionId && filter.optionIds.includes(value.optionId));
+  }
+
+  if (filter.type === 'BOOLEAN') {
+    if (typeof filter.booleanValue !== 'boolean') return true;
+    return value.valueBoolean === filter.booleanValue;
+  }
+
+  if (filter.type === 'NUMBER') {
+    if (typeof value.valueNumber !== 'number') return false;
+    if (typeof filter.numberMin === 'number' && value.valueNumber < filter.numberMin) return false;
+    if (typeof filter.numberMax === 'number' && value.valueNumber > filter.numberMax) return false;
+    return true;
+  }
+
+  const valueDate = value.valueDate ? String(value.valueDate).slice(0, 10) : '';
+  if (!valueDate) return false;
+  if (filter.dateFrom && valueDate < filter.dateFrom) return false;
+  if (filter.dateTo && valueDate > filter.dateTo) return false;
+  return true;
+}
+
+function optimisticCustomFieldValues(
+  task: Task,
+  field: CustomFieldDefinition,
+  rawValue: unknown,
+): TaskCustomFieldValue[] {
+  const current = [...(task.customFieldValues ?? [])];
+  const index = current.findIndex((item) => item.fieldId === field.id);
+  if (rawValue === null || typeof rawValue === 'undefined' || rawValue === '') {
+    if (index >= 0) current.splice(index, 1);
+    return current;
+  }
+
+  const next: TaskCustomFieldValue = {
+    id: current[index]?.id ?? `temp-${task.id}-${field.id}`,
+    taskId: task.id,
+    fieldId: field.id,
+    field: {
+      id: field.id,
+      name: field.name,
+      type: field.type,
+      required: field.required,
+      position: field.position,
+    },
+    optionId: null,
+    option: null,
+    valueText: null,
+    valueNumber: null,
+    valueDate: null,
+    valueBoolean: null,
+  };
+
+  if (field.type === 'TEXT') {
+    next.valueText = String(rawValue);
+  } else if (field.type === 'NUMBER') {
+    next.valueNumber = Number(rawValue);
+  } else if (field.type === 'DATE') {
+    next.valueDate = String(rawValue);
+  } else if (field.type === 'BOOLEAN') {
+    next.valueBoolean = Boolean(rawValue);
+  } else if (field.type === 'SELECT') {
+    const optionId = String(rawValue);
+    const option = field.options.find((candidate) => candidate.id === optionId) ?? null;
+    next.optionId = optionId;
+    next.option = option
+      ? { id: option.id, label: option.label, value: option.value, color: option.color ?? null }
+      : null;
+    next.valueText = option?.value ?? null;
+  }
+
+  if (index >= 0) current[index] = next;
+  else current.push(next);
+  return current;
 }
 
 type TaskTreeNode = {
@@ -175,7 +277,7 @@ const statusBadgeClass: Record<Task['status'], string> = {
   BLOCKED: 'bg-rose-100/80 text-rose-700',
 };
 
-const BOARD_COLUMNS = [
+const BOARD_BASE_COLUMNS = [
   { key: 'name', defaultWidth: 420, minWidth: 260 },
   { key: 'assignee', defaultWidth: 220, minWidth: 150 },
   { key: 'dueDate', defaultWidth: 240, minWidth: 180 },
@@ -188,18 +290,25 @@ const BOARD_COLUMNS = [
   { key: 'actions', defaultWidth: 88, minWidth: 72 },
 ] as const;
 
-type BoardColumnKey = (typeof BOARD_COLUMNS)[number]['key'];
-type BoardColumnWidths = Record<BoardColumnKey, number>;
+type BaseBoardColumnKey = (typeof BOARD_BASE_COLUMNS)[number]['key'];
+type BoardColumnWidths = Record<string, number>;
+type BoardColumnConfig = {
+  key: string;
+  defaultWidth: number;
+  minWidth: number;
+  label: string;
+  customField?: CustomFieldDefinition;
+};
 
-const BOARD_DEFAULT_COLUMN_WIDTHS: BoardColumnWidths = BOARD_COLUMNS.reduce((acc, column) => {
+const BOARD_BASE_COLUMN_WIDTHS: Record<BaseBoardColumnKey, number> = BOARD_BASE_COLUMNS.reduce((acc, column) => {
   acc[column.key] = column.defaultWidth;
   return acc;
-}, {} as BoardColumnWidths);
+}, {} as Record<BaseBoardColumnKey, number>);
 
-const BOARD_MIN_COLUMN_WIDTHS: BoardColumnWidths = BOARD_COLUMNS.reduce((acc, column) => {
+const BOARD_BASE_MIN_COLUMN_WIDTHS: Record<BaseBoardColumnKey, number> = BOARD_BASE_COLUMNS.reduce((acc, column) => {
   acc[column.key] = column.minWidth;
   return acc;
-}, {} as BoardColumnWidths);
+}, {} as Record<BaseBoardColumnKey, number>);
 
 function AssigneeCombobox({
   task,
@@ -390,6 +499,8 @@ function TaskRow({
   onToggleCollapse,
   draggable,
   onDelete,
+  customFields,
+  onEditCustomField,
 }: {
   task: Task;
   sectionId: string;
@@ -404,6 +515,8 @@ function TaskRow({
   onToggleCollapse: (taskId: string) => void;
   draggable: boolean;
   onDelete: (taskId: string) => void;
+  customFields: CustomFieldDefinition[];
+  onEditCustomField: (task: Task, field: CustomFieldDefinition, value: unknown) => void;
 }) {
   const { t } = useI18n();
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
@@ -608,6 +721,110 @@ function TaskRow({
           <option value="BLOCKED">BLOCKED</option>
         </select>
       </TableCell>
+      {customFields.map((field) => {
+        const customValue = findTaskCustomFieldValue(task, field.id);
+        const textValue = customValue?.valueText ?? '';
+        const numberValue =
+          customValue?.valueNumber === null || customValue?.valueNumber === undefined
+            ? ''
+            : String(customValue.valueNumber);
+        const dateValue = customValue?.valueDate ?? null;
+        const selectValue = customValue?.optionId ?? '';
+        const boolValue = Boolean(customValue?.valueBoolean);
+
+        return (
+          <TableCell key={`task-${task.id}-field-${field.id}`} className="border-l border-[#f0f0f0] dark:border-border/40">
+            {field.type === 'TEXT' ? (
+              <Input
+                key={`task-${task.id}-field-${field.id}-${textValue}`}
+                defaultValue={textValue}
+                data-no-dnd="true"
+                data-testid={`task-custom-text-${task.id}-${field.id}`}
+                className="h-7 border-0 bg-transparent px-2 text-[11px] shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
+                onPointerDown={(event) => event.stopPropagation()}
+                onBlur={(event) => {
+                  const next = event.currentTarget.value.trim();
+                  if (next !== textValue) onEditCustomField(task, field, next || null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    const next = (event.currentTarget as HTMLInputElement).value.trim();
+                    if (next !== textValue) onEditCustomField(task, field, next || null);
+                    (event.currentTarget as HTMLInputElement).blur();
+                  }
+                }}
+              />
+            ) : null}
+            {field.type === 'NUMBER' ? (
+              <Input
+                key={`task-${task.id}-field-${field.id}-${numberValue}`}
+                type="number"
+                defaultValue={numberValue}
+                data-no-dnd="true"
+                data-testid={`task-custom-number-${task.id}-${field.id}`}
+                className="h-7 border-0 bg-transparent px-2 text-[11px] shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
+                onPointerDown={(event) => event.stopPropagation()}
+                onBlur={(event) => {
+                  const raw = event.currentTarget.value.trim();
+                  if (!raw && numberValue) {
+                    onEditCustomField(task, field, null);
+                    return;
+                  }
+                  if (!raw) return;
+                  const parsed = Number(raw);
+                  if (!Number.isFinite(parsed)) return;
+                  if (parsed !== Number(numberValue || '0')) onEditCustomField(task, field, parsed);
+                }}
+              />
+            ) : null}
+            {field.type === 'DATE' ? (
+              <CompactDateField
+                value={dateValue}
+                ariaLabel={`${field.name} ${task.title}`}
+                testId={`task-custom-date-${task.id}-${field.id}`}
+                onCommit={(next) => onEditCustomField(task, field, next)}
+              />
+            ) : null}
+            {field.type === 'SELECT' ? (
+              <select
+                className="h-7 w-full rounded-md border-0 bg-transparent px-2 text-[11px] hover:bg-muted/40 focus:bg-muted/40"
+                value={selectValue}
+                data-testid={`task-custom-select-${task.id}-${field.id}`}
+                onChange={(event) => onEditCustomField(task, field, event.target.value || null)}
+              >
+                <option value="">{t('noneOption')}</option>
+                {field.options
+                  .filter((option) => !option.archivedAt)
+                  .map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+              </select>
+            ) : null}
+            {field.type === 'BOOLEAN' ? (
+              <button
+                type="button"
+                data-no-dnd="true"
+                data-testid={`task-custom-boolean-${task.id}-${field.id}`}
+                className={cn(
+                  'inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-muted',
+                  boolValue ? 'text-emerald-600' : 'text-muted-foreground',
+                )}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onEditCustomField(task, field, !boolValue);
+                }}
+                aria-label={`${field.name} ${task.title}`}
+              >
+                {boolValue ? <CheckCircle2 className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
+              </button>
+            ) : null}
+          </TableCell>
+        );
+      })}
       <TableCell className="border-l border-[#f0f0f0] text-[11px] text-muted-foreground dark:border-border/40">{projectName}</TableCell>
       <TableCell className="border-l border-[#f0f0f0] text-[11px] text-muted-foreground dark:border-border/40">-</TableCell>
       <TableCell className="border-l border-[#f0f0f0] text-[11px] text-muted-foreground dark:border-border/40">{t('private')}</TableCell>
@@ -766,6 +983,7 @@ export default function ProjectBoard({
   priorityFilter,
   statusFilters = [],
   assigneeFilters = [],
+  customFieldFilters = [],
   initialTaskId,
   quickAddIntent,
   onQuickAddIntentHandled,
@@ -777,6 +995,7 @@ export default function ProjectBoard({
   priorityFilter: 'ALL' | NonNullable<Task['priority']>;
   statusFilters?: Task['status'][];
   assigneeFilters?: string[];
+  customFieldFilters?: CustomFieldFilter[];
   initialTaskId?: string | null;
   quickAddIntent?: { sectionId: string; nonce: number } | null;
   onQuickAddIntentHandled?: (nonce: number) => void;
@@ -795,12 +1014,16 @@ export default function ProjectBoard({
   const [undoDelete, setUndoDelete] = useState<UndoDeleteState | null>(null);
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [sectionNameDraft, setSectionNameDraft] = useState('');
-  const [columnWidths, setColumnWidths] = useState<BoardColumnWidths>(BOARD_DEFAULT_COLUMN_WIDTHS);
+  const [columnWidths, setColumnWidths] = useState<BoardColumnWidths>(BOARD_BASE_COLUMN_WIDTHS);
   const [columnWidthsLoaded, setColumnWidthsLoaded] = useState(false);
   const [hasStoredColumnWidths, setHasStoredColumnWidths] = useState(false);
+  const [createFieldDialogOpen, setCreateFieldDialogOpen] = useState(false);
+  const [newFieldName, setNewFieldName] = useState('');
+  const [newFieldType, setNewFieldType] = useState<CustomFieldType>('TEXT');
+  const [customFieldError, setCustomFieldError] = useState<string | null>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const resizeStateRef = useRef<{ key: BoardColumnKey; startX: number; startWidth: number } | null>(null);
+  const resizeStateRef = useRef<{ key: string; startX: number; startWidth: number } | null>(null);
   const scrollSyncLockRef = useRef(false);
   const headerScrollRef = useRef<HTMLDivElement | null>(null);
   const sectionScrollRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -827,6 +1050,52 @@ export default function ProjectBoard({
     [t],
   );
 
+  const groupsQuery = useQuery<SectionTaskGroup[]>({
+    queryKey: queryKeys.projectTasksGrouped(projectId),
+    queryFn: () => api(`/projects/${projectId}/tasks?groupBy=section`),
+  });
+
+  const membersQuery = useQuery<ProjectMember[]>({
+    queryKey: queryKeys.projectMembers(projectId),
+    queryFn: () => api(`/projects/${projectId}/members`),
+  });
+
+  const customFieldsQuery = useQuery<CustomFieldDefinition[]>({
+    queryKey: queryKeys.projectCustomFields(projectId),
+    queryFn: () => api(`/projects/${projectId}/custom-fields`),
+  });
+  const customFields = customFieldsQuery.data ?? EMPTY_CUSTOM_FIELDS;
+  const activeCustomFieldFilters = useMemo(
+    () => customFieldFilters.filter((filter) => customFields.some((field) => field.id === filter.fieldId && !field.archivedAt)),
+    [customFieldFilters, customFields],
+  );
+
+  const boardColumns = useMemo<BoardColumnConfig[]>(() => {
+    const baseColumns = BOARD_BASE_COLUMNS.map((column) => ({
+      key: column.key,
+      defaultWidth: column.defaultWidth,
+      minWidth: column.minWidth,
+      label: boardColumnLabels[column.key],
+    }));
+    const customColumns = customFields
+      .filter((field) => !field.archivedAt)
+      .sort((a, b) => a.position - b.position)
+      .map((field) => ({
+        key: customFieldColumnKey(field.id),
+        defaultWidth: 190,
+        minWidth: 140,
+        label: field.name,
+        customField: field,
+      }));
+    const insertBeforeProjectsAt = baseColumns.findIndex((column) => column.key === 'projects');
+    if (insertBeforeProjectsAt < 0) return [...baseColumns, ...customColumns];
+    return [
+      ...baseColumns.slice(0, insertBeforeProjectsAt),
+      ...customColumns,
+      ...baseColumns.slice(insertBeforeProjectsAt),
+    ];
+  }, [boardColumnLabels, customFields]);
+
   useEffect(() => {
     return () => {
       if (undoTimerRef.current) {
@@ -840,28 +1109,33 @@ export default function ProjectBoard({
     setColumnWidthsLoaded(false);
     setHasStoredColumnWidths(false);
     autoSizedColumnsRef.current = false;
+    const defaultWidths = boardColumns.reduce<BoardColumnWidths>((acc, column) => {
+      acc[column.key] = column.defaultWidth;
+      return acc;
+    }, {});
     const raw = window.localStorage.getItem(columnStorageKey);
     if (!raw) {
+      setColumnWidths(defaultWidths);
       setColumnWidthsLoaded(true);
       return;
     }
     try {
-      const parsed = JSON.parse(raw) as Partial<BoardColumnWidths>;
+      const parsed = JSON.parse(raw) as Record<string, number>;
       setColumnWidths(
-        BOARD_COLUMNS.reduce((acc, column) => {
+        boardColumns.reduce<BoardColumnWidths>((acc, column) => {
           const value = Number(parsed[column.key]);
           const normalized = Number.isFinite(value) ? value : column.defaultWidth;
           acc[column.key] = Math.max(column.minWidth, Math.round(normalized));
           return acc;
-        }, {} as BoardColumnWidths),
+        }, {}),
       );
       setHasStoredColumnWidths(true);
     } catch {
-      setColumnWidths(BOARD_DEFAULT_COLUMN_WIDTHS);
+      setColumnWidths(defaultWidths);
       setHasStoredColumnWidths(false);
     }
     setColumnWidthsLoaded(true);
-  }, [columnStorageKey]);
+  }, [boardColumns, columnStorageKey]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !columnWidthsLoaded) return;
@@ -873,7 +1147,7 @@ export default function ProjectBoard({
       const resizeState = resizeStateRef.current;
       if (!resizeState) return;
       const delta = event.clientX - resizeState.startX;
-      const minWidth = BOARD_MIN_COLUMN_WIDTHS[resizeState.key];
+      const minWidth = boardColumns.find((column) => column.key === resizeState.key)?.minWidth ?? 120;
       setColumnWidths((current) => ({
         ...current,
         [resizeState.key]: Math.max(minWidth, Math.round(resizeState.startWidth + delta)),
@@ -893,19 +1167,20 @@ export default function ProjectBoard({
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, []);
+  }, [boardColumns]);
 
-  const beginColumnResize = (key: BoardColumnKey, startX: number) => {
+  const beginColumnResize = (key: string, startX: number) => {
+    const fallback = boardColumns.find((column) => column.key === key)?.defaultWidth ?? 160;
     resizeStateRef.current = {
       key,
       startX,
-      startWidth: columnWidths[key],
+      startWidth: columnWidths[key] ?? fallback,
     };
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
   };
 
-  const startColumnResize = (key: BoardColumnKey, event: ReactPointerEvent<HTMLElement>) => {
+  const startColumnResize = (key: string, event: ReactPointerEvent<HTMLElement>) => {
     event.preventDefault();
     event.stopPropagation();
     beginColumnResize(key, event.clientX);
@@ -993,14 +1268,102 @@ export default function ProjectBoard({
     };
   }, []);
 
-  const groupsQuery = useQuery<SectionTaskGroup[]>({
-    queryKey: queryKeys.projectTasksGrouped(projectId),
-    queryFn: () => api(`/projects/${projectId}/tasks?groupBy=section`),
+  const createCustomField = useMutation({
+    mutationFn: ({
+      name,
+      type,
+    }: {
+      name: string;
+      type: CustomFieldType;
+    }) =>
+      api(`/projects/${projectId}/custom-fields`, {
+        method: 'POST',
+        body:
+          type === 'SELECT'
+            ? {
+                name,
+                type,
+                options: [{ label: t('optionDefaultLabel'), value: 'option_default' }],
+              }
+            : { name, type },
+      }) as Promise<CustomFieldDefinition>,
+    onSuccess: (created) => {
+      queryClient.setQueryData<CustomFieldDefinition[]>(
+        queryKeys.projectCustomFields(projectId),
+        (current = []) => [...current.filter((field) => field.id !== created.id), created].sort((a, b) => a.position - b.position),
+      );
+      setCreateFieldDialogOpen(false);
+      setNewFieldName('');
+      setNewFieldType('TEXT');
+      setCustomFieldError(null);
+    },
+    onError: (error) => {
+      setCustomFieldError(error instanceof Error ? error.message : t('customFieldCreateFailed'));
+    },
   });
 
-  const membersQuery = useQuery<ProjectMember[]>({
-    queryKey: queryKeys.projectMembers(projectId),
-    queryFn: () => api(`/projects/${projectId}/members`),
+  const patchTaskCustomFields = useMutation({
+    mutationFn: ({
+      taskId,
+      version,
+      fieldId,
+      value,
+    }: {
+      taskId: string;
+      version: number;
+      fieldId: string;
+      value: unknown;
+    }) =>
+      api(`/tasks/${taskId}/custom-fields`, {
+        method: 'PATCH',
+        body: { version, values: [{ fieldId, value }] },
+      }) as Promise<{ id: string; version: number; customFieldValues: TaskCustomFieldValue[] }>,
+    onMutate: async ({ taskId, fieldId, value }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      const previous = queryClient.getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId));
+      const field = customFields.find((item) => item.id === fieldId);
+      if (!field) return { previous };
+      queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) =>
+        current.map((group) => ({
+          ...group,
+          tasks: group.tasks.map((task) =>
+            task.id === taskId
+              ? {
+                  ...task,
+                  version: task.version + 1,
+                  customFieldValues: optimisticCustomFieldValues(task, field, value),
+                }
+              : task,
+          ),
+        })),
+      );
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.projectTasksGrouped(projectId), context.previous);
+      }
+      setCustomFieldError(t('customFieldUpdateFailed'));
+    },
+    onSuccess: (updatedTask) => {
+      queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) =>
+        current.map((group) => ({
+          ...group,
+          tasks: group.tasks.map((task) =>
+            task.id === updatedTask.id
+              ? {
+                  ...task,
+                  version: updatedTask.version,
+                  customFieldValues: updatedTask.customFieldValues,
+                }
+              : task,
+          ),
+        })),
+      );
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+    },
   });
 
   const patchTask = useMutation({
@@ -1202,11 +1565,11 @@ export default function ProjectBoard({
   }, []);
 
   const computeAutoColumnWidths = useCallback(
-    (groupsValue: SectionTaskGroup[], membersValue: ProjectMember[]): BoardColumnWidths => {
+    (groupsValue: SectionTaskGroup[], membersValue: ProjectMember[]): Record<BaseBoardColumnKey, number> => {
       const allTasks = groupsValue.flatMap((group) => group.tasks);
       const currentYear = new Date().getFullYear();
-      const clamp = (key: BoardColumnKey, value: number) => {
-        const maxWidthByKey: Partial<Record<BoardColumnKey, number>> = {
+      const clamp = (key: BaseBoardColumnKey, value: number) => {
+        const maxWidthByKey: Partial<Record<BaseBoardColumnKey, number>> = {
           name: 760,
           assignee: 360,
           dueDate: 360,
@@ -1218,7 +1581,7 @@ export default function ProjectBoard({
           collaborators: 220,
           actions: 96,
         };
-        const min = BOARD_MIN_COLUMN_WIDTHS[key];
+        const min = BOARD_BASE_MIN_COLUMN_WIDTHS[key];
         const max = maxWidthByKey[key] ?? 420;
         return Math.max(min, Math.min(max, Math.round(value)));
       };
@@ -1243,7 +1606,7 @@ export default function ProjectBoard({
       });
       const statusValues = [t('statusTodo'), t('statusInProgress'), t('statusDone'), t('statusBlocked')];
 
-      const next: BoardColumnWidths = {
+      const next: Record<BaseBoardColumnKey, number> = {
         name: clamp('name', Math.max(
           measureTextWidth(boardColumnLabels.name),
           maxText(nameValues, '600 14px Inter, system-ui, sans-serif'),
@@ -1279,9 +1642,19 @@ export default function ProjectBoard({
     if (!columnWidthsLoaded || hasStoredColumnWidths || autoSizedColumnsRef.current) return;
     if (groupsQuery.isLoading || membersQuery.isLoading) return;
     const autoWidths = computeAutoColumnWidths(groups, members);
-    setColumnWidths(autoWidths);
+    const customDefaults = boardColumns.reduce<BoardColumnWidths>((acc, column) => {
+      if (!(column.key in autoWidths)) {
+        acc[column.key] = column.defaultWidth;
+      }
+      return acc;
+    }, {});
+    setColumnWidths({
+      ...autoWidths,
+      ...customDefaults,
+    });
     autoSizedColumnsRef.current = true;
   }, [
+    boardColumns,
     columnWidthsLoaded,
     hasStoredColumnWidths,
     groupsQuery.isLoading,
@@ -1311,10 +1684,13 @@ export default function ProjectBoard({
           assigneeFilters.some((assignee) =>
             assignee === 'UNASSIGNED' ? !task.assigneeUserId : task.assigneeUserId === assignee,
           );
-        return bySearch && byStatus && byPriority && byAssignee;
+        const byCustomFields =
+          activeCustomFieldFilters.length === 0 ||
+          activeCustomFieldFilters.every((filter) => taskMatchesCustomFieldFilter(task, filter));
+        return bySearch && byStatus && byPriority && byAssignee && byCustomFields;
       }),
     }));
-  }, [assigneeFilters, groups, priorityFilter, projectName, search, statusFilter, statusFilters]);
+  }, [activeCustomFieldFilters, assigneeFilters, groups, priorityFilter, projectName, search, statusFilter, statusFilters]);
 
   const groupedVisibleRows = useMemo(() => {
     return filteredGroups.map((group) => {
@@ -1359,10 +1735,20 @@ export default function ProjectBoard({
     patchTask.mutate({ taskId, patch: nextPatch });
   };
 
+  const onEditCustomField = (task: Task, field: CustomFieldDefinition, value: unknown) => {
+    setCustomFieldError(null);
+    patchTaskCustomFields.mutate({
+      taskId: task.id,
+      version: task.version,
+      fieldId: field.id,
+      value,
+    });
+  };
+
   const renderColumnGroup = () => (
     <colgroup>
-      {BOARD_COLUMNS.map((column) => (
-        <col key={column.key} style={{ width: `${columnWidths[column.key]}px` }} />
+      {boardColumns.map((column) => (
+        <col key={column.key} style={{ width: `${columnWidths[column.key] ?? column.defaultWidth}px` }} />
       ))}
     </colgroup>
   );
@@ -1374,6 +1760,76 @@ export default function ProjectBoard({
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <div className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="add-custom-field-trigger"
+            onClick={() => setCreateFieldDialogOpen(true)}
+          >
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            {t('addColumn')}
+          </Button>
+          {customFieldError ? (
+            <p className="text-xs text-destructive" data-testid="custom-field-error">
+              {customFieldError}
+            </p>
+          ) : null}
+        </div>
+
+        <Dialog open={createFieldDialogOpen} onOpenChange={setCreateFieldDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{t('createCustomField')}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Input
+                value={newFieldName}
+                onChange={(event) => setNewFieldName(event.target.value)}
+                placeholder={t('customFieldName')}
+                data-testid="custom-field-name-input"
+              />
+              <select
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                value={newFieldType}
+                onChange={(event) => setNewFieldType(event.target.value as CustomFieldType)}
+                data-testid="custom-field-type-select"
+              >
+                <option value="TEXT">{t('customFieldTypeText')}</option>
+                <option value="NUMBER">{t('customFieldTypeNumber')}</option>
+                <option value="DATE">{t('customFieldTypeDate')}</option>
+                <option value="SELECT">{t('customFieldTypeSelect')}</option>
+                <option value="BOOLEAN">{t('customFieldTypeBoolean')}</option>
+              </select>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setCreateFieldDialogOpen(false);
+                  setNewFieldName('');
+                  setNewFieldType('TEXT');
+                }}
+              >
+                {t('cancel')}
+              </Button>
+              <Button
+                data-testid="create-custom-field-btn"
+                disabled={!newFieldName.trim() || createCustomField.isPending}
+                onClick={() => {
+                  void createCustomField.mutateAsync({
+                    name: newFieldName.trim(),
+                    type: newFieldType,
+                  });
+                }}
+              >
+                {createCustomField.isPending ? t('saving') : t('create')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <Table
           className="w-max min-w-full table-fixed"
           containerRef={headerScrollRef}
@@ -1382,7 +1838,7 @@ export default function ProjectBoard({
           {renderColumnGroup()}
           <TableHeader className="border-b border-[#f0f0f0] bg-transparent dark:border-border/40">
             <TableRow className="h-11 hover:bg-transparent">
-              {BOARD_COLUMNS.map((column, index) => (
+              {boardColumns.map((column, index) => (
                 <TableHead
                   key={column.key}
                   className={cn(
@@ -1396,13 +1852,13 @@ export default function ProjectBoard({
                     }
                   }}
                 >
-                  <span>{boardColumnLabels[column.key]}</span>
-                  {index < BOARD_COLUMNS.length - 1 ? (
+                  <span>{column.label}</span>
+                  {index < boardColumns.length - 1 ? (
                     <button
                       type="button"
                       className="absolute right-0 top-0 h-full w-3 touch-none cursor-col-resize bg-transparent transition-colors hover:bg-muted/35"
                       onPointerDown={(event) => startColumnResize(column.key, event)}
-                      aria-label={`Resize ${boardColumnLabels[column.key]} column`}
+                      aria-label={`Resize ${column.label} column`}
                       data-testid={`column-resize-${column.key}`}
                     >
                       <span className="absolute inset-y-2 left-1/2 w-px -translate-x-1/2 bg-[#e4e7eb] dark:bg-border/60" />
@@ -1524,6 +1980,8 @@ export default function ProjectBoard({
                           collapsed={collapsedTaskIds.has(row.task.id)}
                           draggable={!row.task.parentId && !row.hasChildren}
                           onDelete={(taskId) => deleteTask.mutate(taskId)}
+                          customFields={customFields}
+                          onEditCustomField={onEditCustomField}
                           onToggleCollapse={(taskId) => {
                             setCollapsedTaskIds((current) => {
                               const next = new Set(current);
