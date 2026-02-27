@@ -13,7 +13,7 @@ import { useSortable, SortableContext, verticalListSortingStrategy } from '@dnd-
 import { CSS } from '@dnd-kit/utilities';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { Calendar, Check, ChevronDown, ChevronRight, Circle, ExternalLink, Plus, Trash2, User } from 'lucide-react';
+import { Calendar, Check, CheckCircle2, ChevronDown, ChevronRight, Circle, ExternalLink, Plus, Trash2, User } from 'lucide-react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { ProjectMember, Section, SectionTaskGroup, Task } from '@/lib/types';
@@ -472,14 +472,14 @@ function TaskRow({
             <button
               type="button"
               className={cn(
-                'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors',
-                isDone ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-muted-foreground/40 text-muted-foreground',
+                'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-muted',
+                isDone ? 'text-emerald-600' : 'text-muted-foreground',
               )}
               data-testid={`task-complete-${task.id}`}
               aria-label={isDone ? `Reopen ${task.title}` : `Complete ${task.title}`}
               onClick={() => onToggleDone(task)}
             >
-              {isDone ? <Check className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
+              {isDone ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
             </button>
             {isEditingTitle ? (
             <Input
