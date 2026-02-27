@@ -1547,3 +1547,38 @@
   - `pnpm e2e` (31 tests passed)
 - Risks/known gaps:
   - Select-type custom field creation currently seeds a default option (`Option/選択肢`) and expects option management UX in follow-up work.
+
+## 2026-02-27 - P1 #67/#68 Custom Field Filters + Quality Gate
+- What changed:
+  - Added project-level custom-field filter serialization helpers:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/project-filters.ts`
+    - supported predicates: `SELECT`, `BOOLEAN`, `NUMBER`, `DATE`
+  - Wired filter query parsing from URL in project page:
+    - `cf` query param is parsed and passed to `ProjectBoard`.
+  - Extended list filtering logic to apply custom-field predicates without mutating manual order.
+  - Added custom-field filters to Header filter popover:
+    - select option multi-checkbox
+    - boolean any/true/false
+    - number min/max
+    - date from/to
+  - Added e2e coverage:
+    - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/custom-fields-filter.spec.ts`
+    - verifies filter apply, reload persistence, and clear behavior.
+  - Stabilized query/array dependencies to prevent reload-time React update-depth errors in filtered project views:
+    - stabilized URLSearchParams usage in page/header
+    - stabilized empty custom-field array fallback in project board
+  - Updated design/architecture docs for custom-field filtering and URL-driven cache strategy:
+    - `/Users/tomoakikawada/Dev/atlaspm/docs/ui-design.md`
+    - `/Users/tomoakikawada/Dev/atlaspm/docs/architecture.md`
+- Why:
+  - Deliver #67 custom-field filter UX with no-refresh persistence.
+  - Close #68 quality gate with explicit docs and stable E2E behavior, including regression coverage for prior reload crash.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm --filter @atlaspm/playwright e2e -- tests/mvp.spec.ts`
+  - `pnpm --filter @atlaspm/playwright e2e -- tests/custom-fields-filter.spec.ts`
+  - `pnpm e2e` (32 tests passed)
+- Risks/known gaps:
+  - `cf` query payload is JSON in URL; very large filter sets may increase URL length. Current UX scope (project-local, few fields) is within practical bounds.

@@ -54,11 +54,16 @@
 
 ## Web Cache Strategy
 - `web-ui` uses TanStack Query for all core data reads (`projects`, `sections`, grouped `tasks`, `rules`, `members`).
+- Project custom fields are cached independently with `queryKeys.projectCustomFields(projectId)`.
 - Mutation policy:
   - optimistic cache update for inline task patch and within-section reorder,
   - targeted cache updates for section/task/rule create+patch,
   - targeted invalidation for affected project-scoped keys.
 - No full app reload is used for create/edit flows; UI reflects writes immediately and then reconciles with server truth.
+- Project filter persistence:
+  - URL query params are canonical (`statuses`, `assignees`, `cf`).
+  - `cf` stores normalized custom-field predicates (`SELECT` options / `BOOLEAN` value / `NUMBER` range / `DATE` range).
+  - UI mirrors these values to `localStorage` as convenience cache only; it does not drive navigation state.
 
 ## Task Internals (Phase 1)
 - Description storage:
