@@ -1897,3 +1897,29 @@
   - `./scripts/db-explain-baseline.sh`
 - Risks/known gaps:
   - Report reflects current local data shape; rerun after bulk seed for production-like selectivity.
+
+## 2026-02-27 - Invitation auto-activation on login + project member candidate fix
+- What changed:
+  - Implemented automatic acceptance of pending workspace invitations on authenticated login (email match):
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/auth/auth.guard.ts`
+      - normalizes login email
+      - auto-accepts pending invitations (`acceptedAt=null`, not revoked, not expired)
+      - creates workspace membership if missing
+      - appends `workspace.invite.accepted` audit + outbox (`autoAccepted: true`)
+      - uses claim-style `updateMany` to avoid duplicate acceptance events under concurrent requests
+  - Made invitation acceptance endpoint idempotent when invitation is already accepted:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/workspaces/workspace-admin.controller.ts`
+      - `POST /invitations/accept` now returns success for already-accepted valid token after email verification and membership upsert
+  - Added integration coverage:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+      - invite -> login(`/me`) auto-activates user
+      - invited row disappears from INVITED and appears ACTIVE in workspace users listing
+- Why:
+  - Fixed observed issue where invited users remained `INVITED` after login and did not appear in project member add candidates (which query ACTIVE workspace users).
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e` (32 passed)
+- Risks/known gaps:
+  - Auto-accept is email-based; in dev-auth mode this assumes the entered email is intentional/trusted for local testing.

@@ -81,8 +81,33 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(usersWithInvited.body.some((u: any) => u.email === 'invited-1@example.com')).toBe(true);
-
     const auth = app.get(AuthService);
+
+    const autoInviteRes = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ email: 'invited-auto@example.com', role: 'WS_MEMBER' })
+      .expect(201);
+    expect(autoInviteRes.body.inviteLink).toContain('inviteToken=');
+
+    const autoInvitedToken = await auth.mintDevToken('invited-auto', 'invited-auto@example.com', 'Invited Auto');
+    await request(app.getHttpServer())
+      .get('/me')
+      .set('Authorization', `Bearer ${autoInvitedToken}`)
+      .expect(200);
+    const autoInvitedWorkspaces = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${autoInvitedToken}`)
+      .expect(200);
+    expect(autoInvitedWorkspaces.body.some((ws: any) => ws.id === workspaceId)).toBe(true);
+
+    const usersAfterAutoAccept = await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}/users?query=invited-auto@example.com`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(usersAfterAutoAccept.body.some((u: any) => u.email === 'invited-auto@example.com' && u.status === 'ACTIVE')).toBe(true);
+    expect(usersAfterAutoAccept.body.some((u: any) => u.email === 'invited-auto@example.com' && u.status === 'INVITED')).toBe(false);
+
     const invitedToken = await auth.mintDevToken('invited-1', 'invited-1@example.com', 'Invited One');
     const inviteToken = String(invitationRes.body.inviteLink).split('inviteToken=')[1];
     await request(app.getHttpServer())

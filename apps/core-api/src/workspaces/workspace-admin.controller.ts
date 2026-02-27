@@ -351,7 +351,7 @@ export class WorkspaceAdminController {
   async acceptInvitation(@Body() body: AcceptInvitationDto, @CurrentRequest() req: AppRequest) {
     const tokenHash = createHash('sha256').update(body.token).digest('hex');
     const invitation = await this.prisma.invitation.findUnique({ where: { tokenHash } });
-    if (!invitation || invitation.revokedAt || invitation.acceptedAt || invitation.expiresAt.getTime() < Date.now()) {
+    if (!invitation || invitation.revokedAt || invitation.expiresAt.getTime() < Date.now()) {
       throw new BadRequestException('Invalid invitation token');
     }
 
@@ -360,6 +360,21 @@ export class WorkspaceAdminController {
     const loginEmail = (user.email ?? req.user.email ?? '').toLowerCase();
     if (!loginEmail || loginEmail !== inviteEmail) {
       throw new ForbiddenException('Invitation email does not match signed-in user');
+    }
+
+    if (invitation.acceptedAt) {
+      const membership = await this.prisma.workspaceMembership.upsert({
+        where: {
+          workspaceId_userId: { workspaceId: invitation.workspaceId, userId: req.user.sub },
+        },
+        create: {
+          workspaceId: invitation.workspaceId,
+          userId: req.user.sub,
+          role: invitation.role,
+        },
+        update: {},
+      });
+      return { ok: true, workspaceId: invitation.workspaceId, role: membership.role };
     }
 
     return this.prisma.$transaction(async (tx) => {
