@@ -30,6 +30,10 @@ class ListStatusUpdatesQuery {
   @Min(1)
   @Max(100)
   take?: number;
+
+  @IsOptional()
+  @IsString()
+  cursor?: string;
 }
 
 @Controller()
@@ -100,7 +104,7 @@ export class ProjectStatusUpdatesController {
     @Query() query: ListStatusUpdatesQuery,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
 
     const take = query.take ?? 20;
 
@@ -116,10 +120,21 @@ export class ProjectStatusUpdatesController {
         },
       },
       orderBy: { createdAt: 'desc' },
-      take,
+      take: take + 1,
+      cursor: query.cursor ? { id: query.cursor } : undefined,
+      skip: query.cursor ? 1 : 0,
     });
 
-    return statusUpdates;
+    const hasNextPage = statusUpdates.length > take;
+    const items = hasNextPage ? statusUpdates.slice(0, take) : statusUpdates;
+    const lastItem = items[items.length - 1];
+    const nextCursor = hasNextPage && lastItem ? lastItem.id : null;
+
+    return {
+      items,
+      nextCursor,
+      hasNextPage,
+    };
   }
 
   @Get('projects/:id/status-updates/latest')
@@ -127,7 +142,7 @@ export class ProjectStatusUpdatesController {
     @Param('id') projectId: string,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
 
     const statusUpdate = await this.prisma.projectStatusUpdate.findFirst({
       where: { projectId },
