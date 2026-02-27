@@ -8,7 +8,7 @@ import ProjectBoard from '@/components/project-board';
 import { ProjectBoardView, ProjectCalendarView, ProjectFilesView } from '@/components/project-alt-views';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { Project, Section, SectionTaskGroup, Task } from '@/lib/types';
+import type { Project, ProjectMember, Section, SectionTaskGroup, Task } from '@/lib/types';
 import { parseCustomFieldFilters } from '@/lib/project-filters';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,6 +24,7 @@ import {
 
 const TASK_STATUSES: Task['status'][] = ['TODO', 'IN_PROGRESS', 'DONE', 'BLOCKED'];
 type QuickAddIntent = { sectionId: string; nonce: number } | null;
+type CurrentUser = { id: string; email?: string | null; name?: string | null };
 
 function parseListParam(raw: string | null): string[] {
   if (!raw) return [];
@@ -89,6 +90,15 @@ export default function ProjectPage() {
     queryFn: () => api(`/projects/${projectId}/sections`),
     enabled: Boolean(projectId),
   });
+  const meQuery = useQuery<CurrentUser>({
+    queryKey: queryKeys.me,
+    queryFn: () => api('/me'),
+  });
+  const projectMembersQuery = useQuery<ProjectMember[]>({
+    queryKey: queryKeys.projectMembers(projectId),
+    queryFn: () => api(`/projects/${projectId}/members`),
+    enabled: Boolean(projectId),
+  });
 
   const project = useMemo(
     () => projectsQuery.data?.find((item) => item.id === projectId) ?? null,
@@ -98,6 +108,12 @@ export default function ProjectPage() {
     () => sectionsQuery.data?.find((section) => section.isDefault)?.id ?? sectionsQuery.data?.[0]?.id ?? null,
     [sectionsQuery.data],
   );
+  const currentProjectRole = useMemo(() => {
+    const meId = meQuery.data?.id;
+    if (!meId || !projectMembersQuery.data) return null;
+    return projectMembersQuery.data.find((member) => member.userId === meId)?.role ?? null;
+  }, [meQuery.data?.id, projectMembersQuery.data]);
+  const canEditProject = currentProjectRole ? currentProjectRole !== 'VIEWER' : true;
 
   const createSection = useMutation({
     mutationFn: (name: string) =>
@@ -131,6 +147,10 @@ export default function ProjectPage() {
   );
 
   const requestAddTask = useCallback(() => {
+    if (!canEditProject) {
+      setQuickAddError(t('projectReadOnlyHint'));
+      return;
+    }
     if (unsectionedQuickAddSectionId) {
       dispatchQuickAddIntent(unsectionedQuickAddSectionId);
       return;
@@ -141,20 +161,23 @@ export default function ProjectPage() {
       return;
     }
     setQuickAddError(t('addTaskTargetUnavailable'));
-  }, [dispatchQuickAddIntent, sectionsQuery.isLoading, t, unsectionedQuickAddSectionId]);
+  }, [canEditProject, dispatchQuickAddIntent, sectionsQuery.isLoading, t, unsectionedQuickAddSectionId]);
 
   const openAddSectionForm = useCallback(() => {
+    if (!canEditProject) return;
     setShowAddSectionInput(true);
     setQuickAddError(null);
-  }, []);
+  }, [canEditProject]);
 
   const openCreateCustomField = useCallback(() => {
+    if (!canEditProject) return;
     window.dispatchEvent(new CustomEvent('atlaspm:open-create-custom-field'));
-  }, []);
+  }, [canEditProject]);
 
   const openManageCustomFields = useCallback(() => {
+    if (!canEditProject) return;
     window.dispatchEvent(new CustomEvent('atlaspm:open-manage-custom-fields'));
-  }, []);
+  }, [canEditProject]);
 
   const deletedTasksQuery = useQuery<SectionTaskGroup[]>({
     queryKey: queryKeys.projectTasksDeletedGrouped(projectId),
@@ -279,10 +302,22 @@ export default function ProjectPage() {
 
       {view === 'list' ? (
         <>
+          {!canEditProject ? (
+            <p className="text-xs text-muted-foreground" data-testid="project-readonly-banner">
+              {t('projectReadOnlyHint')}
+            </p>
+          ) : null}
           <section className="pb-1">
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex items-center gap-0">
-                <Button size="sm" data-testid="add-new-trigger" className="rounded-r-none" onClick={requestAddTask}>
+                <Button
+                  size="sm"
+                  data-testid="add-new-trigger"
+                  className="rounded-r-none"
+                  onClick={requestAddTask}
+                  disabled={!canEditProject}
+                  title={!canEditProject ? t('projectReadOnlyHint') : undefined}
+                >
                   <Plus className="mr-1 h-4 w-4" />
                   {t('addNewTask')}
                 </Button>
@@ -293,6 +328,8 @@ export default function ProjectPage() {
                       variant="default"
                       className="rounded-l-none border-l border-l-primary-foreground/20 px-2"
                       data-testid="add-new-menu-trigger"
+                      disabled={!canEditProject}
+                      title={!canEditProject ? t('projectReadOnlyHint') : undefined}
                     >
                       <ChevronDown className="h-4 w-4" />
                     </Button>
@@ -313,6 +350,8 @@ export default function ProjectPage() {
                 size="sm"
                 data-testid="add-custom-field-trigger"
                 onClick={openCreateCustomField}
+                disabled={!canEditProject}
+                title={!canEditProject ? t('projectReadOnlyHint') : undefined}
               >
                 <Plus className="mr-1 h-3.5 w-3.5" />
                 {t('addColumn')}
@@ -323,6 +362,8 @@ export default function ProjectPage() {
                 size="sm"
                 data-testid="manage-custom-field-trigger"
                 onClick={openManageCustomFields}
+                disabled={!canEditProject}
+                title={!canEditProject ? t('projectReadOnlyHint') : undefined}
               >
                 {t('customFields')}
               </Button>
@@ -347,6 +388,7 @@ export default function ProjectPage() {
             onQuickAddIntentHandled={(nonce) => {
               setQuickAddIntent((current) => (current?.nonce === nonce ? null : current));
             }}
+            canEdit={canEditProject}
           />
           <section className="pb-2">
             {showAddSectionInput ? (
@@ -371,7 +413,8 @@ export default function ProjectPage() {
                 <Button
                   data-testid="create-section-btn"
                   onClick={() => void createSection.mutateAsync(newSection.trim())}
-                  disabled={!newSection.trim() || createSection.isPending}
+                  disabled={!canEditProject || !newSection.trim() || createSection.isPending}
+                  title={!canEditProject ? t('projectReadOnlyHint') : undefined}
                 >
                   {createSection.isPending ? t('adding') : t('addSection')}
                 </Button>
@@ -391,6 +434,8 @@ export default function ProjectPage() {
                 data-testid="add-section-bottom-trigger"
                 className="flex h-8 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
                 onClick={openAddSectionForm}
+                disabled={!canEditProject}
+                title={!canEditProject ? t('projectReadOnlyHint') : undefined}
               >
                 <Plus className="h-3.5 w-3.5" />
                 <span>{t('addSection')}</span>

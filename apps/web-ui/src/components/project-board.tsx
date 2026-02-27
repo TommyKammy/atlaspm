@@ -433,10 +433,12 @@ function AssigneeCombobox({
   task,
   members,
   onSelect,
+  disabled = false,
 }: {
   task: Task;
   members: ProjectMember[];
   onSelect: (assigneeUserId: string | null) => void;
+  disabled?: boolean;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -453,6 +455,8 @@ function AssigneeCombobox({
                 variant="ghost"
                 data-testid={`assignee-trigger-${task.id}`}
                 className="h-7 max-w-full justify-start gap-2 rounded-md border-0 px-1.5 hover:bg-muted/40"
+                disabled={disabled}
+                title={disabled ? t('projectReadOnlyHint') : undefined}
               >
                 {selected === 'unassigned' ? (
                   <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-dashed text-[10px] text-muted-foreground">
@@ -538,12 +542,15 @@ function CompactDateField({
   onCommit,
   testId,
   ariaLabel,
+  disabled = false,
 }: {
   value?: string | null | undefined;
   onCommit: (next: string | null) => void;
   testId: string;
   ariaLabel: string;
+  disabled?: boolean;
 }) {
+  const { t } = useI18n();
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dateValue = toDateInputValue(value);
@@ -578,6 +585,7 @@ function CompactDateField({
         className="h-7 border-0 bg-transparent px-2 text-[11px] shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
         aria-label={ariaLabel}
         data-testid={testId}
+        disabled={disabled}
       />
     );
   }
@@ -592,9 +600,12 @@ function CompactDateField({
         'flex h-7 w-full items-center rounded px-2 text-left text-[11px] hover:bg-muted/40',
         displayValue ? 'justify-between gap-1' : 'justify-center',
       )}
+      disabled={disabled}
+      title={disabled ? t('projectReadOnlyHint') : undefined}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => {
         event.stopPropagation();
+        if (disabled) return;
         setEditing(true);
       }}
     >
@@ -618,6 +629,7 @@ function TaskRow({
   collapsed,
   onToggleCollapse,
   draggable,
+  canEdit,
   onDelete,
   onEditCustomField,
 }: {
@@ -634,6 +646,7 @@ function TaskRow({
   collapsed: boolean;
   onToggleCollapse: (taskId: string) => void;
   draggable: boolean;
+  canEdit: boolean;
   onDelete: (taskId: string) => void;
   onEditCustomField: (task: Task, field: CustomFieldDefinition, value: unknown) => void;
 }) {
@@ -641,7 +654,7 @@ function TaskRow({
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
     id: task.id,
     data: { sectionId },
-    disabled: !draggable,
+    disabled: !draggable || !canEdit,
   });
   const isDone = task.status === 'DONE';
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -654,6 +667,10 @@ function TaskRow({
   }, [isEditingTitle, task.title]);
 
   const saveTitle = () => {
+    if (!canEdit) {
+      setIsEditingTitle(false);
+      return;
+    }
     const next = titleDraft;
     if (next === task.title) {
       setIsEditingTitle(false);
@@ -691,7 +708,12 @@ function TaskRow({
               )}
               data-testid={`task-complete-${task.id}`}
               aria-label={isDone ? `Reopen ${task.title}` : `Complete ${task.title}`}
-              onClick={() => onToggleDone(task)}
+              disabled={!canEdit}
+              title={!canEdit ? t('projectReadOnlyHint') : undefined}
+              onClick={() => {
+                if (!canEdit) return;
+                onToggleDone(task);
+              }}
             >
               {isDone ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
             </button>
@@ -731,9 +753,11 @@ function TaskRow({
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
+                  if (!canEdit) return;
                   setIsEditingTitle(true);
                 }}
                 data-testid={`task-title-label-${task.id}`}
+                title={!canEdit ? t('projectReadOnlyHint') : undefined}
               >
                 {task.title.trim() || t('untitledTask')}
               </button>
@@ -764,6 +788,7 @@ function TaskRow({
         <AssigneeCombobox
           task={task}
           members={members}
+          disabled={!canEdit}
           onSelect={(assigneeUserId) => onEdit(task.id, { assigneeUserId, version: task.version })}
         />
       );
@@ -776,6 +801,7 @@ function TaskRow({
             value={task.startAt}
             ariaLabel={`${t('startDate')} ${task.title}`}
             testId={`task-start-date-${task.id}`}
+            disabled={!canEdit}
             onCommit={(startAt) =>
               onEdit(task.id, {
                 startAt,
@@ -787,6 +813,7 @@ function TaskRow({
             value={task.dueAt}
             ariaLabel={`${t('endDate')} ${task.title}`}
             testId={`task-end-date-${task.id}`}
+            disabled={!canEdit}
             onCommit={(dueAt) =>
               onEdit(task.id, {
                 dueAt,
@@ -807,6 +834,8 @@ function TaskRow({
               min={0}
               max={100}
               value={task.progressPercent}
+              disabled={!canEdit}
+              title={!canEdit ? t('projectReadOnlyHint') : undefined}
               onChange={(e) => onEdit(task.id, { progressPercent: Number(e.target.value), version: task.version })}
               className="h-6 w-14 border-0 bg-transparent px-1 shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
             />
@@ -826,6 +855,8 @@ function TaskRow({
             statusBadgeClass[task.status],
           )}
           value={task.status}
+          disabled={!canEdit}
+          title={!canEdit ? t('projectReadOnlyHint') : undefined}
           onChange={(e) => onEdit(task.id, { status: e.target.value as Task['status'], version: task.version })}
         >
           <option value="TODO">TODO</option>
@@ -856,12 +887,16 @@ function TaskRow({
             data-no-dnd="true"
             data-testid={`task-custom-text-${task.id}-${field.id}`}
             className="h-7 border-0 bg-transparent px-2 text-[11px] shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
+            disabled={!canEdit}
+            title={!canEdit ? t('projectReadOnlyHint') : undefined}
             onPointerDown={(event) => event.stopPropagation()}
             onBlur={(event) => {
+              if (!canEdit) return;
               const next = event.currentTarget.value.trim();
               if (next !== textValue) onEditCustomField(task, field, next || null);
             }}
             onKeyDown={(event) => {
+              if (!canEdit) return;
               if (event.key === 'Enter') {
                 event.preventDefault();
                 const next = (event.currentTarget as HTMLInputElement).value.trim();
@@ -882,8 +917,11 @@ function TaskRow({
             data-no-dnd="true"
             data-testid={`task-custom-number-${task.id}-${field.id}`}
             className="h-7 border-0 bg-transparent px-2 text-[11px] shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
+            disabled={!canEdit}
+            title={!canEdit ? t('projectReadOnlyHint') : undefined}
             onPointerDown={(event) => event.stopPropagation()}
             onBlur={(event) => {
+              if (!canEdit) return;
               const raw = event.currentTarget.value.trim();
               if (!raw && numberValue) {
                 onEditCustomField(task, field, null);
@@ -904,6 +942,7 @@ function TaskRow({
             value={dateValue}
             ariaLabel={`${field.name} ${task.title}`}
             testId={`task-custom-date-${task.id}-${field.id}`}
+            disabled={!canEdit}
             onCommit={(next) => onEditCustomField(task, field, next)}
           />
         );
@@ -915,6 +954,8 @@ function TaskRow({
             className="h-7 w-full rounded-md border-0 bg-transparent px-2 text-[11px] hover:bg-muted/40 focus:bg-muted/40"
             value={selectValue}
             data-testid={`task-custom-select-${task.id}-${field.id}`}
+            disabled={!canEdit}
+            title={!canEdit ? t('projectReadOnlyHint') : undefined}
             onChange={(event) => onEditCustomField(task, field, event.target.value || null)}
           >
             <option value="">{t('noneOption')}</option>
@@ -938,9 +979,12 @@ function TaskRow({
             'inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-muted',
             boolValue ? 'text-emerald-600' : 'text-muted-foreground',
           )}
+          disabled={!canEdit}
+          title={!canEdit ? t('projectReadOnlyHint') : undefined}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation();
+            if (!canEdit) return;
             onEditCustomField(task, field, !boolValue);
           }}
           aria-label={`${field.name} ${task.title}`}
@@ -979,8 +1023,11 @@ function TaskRow({
           variant="ghost"
           className="h-6 w-6"
           data-testid={`delete-task-${task.id}`}
+          disabled={!canEdit}
+          title={!canEdit ? t('projectReadOnlyHint') : undefined}
           onClick={(event) => {
             event.stopPropagation();
+            if (!canEdit) return;
             onDelete(task.id);
           }}
           aria-label={t('deleteTask')}
@@ -999,13 +1046,13 @@ function TaskRow({
       style={{ transform: CSS.Transform.toString(transform), transition: transition || 'transform 150ms ease' }}
       className={cn(
         'group h-9 border-b border-[#f0f0f0] transition-colors hover:bg-muted/35 dark:border-border/40',
-        draggable && 'cursor-grab active:cursor-grabbing',
+        draggable && canEdit && 'cursor-grab active:cursor-grabbing',
         isDone && 'opacity-50',
       )}
       data-testid={`task-${task.id}`}
       data-task-title={task.title}
-      {...(draggable ? attributes : {})}
-      {...(draggable ? listeners : {})}
+      {...(draggable && canEdit ? attributes : {})}
+      {...(draggable && canEdit ? listeners : {})}
       onPointerDownCapture={(event) => {
         const target = event.target as HTMLElement;
         if (target.closest('button,input,select,textarea,a,[data-no-dnd="true"]')) {
@@ -1031,12 +1078,14 @@ function QuickAddTask({
   openSignal,
   onOpenSignalHandled,
   showClosedTrigger = true,
+  canEdit = true,
 }: {
   sectionId: string;
   onCreate: (sectionId: string, title: string) => Promise<void>;
   openSignal?: number | null;
   onOpenSignalHandled?: (signal: number) => void;
   showClosedTrigger?: boolean;
+  canEdit?: boolean;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -1045,6 +1094,7 @@ function QuickAddTask({
   const ignoreNextBlurRef = useRef(false);
 
   useEffect(() => {
+    if (!canEdit) return;
     if (openSignal === null || openSignal === undefined) return;
     setOpen(true);
     ignoreNextBlurRef.current = true;
@@ -1053,7 +1103,7 @@ function QuickAddTask({
       inputRef.current?.select();
     }, 120);
     onOpenSignalHandled?.(openSignal);
-  }, [onOpenSignalHandled, openSignal]);
+  }, [canEdit, onOpenSignalHandled, openSignal]);
 
   const submit = async () => {
     const trimmed = title.trim();
@@ -1070,7 +1120,10 @@ function QuickAddTask({
         type="button"
         data-testid={`quick-add-open-${sectionId}`}
         className="flex h-8 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        disabled={!canEdit}
+        title={!canEdit ? t('projectReadOnlyHint') : undefined}
         onClick={() => {
+          if (!canEdit) return;
           setOpen(true);
           setTimeout(() => inputRef.current?.focus(), 0);
         }}
@@ -1087,7 +1140,10 @@ function QuickAddTask({
         ref={inputRef}
         value={title}
         onChange={(e) => setTitle(e.target.value)}
+        disabled={!canEdit}
+        title={!canEdit ? t('projectReadOnlyHint') : undefined}
         onKeyDown={(e) => {
+          if (!canEdit) return;
           if (e.key === 'Enter') {
             e.preventDefault();
             void submit();
@@ -1156,6 +1212,7 @@ export default function ProjectBoard({
   initialTaskId,
   quickAddIntent,
   onQuickAddIntentHandled,
+  canEdit = true,
 }: {
   projectId: string;
   projectName?: string;
@@ -1168,6 +1225,7 @@ export default function ProjectBoard({
   initialTaskId?: string | null;
   quickAddIntent?: { sectionId: string; nonce: number } | null;
   onQuickAddIntentHandled?: (nonce: number) => void;
+  canEdit?: boolean;
 }) {
   const { t } = useI18n();
   const taskSensors = useSensors(
@@ -1524,6 +1582,7 @@ export default function ProjectBoard({
   }, []);
 
   useEffect(() => {
+    if (!canEdit) return;
     const onOpenCreateField = () => setCreateFieldDialogOpen(true);
     const onOpenManageFields = () => setManageFieldsDialogOpen(true);
     window.addEventListener('atlaspm:open-create-custom-field', onOpenCreateField);
@@ -1532,7 +1591,7 @@ export default function ProjectBoard({
       window.removeEventListener('atlaspm:open-create-custom-field', onOpenCreateField);
       window.removeEventListener('atlaspm:open-manage-custom-fields', onOpenManageFields);
     };
-  }, []);
+  }, [canEdit]);
 
   const createCustomField = useMutation({
     mutationFn: ({
@@ -2088,6 +2147,7 @@ export default function ProjectBoard({
   };
 
   const onTaskDragEnd = (event: DragEndEvent) => {
+    if (!canEdit) return;
     const { active, over } = event;
     if (!over) return;
     const activeTaskId = String(active.id);
@@ -2114,6 +2174,7 @@ export default function ProjectBoard({
   };
 
   const onEdit = (taskId: string, patch: Partial<Task> & { version: number }) => {
+    if (!canEdit) return;
     const groupsSnapshot = queryClient.getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId)) ?? [];
     const cachedTask = groupsSnapshot.flatMap((group) => group.tasks).find((task) => task.id === taskId);
     const nextPatch = { ...patch, version: cachedTask?.version ?? patch.version };
@@ -2121,6 +2182,7 @@ export default function ProjectBoard({
   };
 
   const onEditCustomField = (task: Task, field: CustomFieldDefinition, value: unknown) => {
+    if (!canEdit) return;
     setCustomFieldError(null);
     patchTaskCustomFields.mutate({
       taskId: task.id,
@@ -2150,7 +2212,7 @@ export default function ProjectBoard({
           </p>
         ) : null}
 
-        <Dialog open={createFieldDialogOpen} onOpenChange={setCreateFieldDialogOpen}>
+        <Dialog open={createFieldDialogOpen} onOpenChange={(open) => setCreateFieldDialogOpen(canEdit ? open : false)}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>{t('createCustomField')}</DialogTitle>
@@ -2158,15 +2220,23 @@ export default function ProjectBoard({
             <div className="space-y-3">
               <Input
                 value={newFieldName}
-                onChange={(event) => setNewFieldName(event.target.value)}
+                onChange={(event) => {
+                  if (!canEdit) return;
+                  setNewFieldName(event.target.value);
+                }}
                 placeholder={t('customFieldName')}
                 data-testid="custom-field-name-input"
+                disabled={!canEdit}
               />
               <select
                 className="h-9 w-full rounded-md border bg-background px-3 text-sm"
                 value={newFieldType}
-                onChange={(event) => setNewFieldType(event.target.value as CustomFieldType)}
+                onChange={(event) => {
+                  if (!canEdit) return;
+                  setNewFieldType(event.target.value as CustomFieldType);
+                }}
                 data-testid="custom-field-type-select"
+                disabled={!canEdit}
               >
                 <option value="TEXT">{t('customFieldTypeText')}</option>
                 <option value="NUMBER">{t('customFieldTypeNumber')}</option>
@@ -2188,8 +2258,9 @@ export default function ProjectBoard({
               </Button>
               <Button
                 data-testid="create-custom-field-btn"
-                disabled={!newFieldName.trim() || createCustomField.isPending}
+                disabled={!canEdit || !newFieldName.trim() || createCustomField.isPending}
                 onClick={() => {
+                  if (!canEdit) return;
                   void createCustomField.mutateAsync({
                     name: newFieldName.trim(),
                     type: newFieldType,
@@ -2202,7 +2273,7 @@ export default function ProjectBoard({
           </DialogContent>
         </Dialog>
 
-        <Dialog open={manageFieldsDialogOpen} onOpenChange={setManageFieldsDialogOpen}>
+        <Dialog open={manageFieldsDialogOpen} onOpenChange={(open) => setManageFieldsDialogOpen(canEdit ? open : false)}>
           <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-2xl">
             <DialogHeader>
               <DialogTitle>{t('customFields')}</DialogTitle>
@@ -2225,14 +2296,15 @@ export default function ProjectBoard({
                           value={draft.name}
                           data-testid={`custom-field-name-edit-${field.id}`}
                           onChange={(event) =>
-                            setFieldDrafts((current) => ({
+                            canEdit ? setFieldDrafts((current) => ({
                               ...current,
                               [field.id]: {
                                 ...draft,
                                 name: event.target.value,
                               },
-                            }))
+                            })) : undefined
                           }
+                          disabled={!canEdit}
                         />
                       </div>
                       <span className="text-xs text-muted-foreground">{field.type}</span>
@@ -2242,17 +2314,18 @@ export default function ProjectBoard({
                           variant="outline"
                           data-testid={`custom-field-save-${field.id}`}
                           disabled={
+                            !canEdit ||
                             patchCustomField.isPending ||
                             !draft.name.trim() ||
                             (field.type === 'SELECT' && parsedOptions.length === 0)
                           }
                           onClick={() =>
-                            patchCustomField.mutate({
+                            canEdit ? patchCustomField.mutate({
                               fieldId: field.id,
                               name: draft.name.trim(),
                               optionsText: draft.optionsText,
                               type: field.type,
-                            })
+                            }) : undefined
                           }
                         >
                           {patchCustomField.isPending ? t('saving') : t('save')}
@@ -2263,7 +2336,10 @@ export default function ProjectBoard({
                           className="text-destructive hover:text-destructive"
                           data-testid={`custom-field-delete-${field.id}`}
                           disabled={archiveCustomField.isPending}
-                          onClick={() => archiveCustomField.mutate(field.id)}
+                          onClick={() => {
+                            if (!canEdit) return;
+                            archiveCustomField.mutate(field.id);
+                          }}
                         >
                           {t('delete')}
                         </Button>
@@ -2277,14 +2353,15 @@ export default function ProjectBoard({
                           data-testid={`custom-field-options-edit-${field.id}`}
                           value={draft.optionsText}
                           onChange={(event) =>
-                            setFieldDrafts((current) => ({
+                            canEdit ? setFieldDrafts((current) => ({
                               ...current,
                               [field.id]: {
                                 ...draft,
                                 optionsText: event.target.value,
                               },
-                            }))
+                            })) : undefined
                           }
+                          disabled={!canEdit}
                         />
                       </div>
                     ) : null}
@@ -2379,6 +2456,11 @@ export default function ProjectBoard({
                         className="h-7 max-w-xs border-0 bg-transparent px-1 text-[11px] uppercase tracking-wider text-muted-foreground shadow-none focus-visible:bg-muted/40 focus-visible:ring-0"
                         onChange={(event) => setSectionNameDraft(event.target.value)}
                         onBlur={() => {
+                          if (!canEdit) {
+                            setEditingSectionId(null);
+                            setSectionNameDraft('');
+                            return;
+                          }
                           const next = sectionNameDraft.trim();
                           if (!next || next === group.section.name) {
                             setEditingSectionId(null);
@@ -2388,6 +2470,14 @@ export default function ProjectBoard({
                           patchSection.mutate({ sectionId: group.section.id, name: next });
                         }}
                         onKeyDown={(event) => {
+                          if (!canEdit) {
+                            if (event.key === 'Escape' || event.key === 'Enter') {
+                              event.preventDefault();
+                              setEditingSectionId(null);
+                              setSectionNameDraft('');
+                            }
+                            return;
+                          }
                           if (event.key === 'Enter') {
                             event.preventDefault();
                             const next = sectionNameDraft.trim();
@@ -2410,7 +2500,9 @@ export default function ProjectBoard({
                         type="button"
                         className="text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
                         data-testid={`section-name-label-${group.section.id}`}
+                        title={!canEdit ? t('projectReadOnlyHint') : undefined}
                         onClick={() => {
+                          if (!canEdit) return;
                           setEditingSectionId(group.section.id);
                           setSectionNameDraft(group.section.name);
                         }}
@@ -2450,6 +2542,7 @@ export default function ProjectBoard({
                             onOpen={setSelectedTaskId}
                             projectName={projectName}
                             boardColumns={orderedBoardColumns}
+                            canEdit={canEdit}
                             depth={row.depth}
                             hasChildren={row.hasChildren}
                             collapsed={collapsedTaskIds.has(row.task.id)}
@@ -2480,10 +2573,12 @@ export default function ProjectBoard({
                     <QuickAddTask
                       sectionId={group.section.id}
                       onCreate={async (sectionId, title) => {
+                        if (!canEdit) return;
                         await createTask.mutateAsync({ sectionId, title });
                       }}
                       openSignal={quickAddIntent?.sectionId === group.section.id ? quickAddIntent.nonce : null}
                       showClosedTrigger={!isNoSection}
+                      canEdit={canEdit}
                       {...(onQuickAddIntentHandled ? { onOpenSignalHandled: onQuickAddIntentHandled } : {})}
                     />
                   </div>

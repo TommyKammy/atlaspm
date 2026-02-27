@@ -1841,3 +1841,31 @@
 - Risks/known gaps:
   - Historical rows remain unchanged (`collab-server` actor) by design.
   - If editor identity is unavailable on a save edge, fallback actor remains `collab-server`.
+
+## 2026-02-27 - P4-1 (Wave 1) Viewer Role UI Guard Completion
+- What changed:
+  - Completed viewer-role read-only UX gating on project list view:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/projects/[id]/page.tsx`
+      - fetches `/me` and project members to derive current role
+      - computes `canEditProject` (`VIEWER` => false)
+      - disables add-task/add-section/custom-field triggers
+      - shows read-only hint banner
+      - passes `canEdit` down to project board
+  - Completed in-board edit guards:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-board.tsx`
+      - added `canEdit` prop (default true) and wired through TaskRow/QuickAddTask
+      - blocks viewer-side edit actions: complete toggle, inline title edit, assignee/date/progress/status/custom field edits, delete, section rename, quick add submission, task reorder mutation
+      - disables edit controls with tooltip reason (`projectReadOnlyHint`)
+      - prevents custom-field create/manage dialog mutation actions for viewers
+  - Added i18n label for read-only reason:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/i18n.tsx`
+      - `projectReadOnlyHint` (en/ja)
+- Why:
+  - Enforce least-privilege in UI layer for VIEWER role and avoid accidental mutation attempts, while keeping existing backend authorization as source of truth.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm e2e` (32 tests passed)
+- Risks/known gaps:
+  - UI gating is additive; backend auth remains mandatory. If membership query is temporarily unavailable, UI falls back to editable state until query resolves (backend still blocks unauthorized writes).
