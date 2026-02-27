@@ -1373,3 +1373,30 @@
 - Risks/known gaps:
   - `tests/mvp.spec.ts` has known intermittent board DnD flake; retries are still occasionally needed.
   - Table controls are intentionally minimal and keyboard-first advanced grid operations are not implemented in this phase.
+
+## 2026-02-27 - My Tasks View Implementation
+- What changed:
+  - Replaced `/my-tasks` placeholder with a functional assigned-task view:
+    - aggregates tasks assigned to current user across all projects
+    - supports search by task/project and status filter
+    - supports complete/reopen toggle via `POST /tasks/:id/complete`
+    - supports opening task detail drawer directly from My Tasks row
+    - shows project deep-link, start/end date compact display, status badge, and progress bar
+  - Added dedicated query key for my-tasks aggregation:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/query-keys.ts`
+  - Added i18n strings (EN/JA) for My Tasks view labels and empty state:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/i18n.tsx`
+  - Added Playwright regression coverage:
+    - `/Users/tomoakikawada/Dev/atlaspm/e2e/playwright/tests/my-tasks.spec.ts`
+    - validates assigned-only visibility, completion update persistence, and task detail open/close flow.
+- Why:
+  - Implement requested `My tasks` real view while preserving headless architecture (web-ui -> core-api HTTP only) and no-refresh UX.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/my-tasks.spec.ts --workers=1 --reporter=line`
+  - `pnpm --filter @atlaspm/playwright exec playwright test tests/mvp.spec.ts --workers=1 --reporter=line`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - My Tasks aggregation currently fetches assigned tasks per project and merges client-side; if project count grows very large, a dedicated core endpoint (`GET /my/tasks`) will be more efficient.

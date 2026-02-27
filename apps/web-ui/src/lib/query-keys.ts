@@ -5,6 +5,7 @@ export const queryKeys = {
     ['workspace', workspaceId, 'users', params] as const,
   workspaceInvitations: (workspaceId: string) => ['workspace', workspaceId, 'invitations'] as const,
   projects: ['projects'] as const,
+  myTasks: (userId: string, projectIds: string[]) => ['my-tasks', userId, projectIds] as const,
   projectSections: (projectId: string) => ['project', projectId, 'sections'] as const,
   projectTasksGrouped: (projectId: string) =>
     ['project', projectId, 'tasks', { groupBy: 'section' }] as const,
