@@ -1869,3 +1869,18 @@
   - `pnpm e2e` (32 tests passed)
 - Risks/known gaps:
   - UI gating is additive; backend auth remains mandatory. If membership query is temporarily unavailable, UI falls back to editable state until query resolves (backend still blocks unauthorized writes).
+
+## 2026-02-27 - P4-3 (Step 1) DB EXPLAIN Baseline Harness
+- What changed:
+  - Added reproducible local DB query-plan harness:
+    - `/Users/tomoakikawada/Dev/atlaspm/scripts/db-explain-baseline.sh`
+      - runs `EXPLAIN (ANALYZE, BUFFERS)` for core P4-3 query families
+      - writes markdown report to `docs/perf/EXPLAIN_BASELINE.md`
+  - Added usage doc:
+    - `/Users/tomoakikawada/Dev/atlaspm/docs/perf/README.md`
+- Why:
+  - Issue #73 requires measurement-driven index tuning (before/after evidence). This step adds repeatable baseline capture with minimal blast radius before schema changes.
+- How tested (exact commands):
+  - `bash -n scripts/db-explain-baseline.sh`
+- Risks/known gaps:
+  - Results depend on local data volume/distribution; use representative seed data before using numbers for p95 claims.
