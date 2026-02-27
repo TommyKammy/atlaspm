@@ -31,10 +31,11 @@ run_psql() {
 }
 
 REPORT_PATH="${1:-docs/perf/EXPLAIN_BASELINE.md}"
+REPORT_TITLE="${REPORT_TITLE:-AtlasPM DB EXPLAIN Baseline}"
 mkdir -p "$(dirname "$REPORT_PATH")"
 
 {
-  echo "# AtlasPM DB EXPLAIN Baseline"
+  echo "# ${REPORT_TITLE}"
   echo
   echo "- GeneratedAtUTC: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   if has_local_psql; then
@@ -120,4 +121,4 @@ SQL
   echo '```'
 } > "$REPORT_PATH"
 
-echo "Wrote EXPLAIN baseline report: $REPORT_PATH"
+echo "Wrote EXPLAIN report: $REPORT_PATH"

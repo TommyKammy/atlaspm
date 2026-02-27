@@ -1945,3 +1945,35 @@
   - `pnpm e2e` (32 passed)
 - Risks/known gaps:
   - Candidate list remains intentionally workspace-scoped; cross-workspace user assignment is still unsupported by design.
+
+## 2026-02-27 - P4-3 (Step 2) Index wave2 + before/after comparison artifacts
+- What changed:
+  - Added wave2 partial-index migration for active tasks:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/prisma/migrations/20260227120000_p4_index_optimization_wave2_partial_active/migration.sql`
+    - indexes:
+      - `Task_active_project_section_position_idx`
+      - `Task_active_project_dueAt_idx`
+      - `Task_active_project_status_assignee_dueAt_idx`
+      - `Task_active_project_updatedAt_desc_idx`
+  - Extended explain script to support report title override:
+    - `/Users/tomoakikawada/Dev/atlaspm/scripts/db-explain-baseline.sh`
+      - new env var: `REPORT_TITLE`
+  - Added before/after diff generator:
+    - `/Users/tomoakikawada/Dev/atlaspm/scripts/db-explain-compare.sh`
+  - Generated index-after and comparison reports:
+    - `/Users/tomoakikawada/Dev/atlaspm/docs/perf/EXPLAIN_AFTER_INDEXES.md`
+    - `/Users/tomoakikawada/Dev/atlaspm/docs/perf/EXPLAIN_COMPARE_WAVE2.md`
+  - Updated performance README runbook:
+    - `/Users/tomoakikawada/Dev/atlaspm/docs/perf/README.md`
+- Why:
+  - Issue #73 requires concrete index追加と before/after 比較のエビデンス。計測を再現可能な手順として repo 内に固定化した。
+- How tested (exact commands):
+  - `DATABASE_URL=postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public pnpm --filter @atlaspm/core-api prisma:migrate`
+  - `REPORT_TITLE='AtlasPM DB EXPLAIN After Indexes (Wave2)' ./scripts/db-explain-baseline.sh docs/perf/EXPLAIN_AFTER_INDEXES.md`
+  - `./scripts/db-explain-compare.sh docs/perf/EXPLAIN_BASELINE.md docs/perf/EXPLAIN_AFTER_INDEXES.md docs/perf/EXPLAIN_COMPARE_WAVE2.md`
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e` (32 passed)
+- Risks/known gaps:
+  - 比較レポートはローカル開発データ依存で、Q1/Q2 は改善よりもプラン変更による揺らぎが見える。実運用相当データで再計測して最終判断する必要あり。
