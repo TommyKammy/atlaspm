@@ -39,6 +39,10 @@ class SnapshotBodyDto {
   @IsOptional()
   participants?: Array<{ userId: string; mode: 'readonly' | 'readwrite' }>;
 
+  @IsOptional()
+  @IsString()
+  actorUserId?: string;
+
   @IsIn(['idle', 'interval', 'disconnect'])
   reason!: 'idle' | 'interval' | 'disconnect';
 }
@@ -136,55 +140,112 @@ export class CollabController {
     const roomId = `task:${taskId}:description`;
     if (body.roomId !== roomId) throw new BadRequestException('roomId mismatch');
     this.validateDoc(body.descriptionDoc);
-
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
     const cid = (correlationId ?? randomUUID()).toString();
+    const nextDescriptionText = String(body.descriptionText ?? '').slice(0, MAX_DESCRIPTION_TEXT_LENGTH);
+    const participantCount = Array.isArray(body.participants) ? body.participants.length : 0;
 
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.task.update({
-        where: { id: taskId },
-        data: {
-          descriptionDoc: body.descriptionDoc as Prisma.InputJsonValue,
-          descriptionText: String(body.descriptionText ?? '').slice(0, MAX_DESCRIPTION_TEXT_LENGTH),
-          descriptionUpdatedAt: new Date(),
-          descriptionVersion: { increment: 1 },
-          version: { increment: 1 },
-        },
-      });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const outcome = await this.prisma.$transaction(async (tx) => {
+        const current = await tx.task.findUniqueOrThrow({
+          where: { id: taskId },
+          select: {
+            descriptionDoc: true,
+            descriptionText: true,
+            descriptionVersion: true,
+            projectId: true,
+          },
+        });
 
-      await this.syncDescriptionMentions(tx, taskId, this.extractMentionUserIdsFromDoc(body.descriptionDoc), cid);
+        const sameDoc = this.isSameJson(current.descriptionDoc ?? null, body.descriptionDoc);
+        const sameText = (current.descriptionText ?? '') === nextDescriptionText;
+        if (sameDoc && sameText) {
+          return { kind: 'noop' as const, descriptionVersion: current.descriptionVersion };
+        }
 
-      await this.domain.appendAuditOutbox({
-        tx,
-        actor: 'collab-server',
-        entityType: 'Task',
-        entityId: taskId,
-        action: 'task.description.snapshot_saved',
-        beforeJson: {
-          descriptionVersion: task.descriptionVersion,
-          descriptionText: task.descriptionText,
-        },
-        afterJson: {
-          descriptionVersion: updated.descriptionVersion,
-          descriptionText: updated.descriptionText,
-          reason: body.reason,
-          participantCount: Array.isArray(body.participants) ? body.participants.length : 0,
-        },
-        correlationId: cid,
-        outboxType: 'task.description.snapshot_saved',
-        payload: {
+        const claimed = await tx.task.updateMany({
+          where: { id: taskId, descriptionVersion: current.descriptionVersion },
+          data: {
+            descriptionDoc: body.descriptionDoc as Prisma.InputJsonValue,
+            descriptionText: nextDescriptionText,
+            descriptionUpdatedAt: new Date(),
+            descriptionVersion: { increment: 1 },
+            version: { increment: 1 },
+          },
+        });
+        if (!claimed.count) {
+          return { kind: 'retry' as const };
+        }
+
+        const updated = await tx.task.findUniqueOrThrow({
+          where: { id: taskId },
+          select: { descriptionVersion: true, descriptionText: true },
+        });
+
+        const snapshotActor = await this.resolveSnapshotActor(tx, current.projectId, body.actorUserId);
+
+        await this.syncDescriptionMentions(
+          tx,
+          current.projectId,
           taskId,
-          roomId,
-          reason: body.reason,
-          participantCount: Array.isArray(body.participants) ? body.participants.length : 0,
-          descriptionVersion: updated.descriptionVersion,
-        },
+          this.extractMentionUserIdsFromDoc(body.descriptionDoc),
+          cid,
+          snapshotActor,
+        );
+
+        await this.domain.appendAuditOutbox({
+          tx,
+          actor: snapshotActor,
+          entityType: 'Task',
+          entityId: taskId,
+          action: 'task.description.snapshot_saved',
+          beforeJson: {
+            descriptionVersion: current.descriptionVersion,
+            descriptionText: current.descriptionText,
+          },
+          afterJson: {
+            descriptionVersion: updated.descriptionVersion,
+            descriptionText: updated.descriptionText,
+            reason: body.reason,
+            participantCount,
+          },
+          correlationId: cid,
+          outboxType: 'task.description.snapshot_saved',
+          payload: {
+            taskId,
+            roomId,
+            reason: body.reason,
+            participantCount,
+            actor: snapshotActor,
+            descriptionVersion: updated.descriptionVersion,
+          },
+        });
+
+        return { kind: 'saved' as const, descriptionVersion: updated.descriptionVersion };
       });
 
-      const result = {
-        ok: true,
-        descriptionVersion: updated.descriptionVersion,
-      };
+      if (outcome.kind === 'retry') {
+        continue;
+      }
+
+      if (outcome.kind === 'noop') {
+        this.logger.log(
+          JSON.stringify({
+            event: 'collab.snapshot.noop',
+            correlationId: cid,
+            taskId,
+            roomId,
+            reason: body.reason,
+            participantCount,
+            descriptionVersion: outcome.descriptionVersion,
+          }),
+        );
+        return {
+          ok: true,
+          noop: true,
+          descriptionVersion: outcome.descriptionVersion,
+        };
+      }
+
       this.logger.log(
         JSON.stringify({
           event: 'collab.snapshot.saved',
@@ -192,12 +253,17 @@ export class CollabController {
           taskId,
           roomId,
           reason: body.reason,
-          participantCount: Array.isArray(body.participants) ? body.participants.length : 0,
-          descriptionVersion: updated.descriptionVersion,
+          participantCount,
+          descriptionVersion: outcome.descriptionVersion,
         }),
       );
-      return result;
-    });
+      return {
+        ok: true,
+        descriptionVersion: outcome.descriptionVersion,
+      };
+    }
+
+    throw new ConflictException('Concurrent snapshot write conflict');
   }
 
   private collabJwtKey() {
@@ -227,6 +293,29 @@ export class CollabController {
     if (doc.type !== 'doc' || !Array.isArray(doc.content)) {
       throw new BadRequestException('descriptionDoc must be a valid ProseMirror doc');
     }
+  }
+
+  private isSameJson(left: unknown, right: unknown) {
+    return this.stableJsonStringify(left) === this.stableJsonStringify(right);
+  }
+
+  private stableJsonStringify(value: unknown) {
+    return JSON.stringify(this.normalizeJsonValue(value));
+  }
+
+  private normalizeJsonValue(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.normalizeJsonValue(item));
+    }
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      const normalized: Record<string, unknown> = {};
+      for (const key of Object.keys(record).sort()) {
+        normalized[key] = this.normalizeJsonValue(record[key]);
+      }
+      return normalized;
+    }
+    return value;
   }
 
   private extractMentionUserIdsFromDoc(node: unknown): string[] {
@@ -262,16 +351,33 @@ export class CollabController {
     return [...ids];
   }
 
+  private async resolveSnapshotActor(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+    candidateActorUserId?: string,
+  ) {
+    if (!candidateActorUserId || !candidateActorUserId.trim()) {
+      return 'collab-server';
+    }
+    const userId = candidateActorUserId.trim();
+    const membership = await tx.projectMembership.findFirst({
+      where: { projectId, userId },
+      select: { userId: true },
+    });
+    return membership?.userId ?? 'collab-server';
+  }
+
   private async syncDescriptionMentions(
     tx: Prisma.TransactionClient,
+    projectId: string,
     taskId: string,
     incomingMentionUserIds: string[],
     correlationId: string,
+    actor: string,
   ) {
-    const task = await tx.task.findUniqueOrThrow({ where: { id: taskId }, select: { projectId: true } });
     const validUsers = incomingMentionUserIds.length
       ? await tx.projectMembership.findMany({
-          where: { projectId: task.projectId, userId: { in: incomingMentionUserIds } },
+          where: { projectId, userId: { in: incomingMentionUserIds } },
           select: { userId: true },
         })
       : [];
@@ -292,7 +398,7 @@ export class CollabController {
       });
       await this.domain.appendAuditOutbox({
         tx,
-        actor: 'collab-server',
+        actor,
         entityType: 'Task',
         entityId: taskId,
         action: 'task.mention.created',
@@ -303,11 +409,11 @@ export class CollabController {
       });
       await this.notifications.upsertMentionNotification(tx, {
         userId,
-        projectId: task.projectId,
+        projectId,
         taskId,
         sourceType: 'description',
         sourceId: '',
-        actor: 'collab-server',
+        actor,
         correlationId,
       });
     }
@@ -316,7 +422,7 @@ export class CollabController {
       await tx.taskMention.delete({ where: { id: mention.id } });
       await this.domain.appendAuditOutbox({
         tx,
-        actor: 'collab-server',
+        actor,
         entityType: 'Task',
         entityId: taskId,
         action: 'task.mention.deleted',

@@ -18,6 +18,11 @@ type RoomState = {
   dirty: boolean;
   debounce?: NodeJS.Timeout;
   lastSavedAt: number;
+  lastChangedAt: number;
+  saving: boolean;
+  pendingReason?: 'idle' | 'interval' | 'disconnect';
+  lastSavedSnapshotKey?: string;
+  lastEditorUserId?: string;
 };
 
 const extensions = [
@@ -85,7 +90,13 @@ function parseTaskIdFromRoom(roomId: string) {
 function stateForRoom(roomId: string) {
   let state = roomStates.get(roomId);
   if (!state) {
-    state = { participants: new Map(), dirty: false, lastSavedAt: 0 };
+    state = {
+      participants: new Map(),
+      dirty: false,
+      lastSavedAt: 0,
+      lastChangedAt: 0,
+      saving: false,
+    };
     roomStates.set(roomId, state);
   }
   return state;
@@ -104,13 +115,45 @@ function extractPlainTextFromDoc(node: unknown): string {
   return '';
 }
 
-async function saveSnapshot(documentName: string, reason: 'idle' | 'interval' | 'disconnect', ydoc: any) {
+function normalizeJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeJsonValue(item));
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const normalized: Record<string, unknown> = {};
+    for (const key of Object.keys(record).sort()) {
+      normalized[key] = normalizeJsonValue(record[key]);
+    }
+    return normalized;
+  }
+  return value;
+}
+
+function snapshotKey(doc: unknown, text: string) {
+  return JSON.stringify({ doc: normalizeJsonValue(doc), text });
+}
+
+async function performSnapshotSave(documentName: string, reason: 'idle' | 'interval' | 'disconnect', ydoc: any) {
   const taskId = parseTaskIdFromRoom(documentName);
   const cid = correlationId();
   const state = stateForRoom(documentName);
 
   const json = TiptapTransformer.fromYdoc(ydoc, 'default') as Record<string, unknown>;
   const text = extractPlainTextFromDoc(json);
+  const key = snapshotKey(json, text);
+  if (state.lastSavedSnapshotKey === key) {
+    state.dirty = false;
+    state.lastSavedAt = Date.now();
+    logInfo('snapshot.skip_same_content', {
+      correlationId: cid,
+      roomId: documentName,
+      taskId,
+      reason,
+      participants: state.participants.size,
+    });
+    return;
+  }
   const participants = [...state.participants.values()];
 
   const body = {
@@ -118,6 +161,7 @@ async function saveSnapshot(documentName: string, reason: 'idle' | 'interval' | 
     descriptionDoc: json,
     descriptionText: text,
     participants,
+    actorUserId: state.lastEditorUserId,
     reason,
   };
 
@@ -135,6 +179,7 @@ async function saveSnapshot(documentName: string, reason: 'idle' | 'interval' | 
     if (res?.ok) {
       state.dirty = false;
       state.lastSavedAt = Date.now();
+      state.lastSavedSnapshotKey = key;
       logInfo('snapshot.saved', {
         correlationId: cid,
         roomId: documentName,
@@ -159,6 +204,41 @@ async function saveSnapshot(documentName: string, reason: 'idle' | 'interval' | 
       await new Promise((resolve) => setTimeout(resolve, attempt * 500));
     }
   }
+}
+
+function snapshotReasonPriority(reason: 'idle' | 'interval' | 'disconnect') {
+  if (reason === 'disconnect') return 3;
+  if (reason === 'idle') return 2;
+  return 1;
+}
+
+async function saveSnapshot(documentName: string, reason: 'idle' | 'interval' | 'disconnect', ydoc: any) {
+  const state = stateForRoom(documentName);
+  if (!state.dirty && reason !== 'disconnect') return;
+
+  if (state.saving) {
+    if (
+      !state.pendingReason ||
+      snapshotReasonPriority(reason) > snapshotReasonPriority(state.pendingReason)
+    ) {
+      state.pendingReason = reason;
+    }
+    return;
+  }
+
+  state.saving = true;
+  try {
+    await performSnapshotSave(documentName, reason, ydoc);
+  } finally {
+    state.saving = false;
+  }
+
+  if (!state.pendingReason || !state.dirty) return;
+  const pendingReason = state.pendingReason;
+  delete state.pendingReason;
+  const instance = server.documents.get(documentName);
+  if (!instance) return;
+  void saveSnapshot(documentName, pendingReason, instance as any);
 }
 
 const server = Server.configure({
@@ -249,7 +329,14 @@ const server = Server.configure({
 
   async onDisconnect(data) {
     const state = stateForRoom(data.documentName);
+    if (state.debounce) {
+      clearTimeout(state.debounce);
+      delete state.debounce;
+    }
     const participant = state.participants.get(data.socketId);
+    if (participant?.userId) {
+      state.lastEditorUserId = participant.userId;
+    }
     state.participants.delete(data.socketId);
     logInfo('presence.leave', {
       correlationId: correlationId(),
@@ -261,11 +348,14 @@ const server = Server.configure({
     if (state.dirty) {
       await saveSnapshot(data.documentName, 'disconnect', data.document);
     }
+    if (!state.participants.size && !state.dirty && !state.saving) {
+      roomStates.delete(data.documentName);
+    }
   },
 
   async onChange(data) {
     const state = stateForRoom(data.documentName);
-    const session = data.context as { mode?: 'readonly' | 'readwrite' };
+    const session = data.context as { userId?: string; mode?: 'readonly' | 'readwrite' };
     if (session?.mode === 'readonly') {
       logError('readonly.write_blocked', {
         correlationId: correlationId(),
@@ -275,7 +365,18 @@ const server = Server.configure({
       throw new Error('Readonly client cannot edit');
     }
 
+    const changedAt = Date.now();
     state.dirty = true;
+    state.lastChangedAt = changedAt;
+    const participant = state.participants.get(data.socketId);
+    const actorUserId = session?.userId ?? participant?.userId;
+    if (actorUserId) {
+      state.lastEditorUserId = actorUserId;
+    }
+    // Avoid immediate interval snapshot right after first keystrokes.
+    if (state.lastSavedAt === 0) {
+      state.lastSavedAt = changedAt;
+    }
     if (state.debounce) clearTimeout(state.debounce);
     state.debounce = setTimeout(() => {
       void saveSnapshot(data.documentName, 'idle', data.document);
@@ -289,6 +390,8 @@ setInterval(() => {
   for (const [roomId, state] of roomStates.entries()) {
     if (!state.dirty) continue;
     if (now - state.lastSavedAt < 30_000) continue;
+    // Let idle/disconnect capture recent edits to reduce near-duplicate saves.
+    if (now - state.lastChangedAt < 3_000) continue;
     const instance = server.documents.get(roomId);
     if (!instance) continue;
     void saveSnapshot(roomId, 'interval', instance as any);

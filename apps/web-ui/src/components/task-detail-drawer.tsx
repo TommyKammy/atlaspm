@@ -81,6 +81,49 @@ function formatAuditEvent(event: AuditEvent, t: (key: string) => string) {
   return action;
 }
 
+function getAuditDescriptionText(event: AuditEvent) {
+  const beforeRaw = event.beforeJson?.descriptionText;
+  const afterRaw = event.afterJson?.descriptionText;
+  return {
+    before: typeof beforeRaw === 'string' ? beforeRaw : '',
+    after: typeof afterRaw === 'string' ? afterRaw : '',
+  };
+}
+
+function compactSnapshotActivity(events: AuditEvent[]) {
+  const compacted: AuditEvent[] = [];
+  for (const event of events) {
+    const prev = compacted[compacted.length - 1];
+    if (!prev) {
+      compacted.push(event);
+      continue;
+    }
+
+    const bothSnapshotSaves =
+      prev.action === 'task.description.snapshot_saved' &&
+      event.action === 'task.description.snapshot_saved' &&
+      prev.actor === 'collab-server' &&
+      event.actor === 'collab-server';
+    if (!bothSnapshotSaves) {
+      compacted.push(event);
+      continue;
+    }
+
+    const prevText = getAuditDescriptionText(prev);
+    const currentText = getAuditDescriptionText(event);
+    const elapsedMs = Math.abs(new Date(event.createdAt).getTime() - new Date(prev.createdAt).getTime());
+    const looksDuplicate =
+      prevText.after === currentText.after &&
+      prevText.before !== prevText.after &&
+      currentText.before === currentText.after &&
+      elapsedMs <= 2_500;
+
+    if (looksDuplicate) continue;
+    compacted.push(event);
+  }
+  return compacted;
+}
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -411,7 +454,10 @@ export default function TaskDetailDrawer({
 
   const comments = commentsQuery.data ?? [];
   const attachments = attachmentsQuery.data ?? [];
-  const activity = useMemo(() => (activityQuery.data ?? []).slice().reverse(), [activityQuery.data]);
+  const activity = useMemo(
+    () => compactSnapshotActivity((activityQuery.data ?? []).slice().reverse()),
+    [activityQuery.data],
+  );
   const dependencies = dependenciesQuery.data ?? [];
   const blockingCount = dependencies.filter((dep) => dep.dependsOnTask && dep.dependsOnTask.status !== 'DONE').length;
 

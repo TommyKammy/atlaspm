@@ -427,11 +427,82 @@ describe('Core API Integration', () => {
         },
         descriptionText: 'snapshot check',
         participants: [{ userId: 'member-1', mode: 'readwrite' }],
+        actorUserId: 'member-1',
         reason: 'idle',
       })
       .expect(201);
     const observedSnapshotCorrelationId = String(snapshotSaved.headers['x-correlation-id'] ?? '');
     expect(observedSnapshotCorrelationId).toBe(snapshotCorrelationId);
+    expect(snapshotSaved.body.noop).not.toBe(true);
+
+    const snapshotNoopCorrelationId = `it-snapshot-noop-${Date.now()}`;
+    const snapshotNoop = await request(app.getHttpServer())
+      .post(`/tasks/${snapshotTaskId}/description/snapshot`)
+      .set('x-collab-service-token', 'collab-service-secret')
+      .set('x-correlation-id', snapshotNoopCorrelationId)
+      .send({
+        roomId: `task:${snapshotTaskId}:description`,
+        descriptionDoc: {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'snapshot check' }] }],
+        },
+        descriptionText: 'snapshot check',
+        participants: [{ userId: 'member-1', mode: 'readwrite' }],
+        actorUserId: 'member-1',
+        reason: 'disconnect',
+      })
+      .expect(201);
+    expect(snapshotNoop.body.noop).toBe(true);
+    expect(snapshotNoop.body.descriptionVersion).toBe(snapshotSaved.body.descriptionVersion);
+
+    const snapshotRaceCorrelationA = `it-snapshot-race-a-${Date.now()}`;
+    const snapshotRaceCorrelationB = `it-snapshot-race-b-${Date.now()}`;
+    const snapshotRacePayload = {
+      roomId: `task:${snapshotTaskId}:description`,
+      descriptionDoc: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'snapshot race value' }] }],
+      },
+      descriptionText: 'snapshot race value',
+      participants: [{ userId: 'member-1', mode: 'readwrite' }],
+      actorUserId: 'member-1',
+      reason: 'idle' as const,
+    };
+    const [snapshotRaceA, snapshotRaceB] = await Promise.all([
+      request(app.getHttpServer())
+        .post(`/tasks/${snapshotTaskId}/description/snapshot`)
+        .set('x-collab-service-token', 'collab-service-secret')
+        .set('x-correlation-id', snapshotRaceCorrelationA)
+        .send(snapshotRacePayload),
+      request(app.getHttpServer())
+        .post(`/tasks/${snapshotTaskId}/description/snapshot`)
+        .set('x-collab-service-token', 'collab-service-secret')
+        .set('x-correlation-id', snapshotRaceCorrelationB)
+        .send(snapshotRacePayload),
+    ]);
+    expect(snapshotRaceA.status).toBe(201);
+    expect(snapshotRaceB.status).toBe(201);
+    const raceNoopCount = [snapshotRaceA.body?.noop, snapshotRaceB.body?.noop].filter(Boolean).length;
+    expect(raceNoopCount).toBe(1);
+
+    const snapshotInvalidActorCorrelationId = `it-snapshot-invalid-actor-${Date.now()}`;
+    const snapshotInvalidActor = await request(app.getHttpServer())
+      .post(`/tasks/${snapshotTaskId}/description/snapshot`)
+      .set('x-collab-service-token', 'collab-service-secret')
+      .set('x-correlation-id', snapshotInvalidActorCorrelationId)
+      .send({
+        roomId: `task:${snapshotTaskId}:description`,
+        descriptionDoc: {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'snapshot invalid actor' }] }],
+        },
+        descriptionText: 'snapshot invalid actor',
+        participants: [{ userId: 'member-1', mode: 'readwrite' }],
+        actorUserId: 'not-project-member',
+        reason: 'idle',
+      })
+      .expect(201);
+    expect(snapshotInvalidActor.body.noop).not.toBe(true);
 
     await request(app.getHttpServer())
       .post(`/sections/${secA.body.id}/tasks/reorder`)
@@ -741,6 +812,26 @@ describe('Core API Integration', () => {
     });
     expect(snapshotOutbox).toBeTruthy();
     expect((snapshotOutbox?.payload as any)?.taskId).toBe(snapshotTaskId);
+    expect((snapshotOutbox?.payload as any)?.actor).toBe('member-1');
+    const snapshotNoopOutbox = await prisma.outboxEvent.findFirst({
+      where: { type: 'task.description.snapshot_saved', correlationId: snapshotNoopCorrelationId },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(snapshotNoopOutbox).toBeNull();
+    const snapshotRaceOutbox = await prisma.outboxEvent.findMany({
+      where: {
+        type: 'task.description.snapshot_saved',
+        correlationId: { in: [snapshotRaceCorrelationA, snapshotRaceCorrelationB] },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(snapshotRaceOutbox).toHaveLength(1);
+    const snapshotInvalidOutbox = await prisma.outboxEvent.findFirst({
+      where: { type: 'task.description.snapshot_saved', correlationId: snapshotInvalidActorCorrelationId },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(snapshotInvalidOutbox).toBeTruthy();
+    expect((snapshotInvalidOutbox?.payload as any)?.actor).toBe('collab-server');
 
     await request(app.getHttpServer())
       .get(`/outbox?projectId=${projectId}`)
@@ -764,7 +855,29 @@ describe('Core API Integration', () => {
       t2Audit.body.some(
         (e: any) =>
           e.action === 'task.description.snapshot_saved' &&
-          e.correlationId === observedSnapshotCorrelationId,
+          e.correlationId === observedSnapshotCorrelationId &&
+          e.actor === 'member-1',
+      ),
+    ).toBe(true);
+    expect(
+      t2Audit.body.some(
+        (e: any) =>
+          e.action === 'task.description.snapshot_saved' &&
+          e.correlationId === snapshotNoopCorrelationId,
+      ),
+    ).toBe(false);
+    const snapshotRaceAudit = t2Audit.body.filter(
+      (e: any) =>
+        e.action === 'task.description.snapshot_saved' &&
+        [snapshotRaceCorrelationA, snapshotRaceCorrelationB].includes(e.correlationId),
+    );
+    expect(snapshotRaceAudit).toHaveLength(1);
+    expect(
+      t2Audit.body.some(
+        (e: any) =>
+          e.action === 'task.description.snapshot_saved' &&
+          e.correlationId === snapshotInvalidActorCorrelationId &&
+          e.actor === 'collab-server',
       ),
     ).toBe(true);
 
