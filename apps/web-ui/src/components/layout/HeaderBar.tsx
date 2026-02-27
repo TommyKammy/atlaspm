@@ -14,7 +14,8 @@ import type { Locale } from '@/lib/layout-preferences';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { Project, ProjectMember, Section, Task } from '@/lib/types';
+import type { CustomFieldDefinition, Project, ProjectMember, Section, Task } from '@/lib/types';
+import { parseCustomFieldFilters, stringifyCustomFieldFilters, type CustomFieldFilter } from '@/lib/project-filters';
 import { useI18n } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -56,6 +57,10 @@ function statusLabel(status: Task['status'], t: (key: string) => string) {
     default:
       return status;
   }
+}
+
+function isFilterableCustomField(field: CustomFieldDefinition) {
+  return field.type === 'SELECT' || field.type === 'BOOLEAN' || field.type === 'NUMBER' || field.type === 'DATE';
 }
 
 function ThemeToggle() {
@@ -228,15 +233,18 @@ export function HeaderBar({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const searchParamsString = searchParams.toString();
+  const resolvedSearchParams = useMemo(() => new URLSearchParams(searchParamsString), [searchParamsString]);
   const { data: projects = [] } = useQuery<Project[]>({
     queryKey: queryKeys.projects,
     queryFn: () => api('/projects'),
   });
   const projectId = useMemo(() => pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null, [pathname]);
-  const currentView = (searchParams.get('view') ?? 'list').toLowerCase();
-  const query = searchParams.get('q') ?? '';
-  const statusesParam = searchParams.get('statuses');
-  const assigneesParam = searchParams.get('assignees');
+  const currentView = (resolvedSearchParams.get('view') ?? 'list').toLowerCase();
+  const query = resolvedSearchParams.get('q') ?? '';
+  const statusesParam = resolvedSearchParams.get('statuses');
+  const assigneesParam = resolvedSearchParams.get('assignees');
+  const customFieldFiltersParam = resolvedSearchParams.get('cf');
   const selectedStatuses = useMemo(
     () =>
       parseListParam(statusesParam).filter(
@@ -245,6 +253,10 @@ export function HeaderBar({
     [statusesParam],
   );
   const selectedAssignees = useMemo(() => parseListParam(assigneesParam), [assigneesParam]);
+  const selectedCustomFieldFilters = useMemo(
+    () => parseCustomFieldFilters(customFieldFiltersParam),
+    [customFieldFiltersParam],
+  );
   const tabs = [
     { id: 'list', label: t('list') },
     { id: 'board', label: t('board') },
@@ -267,6 +279,11 @@ export function HeaderBar({
     queryFn: () => api(`/projects/${projectId}/members`),
     enabled: Boolean(projectId),
   });
+  const customFieldsQuery = useQuery<CustomFieldDefinition[]>({
+    queryKey: queryKeys.projectCustomFields(projectId ?? ''),
+    queryFn: () => api(`/projects/${projectId}/custom-fields`),
+    enabled: Boolean(projectId),
+  });
 
   const title = useMemo(() => {
     if (!projectId) return t('projects');
@@ -275,7 +292,7 @@ export function HeaderBar({
 
   const updateProjectQueryParams = useCallback((updates: Record<string, string | null>) => {
     if (!projectId) return;
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(searchParamsString);
     Object.entries(updates).forEach(([key, value]) => {
       if (value === null || value === '') {
         params.delete(key);
@@ -284,8 +301,9 @@ export function HeaderBar({
       }
     });
     const nextQuery = params.toString();
+    if (nextQuery === searchParamsString) return;
     router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
-  }, [pathname, projectId, router, searchParams]);
+  }, [pathname, projectId, router, searchParamsString]);
 
   const setProjectQueryParam = useCallback(
     (key: string, value: string | null) => updateProjectQueryParams({ [key]: value }),
@@ -296,16 +314,22 @@ export function HeaderBar({
     [projectId],
   );
   const applyProjectFilters = useCallback(
-    (nextStatuses: Task['status'][], nextAssignees: string[]) => {
+    (nextStatuses: Task['status'][], nextAssignees: string[], nextCustomFieldFilters: CustomFieldFilter[]) => {
+      const serializedCustomFieldFilters = stringifyCustomFieldFilters(nextCustomFieldFilters);
       if (projectFilterStorageKey && typeof window !== 'undefined') {
         window.localStorage.setItem(
           projectFilterStorageKey,
-          JSON.stringify({ statuses: nextStatuses, assignees: nextAssignees }),
+          JSON.stringify({
+            statuses: nextStatuses,
+            assignees: nextAssignees,
+            customFieldFilters: nextCustomFieldFilters,
+          }),
         );
       }
       updateProjectQueryParams({
         statuses: nextStatuses.length ? nextStatuses.join(',') : null,
         assignees: nextAssignees.length ? nextAssignees.join(',') : null,
+        cf: serializedCustomFieldFilters,
       });
     },
     [projectFilterStorageKey, updateProjectQueryParams],
@@ -315,23 +339,37 @@ export function HeaderBar({
       const nextStatuses = selectedStatuses.includes(status)
         ? selectedStatuses.filter((item) => item !== status)
         : [...selectedStatuses, status];
-      applyProjectFilters(nextStatuses, selectedAssignees);
+      applyProjectFilters(nextStatuses, selectedAssignees, selectedCustomFieldFilters);
     },
-    [applyProjectFilters, selectedAssignees, selectedStatuses],
+    [applyProjectFilters, selectedAssignees, selectedCustomFieldFilters, selectedStatuses],
   );
   const toggleAssigneeFilter = useCallback(
     (assigneeUserId: string) => {
       const nextAssignees = selectedAssignees.includes(assigneeUserId)
         ? selectedAssignees.filter((item) => item !== assigneeUserId)
         : [...selectedAssignees, assigneeUserId];
-      applyProjectFilters(selectedStatuses, nextAssignees);
+      applyProjectFilters(selectedStatuses, nextAssignees, selectedCustomFieldFilters);
     },
-    [applyProjectFilters, selectedAssignees, selectedStatuses],
+    [applyProjectFilters, selectedAssignees, selectedCustomFieldFilters, selectedStatuses],
+  );
+  const upsertCustomFieldFilter = useCallback(
+    (nextFilter: CustomFieldFilter) => {
+      const next = [...selectedCustomFieldFilters.filter((item) => item.fieldId !== nextFilter.fieldId), nextFilter];
+      applyProjectFilters(selectedStatuses, selectedAssignees, next);
+    },
+    [applyProjectFilters, selectedAssignees, selectedCustomFieldFilters, selectedStatuses],
+  );
+  const removeCustomFieldFilter = useCallback(
+    (fieldId: string) => {
+      const next = selectedCustomFieldFilters.filter((item) => item.fieldId !== fieldId);
+      applyProjectFilters(selectedStatuses, selectedAssignees, next);
+    },
+    [applyProjectFilters, selectedAssignees, selectedCustomFieldFilters, selectedStatuses],
   );
   const clearAllFilters = useCallback(() => {
-    applyProjectFilters([], []);
+    applyProjectFilters([], [], []);
   }, [applyProjectFilters]);
-  const filterCount = selectedStatuses.length + selectedAssignees.length;
+  const filterCount = selectedStatuses.length + selectedAssignees.length + selectedCustomFieldFilters.length;
   const [sectionsOpen, setSectionsOpen] = useState(false);
 
   const [projectSearchInput, setProjectSearchInput] = useState(query);
@@ -345,6 +383,18 @@ export function HeaderBar({
         .filter((section) => !section.isDefault)
         .sort((left, right) => left.position - right.position),
     [sectionsQuery.data],
+  );
+  const filterableCustomFields = useMemo(
+    () =>
+      (customFieldsQuery.data ?? [])
+        .filter((field) => !field.archivedAt)
+        .filter((field) => isFilterableCustomField(field))
+        .sort((left, right) => left.position - right.position),
+    [customFieldsQuery.data],
+  );
+  const customFieldFilterById = useMemo(
+    () => new Map(selectedCustomFieldFilters.map((filter) => [filter.fieldId, filter])),
+    [selectedCustomFieldFilters],
   );
 
   const focusSection = useCallback(
@@ -380,32 +430,15 @@ export function HeaderBar({
 
   useEffect(() => {
     if (!projectId || !projectFilterStorageKey || typeof window === 'undefined') return;
-
-    if (statusesParam || assigneesParam) {
-      window.localStorage.setItem(
-        projectFilterStorageKey,
-        JSON.stringify({ statuses: selectedStatuses, assignees: selectedAssignees }),
-      );
-      return;
-    }
-
-    const raw = window.localStorage.getItem(projectFilterStorageKey);
-    if (!raw) return;
-    try {
-      const parsed = JSON.parse(raw) as { statuses?: string[]; assignees?: string[] };
-      const restoredStatuses = (parsed.statuses ?? []).filter((value) =>
-        FILTER_STATUSES.includes(value as Task['status']),
-      );
-      const restoredAssignees = (parsed.assignees ?? []).filter(Boolean);
-      if (!restoredStatuses.length && !restoredAssignees.length) return;
-      updateProjectQueryParams({
-        statuses: restoredStatuses.length ? restoredStatuses.join(',') : null,
-        assignees: restoredAssignees.length ? restoredAssignees.join(',') : null,
-      });
-    } catch {
-      // no-op
-    }
-  }, [assigneesParam, projectFilterStorageKey, projectId, selectedAssignees, selectedStatuses, statusesParam, updateProjectQueryParams]);
+    window.localStorage.setItem(
+      projectFilterStorageKey,
+      JSON.stringify({
+        statuses: selectedStatuses,
+        assignees: selectedAssignees,
+        customFieldFilters: selectedCustomFieldFilters,
+      }),
+    );
+  }, [projectFilterStorageKey, projectId, selectedAssignees, selectedCustomFieldFilters, selectedStatuses]);
 
   return (
     <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:px-6">
@@ -618,6 +651,209 @@ export function HeaderBar({
                         );
                       })}
                     </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('customFields')}</p>
+                    {!filterableCustomFields.length ? (
+                      <p className="text-xs text-muted-foreground">{t('noFilterableCustomFields')}</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {filterableCustomFields.map((field) => {
+                          const activeFilter = customFieldFilterById.get(field.id);
+                          return (
+                            <div
+                              key={field.id}
+                              className="space-y-1 rounded border border-border/60 p-2"
+                              data-testid={`project-filter-custom-field-${field.id}`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="truncate text-xs font-medium">{field.name}</p>
+                                {activeFilter ? (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-6 px-2 text-[11px]"
+                                    onClick={() => removeCustomFieldFilter(field.id)}
+                                    data-testid={`project-filter-cf-${field.id}-clear`}
+                                  >
+                                    {t('clear')}
+                                  </Button>
+                                ) : null}
+                              </div>
+
+                              {field.type === 'SELECT' ? (
+                                <div className="space-y-1">
+                                  {field.options
+                                    .filter((option) => !option.archivedAt)
+                                    .map((option) => {
+                                      const checked = Boolean(activeFilter?.optionIds?.includes(option.id));
+                                      return (
+                                        <label
+                                          key={option.id}
+                                          className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-muted/30"
+                                          data-testid={`project-filter-cf-${field.id}-option-${option.id}`}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={checked}
+                                            onChange={() => {
+                                              const current = activeFilter?.optionIds ?? [];
+                                              const nextOptionIds = checked
+                                                ? current.filter((id) => id !== option.id)
+                                                : [...current, option.id];
+                                              if (!nextOptionIds.length) {
+                                                removeCustomFieldFilter(field.id);
+                                                return;
+                                              }
+                                              upsertCustomFieldFilter({
+                                                fieldId: field.id,
+                                                type: 'SELECT',
+                                                optionIds: nextOptionIds,
+                                              });
+                                            }}
+                                            className="h-3.5 w-3.5 rounded border-border"
+                                          />
+                                          <span className="truncate">{option.label}</span>
+                                        </label>
+                                      );
+                                    })}
+                                </div>
+                              ) : null}
+
+                              {field.type === 'BOOLEAN' ? (
+                                <select
+                                  className="h-8 w-full rounded border border-border/60 bg-background px-2 text-xs"
+                                  value={
+                                    typeof activeFilter?.booleanValue === 'boolean'
+                                      ? activeFilter.booleanValue
+                                        ? 'true'
+                                        : 'false'
+                                      : 'any'
+                                  }
+                                  data-testid={`project-filter-cf-${field.id}-boolean`}
+                                  onChange={(event) => {
+                                    const next = event.target.value;
+                                    if (next === 'any') {
+                                      removeCustomFieldFilter(field.id);
+                                      return;
+                                    }
+                                    upsertCustomFieldFilter({
+                                      fieldId: field.id,
+                                      type: 'BOOLEAN',
+                                      booleanValue: next === 'true',
+                                    });
+                                  }}
+                                >
+                                  <option value="any">{t('customFieldFilterAny')}</option>
+                                  <option value="true">{t('customFieldFilterTrue')}</option>
+                                  <option value="false">{t('customFieldFilterFalse')}</option>
+                                </select>
+                              ) : null}
+
+                              {field.type === 'NUMBER' ? (
+                                <div className="grid grid-cols-2 gap-2">
+                                  <Input
+                                    type="number"
+                                    value={typeof activeFilter?.numberMin === 'number' ? String(activeFilter.numberMin) : ''}
+                                    placeholder={t('customFieldFilterMin')}
+                                    data-testid={`project-filter-cf-${field.id}-number-min`}
+                                    className="h-8 text-xs"
+                                    onChange={(event) => {
+                                      const raw = event.target.value.trim();
+                                      const nextMin = raw === '' ? null : Number(raw);
+                                      if (raw !== '' && !Number.isFinite(nextMin)) return;
+                                      const nextMax =
+                                        typeof activeFilter?.numberMax === 'number' ? activeFilter.numberMax : null;
+                                      if (nextMin === null && nextMax === null) {
+                                        removeCustomFieldFilter(field.id);
+                                        return;
+                                      }
+                                      upsertCustomFieldFilter({
+                                        fieldId: field.id,
+                                        type: 'NUMBER',
+                                        numberMin: nextMin,
+                                        numberMax: nextMax,
+                                      });
+                                    }}
+                                  />
+                                  <Input
+                                    type="number"
+                                    value={typeof activeFilter?.numberMax === 'number' ? String(activeFilter.numberMax) : ''}
+                                    placeholder={t('customFieldFilterMax')}
+                                    data-testid={`project-filter-cf-${field.id}-number-max`}
+                                    className="h-8 text-xs"
+                                    onChange={(event) => {
+                                      const raw = event.target.value.trim();
+                                      const nextMax = raw === '' ? null : Number(raw);
+                                      if (raw !== '' && !Number.isFinite(nextMax)) return;
+                                      const nextMin =
+                                        typeof activeFilter?.numberMin === 'number' ? activeFilter.numberMin : null;
+                                      if (nextMin === null && nextMax === null) {
+                                        removeCustomFieldFilter(field.id);
+                                        return;
+                                      }
+                                      upsertCustomFieldFilter({
+                                        fieldId: field.id,
+                                        type: 'NUMBER',
+                                        numberMin: nextMin,
+                                        numberMax: nextMax,
+                                      });
+                                    }}
+                                  />
+                                </div>
+                              ) : null}
+
+                              {field.type === 'DATE' ? (
+                                <div className="grid grid-cols-2 gap-2">
+                                  <Input
+                                    type="date"
+                                    value={activeFilter?.dateFrom ?? ''}
+                                    placeholder={t('customFieldFilterFrom')}
+                                    data-testid={`project-filter-cf-${field.id}-date-from`}
+                                    className="h-8 text-xs"
+                                    onChange={(event) => {
+                                      const dateFrom = event.target.value || null;
+                                      const dateTo = activeFilter?.dateTo ?? null;
+                                      if (!dateFrom && !dateTo) {
+                                        removeCustomFieldFilter(field.id);
+                                        return;
+                                      }
+                                      upsertCustomFieldFilter({
+                                        fieldId: field.id,
+                                        type: 'DATE',
+                                        dateFrom,
+                                        dateTo,
+                                      });
+                                    }}
+                                  />
+                                  <Input
+                                    type="date"
+                                    value={activeFilter?.dateTo ?? ''}
+                                    placeholder={t('customFieldFilterTo')}
+                                    data-testid={`project-filter-cf-${field.id}-date-to`}
+                                    className="h-8 text-xs"
+                                    onChange={(event) => {
+                                      const dateTo = event.target.value || null;
+                                      const dateFrom = activeFilter?.dateFrom ?? null;
+                                      if (!dateFrom && !dateTo) {
+                                        removeCustomFieldFilter(field.id);
+                                        return;
+                                      }
+                                      upsertCustomFieldFilter({
+                                        fieldId: field.id,
+                                        type: 'DATE',
+                                        dateFrom,
+                                        dateTo,
+                                      });
+                                    }}
+                                  />
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               </PopoverContent>

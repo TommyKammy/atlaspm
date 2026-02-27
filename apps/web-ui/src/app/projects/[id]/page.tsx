@@ -9,6 +9,7 @@ import { ProjectBoardView, ProjectCalendarView, ProjectFilesView } from '@/compo
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { Project, Section, SectionTaskGroup, Task } from '@/lib/types';
+import { parseCustomFieldFilters } from '@/lib/project-filters';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useI18n } from '@/lib/i18n';
@@ -38,8 +39,10 @@ export default function ProjectPage() {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const searchParamsString = searchParams.toString();
+  const resolvedSearchParams = useMemo(() => new URLSearchParams(searchParamsString), [searchParamsString]);
   const projectId = params.id;
-  const openTaskId = searchParams.get('task');
+  const openTaskId = resolvedSearchParams.get('task');
   const [newSection, setNewSection] = useState('');
   const [showAddSectionInput, setShowAddSectionInput] = useState(false);
   const [quickAddIntent, setQuickAddIntent] = useState<QuickAddIntent>(null);
@@ -47,29 +50,34 @@ export default function ProjectPage() {
   const [quickAddError, setQuickAddError] = useState<string | null>(null);
   const addSectionInputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
-  const viewParam = (searchParams.get('view') ?? 'list').toLowerCase();
+  const viewParam = (resolvedSearchParams.get('view') ?? 'list').toLowerCase();
   const view: 'list' | 'board' | 'calendar' | 'files' =
     viewParam === 'board' || viewParam === 'calendar' || viewParam === 'files' ? viewParam : 'list';
-  const trashOpen = searchParams.get('trash') === '1';
-  const search = searchParams.get('q') ?? '';
+  const trashOpen = resolvedSearchParams.get('trash') === '1';
+  const search = resolvedSearchParams.get('q') ?? '';
+  const statusesParam = resolvedSearchParams.get('statuses');
+  const assigneesParam = resolvedSearchParams.get('assignees');
+  const customFieldFiltersParam = resolvedSearchParams.get('cf');
   const statusFilters = useMemo(
     () =>
-      parseListParam(searchParams.get('statuses')).filter(
+      parseListParam(statusesParam).filter(
         (value): value is Task['status'] => TASK_STATUSES.includes(value as Task['status']),
       ),
-    [searchParams],
+    [statusesParam],
   );
-  const assigneeFilters = useMemo(() => parseListParam(searchParams.get('assignees')), [searchParams]);
+  const assigneeFilters = useMemo(() => parseListParam(assigneesParam), [assigneesParam]);
+  const customFieldFilters = useMemo(() => parseCustomFieldFilters(customFieldFiltersParam), [customFieldFiltersParam]);
   const statusFilter: 'ALL' | Task['status'] = 'ALL';
   const priorityFilter: 'ALL' | NonNullable<Task['priority']> = 'ALL';
 
   const setProjectQueryParam = useCallback((key: string, value: string | null) => {
-    const next = new URLSearchParams(searchParams.toString());
+    const next = new URLSearchParams(searchParamsString);
     if (!value) next.delete(key);
     else next.set(key, value);
     const query = next.toString();
+    if (query === searchParamsString) return;
     router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-  }, [pathname, router, searchParams]);
+  }, [pathname, router, searchParamsString]);
 
   const projectsQuery = useQuery<Project[]>({
     queryKey: queryKeys.projects,
@@ -304,6 +312,7 @@ export default function ProjectPage() {
             priorityFilter={priorityFilter}
             statusFilters={statusFilters}
             assigneeFilters={assigneeFilters}
+            customFieldFilters={customFieldFilters}
             initialTaskId={openTaskId}
             quickAddIntent={quickAddIntent}
             onQuickAddIntentHandled={(nonce) => {

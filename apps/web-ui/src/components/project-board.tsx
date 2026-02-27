@@ -25,6 +25,7 @@ import type {
   Task,
   TaskCustomFieldValue,
 } from '@/lib/types';
+import type { CustomFieldFilter } from '@/lib/project-filters';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -47,6 +48,8 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 function sortByPosition(tasks: Task[]) {
   return [...tasks].sort((a, b) => a.position - b.position);
 }
+
+const EMPTY_CUSTOM_FIELDS: CustomFieldDefinition[] = [];
 
 function removeTaskFromGroups(groups: SectionTaskGroup[], taskId: string) {
   return groups.map((group) => ({
@@ -112,6 +115,34 @@ function customFieldColumnKey(fieldId: string) {
 
 function findTaskCustomFieldValue(task: Task, fieldId: string): TaskCustomFieldValue | null {
   return task.customFieldValues?.find((value) => value.fieldId === fieldId) ?? null;
+}
+
+function taskMatchesCustomFieldFilter(task: Task, filter: CustomFieldFilter): boolean {
+  const value = findTaskCustomFieldValue(task, filter.fieldId);
+  if (!value) return false;
+
+  if (filter.type === 'SELECT') {
+    if (!filter.optionIds?.length) return true;
+    return Boolean(value.optionId && filter.optionIds.includes(value.optionId));
+  }
+
+  if (filter.type === 'BOOLEAN') {
+    if (typeof filter.booleanValue !== 'boolean') return true;
+    return value.valueBoolean === filter.booleanValue;
+  }
+
+  if (filter.type === 'NUMBER') {
+    if (typeof value.valueNumber !== 'number') return false;
+    if (typeof filter.numberMin === 'number' && value.valueNumber < filter.numberMin) return false;
+    if (typeof filter.numberMax === 'number' && value.valueNumber > filter.numberMax) return false;
+    return true;
+  }
+
+  const valueDate = value.valueDate ? String(value.valueDate).slice(0, 10) : '';
+  if (!valueDate) return false;
+  if (filter.dateFrom && valueDate < filter.dateFrom) return false;
+  if (filter.dateTo && valueDate > filter.dateTo) return false;
+  return true;
 }
 
 function optimisticCustomFieldValues(
@@ -708,6 +739,7 @@ function TaskRow({
                 key={`task-${task.id}-field-${field.id}-${textValue}`}
                 defaultValue={textValue}
                 data-no-dnd="true"
+                data-testid={`task-custom-text-${task.id}-${field.id}`}
                 className="h-7 border-0 bg-transparent px-2 text-[11px] shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
                 onPointerDown={(event) => event.stopPropagation()}
                 onBlur={(event) => {
@@ -730,6 +762,7 @@ function TaskRow({
                 type="number"
                 defaultValue={numberValue}
                 data-no-dnd="true"
+                data-testid={`task-custom-number-${task.id}-${field.id}`}
                 className="h-7 border-0 bg-transparent px-2 text-[11px] shadow-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-0"
                 onPointerDown={(event) => event.stopPropagation()}
                 onBlur={(event) => {
@@ -757,6 +790,7 @@ function TaskRow({
               <select
                 className="h-7 w-full rounded-md border-0 bg-transparent px-2 text-[11px] hover:bg-muted/40 focus:bg-muted/40"
                 value={selectValue}
+                data-testid={`task-custom-select-${task.id}-${field.id}`}
                 onChange={(event) => onEditCustomField(task, field, event.target.value || null)}
               >
                 <option value="">{t('noneOption')}</option>
@@ -773,6 +807,7 @@ function TaskRow({
               <button
                 type="button"
                 data-no-dnd="true"
+                data-testid={`task-custom-boolean-${task.id}-${field.id}`}
                 className={cn(
                   'inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-muted',
                   boolValue ? 'text-emerald-600' : 'text-muted-foreground',
@@ -948,6 +983,7 @@ export default function ProjectBoard({
   priorityFilter,
   statusFilters = [],
   assigneeFilters = [],
+  customFieldFilters = [],
   initialTaskId,
   quickAddIntent,
   onQuickAddIntentHandled,
@@ -959,6 +995,7 @@ export default function ProjectBoard({
   priorityFilter: 'ALL' | NonNullable<Task['priority']>;
   statusFilters?: Task['status'][];
   assigneeFilters?: string[];
+  customFieldFilters?: CustomFieldFilter[];
   initialTaskId?: string | null;
   quickAddIntent?: { sectionId: string; nonce: number } | null;
   onQuickAddIntentHandled?: (nonce: number) => void;
@@ -1027,7 +1064,11 @@ export default function ProjectBoard({
     queryKey: queryKeys.projectCustomFields(projectId),
     queryFn: () => api(`/projects/${projectId}/custom-fields`),
   });
-  const customFields = customFieldsQuery.data ?? [];
+  const customFields = customFieldsQuery.data ?? EMPTY_CUSTOM_FIELDS;
+  const activeCustomFieldFilters = useMemo(
+    () => customFieldFilters.filter((filter) => customFields.some((field) => field.id === filter.fieldId && !field.archivedAt)),
+    [customFieldFilters, customFields],
+  );
 
   const boardColumns = useMemo<BoardColumnConfig[]>(() => {
     const baseColumns = BOARD_BASE_COLUMNS.map((column) => ({
@@ -1643,10 +1684,13 @@ export default function ProjectBoard({
           assigneeFilters.some((assignee) =>
             assignee === 'UNASSIGNED' ? !task.assigneeUserId : task.assigneeUserId === assignee,
           );
-        return bySearch && byStatus && byPriority && byAssignee;
+        const byCustomFields =
+          activeCustomFieldFilters.length === 0 ||
+          activeCustomFieldFilters.every((filter) => taskMatchesCustomFieldFilter(task, filter));
+        return bySearch && byStatus && byPriority && byAssignee && byCustomFields;
       }),
     }));
-  }, [assigneeFilters, groups, priorityFilter, projectName, search, statusFilter, statusFilters]);
+  }, [activeCustomFieldFilters, assigneeFilters, groups, priorityFilter, projectName, search, statusFilter, statusFilters]);
 
   const groupedVisibleRows = useMemo(() => {
     return filteredGroups.map((group) => {
