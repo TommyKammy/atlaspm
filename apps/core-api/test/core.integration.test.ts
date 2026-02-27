@@ -862,6 +862,29 @@ describe('Core API Integration', () => {
     expect(patchRes.body.name).toBe('Customer Segment');
     expect(patchRes.body.options.map((option: any) => option.value)).toEqual(['enterprise', 'smb']);
 
+    const enterpriseOptionId = patchRes.body.options.find((option: any) => option.value === 'enterprise')?.id;
+    const secondPatchRes = await request(app.getHttpServer())
+      .patch(`/custom-fields/${fieldId}`)
+      .set('Authorization', `Bearer ${memberToken}`)
+      .send({
+        name: 'Customer Segment Updated',
+        options: [
+          { label: 'Enterprise+', value: 'enterprise' },
+          { label: 'SMB', value: 'smb' },
+          { label: 'Startup', value: 'startup' },
+        ],
+      })
+      .expect(200);
+    expect(secondPatchRes.body.name).toBe('Customer Segment Updated');
+    expect(secondPatchRes.body.options.map((option: any) => option.value)).toEqual([
+      'enterprise',
+      'smb',
+      'startup',
+    ]);
+    expect(
+      secondPatchRes.body.options.find((option: any) => option.value === 'enterprise')?.id,
+    ).toBe(enterpriseOptionId);
+
     await request(app.getHttpServer())
       .delete(`/custom-fields/${fieldId}`)
       .set('Authorization', `Bearer ${memberToken}`)
@@ -887,6 +910,7 @@ describe('Core API Integration', () => {
     });
     expect(customFieldAudit.map((event) => event.action)).toEqual([
       'custom_field.created',
+      'custom_field.updated',
       'custom_field.updated',
       'custom_field.archived',
     ]);
@@ -940,6 +964,12 @@ describe('Core API Integration', () => {
       })
       .expect(201);
 
+    const scoreField = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/custom-fields`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Priority Score', type: 'NUMBER' })
+      .expect(201);
+
     const taskRes = await request(app.getHttpServer())
       .post(`/projects/${projectId}/tasks`)
       .set('Authorization', `Bearer ${token}`)
@@ -964,11 +994,12 @@ describe('Core API Integration', () => {
         values: [
           { fieldId: textField.body.id, value: 'important account' },
           { fieldId: selectField.body.id, value: selectField.body.options[0].id },
+          { fieldId: scoreField.body.id, value: 82 },
         ],
       })
       .expect(200);
     expect(patchRes.body.version).toBe(taskRes.body.version + 1);
-    expect(patchRes.body.customFieldValues.length).toBe(2);
+    expect(patchRes.body.customFieldValues.length).toBe(3);
 
     const taskDetail = await request(app.getHttpServer())
       .get(`/tasks/${taskId}`)
@@ -983,6 +1014,58 @@ describe('Core API Integration', () => {
     const listedTask = listRes.body.find((item: any) => item.id === taskId);
     expect(listedTask).toBeTruthy();
     expect(listedTask.customFieldValues.some((value: any) => value.fieldId === selectField.body.id)).toBe(true);
+
+    const filteredBySelect = await request(app.getHttpServer())
+      .get(
+        `/projects/${projectId}/tasks?customFieldFilters=${encodeURIComponent(
+          JSON.stringify([
+            { fieldId: selectField.body.id, type: 'SELECT', optionIds: [selectField.body.options[0].id] },
+          ]),
+        )}`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(filteredBySelect.body.some((item: any) => item.id === taskId)).toBe(true);
+
+    const sortedByScore = await request(app.getHttpServer())
+      .get(
+        `/projects/${projectId}/tasks?customFieldSortFieldId=${scoreField.body.id}&customFieldSortOrder=desc`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(sortedByScore.body[0].id).toBe(taskId);
+
+    const searchByCustomField = await request(app.getHttpServer())
+      .get(`/search?q=${encodeURIComponent('important account')}&projectId=${projectId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(searchByCustomField.body.hits.some((hit: any) => hit.objectID === taskId)).toBe(true);
+
+    const customRule = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/rules`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: 'High score moves to blocked',
+        templateKey: 'custom_field_score_gate',
+        enabled: true,
+        definition: {
+          trigger: 'task.progress.changed',
+          conditions: [{ field: 'customFieldNumber', fieldId: scoreField.body.id, op: 'gt', value: 80 }],
+          actions: [{ type: 'setStatus', status: 'BLOCKED' }],
+        },
+      })
+      .expect(201);
+    expect(customRule.body.id).toBeTruthy();
+
+    const patchTriggerRule = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/custom-fields`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        version: patchRes.body.version,
+        values: [{ fieldId: scoreField.body.id, value: 90 }],
+      })
+      .expect(200);
+    expect(patchTriggerRule.body.status).toBe('BLOCKED');
 
     const customFieldAudit = await prisma.auditEvent.findFirst({
       where: { entityType: 'Task', entityId: taskId, action: 'task.custom_fields.updated' },

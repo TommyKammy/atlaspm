@@ -37,7 +37,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
-import { Prisma, Priority, ProjectRole, TaskStatus, DependencyType } from '@prisma/client';
+import { Prisma, Priority, ProjectRole, TaskStatus, DependencyType, CustomFieldType } from '@prisma/client';
 import { SubtaskService } from './subtask.service';
 import { SearchService } from '../search/search.service';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -54,7 +54,10 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { Type } from 'class-transformer';
 import {
   parseCustomFieldValue,
+  parseTaskCustomFieldFilters,
+  parseTaskCustomFieldSort,
   type ParsedCustomFieldValue,
+  type TaskCustomFieldFilter,
 } from '../custom-fields/custom-field.validation';
 
 class TaskQuery {
@@ -97,6 +100,22 @@ class TaskQuery {
   @IsOptional()
   @IsString()
   deleted?: 'true' | 'false';
+
+  @IsOptional()
+  @IsString()
+  cf?: string;
+
+  @IsOptional()
+  @IsString()
+  customFieldFilters?: string;
+
+  @IsOptional()
+  @IsUUID()
+  customFieldSortFieldId?: string;
+
+  @IsOptional()
+  @IsString()
+  customFieldSortOrder?: 'asc' | 'desc';
 }
 
 class CreateTaskDto {
@@ -402,8 +421,11 @@ export class TasksController {
   async list(@Param('id') projectId: string, @Query() query: TaskQuery, @CurrentRequest() req: AppRequest) {
     await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
 
+    const customFieldFilters = parseTaskCustomFieldFilters(query.customFieldFilters ?? query.cf);
+    const customFieldSort = parseTaskCustomFieldSort(query.customFieldSortFieldId, query.customFieldSortOrder);
+
     const includeDeleted = query.deleted === 'true';
-    const where: any = {
+    const where: Prisma.TaskWhereInput = {
       projectId,
       deletedAt: includeDeleted ? { not: null } : null,
     };
@@ -416,13 +438,40 @@ export class TasksController {
       };
     }
     if (query.tag) where.tags = { has: query.tag };
+    if (customFieldFilters.length) {
+      const customFilterWhere = customFieldFilters.map((filter) => this.toTaskCustomFieldFilterWhere(filter));
+      if (customFilterWhere.length) {
+        const currentAnd = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
+        where.AND = [...currentAnd, ...customFilterWhere];
+      }
+    }
     if (query.q) {
+      const trimmed = query.q.trim();
+      const maybeNumber = Number(trimmed);
       where.OR = [
-        { title: { contains: query.q, mode: 'insensitive' } },
-        { description: { contains: query.q, mode: 'insensitive' } },
-        { descriptionText: { contains: query.q, mode: 'insensitive' } },
-        { section: { name: { contains: query.q, mode: 'insensitive' } } },
+        { title: { contains: trimmed, mode: 'insensitive' } },
+        { description: { contains: trimmed, mode: 'insensitive' } },
+        { descriptionText: { contains: trimmed, mode: 'insensitive' } },
+        { section: { name: { contains: trimmed, mode: 'insensitive' } } },
+        {
+          customFieldValues: {
+            some: {
+              field: { archivedAt: null },
+              valueText: { contains: trimmed, mode: 'insensitive' },
+            },
+          },
+        },
       ];
+      if (Number.isFinite(maybeNumber)) {
+        where.OR.push({
+          customFieldValues: {
+            some: {
+              field: { archivedAt: null, type: CustomFieldType.NUMBER },
+              valueNumber: maybeNumber,
+            },
+          },
+        });
+      }
     }
 
     const orderBy = query.sortBy
@@ -430,14 +479,18 @@ export class TasksController {
       : [{ sectionId: 'asc' as const }, { position: 'asc' as const }];
 
     const tasks = await this.prisma.task.findMany({ where, orderBy });
-    const hydratedTasks = await this.hydrateTasksWithCustomFieldValues(tasks);
+    const hydratedTasksRaw = await this.hydrateTasksWithCustomFieldValues(tasks);
+    const hydratedTasks = customFieldSort
+      ? this.sortHydratedTasksByCustomField(hydratedTasksRaw, customFieldSort.fieldId, customFieldSort.order)
+      : hydratedTasksRaw;
+    const hasExplicitSort = Boolean(query.sortBy || customFieldSort);
     if (query.groupBy === 'section') {
       const sections = await this.prisma.section.findMany({ where: { projectId }, orderBy: { position: 'asc' } });
       return sections.map((section) => ({
         section,
         tasks: hydratedTasks
           .filter((t) => t.sectionId === section.id)
-          .sort((a, b) => (query.sortBy ? 0 : Number(a.position) - Number(b.position))),
+          .sort((a, b) => (hasExplicitSort ? 0 : Number(a.position) - Number(b.position))),
       }));
     }
     return hydratedTasks;
@@ -503,7 +556,7 @@ export class TasksController {
       await this.applyProgressRules(tx, task.id, req.correlationId);
       return task;
     }).then((task) => {
-      void this.searchService.indexTask(task);
+      void this.indexTaskWithCustomFields(task);
       return task;
     });
   }
@@ -551,7 +604,7 @@ export class TasksController {
       await this.applyProgressRules(tx, id, req.correlationId);
       return updated;
     }).then((updated) => {
-      void this.searchService.indexTask(updated);
+      void this.indexTaskWithCustomFields(updated);
       return updated;
     });
   }
@@ -692,11 +745,29 @@ export class TasksController {
         },
       });
 
+      await this.applyProgressRules(tx, id, req.correlationId);
+      const finalTask = await tx.task.findUniqueOrThrow({
+        where: { id },
+        select: {
+          id: true,
+          version: true,
+          status: true,
+          progressPercent: true,
+          completedAt: true,
+        },
+      });
+
       return {
-        id: updatedTask.id,
-        version: updatedTask.version,
+        id: finalTask.id,
+        version: finalTask.version,
+        status: finalTask.status,
+        progressPercent: finalTask.progressPercent,
+        completedAt: finalTask.completedAt,
         customFieldValues: serializedCurrent,
       };
+    }).then((updated) => {
+      void this.reindexTaskById(updated.id);
+      return updated;
     });
   }
 
@@ -742,7 +813,7 @@ export class TasksController {
       await this.applyProgressRules(tx, id, req.correlationId);
       return updated;
     }).then((updated) => {
-      void this.searchService.indexTask(updated);
+      void this.indexTaskWithCustomFields(updated);
       return updated;
     });
   }
@@ -1601,6 +1672,96 @@ export class TasksController {
     return this.subtaskService.getDependencyGraph(projectId);
   }
 
+  private toTaskCustomFieldFilterWhere(filter: TaskCustomFieldFilter): Prisma.TaskWhereInput {
+    if (filter.type === 'SELECT') {
+      return {
+        customFieldValues: {
+          some: {
+            fieldId: filter.fieldId,
+            field: { archivedAt: null, type: CustomFieldType.SELECT },
+            optionId: { in: filter.optionIds },
+          },
+        },
+      };
+    }
+    if (filter.type === 'BOOLEAN') {
+      return {
+        customFieldValues: {
+          some: {
+            fieldId: filter.fieldId,
+            field: { archivedAt: null, type: CustomFieldType.BOOLEAN },
+            valueBoolean: filter.booleanValue,
+          },
+        },
+      };
+    }
+    if (filter.type === 'NUMBER') {
+      return {
+        customFieldValues: {
+          some: {
+            fieldId: filter.fieldId,
+            field: { archivedAt: null, type: CustomFieldType.NUMBER },
+            valueNumber: {
+              gte: filter.numberMin ?? undefined,
+              lte: filter.numberMax ?? undefined,
+            },
+          },
+        },
+      };
+    }
+    return {
+      customFieldValues: {
+        some: {
+          fieldId: filter.fieldId,
+          field: { archivedAt: null, type: CustomFieldType.DATE },
+          valueDate: {
+            gte: filter.dateFrom ? new Date(filter.dateFrom) : undefined,
+            lte: filter.dateTo ? new Date(filter.dateTo) : undefined,
+          },
+        },
+      },
+    };
+  }
+
+  private sortHydratedTasksByCustomField(
+    tasks: Array<Record<string, unknown> & { id: string; customFieldValues: SerializedTaskCustomFieldValue[] }>,
+    fieldId: string,
+    order: 'asc' | 'desc',
+  ) {
+    const direction = order === 'desc' ? -1 : 1;
+    const decorated = tasks.map((task, index) => ({
+      task,
+      index,
+      value: this.getCustomFieldComparableValue(task.customFieldValues, fieldId),
+    }));
+    decorated.sort((left, right) => {
+      if (left.value === null && right.value === null) return left.index - right.index;
+      if (left.value === null) return 1;
+      if (right.value === null) return -1;
+      if (left.value < right.value) return -1 * direction;
+      if (left.value > right.value) return 1 * direction;
+      return left.index - right.index;
+    });
+    return decorated.map((entry) => entry.task);
+  }
+
+  private getCustomFieldComparableValue(values: SerializedTaskCustomFieldValue[], fieldId: string) {
+    const value = values.find((entry) => entry.fieldId === fieldId);
+    if (!value?.field) return null;
+    if (value.field.type === CustomFieldType.NUMBER) return value.valueNumber;
+    if (value.field.type === CustomFieldType.DATE) {
+      return value.valueDate ? new Date(value.valueDate).getTime() : null;
+    }
+    if (value.field.type === CustomFieldType.BOOLEAN) {
+      if (typeof value.valueBoolean !== 'boolean') return null;
+      return value.valueBoolean ? 1 : 0;
+    }
+    if (value.field.type === CustomFieldType.SELECT) {
+      return (value.option?.label ?? value.valueText ?? '').toLowerCase() || null;
+    }
+    return (value.valueText ?? '').toLowerCase() || null;
+  }
+
   private async hydrateTasksWithCustomFieldValues(
     tasks: Array<Record<string, unknown> & { id: string }>,
   ): Promise<Array<Record<string, unknown> & { id: string; customFieldValues: SerializedTaskCustomFieldValue[] }>> {
@@ -1897,11 +2058,50 @@ export class TasksController {
     await Promise.all(taskIds.map((taskId) => this.searchService.removeTask(taskId)));
   }
 
+  private async buildTaskCustomFieldSearchText(taskId: string): Promise<string> {
+    const values = await this.prisma.taskCustomFieldValue.findMany({
+      where: {
+        taskId,
+        field: { archivedAt: null },
+      },
+      include: {
+        option: { select: { label: true, value: true } },
+      },
+    });
+    return values
+      .map((value) => {
+        if (value.option?.label) return value.option.label;
+        if (value.option?.value) return value.option.value;
+        if (value.valueText) return value.valueText;
+        if (value.valueNumber !== null) return String(value.valueNumber);
+        if (value.valueDate) return value.valueDate.toISOString();
+        if (typeof value.valueBoolean === 'boolean') return value.valueBoolean ? 'true' : 'false';
+        return '';
+      })
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  private async indexTaskWithCustomFields(task: { id: string }) {
+    const indexedTask = await this.prisma.task.findFirst({
+      where: { id: task.id, deletedAt: null },
+    });
+    if (!indexedTask) return;
+    const customFieldText = await this.buildTaskCustomFieldSearchText(task.id);
+    await this.searchService.indexTask(indexedTask, { customFieldText });
+  }
+
+  private async reindexTaskById(taskId: string) {
+    const task = await this.prisma.task.findFirst({ where: { id: taskId, deletedAt: null } });
+    if (!task) return;
+    const customFieldText = await this.buildTaskCustomFieldSearchText(task.id);
+    await this.searchService.indexTask(task, { customFieldText });
+  }
+
   private async reindexTasks(taskIds: string[]) {
     const uniqueTaskIds = [...new Set(taskIds)];
     for (const taskId of uniqueTaskIds) {
-      const task = await this.prisma.task.findFirst({ where: { id: taskId, deletedAt: null } });
-      if (task) await this.searchService.indexTask(task);
+      await this.reindexTaskById(taskId);
     }
   }
 
@@ -1909,6 +2109,24 @@ export class TasksController {
     const task = await tx.task.findUnique({ where: { id: taskId } });
     if (!task) return;
     const cid = correlationId ?? 'test-correlation-id';
+    const customNumberValues = await tx.taskCustomFieldValue.findMany({
+      where: {
+        taskId,
+        field: { archivedAt: null, type: CustomFieldType.NUMBER },
+      },
+      select: {
+        fieldId: true,
+        valueNumber: true,
+      },
+    });
+    const customNumberByFieldId = new Map(
+      customNumberValues
+        .filter((entry: { valueNumber: Prisma.Decimal | null }) => entry.valueNumber !== null)
+        .map((entry: { fieldId: string; valueNumber: Prisma.Decimal | null }) => [
+          entry.fieldId,
+          Number(entry.valueNumber),
+        ]),
+    );
 
     const rules = await tx.rule.findMany({ where: { projectId: task.projectId, enabled: true } });
     for (const rule of rules) {
@@ -1921,7 +2139,11 @@ export class TasksController {
 
       const definition = this.resolveRuleDefinition(rule);
       const conditionsMatched = definition.conditions.every((condition) => {
-        const value = task.progressPercent;
+        const value =
+          condition.field === 'progressPercent'
+            ? task.progressPercent
+            : customNumberByFieldId.get(condition.fieldId) ?? null;
+        if (value === null || value === undefined) return false;
         if (condition.op === 'between') {
           return value >= Number(condition.min) && value <= Number(condition.max);
         }

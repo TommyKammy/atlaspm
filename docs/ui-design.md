@@ -150,3 +150,23 @@
 - State management:
   - TanStack Query targeted invalidation for `workspaceUsers`, `workspaceInvitations`, `projectMembers`
   - no full browser refresh for admin actions
+
+## Custom Field Management UX
+- List view toolbar includes:
+  - `Add column` (create custom field)
+  - `Custom fields` (manage existing definitions)
+- Manage dialog supports:
+  - rename custom field name
+  - archive custom field
+  - edit `SELECT` options using `label|value` line format (one option per line)
+- Mutation behavior:
+  - definition updates refresh `projectCustomFields`
+  - archive also invalidates grouped tasks so hidden columns/values are reflected immediately
+  - all actions are no-refresh and query-scoped
+
+## Rules Editor (Custom Number Conditions)
+- Rule condition field selector supports:
+  - `progressPercent`
+  - project custom fields of type `NUMBER`
+- Condition operator/value UX is shared across progress and custom numeric fields.
+- Existing rule actions and enable/disable UX stay unchanged.

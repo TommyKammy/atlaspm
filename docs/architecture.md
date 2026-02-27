@@ -203,3 +203,21 @@
     - `x-atlaspm-signature` (`v1=<sha256>`)
     - `x-atlaspm-timestamp`
   - Signature base string: `${timestamp}.${rawJsonBody}`.
+
+## Custom Fields P3 (Sort/Search/Rules)
+- Definition management:
+  - field rename and archive remain at definition level (`PATCH /custom-fields/:id`, `DELETE /custom-fields/:id`).
+  - `SELECT` option updates now reconcile by option `value` (stable IDs for unchanged values), archive removed options, and create new options atomically.
+- Task list API extensions:
+  - `GET /projects/:id/tasks` now accepts:
+    - `customFieldFilters` (JSON string; supports SELECT/BOOLEAN/NUMBER/DATE predicates)
+    - `customFieldSortFieldId` + `customFieldSortOrder=asc|desc`
+  - default manual ordering is unchanged when no explicit sort is requested.
+- Search integration:
+  - `/search` fallback query includes custom field values (`value_text` plus numeric exact match).
+  - Algolia index payload includes `customFieldText` for custom field terms in global search.
+- Rule engine conditions:
+  - rule definition now supports numeric custom field predicates:
+    - `{ field: "customFieldNumber", fieldId: "<uuid>", op, value|min|max }`
+  - rule evaluation reads current task custom numeric values and can drive existing actions (`setStatus`, `setCompletedAtNow`, `setCompletedAtNull`).
+  - custom field updates (`PATCH /tasks/:id/custom-fields`) run through the same rule evaluation path with cooldown protection.

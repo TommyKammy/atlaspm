@@ -224,13 +224,24 @@ export type ProjectMember = {
   };
 };
 
-export type RuleCondition = {
-  field: 'progressPercent';
-  op: 'eq' | 'lt' | 'lte' | 'gt' | 'gte' | 'between';
-  value?: number;
-  min?: number;
-  max?: number;
-};
+type RuleNumericOperator = 'eq' | 'lt' | 'lte' | 'gt' | 'gte' | 'between';
+
+export type RuleCondition =
+  | {
+      field: 'progressPercent';
+      op: RuleNumericOperator;
+      value?: number;
+      min?: number;
+      max?: number;
+    }
+  | {
+      field: 'customFieldNumber';
+      fieldId: string;
+      op: RuleNumericOperator;
+      value?: number;
+      min?: number;
+      max?: number;
+    };
 
 export type RuleAction =
   | { type: 'setStatus'; status: 'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED' }
@@ -314,6 +325,7 @@ export type TaskSearchHit = {
   objectID: string;
   title: string;
   description?: string | null;
+  customFieldText?: string | null;
   projectId: string;
   assigneeId?: string | null;
   status: Task['status'];

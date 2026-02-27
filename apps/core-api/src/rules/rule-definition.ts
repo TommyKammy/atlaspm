@@ -4,18 +4,19 @@ import { z } from 'zod';
 
 const triggerSchema = z.enum(['task.progress.changed']);
 const opSchema = z.enum(['eq', 'lt', 'lte', 'gt', 'gte', 'between']);
-const fieldSchema = z.enum(['progressPercent']);
 const actionTypeSchema = z.enum(['setStatus', 'setCompletedAtNow', 'setCompletedAtNull']);
 
-const conditionSchema = z
-  .object({
-    field: fieldSchema,
-    op: opSchema,
-    value: z.number().optional(),
-    min: z.number().optional(),
-    max: z.number().optional(),
-  })
-  .superRefine((cond, ctx) => {
+const conditionNumericRangeShape = z.object({
+  op: opSchema,
+  value: z.number().optional(),
+  min: z.number().optional(),
+  max: z.number().optional(),
+});
+
+function validateNumericCondition(
+  cond: { op: 'eq' | 'lt' | 'lte' | 'gt' | 'gte' | 'between'; value?: number; min?: number; max?: number },
+  ctx: z.RefinementCtx,
+) {
     if (cond.op === 'between') {
       if (typeof cond.min !== 'number' || typeof cond.max !== 'number') {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'between requires min/max' });
@@ -25,7 +26,22 @@ const conditionSchema = z
     if (typeof cond.value !== 'number') {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${cond.op} requires value` });
     }
-  });
+}
+
+const progressConditionSchema = conditionNumericRangeShape
+  .extend({
+    field: z.literal('progressPercent'),
+  })
+  .superRefine(validateNumericCondition);
+
+const customFieldNumberConditionSchema = conditionNumericRangeShape
+  .extend({
+    field: z.literal('customFieldNumber'),
+    fieldId: z.string().uuid(),
+  })
+  .superRefine(validateNumericCondition);
+
+const conditionSchema = z.union([progressConditionSchema, customFieldNumberConditionSchema]);
 
 const actionSchema = z
   .object({
@@ -71,4 +87,3 @@ export function templateDefinition(templateKey: string): RuleDefinition {
     actions: [{ type: 'setStatus', status: TaskStatus.IN_PROGRESS }, { type: 'setCompletedAtNull' }],
   };
 }
-

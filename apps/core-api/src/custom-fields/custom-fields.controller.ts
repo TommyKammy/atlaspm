@@ -255,23 +255,13 @@ export class CustomFieldsController {
 
     return this.prisma.$transaction(async (tx) => {
       const now = new Date();
-      const shouldReplaceOptions = body.options !== undefined || parsed.type !== existing.type;
-      if (shouldReplaceOptions) {
+      if (parsed.type !== CustomFieldType.SELECT) {
         await tx.customFieldOption.updateMany({
           where: { fieldId, archivedAt: null },
           data: { archivedAt: now },
         });
-        if (parsed.type === CustomFieldType.SELECT && parsed.options) {
-          await tx.customFieldOption.createMany({
-            data: parsed.options.map((option, index) => ({
-              fieldId,
-              label: option.label,
-              value: option.value,
-              color: option.color,
-              position: option.position ?? (index + 1) * 1000,
-            })),
-          });
-        }
+      } else if (body.options !== undefined || existing.type !== CustomFieldType.SELECT) {
+        await this.reconcileSelectFieldOptions(tx, fieldId, parsed.options ?? [], now);
       }
 
       const updated = await tx.customFieldDefinition.update({
@@ -371,5 +361,58 @@ export class CustomFieldsController {
         updatedAt: option.updatedAt,
       })),
     };
+  }
+
+  private async reconcileSelectFieldOptions(
+    tx: Prisma.TransactionClient,
+    fieldId: string,
+    incomingOptions: Array<{ label: string; value: string; color?: string; position?: number }>,
+    now: Date,
+  ) {
+    const existingActive = await tx.customFieldOption.findMany({
+      where: { fieldId, archivedAt: null },
+      orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+    });
+    const byValue = new Map(existingActive.map((option) => [option.value.toLowerCase(), option]));
+    const keepIds = new Set<string>();
+
+    for (const [index, option] of incomingOptions.entries()) {
+      const normalizedValue = option.value.toLowerCase();
+      const existing = byValue.get(normalizedValue);
+      const nextPosition = option.position ?? (index + 1) * 1000;
+      if (existing) {
+        keepIds.add(existing.id);
+        await tx.customFieldOption.update({
+          where: { id: existing.id },
+          data: {
+            archivedAt: null,
+            label: option.label,
+            color: option.color,
+            position: nextPosition,
+          },
+        });
+      } else {
+        const created = await tx.customFieldOption.create({
+          data: {
+            fieldId,
+            label: option.label,
+            value: option.value,
+            color: option.color,
+            position: nextPosition,
+          },
+        });
+        keepIds.add(created.id);
+      }
+    }
+
+    const archiveTargetIds = existingActive
+      .filter((option) => !keepIds.has(option.id))
+      .map((option) => option.id);
+    if (archiveTargetIds.length) {
+      await tx.customFieldOption.updateMany({
+        where: { id: { in: archiveTargetIds } },
+        data: { archivedAt: now },
+      });
+    }
   }
 }

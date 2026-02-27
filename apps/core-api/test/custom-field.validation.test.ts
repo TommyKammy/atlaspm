@@ -3,6 +3,8 @@ import { CustomFieldType } from '@prisma/client';
 import { describe, expect, it } from 'vitest';
 import {
   parseCustomFieldDefinition,
+  parseTaskCustomFieldFilters,
+  parseTaskCustomFieldSort,
   parseCustomFieldValue,
 } from '../src/custom-fields/custom-field.validation';
 
@@ -98,5 +100,32 @@ describe('custom field validation', () => {
     expect(() => parseCustomFieldValue(selectField, 'ddf8a7b2-4afa-445a-8dfa-a7f5bb867db3')).toThrow(
       BadRequestException,
     );
+  });
+
+  it('parses custom field filters and sort spec for task list API', () => {
+    const filters = parseTaskCustomFieldFilters(
+      JSON.stringify([
+        {
+          fieldId: 'f389d7a2-f45f-4e03-84f2-f31896874d3f',
+          type: 'SELECT',
+          optionIds: ['b3eb7cb4-d2fd-42d0-8f07-875f26a7e5f8'],
+        },
+      ]),
+    );
+    expect(filters).toHaveLength(1);
+    expect(filters[0]?.type).toBe('SELECT');
+
+    const sort = parseTaskCustomFieldSort('f389d7a2-f45f-4e03-84f2-f31896874d3f', 'desc');
+    expect(sort).toEqual({
+      fieldId: 'f389d7a2-f45f-4e03-84f2-f31896874d3f',
+      order: 'desc',
+    });
+  });
+
+  it('rejects invalid custom field filters json', () => {
+    expect(() => parseTaskCustomFieldFilters('not-json')).toThrow(BadRequestException);
+    expect(() =>
+      parseTaskCustomFieldSort('not-uuid', 'asc'),
+    ).toThrow(BadRequestException);
   });
 });

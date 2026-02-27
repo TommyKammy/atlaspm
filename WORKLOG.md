@@ -1601,3 +1601,39 @@
   - `pnpm e2e` (32 tests passed)
 - Risks/known gaps:
   - Redrive remains single-event; bulk redrive orchestration is still intentionally out of scope.
+
+## 2026-02-27 - P3 Custom Fields (Rename/Delete/SELECT options + Sort/Search/Rules)
+- What changed:
+  - core-api custom field definition update behavior improved:
+    - `PATCH /custom-fields/:id` now reconciles `SELECT` options by `value` (stable IDs for unchanged values).
+    - removed options are archived, added options are created, unchanged options are updated in-place.
+  - Added task list custom-field query capabilities:
+    - `customFieldFilters` (JSON) for `SELECT/BOOLEAN/NUMBER/DATE`
+    - `customFieldSortFieldId` + `customFieldSortOrder`
+  - Extended global search indexing/fallback:
+    - search fallback (`/search`) now matches custom field values
+    - search index payload includes `customFieldText`
+  - Extended rules engine condition schema:
+    - supports `{ field: "customFieldNumber", fieldId, op, value|min|max }`
+    - custom field updates now trigger rule evaluation path with existing cooldown safeguards.
+  - web-ui:
+    - added custom field management dialog with rename/delete and SELECT option editing (`label|value` lines).
+    - changed manage trigger label to avoid collision with existing “Edit comment” E2E selectors.
+    - rules page now supports selecting numeric custom fields as condition source.
+  - tests:
+    - integration tests expanded for select option reconciliation, custom-field list filtering/sorting, search-by-custom-field, and custom-field-driven rule condition.
+    - e2e custom field flow expanded to cover rename/options update/archive from UI.
+- Why:
+  - Deliver requested P3 capabilities and close management gaps in custom fields without weakening existing authorization, audit/outbox, or cache discipline.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api build`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `docker compose -f infra/docker/docker-compose.yml up -d postgres`
+  - `pnpm test`
+  - `pnpm e2e:rebuild` (32 passed)
+- Risks/known gaps:
+  - `SELECT` option editor currently uses line-based input (`label|value`) for speed and low dependency footprint; richer drag/drop option editor can be added later without API change.
+  - `pnpm e2e` without rebuild may still use stale docker images after code changes; use `pnpm e2e:rebuild` when app code changed.

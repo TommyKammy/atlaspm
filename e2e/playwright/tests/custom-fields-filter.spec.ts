@@ -82,9 +82,32 @@ test('custom field filter persists after reload and clears correctly', async ({ 
   const stageOption = stageField.options.find((option: any) => !option.archivedAt);
   expect(stageOption?.id).toBeTruthy();
 
+  const renamedStageFieldName = `${stageFieldName} Edited`;
+  await page.click('[data-testid="manage-custom-field-trigger"]');
+  await page.fill(`[data-testid="custom-field-name-edit-${stageField.id}"]`, renamedStageFieldName);
+  await page.fill(
+    `[data-testid="custom-field-options-edit-${stageField.id}"]`,
+    'Backlog|backlog\nReady|ready',
+  );
+  await page.click(`[data-testid="custom-field-save-${stageField.id}"]`);
+  await expect
+    .poll(async () => {
+      const fields = await api(`/projects/${project.id}/custom-fields`, token);
+      const field = fields.find((candidate: any) => candidate.id === stageField.id);
+      return field?.name ?? '';
+    })
+    .toBe(renamedStageFieldName);
+  await page.keyboard.press('Escape');
+
+  stageField = await api(`/projects/${project.id}/custom-fields`, token).then((fields: any[]) =>
+    fields.find((candidate) => candidate.id === stageField.id),
+  );
+  const readyOption = stageField.options.find((option: any) => option.value === 'ready');
+  expect(readyOption?.id).toBeTruthy();
+
   await page.selectOption(
     `[data-testid="task-custom-select-${taskBeta.id}-${stageField.id}"]`,
-    stageOption.id,
+    readyOption.id,
   );
   await expect
     .poll(async () => {
@@ -92,12 +115,12 @@ test('custom field filter persists after reload and clears correctly', async ({ 
       const beta = groups.flatMap((group: any) => group.tasks).find((task: any) => task.id === taskBeta.id);
       return beta?.customFieldValues?.find((value: any) => value.fieldId === stageField.id)?.optionId ?? null;
     })
-    .toBe(stageOption.id);
+    .toBe(readyOption.id);
 
   await page.reload();
   await page.click('[data-testid="project-filter-trigger"]');
-  await expect(page.locator(`[data-testid="project-filter-cf-${stageField.id}-option-${stageOption.id}"]`)).toBeVisible();
-  await page.click(`[data-testid="project-filter-cf-${stageField.id}-option-${stageOption.id}"]`);
+  await expect(page.locator(`[data-testid="project-filter-cf-${stageField.id}-option-${readyOption.id}"]`)).toBeVisible();
+  await page.click(`[data-testid="project-filter-cf-${stageField.id}-option-${readyOption.id}"]`);
   await expect(page.locator('[data-task-title="Task Beta"]')).toBeVisible();
   await expect(page.locator('[data-task-title="Task Alpha"]')).toHaveCount(0);
 
@@ -109,4 +132,13 @@ test('custom field filter persists after reload and clears correctly', async ({ 
   await page.click('[data-testid="project-filter-clear"]');
   await expect(page.locator('[data-task-title="Task Alpha"]')).toBeVisible();
   await expect(page.locator('[data-task-title="Task Beta"]')).toBeVisible();
+
+  await page.click('[data-testid="manage-custom-field-trigger"]');
+  await page.click(`[data-testid="custom-field-delete-${stageField.id}"]`);
+  await expect
+    .poll(async () => {
+      const fields = await api(`/projects/${project.id}/custom-fields`, token);
+      return fields.some((field: any) => field.id === stageField.id);
+    })
+    .toBe(false);
 });

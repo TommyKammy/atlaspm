@@ -1,12 +1,12 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { Task } from '@prisma/client';
+import { Priority, Task, TaskStatus } from '@prisma/client';
 import { algoliasearch, Algoliasearch } from 'algoliasearch';
 
 export interface SearchFilters {
   projectId?: string;
   assigneeId?: string;
-  status?: string;
-  priority?: string;
+  status?: TaskStatus;
+  priority?: Priority;
   parentId?: string | null;
 }
 
@@ -14,6 +14,7 @@ export interface TaskSearchHit {
   objectID: string;
   title: string;
   description?: string | null;
+  customFieldText?: string | null;
   projectId: string;
   assigneeId?: string | null;
   status: string;
@@ -66,7 +67,7 @@ export class SearchService implements OnModuleInit {
       const settings = {
         indexName: this.indexName,
         indexSettings: {
-          searchableAttributes: ['title', 'description', 'tags'],
+          searchableAttributes: ['title', 'description', 'customFieldText', 'tags'],
           attributesForFaceting: ['projectId', 'assigneeId', 'status', 'priority', 'parentId', 'tags'],
           ranking: ['typo', 'geo', 'words', 'filters', 'proximity', 'attribute', 'exact', 'custom'],
           customRanking: ['desc(updatedAt)', 'desc(createdAt)'],
@@ -86,7 +87,7 @@ export class SearchService implements OnModuleInit {
     return this.isEnabled;
   }
 
-  async indexTask(task: Task): Promise<void> {
+  async indexTask(task: Task, metadata?: { customFieldText?: string | null }): Promise<void> {
     if (!this.isEnabled || !this.client) {
       return;
     }
@@ -96,6 +97,7 @@ export class SearchService implements OnModuleInit {
         objectID: task.id,
         title: task.title,
         description: task.description,
+        customFieldText: metadata?.customFieldText ?? null,
         projectId: task.projectId,
         assigneeId: task.assigneeUserId,
         status: task.status,
@@ -119,7 +121,7 @@ export class SearchService implements OnModuleInit {
     }
   }
 
-  async indexTasks(tasks: Task[]): Promise<void> {
+  async indexTasks(tasks: Task[], metadataByTaskId?: Map<string, { customFieldText?: string | null }>): Promise<void> {
     if (!this.isEnabled || !this.client || tasks.length === 0) {
       return;
     }
@@ -131,6 +133,7 @@ export class SearchService implements OnModuleInit {
           objectID: task.id,
           title: task.title,
           description: task.description,
+          customFieldText: metadataByTaskId?.get(task.id)?.customFieldText ?? null,
           projectId: task.projectId,
           assigneeId: task.assigneeUserId,
           status: task.status,
@@ -292,7 +295,10 @@ export class SearchService implements OnModuleInit {
     return conditions.join(' AND ');
   }
 
-  async reindexAll(tasks: Task[]): Promise<void> {
+  async reindexAll(
+    tasks: Task[],
+    metadataByTaskId?: Map<string, { customFieldText?: string | null }>,
+  ): Promise<void> {
     if (!this.isEnabled || !this.client) {
       return;
     }
@@ -305,7 +311,7 @@ export class SearchService implements OnModuleInit {
       const batchSize = 1000;
       for (let i = 0; i < tasks.length; i += batchSize) {
         const batch = tasks.slice(i, i + batchSize);
-        await this.indexTasks(batch);
+        await this.indexTasks(batch, metadataByTaskId);
         this.logger.log(`Indexed ${Math.min(i + batchSize, tasks.length)}/${tasks.length} tasks`);
       }
       

@@ -199,6 +199,45 @@ function optimisticCustomFieldValues(
   return current;
 }
 
+type CustomFieldEditorDraft = {
+  name: string;
+  optionsText: string;
+};
+
+function serializeSelectFieldOptions(field: CustomFieldDefinition) {
+  return field.options
+    .filter((option) => !option.archivedAt)
+    .map((option) => `${option.label}|${option.value}`)
+    .join('\n');
+}
+
+function normalizeOptionValueLabel(label: string) {
+  return label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80);
+}
+
+function parseSelectFieldOptionsInput(optionsText: string) {
+  const lines = optionsText
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const options = lines.map((line, index) => {
+    const [leftRaw = '', rightRaw = ''] = line.split('|').map((part) => part.trim());
+    const label = leftRaw || rightRaw;
+    const candidate = rightRaw || normalizeOptionValueLabel(label);
+    const value = candidate || `option_${index + 1}`;
+    return {
+      label,
+      value,
+      position: (index + 1) * 1000,
+    };
+  });
+  return options.filter((option) => option.label && option.value);
+}
+
 type TaskTreeNode = {
   task: Task;
   children: TaskTreeNode[];
@@ -1018,8 +1057,10 @@ export default function ProjectBoard({
   const [columnWidthsLoaded, setColumnWidthsLoaded] = useState(false);
   const [hasStoredColumnWidths, setHasStoredColumnWidths] = useState(false);
   const [createFieldDialogOpen, setCreateFieldDialogOpen] = useState(false);
+  const [manageFieldsDialogOpen, setManageFieldsDialogOpen] = useState(false);
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldType, setNewFieldType] = useState<CustomFieldType>('TEXT');
+  const [fieldDrafts, setFieldDrafts] = useState<Record<string, CustomFieldEditorDraft>>({});
   const [customFieldError, setCustomFieldError] = useState<string | null>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1069,6 +1110,23 @@ export default function ProjectBoard({
     () => customFieldFilters.filter((filter) => customFields.some((field) => field.id === filter.fieldId && !field.archivedAt)),
     [customFieldFilters, customFields],
   );
+
+  useEffect(() => {
+    if (!manageFieldsDialogOpen) return;
+    setFieldDrafts((current) => {
+      const next = { ...current };
+      for (const field of customFields) {
+        if (field.archivedAt) continue;
+        if (!next[field.id]) {
+          next[field.id] = {
+            name: field.name,
+            optionsText: field.type === 'SELECT' ? serializeSelectFieldOptions(field) : '',
+          };
+        }
+      }
+      return next;
+    });
+  }, [customFields, manageFieldsDialogOpen]);
 
   const boardColumns = useMemo<BoardColumnConfig[]>(() => {
     const baseColumns = BOARD_BASE_COLUMNS.map((column) => ({
@@ -1302,6 +1360,63 @@ export default function ProjectBoard({
     },
   });
 
+  const patchCustomField = useMutation({
+    mutationFn: ({
+      fieldId,
+      name,
+      optionsText,
+      type,
+    }: {
+      fieldId: string;
+      name: string;
+      optionsText: string;
+      type: CustomFieldType;
+    }) =>
+      api(`/custom-fields/${fieldId}`, {
+        method: 'PATCH',
+        body:
+          type === 'SELECT'
+            ? {
+                name,
+                options: parseSelectFieldOptionsInput(optionsText),
+              }
+            : { name },
+      }) as Promise<CustomFieldDefinition>,
+    onSuccess: (updated) => {
+      queryClient.setQueryData<CustomFieldDefinition[]>(
+        queryKeys.projectCustomFields(projectId),
+        (current = []) =>
+          current
+            .map((field) => (field.id === updated.id ? updated : field))
+            .sort((a, b) => a.position - b.position),
+      );
+      setFieldDrafts((current) => ({
+        ...current,
+        [updated.id]: {
+          name: updated.name,
+          optionsText: updated.type === 'SELECT' ? serializeSelectFieldOptions(updated) : '',
+        },
+      }));
+      setCustomFieldError(null);
+    },
+    onError: (error) => {
+      setCustomFieldError(error instanceof Error ? error.message : t('customFieldUpdateFailed'));
+    },
+  });
+
+  const archiveCustomField = useMutation({
+    mutationFn: (fieldId: string) =>
+      api(`/custom-fields/${fieldId}`, { method: 'DELETE' }) as Promise<{ ok: boolean }>,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectCustomFields(projectId) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      setCustomFieldError(null);
+    },
+    onError: (error) => {
+      setCustomFieldError(error instanceof Error ? error.message : t('customFieldUpdateFailed'));
+    },
+  });
+
   const patchTaskCustomFields = useMutation({
     mutationFn: ({
       taskId,
@@ -1317,7 +1432,14 @@ export default function ProjectBoard({
       api(`/tasks/${taskId}/custom-fields`, {
         method: 'PATCH',
         body: { version, values: [{ fieldId, value }] },
-      }) as Promise<{ id: string; version: number; customFieldValues: TaskCustomFieldValue[] }>,
+      }) as Promise<{
+        id: string;
+        version: number;
+        status?: Task['status'];
+        progressPercent?: number;
+        completedAt?: string | null;
+        customFieldValues: TaskCustomFieldValue[];
+      }>,
     onMutate: async ({ taskId, fieldId, value }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
       const previous = queryClient.getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId));
@@ -1351,11 +1473,18 @@ export default function ProjectBoard({
           ...group,
           tasks: group.tasks.map((task) =>
             task.id === updatedTask.id
-              ? {
-                  ...task,
-                  version: updatedTask.version,
-                  customFieldValues: updatedTask.customFieldValues,
-                }
+              ? (() => {
+                  const nextCompletedAt = (updatedTask as Partial<Task>).completedAt;
+                  return {
+                    ...task,
+                    version: updatedTask.version,
+                    status: (updatedTask as Partial<Task>).status ?? task.status,
+                    progressPercent:
+                      (updatedTask as Partial<Task>).progressPercent ?? task.progressPercent,
+                    ...(nextCompletedAt !== undefined ? { completedAt: nextCompletedAt } : {}),
+                    customFieldValues: updatedTask.customFieldValues,
+                  };
+                })()
               : task,
           ),
         })),
@@ -1761,16 +1890,27 @@ export default function ProjectBoard({
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            data-testid="add-custom-field-trigger"
-            onClick={() => setCreateFieldDialogOpen(true)}
-          >
-            <Plus className="mr-1 h-3.5 w-3.5" />
-            {t('addColumn')}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="add-custom-field-trigger"
+              onClick={() => setCreateFieldDialogOpen(true)}
+            >
+              <Plus className="mr-1 h-3.5 w-3.5" />
+              {t('addColumn')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="manage-custom-field-trigger"
+              onClick={() => setManageFieldsDialogOpen(true)}
+            >
+              {t('customFields')}
+            </Button>
+          </div>
           {customFieldError ? (
             <p className="text-xs text-destructive" data-testid="custom-field-error">
               {customFieldError}
@@ -1827,6 +1967,102 @@ export default function ProjectBoard({
                 {createCustomField.isPending ? t('saving') : t('create')}
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={manageFieldsDialogOpen} onOpenChange={setManageFieldsDialogOpen}>
+          <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>{t('customFields')}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              {customFields.filter((field) => !field.archivedAt).map((field) => {
+                const draft = fieldDrafts[field.id] ?? {
+                  name: field.name,
+                  optionsText: field.type === 'SELECT' ? serializeSelectFieldOptions(field) : '',
+                };
+                const parsedOptions = field.type === 'SELECT'
+                  ? parseSelectFieldOptionsInput(draft.optionsText)
+                  : [];
+                return (
+                  <div key={field.id} className="space-y-3 rounded-md border p-3" data-testid={`custom-field-manage-${field.id}`}>
+                    <div className="grid gap-3 md:grid-cols-[1fr_auto_auto] md:items-end">
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">{t('name')}</p>
+                        <Input
+                          value={draft.name}
+                          data-testid={`custom-field-name-edit-${field.id}`}
+                          onChange={(event) =>
+                            setFieldDrafts((current) => ({
+                              ...current,
+                              [field.id]: {
+                                ...draft,
+                                name: event.target.value,
+                              },
+                            }))
+                          }
+                        />
+                      </div>
+                      <span className="text-xs text-muted-foreground">{field.type}</span>
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          data-testid={`custom-field-save-${field.id}`}
+                          disabled={
+                            patchCustomField.isPending ||
+                            !draft.name.trim() ||
+                            (field.type === 'SELECT' && parsedOptions.length === 0)
+                          }
+                          onClick={() =>
+                            patchCustomField.mutate({
+                              fieldId: field.id,
+                              name: draft.name.trim(),
+                              optionsText: draft.optionsText,
+                              type: field.type,
+                            })
+                          }
+                        >
+                          {patchCustomField.isPending ? t('saving') : t('save')}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:text-destructive"
+                          data-testid={`custom-field-delete-${field.id}`}
+                          disabled={archiveCustomField.isPending}
+                          onClick={() => archiveCustomField.mutate(field.id)}
+                        >
+                          {t('delete')}
+                        </Button>
+                      </div>
+                    </div>
+                    {field.type === 'SELECT' ? (
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Options (label|value, one per line)</p>
+                        <textarea
+                          className="min-h-[120px] w-full rounded-md border bg-background p-2 text-sm"
+                          data-testid={`custom-field-options-edit-${field.id}`}
+                          value={draft.optionsText}
+                          onChange={(event) =>
+                            setFieldDrafts((current) => ({
+                              ...current,
+                              [field.id]: {
+                                ...draft,
+                                optionsText: event.target.value,
+                              },
+                            }))
+                          }
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+              {!customFields.filter((field) => !field.archivedAt).length ? (
+                <p className="text-sm text-muted-foreground">{t('noFilterableCustomFields')}</p>
+              ) : null}
+            </div>
           </DialogContent>
         </Dialog>
 

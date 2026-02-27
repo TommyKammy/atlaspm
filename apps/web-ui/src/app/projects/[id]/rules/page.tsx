@@ -5,7 +5,13 @@ import { useParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { Rule, RuleAction, RuleCondition, RuleDefinition } from '@/lib/types';
+import type {
+  CustomFieldDefinition,
+  Rule,
+  RuleAction,
+  RuleCondition,
+  RuleDefinition,
+} from '@/lib/types';
 
 const triggerOptions = ['task.progress.changed'] as const;
 
@@ -29,17 +35,28 @@ function ensureRuleDefinition(rule: Rule): RuleDefinition {
 
 function RuleEditor({
   rule,
+  customFields,
   onSave,
   onCancel,
 }: {
   rule: Rule;
+  customFields: CustomFieldDefinition[];
   onSave: (patch: { name: string; definition: RuleDefinition }) => Promise<void>;
   onCancel: () => void;
 }) {
   const base = ensureRuleDefinition(rule);
+  const numberCustomFields = useMemo(
+    () =>
+      customFields
+        .filter((field) => field.type === 'NUMBER' && !field.archivedAt)
+        .sort((left, right) => left.position - right.position),
+    [customFields],
+  );
   const [name, setName] = useState(rule.name);
   const [trigger, setTrigger] = useState<RuleDefinition['trigger']>(base.trigger);
-  const [condition, setCondition] = useState<RuleCondition>(base.conditions[0] ?? { field: 'progressPercent', op: 'eq', value: 100 });
+  const [condition, setCondition] = useState<RuleCondition>(
+    base.conditions[0] ?? { field: 'progressPercent', op: 'eq', value: 100 },
+  );
   const [actionStatus, setActionStatus] = useState<'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED'>(
     (base.actions.find((action): action is Extract<RuleAction, { type: 'setStatus' }> => action.type === 'setStatus')
       ?.status ?? 'TODO') as 'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED',
@@ -47,7 +64,13 @@ function RuleEditor({
   const [setNow, setSetNow] = useState(base.actions.some((action) => action.type === 'setCompletedAtNow'));
   const [setNull, setSetNull] = useState(base.actions.some((action) => action.type === 'setCompletedAtNull'));
 
+  const selectedFieldKey =
+    condition.field === 'customFieldNumber' ? `cf:${condition.fieldId}` : 'progressPercent';
+
   const save = async () => {
+    if (condition.field === 'customFieldNumber' && !condition.fieldId) {
+      return;
+    }
     const actions: RuleAction[] = [{ type: 'setStatus', status: actionStatus }];
     if (setNow) actions.push({ type: 'setCompletedAtNow' });
     if (setNull) actions.push({ type: 'setCompletedAtNull' });
@@ -90,6 +113,52 @@ function RuleEditor({
       </div>
 
       <div className="grid gap-2 md:grid-cols-4">
+        <label className="space-y-1 text-xs text-muted-foreground">
+          Condition field
+          <select
+            className={fieldBase}
+            value={selectedFieldKey}
+            onChange={(e) => {
+              const next = e.target.value;
+              const carryNumericCondition = (
+                base:
+                  | { field: 'progressPercent'; op: RuleCondition['op'] }
+                  | { field: 'customFieldNumber'; fieldId: string; op: RuleCondition['op'] },
+                prev: RuleCondition,
+              ): RuleCondition => {
+                const withValue =
+                  prev.op === 'between'
+                    ? {
+                        ...base,
+                        ...(typeof prev.min === 'number' ? { min: prev.min } : {}),
+                        ...(typeof prev.max === 'number' ? { max: prev.max } : {}),
+                      }
+                    : {
+                        ...base,
+                        ...(typeof prev.value === 'number' ? { value: prev.value } : {}),
+                      };
+                return withValue;
+              };
+              if (next === 'progressPercent') {
+                setCondition((prev) => carryNumericCondition({ field: 'progressPercent', op: prev.op }, prev));
+                return;
+              }
+              const [, parsedFieldId] = next.split(':');
+              const fieldId = parsedFieldId ?? numberCustomFields[0]?.id;
+              if (!fieldId) return;
+              setCondition((prev) =>
+                carryNumericCondition({ field: 'customFieldNumber', fieldId, op: prev.op }, prev),
+              );
+            }}
+          >
+            <option value="progressPercent">progressPercent</option>
+            {numberCustomFields.map((field) => (
+              <option key={field.id} value={`cf:${field.id}`}>
+                {field.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="space-y-1 text-xs text-muted-foreground">
           Condition op
           <select
@@ -170,6 +239,7 @@ function RuleEditor({
           type="button"
           className="h-8 rounded bg-primary px-3 text-xs font-medium text-primary-foreground"
           data-testid={`rule-save-${rule.id}`}
+          disabled={condition.field === 'customFieldNumber' && !condition.fieldId}
           onClick={() => void save()}
         >
           Save
@@ -197,6 +267,11 @@ export default function RulesPage() {
     queryFn: () => api(`/projects/${projectId}/rules`),
     enabled: Boolean(projectId),
   });
+  const customFieldsQuery = useQuery<CustomFieldDefinition[]>({
+    queryKey: queryKeys.projectCustomFields(projectId),
+    queryFn: () => api(`/projects/${projectId}/custom-fields`),
+    enabled: Boolean(projectId),
+  });
 
   const toggleMutation = useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
@@ -220,6 +295,7 @@ export default function RulesPage() {
   });
 
   const rules = useMemo(() => rulesQuery.data ?? [], [rulesQuery.data]);
+  const customFields = useMemo(() => customFieldsQuery.data ?? [], [customFieldsQuery.data]);
 
   if (!projectId) return <div>Loading...</div>;
 
@@ -260,6 +336,7 @@ export default function RulesPage() {
             <div className="ml-1">
               <RuleEditor
                 rule={rule}
+                customFields={customFields}
                 onCancel={() => setEditingRuleId(null)}
                 onSave={async (patch) => {
                   await patchMutation.mutateAsync({ id: rule.id, patch });

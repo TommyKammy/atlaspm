@@ -72,6 +72,34 @@ const definitionRefSchema = z.object({
   options: z.array(definitionOptionRefSchema).optional(),
 });
 
+const customFieldFilterSchema = z.discriminatedUnion('type', [
+  z.object({
+    fieldId: z.string().uuid(),
+    type: z.literal(CustomFieldType.SELECT),
+    optionIds: z.array(z.string().uuid()).min(1),
+  }),
+  z.object({
+    fieldId: z.string().uuid(),
+    type: z.literal(CustomFieldType.BOOLEAN),
+    booleanValue: z.boolean(),
+  }),
+  z.object({
+    fieldId: z.string().uuid(),
+    type: z.literal(CustomFieldType.NUMBER),
+    numberMin: z.number().finite().optional().nullable(),
+    numberMax: z.number().finite().optional().nullable(),
+  }),
+  z.object({
+    fieldId: z.string().uuid(),
+    type: z.literal(CustomFieldType.DATE),
+    dateFrom: z.string().trim().refine((value) => !Number.isNaN(Date.parse(value))).optional().nullable(),
+    dateTo: z.string().trim().refine((value) => !Number.isNaN(Date.parse(value))).optional().nullable(),
+  }),
+]);
+
+const customFieldFilterListSchema = z.array(customFieldFilterSchema).max(50);
+const customFieldSortOrderSchema = z.enum(['asc', 'desc']);
+
 const textValueSchema = z.string().trim().max(MAX_TEXT_VALUE_LENGTH);
 
 const numberValueSchema = z
@@ -86,6 +114,11 @@ const dateValueSchema = z
 
 export type CustomFieldDefinitionInput = z.infer<typeof definitionSchema>;
 export type CustomFieldDefinitionRef = z.infer<typeof definitionRefSchema>;
+export type TaskCustomFieldFilter = z.infer<typeof customFieldFilterSchema>;
+export type TaskCustomFieldSort = {
+  fieldId: string;
+  order: z.infer<typeof customFieldSortOrderSchema>;
+};
 
 export type ParsedCustomFieldValue =
   | { type: 'TEXT'; valueText: string }
@@ -114,6 +147,56 @@ export function parseCustomFieldDefinitionRef(input: unknown): CustomFieldDefini
     });
   }
   return result.data;
+}
+
+export function parseTaskCustomFieldFilters(raw: unknown): TaskCustomFieldFilter[] {
+  if (!raw) return [];
+  if (typeof raw !== 'string') {
+    throw new BadRequestException({ message: 'custom field filters must be a JSON string' });
+  }
+  let parsedRaw: unknown;
+  try {
+    parsedRaw = JSON.parse(raw);
+  } catch {
+    throw new BadRequestException({ message: 'custom field filters must be valid JSON' });
+  }
+  const parsed = customFieldFilterListSchema.safeParse(parsedRaw);
+  if (!parsed.success) {
+    throw new BadRequestException({
+      message: 'Invalid custom field filters',
+      issues: parsed.error.issues,
+    });
+  }
+  const deduped = new Map<string, TaskCustomFieldFilter>();
+  for (const filter of parsed.data) {
+    deduped.set(filter.fieldId, filter);
+  }
+  return [...deduped.values()];
+}
+
+export function parseTaskCustomFieldSort(
+  fieldIdRaw: unknown,
+  orderRaw: unknown,
+): TaskCustomFieldSort | null {
+  if (!fieldIdRaw) return null;
+  const fieldId = z.string().uuid().safeParse(fieldIdRaw);
+  if (!fieldId.success) {
+    throw new BadRequestException({
+      message: 'customFieldSortFieldId must be a UUID',
+      issues: fieldId.error.issues,
+    });
+  }
+  const order = customFieldSortOrderSchema.safeParse(orderRaw ?? 'asc');
+  if (!order.success) {
+    throw new BadRequestException({
+      message: 'customFieldSortOrder must be asc or desc',
+      issues: order.error.issues,
+    });
+  }
+  return {
+    fieldId: fieldId.data,
+    order: order.data,
+  };
 }
 
 export function parseCustomFieldValue(
