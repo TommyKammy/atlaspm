@@ -1,7 +1,7 @@
 import './globals.css';
 import type { ReactNode } from 'react';
 import { Inter } from 'next/font/google';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import Providers from './providers';
 import AppShell from '@/components/layout/AppShell';
 import {
@@ -9,6 +9,7 @@ import {
   LOCALE_COOKIE,
   SIDEBAR_MODE_COOKIE,
   THEME_PRESET_COOKIE,
+  detectLocaleFromAcceptLanguage,
   parseContentLayout,
   parseLocale,
   parseSidebarMode,
@@ -21,10 +22,14 @@ const inter = Inter({
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const cookieStore = await cookies();
+  const headerStore = await headers();
   const initialSidebarMode = parseSidebarMode(cookieStore.get(SIDEBAR_MODE_COOKIE)?.value);
   const initialContentLayout = parseContentLayout(cookieStore.get(CONTENT_LAYOUT_COOKIE)?.value);
   const initialThemePreset = parseThemePreset(cookieStore.get(THEME_PRESET_COOKIE)?.value);
-  const initialLocale = parseLocale(cookieStore.get(LOCALE_COOKIE)?.value);
+  const localeCookie = cookieStore.get(LOCALE_COOKIE)?.value;
+  const initialLocale = localeCookie
+    ? parseLocale(localeCookie)
+    : detectLocaleFromAcceptLanguage(headerStore.get('accept-language') ?? undefined);
 
   return (
     <html

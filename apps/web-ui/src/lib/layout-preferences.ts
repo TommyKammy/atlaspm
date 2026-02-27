@@ -28,3 +28,25 @@ export function parseThemePreset(value?: string): ThemePreset {
 export function parseLocale(value?: string): Locale {
   return value === 'ja' ? 'ja' : DEFAULT_LOCALE;
 }
+
+export function detectLocaleFromAcceptLanguage(value?: string): Locale {
+  if (!value) {
+    return DEFAULT_LOCALE;
+  }
+
+  const languages = value
+    .toLowerCase()
+    .split(',')
+    .map((entry) => entry.split(';')[0]?.trim())
+    .filter((entry): entry is string => Boolean(entry));
+
+  if (languages.some((language) => language === 'ja' || language.startsWith('ja-'))) {
+    return 'ja';
+  }
+
+  if (languages.some((language) => language === 'en' || language.startsWith('en-'))) {
+    return 'en';
+  }
+
+  return DEFAULT_LOCALE;
+}
