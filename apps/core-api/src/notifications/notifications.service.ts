@@ -262,6 +262,10 @@ export class NotificationsService {
       return created;
     }
 
+    if (!existing.readAt && existing.triggeredByUserId === input.triggeredByUserId) {
+      return existing;
+    }
+
     const updated = await tx.inboxNotification.update({
       where: { id: existing.id },
       data: {

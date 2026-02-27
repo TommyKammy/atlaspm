@@ -608,7 +608,7 @@ export class TasksController {
       await this.applyProgressRules(tx, id, req.correlationId);
 
       const newAssigneeId = body.assigneeUserId;
-      const assigneeChanged = newAssigneeId !== undefined && newAssigneeId !== task.assigneeUserId && newAssigneeId;
+      const assigneeChanged = newAssigneeId !== undefined && newAssigneeId !== task.assigneeUserId && newAssigneeId !== null;
       if (assigneeChanged) {
         await this.notifications.createTaskAssignmentNotification(tx, {
           userId: newAssigneeId,
@@ -620,11 +620,20 @@ export class TasksController {
         });
       }
 
-      const currentAssigneeId = task.assigneeUserId;
-      const dueDateChanged = body.dueAt !== undefined && body.dueAt !== task.dueAt && currentAssigneeId;
-      if (dueDateChanged) {
+      const postUpdateAssigneeId = updated.assigneeUserId;
+      let dueDateChanged = false;
+      if (body.dueAt !== undefined && postUpdateAssigneeId) {
+        if (body.dueAt === null) {
+          dueDateChanged = task.dueAt !== null;
+        } else {
+          const newDueDate = new Date(body.dueAt).getTime();
+          const oldDueDate = task.dueAt ? task.dueAt.getTime() : null;
+          dueDateChanged = newDueDate !== oldDueDate;
+        }
+      }
+      if (dueDateChanged && postUpdateAssigneeId) {
         await this.notifications.createDueDateNotification(tx, {
-          userId: currentAssigneeId,
+          userId: postUpdateAssigneeId,
           projectId: task.projectId,
           taskId: id,
           triggeredByUserId: req.user.sub,
@@ -634,10 +643,10 @@ export class TasksController {
       }
 
       const statusChanged = status !== task.status;
-      const shouldNotifyAssigneeOfStatus = statusChanged && currentAssigneeId && currentAssigneeId !== req.user.sub;
+      const shouldNotifyAssigneeOfStatus = statusChanged && postUpdateAssigneeId && postUpdateAssigneeId !== req.user.sub;
       if (shouldNotifyAssigneeOfStatus) {
         await this.notifications.createStatusChangeNotification(tx, {
-          userId: currentAssigneeId,
+          userId: postUpdateAssigneeId,
           projectId: task.projectId,
           taskId: id,
           triggeredByUserId: req.user.sub,
