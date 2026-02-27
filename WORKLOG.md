@@ -1673,3 +1673,26 @@
 - Risks/known gaps:
   - Endpoints requiring resource lookup indirection (e.g., `taskId -> projectId`, `invitationId -> workspaceId`) still use manual checks and are targeted for next wave.
   - Full UI disable/tooltip reason alignment is not part of this backend-first wave.
+
+## 2026-02-27 - P4-2 (Wave 1) Activity Diff Readability in Task Detail
+- What changed:
+  - Improved task detail Activity timeline to show structured before/after changes for important fields.
+  - Added diff extraction with noise suppression in:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/task-detail-drawer.tsx`
+  - Diff behavior:
+    - excludes noisy keys (`updatedAt`, `version`, `descriptionVersion`, etc.)
+    - prioritizes enterprise-relevant fields (`status`, `progressPercent`, `assigneeUserId`, `startAt`, `dueAt`, `sectionId`, etc.)
+    - renders per-event rows as `field / before / after` in Activity tab.
+  - Added i18n labels for diff UI:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/i18n.tsx`
+    - keys: `changes`, `before`, `after`, `noValue` (en/ja).
+- Why:
+  - Start P4 history-compare UX by making existing audit data actionable without introducing heavy backend changes in this wave.
+  - Improve readability for operations/security reviews (who changed what) in daily workflows.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm e2e` (32 tests passed)
+- Risks/known gaps:
+  - This wave computes diffs client-side from existing audit payloads; a dedicated normalized diff endpoint can be added in next wave for stricter consistency and richer field semantics.
+  - Very large object-valued changes are intentionally summarized/truncated for readability.
