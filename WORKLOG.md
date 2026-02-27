@@ -2002,3 +2002,32 @@
   - `pnpm e2e` (32 passed)
 - Risks/known gaps:
   - Overrides may need periodic review when NestJS transitive ranges change; keep audit checks in CI cadence.
+
+## 2026-02-27 - P4-3 (Step 3) Production-like remeasurement + wave2 index tuning
+- What changed:
+  - Added wave2 tuning migration to remove regressive dueAt-only partial index:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/prisma/migrations/20260227124000_p4_index_optimization_wave2_drop_dueat_partial/migration.sql`
+    - dropped `Task_active_project_dueAt_idx`.
+  - Extended explain script docker mode to support arbitrary DB name/user:
+    - `/Users/tomoakikawada/Dev/atlaspm/scripts/db-explain-baseline.sh`
+    - new env vars: `PSQL_DATABASE`, `PSQL_USER`.
+  - Added isolated prod-like benchmark harness:
+    - `/Users/tomoakikawada/Dev/atlaspm/scripts/db-explain-prodlike-wave2.sh`
+    - creates temp DB, applies migrations, seeds large synthetic data, captures before/after, writes comparison, and drops DB.
+  - Generated prod-like performance artifacts:
+    - `/Users/tomoakikawada/Dev/atlaspm/docs/perf/EXPLAIN_PRODLIKE_BASELINE.md`
+    - `/Users/tomoakikawada/Dev/atlaspm/docs/perf/EXPLAIN_PRODLIKE_AFTER_INDEXES.md`
+    - `/Users/tomoakikawada/Dev/atlaspm/docs/perf/EXPLAIN_PRODLIKE_COMPARE_WAVE2.md`
+  - Updated runbook:
+    - `/Users/tomoakikawada/Dev/atlaspm/docs/perf/README.md`
+- Why:
+  - #73 の第2アクション（本番相当データ再計測）で、Q2 が `Task_active_project_dueAt_idx` に引っ張られて悪化することを確認したため、インデックス集合をチューニングして回帰を抑制。
+- How tested (exact commands):
+  - `docker compose -f infra/docker/docker-compose.yml up -d postgres`
+  - `./scripts/db-explain-prodlike-wave2.sh`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm -r --if-present build`
+  - `pnpm e2e` (32 passed)
+- Risks/known gaps:
+  - Prod-like は合成データであり、本番データ分布と完全一致ではない。次段でステージングスナップショット再計測が必要。
+  - Q4/Q5 は誤差範囲で微増減があるため、継続監視前提。

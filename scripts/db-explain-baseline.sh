@@ -9,6 +9,14 @@ has_postgres_container() {
   docker ps --format '{{.Names}}' | grep -q '^atlaspm-postgres$'
 }
 
+docker_psql_user() {
+  echo "${PSQL_USER:-atlaspm}"
+}
+
+docker_psql_database() {
+  echo "${PSQL_DATABASE:-atlaspm}"
+}
+
 run_psql() {
   if has_local_psql; then
     if [[ -z "${DATABASE_URL:-}" ]]; then
@@ -21,7 +29,7 @@ run_psql() {
   fi
 
   if has_postgres_container; then
-    docker exec -i atlaspm-postgres psql -U atlaspm -d atlaspm -X -v ON_ERROR_STOP=1
+    docker exec -i atlaspm-postgres psql -U "$(docker_psql_user)" -d "$(docker_psql_database)" -X -v ON_ERROR_STOP=1
     return
   fi
 
