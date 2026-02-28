@@ -37,7 +37,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
-import { Prisma, Priority, ProjectRole, TaskStatus, DependencyType, CustomFieldType } from '@prisma/client';
+import { Prisma, Priority, ProjectRole, TaskStatus, TaskType, DependencyType, CustomFieldType } from '@prisma/client';
 import { SubtaskService } from './subtask.service';
 import { SearchService } from '../search/search.service';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -131,6 +131,10 @@ class CreateTaskDto {
   status?: TaskStatus;
 
   @IsOptional()
+  @IsEnum(TaskType)
+  type?: TaskType;
+
+  @IsOptional()
   @IsInt()
   @Min(0)
   @Max(100)
@@ -173,6 +177,10 @@ class PatchTaskDto {
   @IsOptional()
   @IsEnum(TaskStatus)
   status?: TaskStatus;
+
+  @IsOptional()
+  @IsEnum(TaskType)
+  type?: TaskType;
 
   @IsOptional()
   @IsInt()
@@ -524,7 +532,13 @@ export class TasksController {
       orderBy: { position: 'asc' },
     });
     const position = (topTask?.position ?? 1000) - 1000;
-    const progress = body.progressPercent ?? 0;
+    const taskType = body.type ?? TaskType.TASK;
+    
+    let progress = body.progressPercent ?? 0;
+    if (taskType === TaskType.MILESTONE) {
+      progress = 100;
+    }
+    
     const status = this.domain.deriveStatusForProgress(progress, body.status ?? TaskStatus.TODO);
     const completedAt = status === TaskStatus.DONE ? new Date() : null;
 
@@ -536,6 +550,7 @@ export class TasksController {
           title: body.title,
           description: body.description,
           status,
+          type: taskType,
           progressPercent: progress,
           priority: body.priority,
           assigneeUserId: body.assigneeUserId,
@@ -571,7 +586,13 @@ export class TasksController {
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (body.version && body.version !== task.version) throw new ConflictException('Version conflict');
 
-    const progress = body.progressPercent ?? task.progressPercent;
+    const newType = body.type ?? task.type;
+    let progress = body.progressPercent ?? task.progressPercent;
+    
+    if (newType === TaskType.MILESTONE) {
+      progress = 100;
+    }
+    
     const status = body.status ?? this.domain.deriveStatusForProgress(progress, task.status);
     const completedAt = status === TaskStatus.DONE ? task.completedAt ?? new Date() : null;
 
@@ -582,7 +603,8 @@ export class TasksController {
           title: body.title,
           description: body.description,
           status,
-          progressPercent: body.progressPercent,
+          type: newType,
+          progressPercent: progress,
           priority: body.priority,
           assigneeUserId: body.assigneeUserId,
           startAt: body.startAt ? new Date(body.startAt) : body.startAt === null ? null : undefined,
@@ -831,7 +853,10 @@ export class TasksController {
     if (body.version !== task.version) throw new ConflictException('Version conflict');
 
     const nextStatus = body.done ? TaskStatus.DONE : TaskStatus.IN_PROGRESS;
-    const nextProgress = body.done ? 100 : 0;
+    let nextProgress = body.done ? 100 : 0;
+    if (task.type === TaskType.MILESTONE) {
+      nextProgress = 100;
+    }
     const nextCompletedAt = body.done ? task.completedAt ?? new Date() : null;
     const action = body.done ? 'task.completed' : 'task.reopened';
 
@@ -1553,7 +1578,10 @@ export class TasksController {
     return this.prisma.$transaction(async (tx) => {
       const updated = [] as unknown[];
       for (const task of tasks) {
-        const progress = body.progressPercent ?? task.progressPercent;
+        let progress = body.progressPercent ?? task.progressPercent;
+        if (task.type === TaskType.MILESTONE) {
+          progress = 100;
+        }
         const status = body.status ?? this.domain.deriveStatusForProgress(progress, task.status);
         const completedAt = status === TaskStatus.DONE ? task.completedAt ?? new Date() : null;
 
@@ -1563,7 +1591,7 @@ export class TasksController {
             status,
             assigneeUserId: body.assigneeUserId,
             tags: body.tags,
-            progressPercent: body.progressPercent,
+            progressPercent: progress,
             completedAt,
             version: { increment: 1 },
           },

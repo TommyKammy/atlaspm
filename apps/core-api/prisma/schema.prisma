@@ -30,6 +30,12 @@ enum TaskStatus {
   BLOCKED
 }
 
+enum TaskType {
+  TASK
+  MILESTONE
+  APPROVAL
+}
+
 enum Priority {
   LOW
   MEDIUM
@@ -186,6 +192,7 @@ model Task {
   descriptionUpdatedAt DateTime? @map("description_updated_at")
   descriptionVersion Int    @default(0) @map("description_version")
   status         TaskStatus @default(TODO)
+  type           TaskType   @default(TASK)
   progressPercent Int       @default(0)
   priority       Priority?
   assigneeUserId String?
@@ -224,6 +231,7 @@ model Task {
   @@index([projectId, deletedAt])
   @@index([projectId, deletedAt, status, assigneeUserId, dueAt])
   @@index([projectId, deletedAt, updatedAt])
+  @@index([projectId, deletedAt, type])
 }
 
 model CustomFieldDefinition {
