@@ -606,6 +606,55 @@ export class TasksController {
         payload: updated,
       });
       await this.applyProgressRules(tx, id, req.correlationId);
+
+      const newAssigneeId = body.assigneeUserId;
+      const assigneeChanged = newAssigneeId !== undefined && newAssigneeId !== task.assigneeUserId && newAssigneeId !== null;
+      if (assigneeChanged) {
+        await this.notifications.createTaskAssignmentNotification(tx, {
+          userId: newAssigneeId,
+          projectId: task.projectId,
+          taskId: id,
+          triggeredByUserId: req.user.sub,
+          actor: req.user.sub,
+          correlationId: req.correlationId,
+        });
+      }
+
+      const postUpdateAssigneeId = updated.assigneeUserId;
+      let dueDateChanged = false;
+      if (body.dueAt !== undefined && postUpdateAssigneeId) {
+        if (body.dueAt === null) {
+          dueDateChanged = task.dueAt !== null;
+        } else {
+          const newDueDate = new Date(body.dueAt).getTime();
+          const oldDueDate = task.dueAt ? task.dueAt.getTime() : null;
+          dueDateChanged = newDueDate !== oldDueDate;
+        }
+      }
+      if (dueDateChanged && postUpdateAssigneeId) {
+        await this.notifications.createDueDateNotification(tx, {
+          userId: postUpdateAssigneeId,
+          projectId: task.projectId,
+          taskId: id,
+          triggeredByUserId: req.user.sub,
+          actor: req.user.sub,
+          correlationId: req.correlationId,
+        });
+      }
+
+      const statusChanged = status !== task.status;
+      const shouldNotifyAssigneeOfStatus = statusChanged && postUpdateAssigneeId && postUpdateAssigneeId !== req.user.sub;
+      if (shouldNotifyAssigneeOfStatus) {
+        await this.notifications.createStatusChangeNotification(tx, {
+          userId: postUpdateAssigneeId,
+          projectId: task.projectId,
+          taskId: id,
+          triggeredByUserId: req.user.sub,
+          actor: req.user.sub,
+          correlationId: req.correlationId,
+        });
+      }
+
       return updated;
     }).then((updated) => {
       void this.indexTaskWithCustomFields(updated);
@@ -1081,6 +1130,21 @@ export class TasksController {
         },
         req,
       );
+
+      const taskAssigneeId = task.assigneeUserId;
+      const assigneeShouldBeNotified = taskAssigneeId && taskAssigneeId !== req.user.sub;
+      if (assigneeShouldBeNotified) {
+        await this.notifications.createCommentNotification(tx, {
+          userId: taskAssigneeId,
+          projectId: task.projectId,
+          taskId,
+          commentId: comment.id,
+          triggeredByUserId: req.user.sub,
+          actor: req.user.sub,
+          correlationId: req.correlationId,
+        });
+      }
+
       return comment;
     });
   }
