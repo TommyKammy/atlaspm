@@ -7,12 +7,14 @@ import {
   CalendarDays,
   CheckCircle2,
   Circle,
+  Diamond,
   Clock3,
   Flag,
   Gauge,
   List,
   MessageSquare,
   Paperclip,
+  Stamp,
   Tag,
   UserCircle2,
   X,
@@ -131,6 +133,16 @@ function compactSnapshotActivity(events: AuditEvent[]) {
     compacted.push(event);
   }
   return compacted;
+}
+
+function renderTaskTypeCompletionIcon(task: Task | null | undefined, isDone: boolean) {
+  if (task?.type === 'MILESTONE') {
+    return <Diamond className={cn('mr-1 h-4 w-4 shrink-0', isDone ? 'fill-current text-emerald-600' : 'text-muted-foreground')} />;
+  }
+  if (task?.type === 'APPROVAL') {
+    return <Stamp className={cn('mr-1 h-4 w-4 shrink-0', isDone ? 'text-emerald-600' : 'text-muted-foreground')} />;
+  }
+  return isDone ? <CheckCircle2 className="mr-1 h-4 w-4 shrink-0" /> : <Circle className="mr-1 h-4 w-4 shrink-0" />;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -686,7 +698,7 @@ export default function TaskDetailDrawer({
                 onClick={handleToggleCompleteClick}
                 disabled={!currentTask || toggleComplete.isPending}
               >
-                {isDone ? <CheckCircle2 className="mr-1 h-4 w-4 shrink-0" /> : <Circle className="mr-1 h-4 w-4 shrink-0" />}
+                {renderTaskTypeCompletionIcon(currentTask ?? null, isDone)}
                 {isDone ? t('markIncomplete') : t('markComplete')}
               </Button>
               <div className="flex items-center gap-1">

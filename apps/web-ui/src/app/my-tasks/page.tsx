@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Circle, ExternalLink } from 'lucide-react';
+import { CheckCircle2, Circle, Diamond, ExternalLink, Stamp } from 'lucide-react';
 import TaskDetailDrawer from '@/components/task-detail-drawer';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -42,6 +42,20 @@ function statusLabel(status: Task['status'], t: (key: string) => string) {
   if (status === 'IN_PROGRESS') return t('statusInProgress');
   if (status === 'BLOCKED') return t('statusBlocked');
   return t('statusTodo');
+}
+
+function renderTaskTypeCompletionIcon(task: Task, isDone: boolean) {
+  if (task.type === 'MILESTONE') {
+    return (
+      <Diamond
+        className={`h-5 w-5 ${isDone ? 'fill-current text-emerald-600' : 'text-muted-foreground'}`}
+      />
+    );
+  }
+  if (task.type === 'APPROVAL') {
+    return <Stamp className={`h-5 w-5 ${isDone ? 'text-emerald-600' : 'text-muted-foreground'}`} />;
+  }
+  return isDone ? <CheckCircle2 className="h-5 w-5 text-emerald-600" /> : <Circle className="h-5 w-5 text-muted-foreground" />;
 }
 
 function formatCompactDate(dateValue: string | null | undefined, locale: 'ja' | 'en') {
@@ -210,11 +224,7 @@ export default function MyTasksPage() {
                               })
                             }
                           >
-                            {done ? (
-                              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                            ) : (
-                              <Circle className="h-5 w-5 text-muted-foreground" />
-                            )}
+                            {renderTaskTypeCompletionIcon(entry.task, done)}
                           </button>
                           <button
                             type="button"
