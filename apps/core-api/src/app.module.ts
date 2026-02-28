@@ -29,6 +29,7 @@ import { CustomFieldsController } from './custom-fields/custom-fields.controller
 import { ProjectStatusUpdatesController } from './projects/project-status-updates.controller';
 import { RecurringTasksController } from './recurring-tasks/recurring-tasks.controller';
 import { RecurringTaskWorker } from './recurring-tasks/recurring-task.worker';
+import { FormsController } from './forms/forms.controller';
 import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
 
 @Module({
@@ -48,6 +49,7 @@ import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
     CustomFieldsController,
     ProjectStatusUpdatesController,
     RecurringTasksController,
+    FormsController,
   ],
   providers: [
     PrismaService,
