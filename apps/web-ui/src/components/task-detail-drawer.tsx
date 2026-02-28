@@ -7,11 +7,15 @@ import {
   CalendarDays,
   CheckCircle2,
   Circle,
+  Diamond,
   Clock3,
+  Flag,
   Gauge,
   List,
   MessageSquare,
   Paperclip,
+  Stamp,
+  Tag,
   UserCircle2,
   X,
 } from 'lucide-react';
@@ -129,6 +133,16 @@ function compactSnapshotActivity(events: AuditEvent[]) {
     compacted.push(event);
   }
   return compacted;
+}
+
+function renderTaskTypeCompletionIcon(task: Task | null | undefined, isDone: boolean) {
+  if (task?.type === 'MILESTONE') {
+    return <Diamond className={cn('mr-1 h-4 w-4 shrink-0', isDone ? 'fill-current text-emerald-600' : 'text-muted-foreground')} />;
+  }
+  if (task?.type === 'APPROVAL') {
+    return <Stamp className={cn('mr-1 h-4 w-4 shrink-0', isDone ? 'text-emerald-600' : 'text-muted-foreground')} />;
+  }
+  return isDone ? <CheckCircle2 className="mr-1 h-4 w-4 shrink-0" /> : <Circle className="mr-1 h-4 w-4 shrink-0" />;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -684,7 +698,7 @@ export default function TaskDetailDrawer({
                 onClick={handleToggleCompleteClick}
                 disabled={!currentTask || toggleComplete.isPending}
               >
-                {isDone ? <CheckCircle2 className="mr-1 h-4 w-4 shrink-0" /> : <Circle className="mr-1 h-4 w-4 shrink-0" />}
+                {renderTaskTypeCompletionIcon(currentTask ?? null, isDone)}
                 {isDone ? t('markIncomplete') : t('markComplete')}
               </Button>
               <div className="flex items-center gap-1">
@@ -862,6 +876,33 @@ export default function TaskDetailDrawer({
                         ))}
                       </select>
                     </MetadataRow>
+
+                    <MetadataRow icon={<Tag className="h-3.5 w-3.5" />} label={t('taskType')}>
+                      <select
+                        value={currentTask?.type ?? 'TASK'}
+                        onChange={(event) => {
+                          const nextType = event.target.value as Task['type'];
+                          if (!currentTask) return;
+                          patchTask.mutate({ type: nextType, version: currentTask.version });
+                        }}
+                        disabled={!currentTask || patchTask.isPending}
+                        className="h-8 min-w-[200px] rounded-full border border-transparent bg-transparent px-3 text-sm hover:bg-muted/30 focus:border-border focus:outline-none disabled:opacity-50"
+                        data-testid="task-detail-type"
+                      >
+                        {(['TASK', 'MILESTONE', 'APPROVAL'] as const).map((type) => (
+                          <option key={type} value={type}>
+                            {type === 'TASK' ? t('taskTypeTask') : type === 'MILESTONE' ? t('taskTypeMilestone') : t('taskTypeApproval')}
+                          </option>
+                        ))}
+                      </select>
+                    </MetadataRow>
+
+                    {currentTask?.type === 'MILESTONE' && (
+                      <div className="flex items-center gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                        <Flag className="h-4 w-4" />
+                        {t('milestoneProgressFixed')}
+                      </div>
+                    )}
 
                     <div className="mt-2 flex items-center justify-between gap-2 rounded-md bg-muted/30 px-2 py-1.5">
                       <div className="text-xs text-muted-foreground" data-testid="subtask-rollup">

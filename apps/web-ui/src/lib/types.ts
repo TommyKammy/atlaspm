@@ -90,6 +90,8 @@ export type TaskCustomFieldValue = {
   } | null;
 };
 
+export type TaskType = 'TASK' | 'MILESTONE' | 'APPROVAL';
+
 export type Task = {
   id: string;
   projectId: string;
@@ -102,6 +104,7 @@ export type Task = {
   descriptionUpdatedAt?: string | null;
   descriptionVersion?: number;
   status: 'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED';
+  type: TaskType;
   progressPercent: number;
   priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT' | null;
   assigneeUserId?: string | null;
@@ -340,5 +343,47 @@ export type TaskSearchHit = {
   _highlightResult?: {
     title?: { value: string };
     description?: { value: string };
+  };
+};
+
+export type RecurringFrequency = 'DAILY' | 'WEEKLY' | 'MONTHLY';
+
+export type RecurringRule = {
+  id: string;
+  projectId: string;
+  title: string;
+  description?: string | null;
+  frequency: RecurringFrequency;
+  interval: number;
+  daysOfWeek: number[];
+  dayOfMonth?: number | null;
+  sectionId: string;
+  assigneeUserId?: string | null;
+  priority?: Task['priority'];
+  tags: string[];
+  startDate: string;
+  endDate?: string | null;
+  lastGeneratedAt?: string | null;
+  nextScheduledAt?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  _count?: {
+    tasks: number;
+    generations: number;
+  };
+};
+
+export type ProjectStatusUpdate = {
+  id: string;
+  projectId: string;
+  authorUserId: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+  author?: {
+    id: string;
+    displayName?: string | null;
+    email?: string | null;
   };
 };

@@ -350,6 +350,30 @@ describe('Core API Integration', () => {
       .send({ title: 'Task 2', sectionId: secA.body.id })
       .expect(201);
 
+    const milestone = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Milestone 1', sectionId: secA.body.id, type: 'MILESTONE' })
+      .expect(201);
+    expect(milestone.body.type).toBe('MILESTONE');
+    expect(milestone.body.progressPercent).toBe(0);
+
+    const milestoneDone = await request(app.getHttpServer())
+      .patch(`/tasks/${milestone.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: 'DONE', version: milestone.body.version })
+      .expect(200);
+    expect(milestoneDone.body.progressPercent).toBe(100);
+    expect(milestoneDone.body.status).toBe('DONE');
+
+    const milestoneReopened = await request(app.getHttpServer())
+      .patch(`/tasks/${milestone.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: 'IN_PROGRESS', version: milestoneDone.body.version })
+      .expect(200);
+    expect(milestoneReopened.body.progressPercent).toBe(0);
+    expect(milestoneReopened.body.status).toBe('IN_PROGRESS');
+
     const childTaskCreated = await prisma.task.create({
       data: {
         projectId,

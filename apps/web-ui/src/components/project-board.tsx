@@ -25,7 +25,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { Calendar, Check, CheckCircle2, ChevronDown, ChevronRight, Circle, ExternalLink, Plus, Trash2, User } from 'lucide-react';
+import { Calendar, Check, CheckCircle2, ChevronDown, ChevronRight, Circle, Diamond, ExternalLink, Plus, Stamp, Trash2, User } from 'lucide-react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type {
@@ -63,6 +63,20 @@ function sortByPosition(tasks: Task[]) {
 }
 
 const EMPTY_CUSTOM_FIELDS: CustomFieldDefinition[] = [];
+
+function renderTaskTypeCompletionIcon(task: Task, isDone: boolean) {
+  if (task.type === 'MILESTONE') {
+    return (
+      <Diamond
+        className={cn('h-5 w-5', isDone ? 'fill-current text-emerald-600' : 'text-muted-foreground')}
+      />
+    );
+  }
+  if (task.type === 'APPROVAL') {
+    return <Stamp className={cn('h-5 w-5', isDone ? 'text-emerald-600' : 'text-muted-foreground')} />;
+  }
+  return isDone ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />;
+}
 
 function removeTaskFromGroups(groups: SectionTaskGroup[], taskId: string) {
   return groups.map((group) => ({
@@ -761,7 +775,7 @@ function TaskRow({
                 onToggleDone(task);
               }}
             >
-              {isDone ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
+              {renderTaskTypeCompletionIcon(task, isDone)}
             </button>
             {isEditingTitle ? (
               <Input
