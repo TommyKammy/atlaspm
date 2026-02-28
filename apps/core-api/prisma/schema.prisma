@@ -135,6 +135,7 @@ model Project {
   notifications InboxNotification[]
   customFieldDefinitions CustomFieldDefinition[]
   statusUpdates ProjectStatusUpdate[]
+  recurringRules RecurringRule[]
 }
 
 model ProjectStatusUpdate {
@@ -177,6 +178,7 @@ model Section {
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   tasks   Task[]
+  recurringRules RecurringRule[]
 
   @@unique([projectId, position])
 }
@@ -224,6 +226,9 @@ model Task {
   dependencies TaskDependency[] @relation("TaskDependencies")
   dependents   TaskDependency[] @relation("TaskDependents")
   customFieldValues TaskCustomFieldValue[]
+  recurringRule RecurringRule? @relation(fields: [recurringRuleId], references: [id])
+  recurringRuleId String?
+  recurringGeneration RecurringTaskGeneration?
 
   @@index([projectId, sectionId, position])
   @@index([projectId, sectionId, deletedAt, position])
@@ -232,6 +237,7 @@ model Task {
   @@index([projectId, deletedAt, status, assigneeUserId, dueAt])
   @@index([projectId, deletedAt, updatedAt])
   @@index([projectId, deletedAt, type])
+  @@index([recurringRuleId])
 }
 
 model CustomFieldDefinition {
@@ -541,4 +547,57 @@ enum WidgetType {
   TEAM_LOAD
   OVERDUE_ALERTS
   RECENT_ACTIVITY
+}
+
+enum RecurringFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+model RecurringRule {
+  id          String   @id @default(uuid())
+  projectId   String
+  title       String
+  description String?
+  frequency   RecurringFrequency
+  interval    Int      @default(1)
+  daysOfWeek  Int[]    @default([])
+  dayOfMonth  Int?
+  sectionId   String
+  assigneeUserId String?
+  priority    Priority?
+  tags        String[] @default([])
+  startDate   DateTime
+  endDate     DateTime?
+  lastGeneratedAt DateTime?
+  nextScheduledAt DateTime?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  section   Section @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+  tasks     Task[]
+  generations RecurringTaskGeneration[]
+
+  @@index([projectId, isActive])
+  @@index([isActive, nextScheduledAt])
+}
+
+model RecurringTaskGeneration {
+  id          String   @id @default(uuid())
+  ruleId      String
+  taskId      String?   @unique
+  scheduledAt DateTime
+  generatedAt DateTime @default(now())
+  status      String   @default("completed")
+  error       String?
+  retryCount  Int      @default(0)
+
+  rule RecurringRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  task Task? @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleId, scheduledAt])
+  @@index([status, retryCount])
 }
