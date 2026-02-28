@@ -27,6 +27,8 @@ import { DashboardsModule } from './dashboards/dashboards.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { CustomFieldsController } from './custom-fields/custom-fields.controller';
 import { ProjectStatusUpdatesController } from './projects/project-status-updates.controller';
+import { RecurringTasksController } from './recurring-tasks/recurring-tasks.controller';
+import { RecurringTaskWorker } from './recurring-tasks/recurring-task.worker';
 import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
 
 @Module({
@@ -45,6 +47,7 @@ import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
     NotificationsController,
     CustomFieldsController,
     ProjectStatusUpdatesController,
+    RecurringTasksController,
   ],
   providers: [
     PrismaService,
@@ -57,6 +60,7 @@ import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
     NotificationsService,
     ProjectRoleGuard,
     WorkspaceRoleGuard,
+    RecurringTaskWorker,
   ],
 })
 export class AppModule {}
