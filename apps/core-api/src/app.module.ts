@@ -26,6 +26,7 @@ import { WorkloadModule } from './workload/workload.module';
 import { DashboardsModule } from './dashboards/dashboards.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { CustomFieldsController } from './custom-fields/custom-fields.controller';
+import { ProjectStatusUpdatesController } from './projects/project-status-updates.controller';
 import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
 
 @Module({
@@ -43,6 +44,7 @@ import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
     WorkspaceAdminController,
     NotificationsController,
     CustomFieldsController,
+    ProjectStatusUpdatesController,
   ],
   providers: [
     PrismaService,

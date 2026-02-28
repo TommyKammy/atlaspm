@@ -77,6 +77,7 @@ model User {
   triggeredNotifications InboxNotification[] @relation("NotificationTriggeredBy")
   dashboards           Dashboard[]
   reminders            TaskReminder[]
+  statusUpdates        ProjectStatusUpdate[]
 }
 
 model WorkspaceMembership {
@@ -127,6 +128,22 @@ model Project {
   portfolios  PortfolioProject[]
   notifications InboxNotification[]
   customFieldDefinitions CustomFieldDefinition[]
+  statusUpdates ProjectStatusUpdate[]
+}
+
+model ProjectStatusUpdate {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  authorUserId String  @map("author_user_id")
+  body        String
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  author  User    @relation(fields: [authorUserId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@map("project_status_updates")
 }
 
 model ProjectMembership {
