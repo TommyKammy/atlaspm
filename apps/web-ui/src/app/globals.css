@@ -100,6 +100,15 @@
     min-height: 220px;
   }
 
+  .tiptap-editor-surface .ProseMirror p.is-editor-empty:first-child::before,
+  .tiptap-editor-surface .ProseMirror p.is-empty:first-child::before {
+    content: attr(data-placeholder);
+    color: hsl(var(--muted-foreground));
+    float: left;
+    height: 0;
+    pointer-events: none;
+  }
+
   .tiptap-editor-surface .ProseMirror table {
     width: 100%;
     border-collapse: collapse;
