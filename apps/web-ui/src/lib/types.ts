@@ -92,6 +92,24 @@ export type TaskCustomFieldValue = {
 
 export type TaskType = 'TASK' | 'MILESTONE' | 'APPROVAL';
 
+export type TaskApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export type TaskApproval = {
+  id: string;
+  taskId: string;
+  status: TaskApprovalStatus;
+  approverUserId?: string | null;
+  comment?: string | null;
+  requestedAt: string;
+  respondedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  approver?: {
+    id: string;
+    displayName?: string | null;
+  } | null;
+};
+
 export type Task = {
   id: string;
   projectId: string;
@@ -116,6 +134,7 @@ export type Task = {
   version: number;
   position: number;
   customFieldValues?: TaskCustomFieldValue[];
+  approval?: TaskApproval | null;
 };
 
 export type TaskComment = {

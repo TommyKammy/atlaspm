@@ -36,6 +36,12 @@ enum TaskType {
   APPROVAL
 }
 
+enum TaskApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum Priority {
   LOW
   MEDIUM
@@ -85,6 +91,7 @@ model User {
   reminders            TaskReminder[]
   statusUpdates        ProjectStatusUpdate[]
   createdForms         Form[]
+  taskApprovals        TaskApproval[]
 }
 
 model WorkspaceMembership {
@@ -232,6 +239,7 @@ model Task {
   recurringRuleId String?
   recurringGeneration RecurringTaskGeneration?
   formSubmission FormSubmission?
+  approval TaskApproval?
 
   @@index([projectId, sectionId, position])
   @@index([projectId, sectionId, deletedAt, position])
@@ -241,6 +249,25 @@ model Task {
   @@index([projectId, deletedAt, updatedAt])
   @@index([projectId, deletedAt, type])
   @@index([recurringRuleId])
+}
+
+model TaskApproval {
+  id          String             @id @default(uuid())
+  taskId      String             @unique @map("task_id")
+  status      TaskApprovalStatus @default(PENDING)
+  approverUserId String?         @map("approver_user_id")
+  comment     String?
+  requestedAt DateTime           @default(now()) @map("requested_at")
+  respondedAt DateTime?          @map("responded_at")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  task     Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  approver User? @relation(fields: [approverUserId], references: [id], onDelete: SetNull)
+
+  @@index([taskId])
+  @@index([approverUserId])
+  @@map("task_approvals")
 }
 
 model CustomFieldDefinition {

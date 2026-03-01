@@ -33,6 +33,7 @@ import type {
   TaskReminder,
   TaskTree,
 } from '@/lib/types';
+import { ApprovalSection } from '@/components/task-approval-section';
 import { DependencyManager } from '@/components/dependency-manager';
 import TaskDescriptionEditor from '@/components/editor/TaskDescriptionEditor';
 import { SubtaskList } from '@/components/subtask-list';
@@ -902,6 +903,14 @@ export default function TaskDetailDrawer({
                         <Flag className="h-4 w-4" />
                         {t('milestoneProgressFixed')}
                       </div>
+                    )}
+
+                    {currentTask?.type === 'APPROVAL' && meQuery.data?.id && (
+                      <ApprovalSection 
+                        task={currentTask} 
+                        currentUserId={meQuery.data.id} 
+                        isProjectAdmin={membersQuery.data?.some(m => m.userId === meQuery.data?.id && m.role === 'ADMIN') ?? false}
+                      />
                     )}
 
                     <div className="mt-2 flex items-center justify-between gap-2 rounded-md bg-muted/30 px-2 py-1.5">
