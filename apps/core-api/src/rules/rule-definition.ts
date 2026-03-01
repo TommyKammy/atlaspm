@@ -5,6 +5,7 @@ import { z } from 'zod';
 const triggerSchema = z.enum(['task.progress.changed']);
 const opSchema = z.enum(['eq', 'lt', 'lte', 'gt', 'gte', 'between']);
 const actionTypeSchema = z.enum(['setStatus', 'setCompletedAtNow', 'setCompletedAtNull']);
+const logicalOperatorSchema = z.enum(['AND', 'OR']);
 
 const conditionNumericRangeShape = z.object({
   op: opSchema,
@@ -56,6 +57,7 @@ const actionSchema = z
 
 export const ruleDefinitionSchema = z.object({
   trigger: triggerSchema,
+  logicalOperator: logicalOperatorSchema.default('AND'),
   conditions: z.array(conditionSchema).default([]),
   actions: z.array(actionSchema).min(1),
 });
@@ -77,12 +79,14 @@ export function templateDefinition(templateKey: string): RuleDefinition {
   if (templateKey === 'progress_to_done') {
     return {
       trigger: 'task.progress.changed',
+      logicalOperator: 'AND',
       conditions: [{ field: 'progressPercent', op: 'eq', value: 100 }],
       actions: [{ type: 'setStatus', status: TaskStatus.DONE }, { type: 'setCompletedAtNow' }],
     };
   }
   return {
     trigger: 'task.progress.changed',
+    logicalOperator: 'AND',
     conditions: [{ field: 'progressPercent', op: 'between', min: 0, max: 99 }],
     actions: [{ type: 'setStatus', status: TaskStatus.IN_PROGRESS }, { type: 'setCompletedAtNull' }],
   };

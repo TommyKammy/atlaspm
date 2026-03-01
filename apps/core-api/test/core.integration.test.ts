@@ -1250,12 +1250,38 @@ describe('Core API Integration', () => {
         enabled: true,
         definition: {
           trigger: 'task.progress.changed',
-          conditions: [{ field: 'customFieldNumber', fieldId: scoreField.body.id, op: 'gt', value: 80 }],
+          logicalOperator: 'OR',
+          conditions: [
+            { field: 'progressPercent', op: 'eq', value: 100 },
+            { field: 'customFieldNumber', fieldId: scoreField.body.id, op: 'gt', value: 80 },
+          ],
           actions: [{ type: 'setStatus', status: 'BLOCKED' }],
         },
       })
       .expect(201);
     expect(customRule.body.id).toBeTruthy();
+    expect(customRule.body.definition?.logicalOperator).toBe('OR');
+
+    const andRule = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/rules`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: 'Only done when all conditions match',
+        templateKey: 'custom_field_score_gate_and',
+        enabled: true,
+        definition: {
+          trigger: 'task.progress.changed',
+          logicalOperator: 'AND',
+          conditions: [
+            { field: 'progressPercent', op: 'eq', value: 100 },
+            { field: 'customFieldNumber', fieldId: scoreField.body.id, op: 'gt', value: 80 },
+          ],
+          actions: [{ type: 'setStatus', status: 'DONE' }],
+        },
+      })
+      .expect(201);
+    expect(andRule.body.id).toBeTruthy();
+    expect(andRule.body.definition?.logicalOperator).toBe('AND');
 
     const patchTriggerRule = await request(app.getHttpServer())
       .patch(`/tasks/${taskId}/custom-fields`)
@@ -1266,6 +1292,22 @@ describe('Core API Integration', () => {
       })
       .expect(200);
     expect(patchTriggerRule.body.status).toBe('BLOCKED');
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/rules`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: 'Invalid empty conditions',
+        templateKey: 'custom_field_score_gate',
+        enabled: true,
+        definition: {
+          trigger: 'task.progress.changed',
+          logicalOperator: 'AND',
+          conditions: [],
+          actions: [{ type: 'setStatus', status: 'BLOCKED' }],
+        },
+      })
+      .expect(400);
 
     const customFieldAudit = await prisma.auditEvent.findFirst({
       where: { entityType: 'Task', entityId: taskId, action: 'task.custom_fields.updated' },

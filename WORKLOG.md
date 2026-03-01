@@ -2087,3 +2087,63 @@
   - `pnpm --filter @atlaspm/playwright e2e` (33 passed)
 - Risks/known gaps:
   - Existing clients/integrations that call `POST /tasks/:id/complete` directly may now receive 409 for parent tasks with open subtasks and must retry with `force: true` intentionally.
+
+## 2026-03-01 - Issue #83: Rules UI extension (IF + AND/OR + custom field conditions)
+- What changed:
+  - Extended rule definition schema with logical operator support while preserving backward compatibility:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/rules/rule-definition.ts`
+    - Added `logicalOperator: 'AND' | 'OR'` with default `AND`.
+    - Ensured template definitions explicitly use `AND`.
+  - Updated rule execution to evaluate conditions by operator:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/tasks/tasks.controller.ts`
+    - `AND` uses `every`, `OR` uses `some`; empty condition list treated as non-match.
+  - Expanded web rule editor to support multiple conditions + AND/OR and custom-field condition rows:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/projects/[id]/rules/page.tsx`
+    - Added add/remove condition rows and per-row field/op/value editing.
+    - Save payload now includes `logicalOperator` and full `conditions[]`.
+  - Updated shared web rule types:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/types.ts`
+  - Added rule definition unit tests:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/rule-definition.test.ts`
+    - Covers legacy payload defaulting, OR acceptance, and template compatibility.
+  - Extended integration assertion for logicalOperator persistence:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+- Why:
+  - Implement Issue #83 requirements for minimal IF builder with AND/OR and custom-field conditions, without breaking existing rule definitions/templates.
+- How tested (exact commands):
+  - `pnpm -r --if-present lint`
+  - `pnpm -r --if-present type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Current builder is intentionally minimal and numeric-condition oriented; richer condition groups/nested logic are out of scope.
+  - Node engine warning remains in local env (`v25` vs expected `>=20 <21`), but tests/build passed.
+
+## 2026-03-01 - PR #100 review follow-up (Issue #83 minimal fixes)
+- What changed:
+  - Addressed review comment #1 (type safety for legacy rules):
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/types.ts`
+    - made `RuleDefinition.logicalOperator` optional in API-facing type to reflect legacy persisted definitions that may omit it.
+  - Addressed review comment #2 (template key mismatch in test):
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/rule-definition.test.ts`
+    - replaced `progress_incomplete` assertion with actual key `progress_to_in_progress`.
+  - Addressed review comment #3 (missing OR/AND execution coverage):
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+    - added multi-condition `OR` rule and multi-condition `AND` rule assertions in custom-field rule flow to verify operator behavior.
+  - Addressed review comment #4 with safe compatibility strategy:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/rules/rules.controller.ts`
+    - rejected create/patch payloads with empty `definition.conditions` via 400, while keeping parser compatibility for legacy stored definitions.
+  - Minor type fix in rules editor state after optional API type update:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/projects/[id]/rules/page.tsx`
+    - narrowed editor state `logicalOperator` to non-nullable local type.
+- Why:
+  - Incorporate valid PR #100 review feedback without breaking backward compatibility or existing persisted rules.
+- How tested (exact commands):
+  - `pnpm -r --if-present lint`
+  - `pnpm -r --if-present type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - `GET /projects/:id/rules` still returns raw persisted definition JSON; editor normalization remains client-side (`ensureRuleDefinition`).
