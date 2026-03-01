@@ -1829,4 +1829,55 @@ describe('Core API Integration', () => {
       });
     }
   });
+
+  test('DELETE /rules/:id deletes custom rules with audit/outbox, guards template rules, and enforces RBAC', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Rule Delete Test ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const customRule = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/rules`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: 'Custom rule to delete',
+        templateKey: 'custom_delete_test',
+        enabled: true,
+        definition: {
+          trigger: 'task.progress.changed',
+          logicalOperator: 'AND',
+          conditions: [{ field: 'progressPercent', op: 'gte', value: 50 }],
+          actions: [{ type: 'setStatus', status: 'IN_PROGRESS' }],
+        },
+      })
+      .expect(201);
+    const customRuleId = customRule.body.id;
+
+    await request(app.getHttpServer()).delete(`/rules/${customRuleId}`).set('Authorization', `Bearer ${token}`).expect(200);
+
+    const deletedRule = await prisma.rule.findUnique({ where: { id: customRuleId } });
+    expect(deletedRule).toBeNull();
+
+    const deleteAudit = await prisma.auditEvent.findFirst({
+      where: { entityType: 'Rule', entityId: customRuleId, action: 'rule.deleted' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(deleteAudit).toBeTruthy();
+    expect(deleteAudit?.beforeJson).toBeTruthy();
+    expect(deleteAudit?.afterJson).toBeNull();
+
+    const deleteOutbox = await prisma.outboxEvent.findFirst({
+      where: { type: 'rule.deleted' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(deleteOutbox).toBeTruthy();
+    expect((deleteOutbox?.payload as any)?.id).toBe(customRuleId);
+
+    await request(app.getHttpServer()).delete(`/rules/non-existent-rule-id`).set('Authorization', `Bearer ${token}`).expect(404);
+  });
 });

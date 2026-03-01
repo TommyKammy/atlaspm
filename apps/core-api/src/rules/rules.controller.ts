@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Inject, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
@@ -149,6 +149,41 @@ export class RulesController {
         payload: updated,
       });
       return updated;
+    });
+  }
+
+  @Delete('rules/:id')
+  async delete(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
+    const rule = await this.prisma.rule.findUnique({ where: { id } });
+    if (!rule) {
+      throw new NotFoundException('Rule not found');
+    }
+
+    await this.domain.requireProjectRole(rule.projectId, req.user.sub, ProjectRole.MEMBER);
+
+    const defaultTemplateKeys = ['progress_to_done', 'progress_to_in_progress'];
+    if (rule.templateKey && defaultTemplateKeys.includes(rule.templateKey)) {
+      throw new ConflictException({
+        error: 'TEMPLATE_RULE_DELETION_FORBIDDEN',
+        message: 'Template-backed rules cannot be deleted. Disable the rule instead.',
+      });
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.rule.delete({ where: { id } });
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'Rule',
+        entityId: id,
+        action: 'rule.deleted',
+        beforeJson: rule,
+        afterJson: null,
+        correlationId: req.correlationId,
+        outboxType: 'rule.deleted',
+        payload: { id, projectId: rule.projectId, name: rule.name },
+      });
+      return { success: true };
     });
   }
 
