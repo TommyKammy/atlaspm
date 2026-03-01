@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import path from 'node:path';
 
 const API = process.env.E2E_CORE_API_URL ?? 'http://localhost:3001';
@@ -46,6 +46,21 @@ async function dragBoardTaskToTask(page: Page, taskTitle: string, targetTitle: s
   await page.mouse.down();
   await page.mouse.move(sourceBox.x + 36, sourceBox.y + sourceBox.height / 2);
   await page.mouse.move(targetBox.x + 24, targetBox.y + targetBox.height / 2, { steps: 16 });
+  await page.mouse.up();
+}
+
+async function dragLocatorToLocator(page: Page, source: Locator, target: Locator) {
+  await expect(source).toBeVisible();
+  await expect(target).toBeVisible();
+  await source.scrollIntoViewIfNeeded();
+  await target.scrollIntoViewIfNeeded();
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error('Unable to resolve drag coordinates');
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2 + 12, sourceBox.y + sourceBox.height / 2, { steps: 3 });
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 16 });
   await page.mouse.up();
 }
 
@@ -255,9 +270,10 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   const taskAId = taskAData.flatMap((g: any) => g.tasks).find((task: any) => task.title === 'Task A').id;
   await expect(page.locator(`[data-testid="calendar-no-due-task-${taskAId}"]`)).toBeVisible();
   await expect(page.locator(`[data-testid="calendar-day-${targetDate}"]`)).toBeVisible();
-  await page.locator(`[data-testid="calendar-no-due-task-${taskAId}"]`).dragTo(
+  await dragLocatorToLocator(
+    page,
+    page.locator(`[data-testid="calendar-no-due-task-${taskAId}"]`),
     page.locator(`[data-testid="calendar-day-${targetDate}"]`),
-    { force: true },
   );
   await expect
     .poll(async () => {
@@ -269,9 +285,10 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
 
   await page.click('[data-testid="calendar-field-start"]');
   await expect(page.locator(`[data-testid="calendar-no-start-task-${taskAId}"]`)).toBeVisible();
-  await page.locator(`[data-testid="calendar-no-start-task-${taskAId}"]`).dragTo(
+  await dragLocatorToLocator(
+    page,
+    page.locator(`[data-testid="calendar-no-start-task-${taskAId}"]`),
     page.locator(`[data-testid="calendar-day-${targetDate}"]`),
-    { force: true },
   );
   await expect
     .poll(async () => {
@@ -280,9 +297,11 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
       return taskAAfter?.startAt ? String(taskAAfter.startAt).slice(0, 10) : null;
     })
     .toBe(targetDate);
-  await page.locator(`[data-testid="calendar-task-${taskAId}"]`).dragTo(page.locator('[data-testid="calendar-no-start"]'), {
-    force: true,
-  });
+  await dragLocatorToLocator(
+    page,
+    page.locator(`[data-testid="calendar-task-${taskAId}"]`),
+    page.locator('[data-testid="calendar-no-start"]'),
+  );
   await expect
     .poll(async () => {
       const taskGroups = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);
