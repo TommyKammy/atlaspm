@@ -3,7 +3,7 @@ import { AuthGuard } from '../auth/auth.guard';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { WorkloadService, WorkloadFilters } from './workload.service';
-import { IsOptional, IsString, IsDateString } from 'class-validator';
+import { IsOptional, IsString, IsDateString, IsEnum, IsInt, Min } from 'class-validator';
 
 class WorkloadQueryDto {
   @IsOptional()
@@ -17,6 +17,15 @@ class WorkloadQueryDto {
   @IsOptional()
   @IsString()
   projectId?: string;
+
+  @IsOptional()
+  @IsEnum(['tasks', 'effort'])
+  viewMode?: 'tasks' | 'effort';
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  periodWeeks?: number;
 }
 
 @Controller('workload')
@@ -38,6 +47,8 @@ export class WorkloadController {
       startDate: query.startDate ? new Date(query.startDate) : undefined,
       endDate: query.endDate ? new Date(query.endDate) : undefined,
       projectId: query.projectId,
+      viewMode: query.viewMode,
+      periodWeeks: query.periodWeeks,
     };
 
     return this.workloadService.getUserWorkload(workspaceId, req.user.sub, filters, req.user.sub);
@@ -58,6 +69,8 @@ export class WorkloadController {
       startDate: query.startDate ? new Date(query.startDate) : undefined,
       endDate: query.endDate ? new Date(query.endDate) : undefined,
       projectId: query.projectId,
+      viewMode: query.viewMode,
+      periodWeeks: query.periodWeeks,
     };
 
     return this.workloadService.getUserWorkload(workspaceId, userId, filters, req.user.sub);
@@ -77,6 +90,8 @@ export class WorkloadController {
       startDate: query.startDate ? new Date(query.startDate) : undefined,
       endDate: query.endDate ? new Date(query.endDate) : undefined,
       projectId: query.projectId,
+      viewMode: query.viewMode,
+      periodWeeks: query.periodWeeks,
     };
 
     return this.workloadService.getTeamWorkload(workspaceId, filters, req.user.sub);
@@ -96,6 +111,8 @@ export class WorkloadController {
     const filters: WorkloadFilters = {
       startDate: query.startDate ? new Date(query.startDate) : undefined,
       endDate: query.endDate ? new Date(query.endDate) : undefined,
+      viewMode: query.viewMode,
+      periodWeeks: query.periodWeeks,
     };
 
     return this.workloadService.getProjectWorkload(workspaceId, projectId, filters, req.user.sub);
