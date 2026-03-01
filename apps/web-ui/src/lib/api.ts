@@ -1,8 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/lib/query-keys';
 import type { Project, TaskProjectLink } from '@/lib/types';
 
 const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL ?? 'http://localhost:3001';
 export const apiBaseUrl = API_URL;
+
+// Raw link response from mutations (without included project relation)
+type TaskProjectLinkResponse = {
+  id: string;
+  taskId: string;
+  projectId: string;
+  isPrimary: boolean;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+};
 
 export type ApiOptions = {
   method?: string;
@@ -75,19 +87,19 @@ export async function addTaskToProject(taskId: string, projectId: string) {
   return api(`/tasks/${taskId}/projects`, {
     method: 'POST',
     body: { projectId },
-  }) as Promise<TaskProjectLink>;
+  }) as Promise<TaskProjectLinkResponse>;
 }
 
 export async function removeTaskFromProject(taskId: string, projectId: string) {
   return api(`/tasks/${taskId}/projects/${projectId}`, {
     method: 'DELETE',
-  }) as Promise<TaskProjectLink>;
+  }) as Promise<TaskProjectLinkResponse>;
 }
 
 export async function setPrimaryProject(taskId: string, projectId: string) {
   return api(`/tasks/${taskId}/projects/${projectId}/primary`, {
     method: 'POST',
-  }) as Promise<TaskProjectLink>;
+  }) as Promise<TaskProjectLinkResponse>;
 }
 
 // Task Project Links Mutations
@@ -99,7 +111,7 @@ export function useAddTaskToProject() {
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['task', variables.taskId, 'projects'] });
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(variables.projectId) });
     },
   });
 }
@@ -112,7 +124,7 @@ export function useRemoveTaskFromProject() {
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['task', variables.taskId, 'projects'] });
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(variables.projectId) });
     },
   });
 }
@@ -123,9 +135,15 @@ export function useSetPrimaryProject() {
     mutationFn: async ({ taskId, projectId }: { taskId: string; projectId: string }) => {
       return setPrimaryProject(taskId, projectId);
     },
-    onSuccess: (_, variables) => {
+    onSuccess: async (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['task', variables.taskId, 'projects'] });
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(variables.taskId) });
+
+      const taskDetail = queryClient.getQueryData<{ projectId: string }>(queryKeys.taskDetail(variables.taskId));
+      if (taskDetail) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(taskDetail.projectId) });
+      }
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(variables.projectId) });
     },
   });
 }

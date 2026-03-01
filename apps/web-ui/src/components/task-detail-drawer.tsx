@@ -406,7 +406,7 @@ export default function TaskDetailDrawer({
   const projectQuery = useQuery<{ id: string; workspaceId: string; name: string }>({
     queryKey: ['project', projectId],
     queryFn: () => api(`/projects/${projectId}`),
-    enabled: !!projectId,
+    enabled: enabled && !!projectId,
   });
 
   const projectsQuery = useProjects(projectQuery.data?.workspaceId ?? '');
