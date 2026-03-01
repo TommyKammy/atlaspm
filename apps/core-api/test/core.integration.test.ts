@@ -1457,6 +1457,95 @@ describe('Core API Integration', () => {
       .expect(400);
   });
 
+  test('task project links support multi-home with primary switch and auth checks', async () => {
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = wsRes.body[0].id as string;
+
+    const projectA = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Multi-home A ${Date.now()}` })
+      .expect(201);
+    const projectB = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Multi-home B ${Date.now()}` })
+      .expect(201);
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectA.body.id}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSection = sectionsRes.body.find((section: any) => section.isDefault);
+    expect(defaultSection?.id).toBeTruthy();
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectA.body.id}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Multi-home Task', sectionId: defaultSection.id })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+
+    await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/projects`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ projectId: projectB.body.id })
+      .expect(201);
+
+    const linksAfterAdd = await request(app.getHttpServer())
+      .get(`/tasks/${taskId}/projects`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(linksAfterAdd.body.length).toBe(2);
+    expect(linksAfterAdd.body.some((link: any) => link.projectId === projectA.body.id && link.isPrimary)).toBe(true);
+    expect(linksAfterAdd.body.some((link: any) => link.projectId === projectB.body.id && !link.isPrimary)).toBe(true);
+
+    await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/projects/${projectB.body.id}/primary`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+
+    const taskAfterSwitch = await request(app.getHttpServer())
+      .get(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(taskAfterSwitch.body.projectId).toBe(projectB.body.id);
+
+    await request(app.getHttpServer())
+      .delete(`/tasks/${taskId}/projects/${projectA.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const linksAfterDelete = await request(app.getHttpServer())
+      .get(`/tasks/${taskId}/projects`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(linksAfterDelete.body.length).toBe(1);
+    expect(linksAfterDelete.body[0].projectId).toBe(projectB.body.id);
+    expect(linksAfterDelete.body[0].isPrimary).toBe(true);
+
+    const auth = app.get(AuthService);
+    const outsiderToken = await auth.mintDevToken(
+      `multi-home-outsider-${Date.now()}`,
+      `multi-home-outsider-${Date.now()}@example.com`,
+      'Multi-home Outsider',
+    );
+    await request(app.getHttpServer())
+      .get(`/tasks/${taskId}/projects`)
+      .set('Authorization', `Bearer ${outsiderToken}`)
+      .expect(404);
+
+    const outbox = await request(app.getHttpServer())
+      .get(`/outbox?projectId=${projectB.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(outbox.body.some((event: any) => event.type === 'task.project_linked')).toBe(true);
+    expect(outbox.body.some((event: any) => event.type === 'task.primary_project_changed')).toBe(true);
+  });
+
   test('task retention worker purges expired soft-deleted tasks and keeps recent deletions', async () => {
     const wsRes = await request(app.getHttpServer())
       .get('/workspaces')
