@@ -83,6 +83,7 @@ function RuleEditor({
   onSave: (patch: { name: string; definition: RuleDefinition }) => Promise<void>;
   onCancel: () => void;
 }) {
+  const { t } = useI18n();
   const base = ensureRuleDefinition(rule);
   const numberCustomFields = useMemo(
     () =>
@@ -136,7 +137,7 @@ function RuleEditor({
     <div className="mt-3 space-y-3 rounded-md border bg-card p-3">
       <div className="grid gap-2 md:grid-cols-2">
         <label className="space-y-1 text-xs text-muted-foreground">
-          Rule name
+          {t('ruleName')}
           <input
             className={fieldBase}
             value={name}
@@ -145,7 +146,7 @@ function RuleEditor({
           />
         </label>
         <label className="space-y-1 text-xs text-muted-foreground">
-          Trigger
+          {t('trigger')}
           <select
             className={fieldBase}
             value={trigger}
@@ -157,15 +158,15 @@ function RuleEditor({
           </select>
         </label>
         <label className="space-y-1 text-xs text-muted-foreground">
-          Condition mode
+          {t('conditionMode')}
           <select
             className={fieldBase}
             value={logicalOperator}
             onChange={(e) => setLogicalOperator(e.target.value as LogicalOperator)}
             data-testid={`rule-condition-mode-${rule.id}`}
           >
-            <option value="AND">All conditions (AND)</option>
-            <option value="OR">Any condition (OR)</option>
+            <option value="AND">{t('conditionModeAll')}</option>
+            <option value="OR">{t('conditionModeAny')}</option>
           </select>
         </label>
       </div>
@@ -177,7 +178,7 @@ function RuleEditor({
           return (
             <div key={`${rule.id}-condition-${index}`} className="grid gap-2 md:grid-cols-5">
               <label className="space-y-1 text-xs text-muted-foreground">
-                Condition field
+                {t('conditionField')}
                 <select
                   className={fieldBase}
                   value={selectedFieldKey}
@@ -218,25 +219,25 @@ function RuleEditor({
                 </select>
               </label>
               <label className="space-y-1 text-xs text-muted-foreground">
-                Condition op
+                {t('conditionOp')}
                 <select
                   className={fieldBase}
                   value={condition.op}
                   data-testid={`rule-condition-op-${rule.id}-${index}`}
                   onChange={(e) => updateConditionAt(index, withOperator(condition, e.target.value as RuleCondition['op']))}
                 >
-                  <option value="eq">eq</option>
-                  <option value="lt">lt</option>
-                  <option value="lte">lte</option>
-                  <option value="gt">gt</option>
-                  <option value="gte">gte</option>
-                  <option value="between">between</option>
+                  <option value="eq">{t('opEq')}</option>
+                  <option value="lt">{t('opLt')}</option>
+                  <option value="lte">{t('opLte')}</option>
+                  <option value="gt">{t('opGt')}</option>
+                  <option value="gte">{t('opGte')}</option>
+                  <option value="between">{t('opBetween')}</option>
                 </select>
               </label>
               {condition.op === 'between' ? (
                 <>
                   <label className="space-y-1 text-xs text-muted-foreground">
-                    Min
+                    {t('min')}
                     <input
                       className={fieldBase}
                       type="number"
@@ -245,7 +246,7 @@ function RuleEditor({
                     />
                   </label>
                   <label className="space-y-1 text-xs text-muted-foreground">
-                    Max
+                    {t('max')}
                     <input
                       className={fieldBase}
                       type="number"
@@ -256,7 +257,7 @@ function RuleEditor({
                 </>
               ) : (
                 <label className="space-y-1 text-xs text-muted-foreground">
-                  Value
+                  {t('value')}
                   <input
                     className={fieldBase}
                     type="number"
@@ -275,7 +276,7 @@ function RuleEditor({
                     setConditions((current) => current.filter((_, cursor) => cursor !== index))
                   }
                 >
-                  Remove
+                  {t('remove')}
                 </button>
               </div>
             </div>
@@ -287,22 +288,22 @@ function RuleEditor({
           data-testid={`rule-condition-add-${rule.id}`}
           onClick={() => setConditions((current) => [...current, defaultRuleCondition()])}
         >
-          Add condition
+          {t('addCondition')}
         </button>
       </div>
 
       <div className="grid gap-2 md:grid-cols-4">
         <label className="space-y-1 text-xs text-muted-foreground">
-          Set status
+          {t('setStatus')}
           <select
             className={fieldBase}
             value={actionStatus}
             onChange={(e) => setActionStatus(e.target.value as 'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED')}
           >
-            <option value="TODO">TODO</option>
-            <option value="IN_PROGRESS">IN_PROGRESS</option>
-            <option value="DONE">DONE</option>
-            <option value="BLOCKED">BLOCKED</option>
+            <option value="TODO">{t('statusTodo')}</option>
+            <option value="IN_PROGRESS">{t('statusInProgress')}</option>
+            <option value="DONE">{t('statusDone')}</option>
+            <option value="BLOCKED">{t('statusBlocked')}</option>
           </select>
         </label>
       </div>
@@ -310,11 +311,11 @@ function RuleEditor({
       <div className="flex items-center gap-4 text-xs text-muted-foreground">
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={setNow} onChange={(e) => setSetNow(e.target.checked)} />
-          completedAt now
+          {t('completedAtNow')}
         </label>
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={setNull} onChange={(e) => setSetNull(e.target.checked)} />
-          completedAt null
+          {t('completedAtNull')}
         </label>
       </div>
 
@@ -326,14 +327,14 @@ function RuleEditor({
           disabled={hasInvalidCustomFieldCondition || !conditions.length}
           onClick={() => void save()}
         >
-          Save
+          {t('save')}
         </button>
         <button
           type="button"
           className="h-8 rounded border bg-background px-3 text-xs text-muted-foreground hover:text-foreground"
           onClick={onCancel}
         >
-          Cancel
+          {t('cancel')}
         </button>
       </div>
     </div>
@@ -728,7 +729,7 @@ export default function RulesPage() {
   const rules = useMemo(() => rulesQuery.data ?? [], [rulesQuery.data]);
   const customFields = useMemo(() => customFieldsQuery.data ?? [], [customFieldsQuery.data]);
 
-  if (!projectId) return <div>Loading...</div>;
+  if (!projectId) return <div>{t('loading')}</div>;
 
   return (
     <div className="space-y-3">
@@ -766,7 +767,7 @@ export default function RulesPage() {
           <div className="ml-1 flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="font-medium" data-testid={`rule-name-${rule.id}`}>{rule.name}</div>
-              <div className="text-[11px] text-muted-foreground">template: {rule.templateKey} | cooldown: {rule.cooldownSec}s</div>
+              <div className="text-[11px] text-muted-foreground">{t('ruleTemplateInfo').replace('{{templateKey}}', rule.templateKey).replace('{{cooldownSec}}', String(rule.cooldownSec))}</div>
             </div>
             <div className="flex gap-2">
               <button
@@ -775,14 +776,14 @@ export default function RulesPage() {
                 className="h-8 rounded border bg-background px-3 text-xs text-muted-foreground hover:text-foreground"
                 onClick={() => setEditingRuleId(rule.id)}
               >
-                Edit
+                {t('edit')}
               </button>
               <button
                 type="button"
                 className="h-8 rounded border bg-background px-3 text-xs text-muted-foreground hover:text-foreground"
                 onClick={() => toggleMutation.mutate({ id: rule.id, enabled: rule.enabled })}
               >
-                {rule.enabled ? 'Disable' : 'Enable'}
+                {rule.enabled ? t('disable') : t('enable')}
               </button>
               {canCreateRule ? (
                 <button
@@ -814,7 +815,7 @@ export default function RulesPage() {
       ))}
 
       {!rules.length ? (
-        <div className="rounded-lg border border-dashed bg-card p-6 text-sm text-muted-foreground">No rules found.</div>
+        <div className="rounded-lg border border-dashed bg-card p-6 text-sm text-muted-foreground">{t('noRules')}</div>
       ) : null}
     </div>
   );
