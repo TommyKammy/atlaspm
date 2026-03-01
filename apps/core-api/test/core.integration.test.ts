@@ -1830,7 +1830,7 @@ describe('Core API Integration', () => {
     }
   });
 
-  test('DELETE /rules/:id deletes custom rules with audit/outbox, guards template rules, and enforces RBAC', async () => {
+  test('DELETE /rules/:id deletes custom rules with audit/outbox and returns 404 for missing rules', async () => {
     const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
     const workspaceId = wsRes.body[0].id;
 
@@ -1871,12 +1871,15 @@ describe('Core API Integration', () => {
     expect(deleteAudit?.beforeJson).toBeTruthy();
     expect(deleteAudit?.afterJson).toBeNull();
 
-    const deleteOutbox = await prisma.outboxEvent.findFirst({
+    const recentRuleDeletedOutboxEvents = await prisma.outboxEvent.findMany({
       where: { type: 'rule.deleted' },
       orderBy: { createdAt: 'desc' },
+      take: 20,
     });
+    const deleteOutbox = recentRuleDeletedOutboxEvents.find(
+      (event) => (event.payload as any)?.id === customRuleId,
+    );
     expect(deleteOutbox).toBeTruthy();
-    expect((deleteOutbox?.payload as any)?.id).toBe(customRuleId);
 
     await request(app.getHttpServer()).delete(`/rules/non-existent-rule-id`).set('Authorization', `Bearer ${token}`).expect(404);
   });

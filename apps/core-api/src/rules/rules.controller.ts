@@ -161,10 +161,9 @@ export class RulesController {
 
     await this.domain.requireProjectRole(rule.projectId, req.user.sub, ProjectRole.MEMBER);
 
-    const defaultTemplateKeys = ['progress_to_done', 'progress_to_in_progress'];
-    if (rule.templateKey && defaultTemplateKeys.includes(rule.templateKey)) {
+    if (rule.templateKey && this.domain.isDefaultRuleTemplateKey(rule.templateKey)) {
       throw new ConflictException({
-        error: 'TEMPLATE_RULE_DELETION_FORBIDDEN',
+        code: 'TEMPLATE_RULE_DELETION_FORBIDDEN',
         message: 'Template-backed rules cannot be deleted. Disable the rule instead.',
       });
     }
