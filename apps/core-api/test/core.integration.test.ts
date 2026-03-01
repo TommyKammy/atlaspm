@@ -1322,6 +1322,116 @@ describe('Core API Integration', () => {
     expect(outbox.body.some((event: any) => event.type === 'task.custom_fields.updated')).toBe(true);
   });
 
+  test('time tracking APIs update spent/estimate and reject logs on soft-deleted tasks', async () => {
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Time Tracking ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSection = sectionsRes.body.find((section: any) => section.isDefault);
+    expect(defaultSection?.id).toBeTruthy();
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Time tracked task', sectionId: defaultSection.id })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+
+    const firstLog = await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/time-logs`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ minutes: 30, description: 'Initial log' })
+      .expect(201);
+    expect(firstLog.body.minutes).toBe(30);
+
+    const taskAfterCreate = await request(app.getHttpServer())
+      .get(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(taskAfterCreate.body.spentMinutes).toBe(30);
+
+    await request(app.getHttpServer())
+      .patch(`/time-logs/${firstLog.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ minutes: 45, description: 'Adjusted log' })
+      .expect(200);
+
+    const taskAfterUpdate = await request(app.getHttpServer())
+      .get(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(taskAfterUpdate.body.spentMinutes).toBe(45);
+
+    await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/estimate`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ estimateMinutes: 120 })
+      .expect(200);
+
+    const agg = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/time-tracking/aggregation`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(agg.body.totalEstimateMinutes).toBe(120);
+    expect(agg.body.totalSpentMinutes).toBe(45);
+    expect(agg.body.byTask.some((item: any) => item.taskId === taskId && item.totalMinutes === 45)).toBe(true);
+
+    await request(app.getHttpServer())
+      .delete(`/time-logs/${firstLog.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const taskAfterDelete = await request(app.getHttpServer())
+      .get(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(taskAfterDelete.body.spentMinutes).toBe(0);
+
+    const secondLog = await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/time-logs`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ minutes: 10, description: 'Log before task soft delete' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .delete(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/time-logs/${secondLog.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ minutes: 11 })
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .delete(`/time-logs/${secondLog.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(404);
+
+    const outbox = await request(app.getHttpServer())
+      .get(`/outbox?projectId=${projectId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(outbox.body.some((event: any) => event.type === 'time_log.created')).toBe(true);
+    expect(outbox.body.some((event: any) => event.type === 'time_log.updated')).toBe(true);
+    expect(outbox.body.some((event: any) => event.type === 'time_log.deleted')).toBe(true);
+    expect(outbox.body.some((event: any) => event.type === 'task.estimate.updated')).toBe(true);
+  });
+
   test('task retention worker purges expired soft-deleted tasks and keeps recent deletions', async () => {
     const wsRes = await request(app.getHttpServer())
       .get('/workspaces')

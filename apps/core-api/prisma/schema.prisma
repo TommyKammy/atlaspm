@@ -92,6 +92,7 @@ model User {
   statusUpdates        ProjectStatusUpdate[]
   createdForms         Form[]
   taskApprovals        TaskApproval[]
+  timeLogs             TaskTimeLog[]
 }
 
 model WorkspaceMembership {
@@ -215,6 +216,8 @@ model Task {
   deletedByUserId String?   @map("deleted_by_user_id")
   position       Int
   version        Int        @default(1)
+  estimateMinutes Int?      @map("estimate_minutes")
+  spentMinutes   Int        @default(0) @map("spent_minutes")
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
@@ -240,6 +243,7 @@ model Task {
   recurringGeneration RecurringTaskGeneration?
   formSubmission FormSubmission?
   approval TaskApproval?
+  timeLogs TaskTimeLog[]
 
   @@index([projectId, sectionId, position])
   @@index([projectId, sectionId, deletedAt, position])
@@ -268,6 +272,24 @@ model TaskApproval {
   @@index([taskId])
   @@index([approverUserId])
   @@map("task_approvals")
+}
+
+model TaskTimeLog {
+  id          String   @id @default(uuid())
+  taskId      String   @map("task_id")
+  userId      String   @map("user_id")
+  minutes     Int
+  description String?
+  loggedAt    DateTime @default(now()) @map("logged_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, loggedAt])
+  @@index([userId, loggedAt])
+  @@map("task_time_logs")
 }
 
 model CustomFieldDefinition {
