@@ -138,6 +138,7 @@ model Project {
   memberships ProjectMembership[]
   sections    Section[]
   tasks       Task[]
+  taskLinks   TaskProjectLink[]
   rules       Rule[]
   webhooks    Webhook[]
   portfolios  PortfolioProject[]
@@ -223,6 +224,7 @@ model Task {
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   section Section @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+  projectLinks TaskProjectLink[]
   comments TaskComment[]
   mentions TaskMention[]
   notifications InboxNotification[]
@@ -736,4 +738,24 @@ model FormAnswer {
 
   @@unique([submissionId, questionId])
   @@map("form_answers")
+}
+
+// Multi-home support: Task can belong to multiple projects
+model TaskProjectLink {
+  id          String   @id @default(uuid())
+  taskId      String   @map("task_id")
+  projectId   String   @map("project_id")
+  isPrimary   Boolean  @default(false) @map("is_primary") // Original project for backward compatibility
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  task    Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, projectId])
+  @@index([taskId])
+  @@index([projectId])
+  @@index([projectId, deletedAt])
+  @@map("task_project_links")
 }

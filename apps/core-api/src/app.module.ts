@@ -32,10 +32,11 @@ import { RecurringTaskWorker } from './recurring-tasks/recurring-task.worker';
 import { FormsController } from './forms/forms.controller';
 import { TaskApprovalController } from './task-approvals/task-approval.controller';
 import { TaskTimeTrackingController } from './task-time-tracking/task-time-tracking.controller';
+import { TaskProjectLinksModule } from './task-project-links/task-project-links.module';
 import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, SearchModule, PortfoliosModule, WorkloadModule, DashboardsModule, IntegrationsModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, SearchModule, PortfoliosModule, WorkloadModule, DashboardsModule, IntegrationsModule, TaskProjectLinksModule],
   controllers: [
     WorkspacesController,
     ProjectsController,
