@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, NotFoundException, Inject } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
@@ -38,8 +38,8 @@ class UpdateEstimateDto {
 @UseGuards(AuthGuard)
 export class TaskTimeTrackingController {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly domain: DomainService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(DomainService) private readonly domain: DomainService,
   ) {}
 
   @Get('tasks/:id/time-logs')
@@ -119,7 +119,10 @@ export class TaskTimeTrackingController {
     @CurrentRequest() req: AppRequest,
   ) {
     const timeLog = await this.prisma.taskTimeLog.findFirst({
-      where: { id },
+      where: {
+        id,
+        task: { deletedAt: null },
+      },
       include: { task: true, user: { select: { id: true, displayName: true } } },
     });
 
@@ -172,7 +175,10 @@ export class TaskTimeTrackingController {
     @CurrentRequest() req: AppRequest,
   ) {
     const timeLog = await this.prisma.taskTimeLog.findFirst({
-      where: { id },
+      where: {
+        id,
+        task: { deletedAt: null },
+      },
       include: { task: true, user: { select: { id: true, displayName: true } } },
     });
 
