@@ -1,12 +1,12 @@
 import { Body, Controller, Delete, Get, Inject, Param, Post, UseGuards } from '@nestjs/common';
-import { IsString } from 'class-validator';
+import { IsUUID } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { TaskProjectLinksService } from './task-project-links.service';
 
 class LinkProjectDto {
-  @IsString()
+  @IsUUID()
   projectId!: string;
 }
 

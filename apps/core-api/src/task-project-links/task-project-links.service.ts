@@ -95,6 +95,7 @@ export class TaskProjectLinksService {
 
   async removeTaskFromProject(taskId: string, projectId: string, actorUserId: string, correlationId: string) {
     await this.requireTaskWithRole(taskId, actorUserId, ProjectRole.MEMBER);
+    await this.requireProjectWithRole(projectId, actorUserId, ProjectRole.MEMBER);
 
     return this.prisma.$transaction(async (tx) => {
       const link = await tx.taskProjectLink.findUnique({
@@ -137,7 +138,10 @@ export class TaskProjectLinksService {
 
   async setPrimaryProject(taskId: string, projectId: string, actorUserId: string, correlationId: string) {
     const task = await this.requireTaskWithRole(taskId, actorUserId, ProjectRole.MEMBER);
-    await this.requireProjectWithRole(projectId, actorUserId, ProjectRole.MEMBER);
+    const targetProject = await this.requireProjectWithRole(projectId, actorUserId, ProjectRole.MEMBER);
+    if (targetProject.workspaceId !== task.project.workspaceId) {
+      throw new BadRequestException('project must be in the same workspace as the task');
+    }
 
     return this.prisma.$transaction(async (tx) => {
       await this.ensureCanonicalPrimaryLink(task, tx);
@@ -226,26 +230,28 @@ export class TaskProjectLinksService {
 
   private async ensureCanonicalPrimaryLink(task: TaskWithProject, tx?: Prisma.TransactionClient) {
     const client = tx ?? this.prisma;
-    const canonical = await client.taskProjectLink.findUnique({
+    const canonical = await client.taskProjectLink.upsert({
       where: { taskId_projectId: { taskId: task.id, projectId: task.projectId } },
+      create: {
+        taskId: task.id,
+        projectId: task.projectId,
+        isPrimary: true,
+      },
+      update: {
+        deletedAt: null,
+        isPrimary: true,
+      },
     });
 
-    if (!canonical) {
-      await client.taskProjectLink.create({
-        data: {
-          taskId: task.id,
-          projectId: task.projectId,
-          isPrimary: true,
-        },
-      });
-      return;
-    }
-
-    if (canonical.deletedAt || !canonical.isPrimary) {
-      await client.taskProjectLink.update({
-        where: { id: canonical.id },
-        data: { deletedAt: null, isPrimary: true },
-      });
-    }
+    await client.taskProjectLink.updateMany({
+      where: {
+        taskId: task.id,
+        deletedAt: null,
+        id: { not: canonical.id },
+      },
+      data: {
+        isPrimary: false,
+      },
+    });
   }
 }
