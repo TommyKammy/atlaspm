@@ -683,6 +683,33 @@ export default function RulesPage() {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api(`/rules/${id}`, { method: 'DELETE' }) as Promise<void>,
+    onSuccess: (_, id) => {
+      queryClient.setQueryData<Rule[]>(queryKeys.projectRules(projectId), (current = []) =>
+        current.filter((rule) => rule.id !== id),
+      );
+    },
+  });
+
+  const handleDelete = async (rule: Rule) => {
+    if (!confirm(t('ruleDeleteConfirm'))) {
+      return;
+    }
+    try {
+      await deleteMutation.mutateAsync(rule.id);
+    } catch (err) {
+      const errorData = err && typeof err === 'object' && 'code' in err
+        ? (err as { code?: string; message?: string })
+        : null;
+      if (errorData?.code === 'TEMPLATE_RULE_DELETION_FORBIDDEN') {
+        alert(t('ruleDeleteTemplateForbidden'));
+      } else {
+        alert(t('ruleDeleteFailed'));
+      }
+    }
+  };
+
   const rules = useMemo(() => rulesQuery.data ?? [], [rulesQuery.data]);
   const customFields = useMemo(() => customFieldsQuery.data ?? [], [customFieldsQuery.data]);
 
@@ -742,6 +769,17 @@ export default function RulesPage() {
               >
                 {rule.enabled ? 'Disable' : 'Enable'}
               </button>
+              {canCreateRule ? (
+                <button
+                  type="button"
+                  data-testid={`rule-delete-${rule.id}`}
+                  className="h-8 rounded border bg-background px-3 text-xs text-destructive hover:text-destructive/80"
+                  onClick={() => handleDelete(rule)}
+                  disabled={deleteMutation.isPending}
+                >
+                  {t('delete')}
+                </button>
+              ) : null}
             </div>
           </div>
 
