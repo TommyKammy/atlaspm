@@ -34,7 +34,7 @@ export default function WorkloadPage() {
 
   const [view, setView] = useState<'team' | 'project'>('team');
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
-  const [viewMode, setViewMode] = useState<'tasks' | 'effort'>('effort');
+  const [viewMode, setViewMode] = useState<'tasks' | 'effort'>('tasks');
   const [periodWeeks, setPeriodWeeks] = useState<number>(4);
 
   const { data: projects } = useProjects(workspaceId);

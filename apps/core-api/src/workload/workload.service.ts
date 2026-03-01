@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { WorkspaceRole } from '@prisma/client';
@@ -54,8 +54,8 @@ export class WorkloadService {
   private readonly DEFAULT_CAPACITY_HOURS = 40;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly domain: DomainService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(DomainService) private readonly domain: DomainService,
   ) {}
 
   async getUserWorkload(
