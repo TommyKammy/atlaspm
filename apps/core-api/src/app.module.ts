@@ -33,9 +33,10 @@ import { FormsController } from './forms/forms.controller';
 import { TaskApprovalController } from './task-approvals/task-approval.controller';
 import { TaskTimeTrackingController } from './task-time-tracking/task-time-tracking.controller';
 import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
+import { TaskProjectLinksModule } from './task-project-links/task-project-links.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, SearchModule, PortfoliosModule, WorkloadModule, DashboardsModule, IntegrationsModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, SearchModule, PortfoliosModule, WorkloadModule, DashboardsModule, IntegrationsModule, TaskProjectLinksModule],
   controllers: [
     WorkspacesController,
     ProjectsController,
