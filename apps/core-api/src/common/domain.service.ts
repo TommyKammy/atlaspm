@@ -6,7 +6,13 @@ import type { AuthUser } from './types';
 
 @Injectable()
 export class DomainService {
+  private static readonly defaultRuleTemplateKeys = ['progress_to_done', 'progress_to_in_progress'] as const;
+
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  isDefaultRuleTemplateKey(templateKey: string): boolean {
+    return DomainService.defaultRuleTemplateKeys.includes(templateKey as typeof DomainService.defaultRuleTemplateKeys[number]);
+  }
 
   async ensureUser(sub: string, email?: string, name?: string) {
     const existing = await this.prisma.user.findUnique({ where: { id: sub } });
