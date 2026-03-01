@@ -263,7 +263,21 @@ export type RuleCondition =
       value?: number;
       min?: number;
       max?: number;
-    };
+};
+
+export type TaskProjectLink = {
+  id: string;
+  taskId: string;
+  projectId: string;
+  isPrimary: boolean;
+  project: {
+    id: string;
+    name: string;
+    workspaceId: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+};
 
 export type RuleAction =
   | { type: 'setStatus'; status: 'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED' }

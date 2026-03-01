@@ -1,8 +1,20 @@
-import { useQuery } from '@tanstack/react-query';
-import type { Project } from '@/lib/types';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/lib/query-keys';
+import type { Project, TaskProjectLink } from '@/lib/types';
 
 const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL ?? 'http://localhost:3001';
 export const apiBaseUrl = API_URL;
+
+// Raw link response from mutations (without included project relation)
+type TaskProjectLinkResponse = {
+  id: string;
+  taskId: string;
+  projectId: string;
+  isPrimary: boolean;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+};
 
 export type ApiOptions = {
   method?: string;
@@ -57,5 +69,81 @@ export function useProjects(workspaceId: string) {
       return projects.filter((project) => project.workspaceId === workspaceId);
     },
     enabled: !!workspaceId,
+  });
+}
+
+// Task Project Links API
+export function useTaskProjectLinks(taskId: string) {
+  return useQuery({
+    queryKey: ['task', taskId, 'projects'],
+    queryFn: async () => {
+      return api(`/tasks/${taskId}/projects`) as Promise<TaskProjectLink[]>;
+    },
+    enabled: !!taskId,
+  });
+}
+
+export async function addTaskToProject(taskId: string, projectId: string) {
+  return api(`/tasks/${taskId}/projects`, {
+    method: 'POST',
+    body: { projectId },
+  }) as Promise<TaskProjectLinkResponse>;
+}
+
+export async function removeTaskFromProject(taskId: string, projectId: string) {
+  return api(`/tasks/${taskId}/projects/${projectId}`, {
+    method: 'DELETE',
+  }) as Promise<TaskProjectLinkResponse>;
+}
+
+export async function setPrimaryProject(taskId: string, projectId: string) {
+  return api(`/tasks/${taskId}/projects/${projectId}/primary`, {
+    method: 'POST',
+  }) as Promise<TaskProjectLinkResponse>;
+}
+
+// Task Project Links Mutations
+export function useAddTaskToProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskId, projectId }: { taskId: string; projectId: string }) => {
+      return addTaskToProject(taskId, projectId);
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['task', variables.taskId, 'projects'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(variables.projectId) });
+    },
+  });
+}
+
+export function useRemoveTaskFromProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskId, projectId }: { taskId: string; projectId: string }) => {
+      return removeTaskFromProject(taskId, projectId);
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['task', variables.taskId, 'projects'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(variables.projectId) });
+    },
+  });
+}
+
+export function useSetPrimaryProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskId, projectId }: { taskId: string; projectId: string }) => {
+      return setPrimaryProject(taskId, projectId);
+    },
+    onSuccess: async (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['task', variables.taskId, 'projects'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(variables.taskId) });
+
+      const taskDetail = queryClient.getQueryData<{ projectId: string }>(queryKeys.taskDetail(variables.taskId));
+      if (taskDetail) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(taskDetail.projectId) });
+      }
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(variables.projectId) });
+    },
   });
 }

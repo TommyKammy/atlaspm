@@ -10,6 +10,7 @@ import {
   Diamond,
   Clock3,
   Flag,
+  Folder,
   Gauge,
   List,
   MessageSquare,
@@ -20,7 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { api, apiBaseUrl } from '@/lib/api';
+import { api, apiBaseUrl, useProjects } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type {
   AuditEvent,
@@ -36,6 +37,7 @@ import type {
 import { ApprovalSection } from '@/components/task-approval-section';
 import { DependencyManager } from '@/components/dependency-manager';
 import TaskDescriptionEditor from '@/components/editor/TaskDescriptionEditor';
+import { ProjectSelector } from '@/components/project-selector';
 import { SubtaskList } from '@/components/subtask-list';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -400,6 +402,14 @@ export default function TaskDetailDrawer({
     queryKey: queryKeys.me,
     queryFn: () => api('/me'),
   });
+
+  const projectQuery = useQuery<{ id: string; workspaceId: string; name: string }>({
+    queryKey: ['project', projectId],
+    queryFn: () => api(`/projects/${projectId}`),
+    enabled: enabled && !!projectId,
+  });
+
+  const projectsQuery = useProjects(projectQuery.data?.workspaceId ?? '');
 
   const syncTaskCaches = (updated: Task) => {
     queryClient.setQueryData(queryKeys.taskDetail(updated.id), updated);
@@ -896,6 +906,18 @@ export default function TaskDetailDrawer({
                           </option>
                         ))}
                       </select>
+                    </MetadataRow>
+
+                    <MetadataRow icon={<Folder className="h-3.5 w-3.5" />} label={t('projects')}>
+                      {taskId ? (
+                        <ProjectSelector
+                          taskId={taskId}
+                          workspaceId={projectQuery.data?.workspaceId ?? ''}
+                          availableProjects={projectsQuery.data ?? []}
+                        />
+                      ) : (
+                        <span className="text-sm text-muted-foreground">{t('loading')}...</span>
+                      )}
                     </MetadataRow>
 
                     {currentTask?.type === 'MILESTONE' && (
