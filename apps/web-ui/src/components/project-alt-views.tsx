@@ -40,6 +40,11 @@ function taskMatchesFilters(
   return bySearch && byStatus && byPriority;
 }
 
+function isApiConflictError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /^API 409:/.test(error.message);
+}
+
 function moveTaskPreview(
   groups: SectionTaskGroup[],
   taskId: string,
@@ -319,7 +324,7 @@ export function ProjectCalendarView({
   });
 
   const patchTaskDate = useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       taskId,
       field,
       value,
@@ -329,8 +334,21 @@ export function ProjectCalendarView({
       field: 'dueAt' | 'startAt';
       value: string | null;
       version: number;
-    }) =>
-      api(`/tasks/${taskId}`, { method: 'PATCH', body: { [field]: value, version } }) as Promise<Task>,
+    }) => {
+      try {
+        return (await api(`/tasks/${taskId}`, {
+          method: 'PATCH',
+          body: { [field]: value, version },
+        })) as Task;
+      } catch (error) {
+        if (!isApiConflictError(error)) throw error;
+        const latestTask = (await api(`/tasks/${taskId}`)) as Task;
+        return (await api(`/tasks/${taskId}`, {
+          method: 'PATCH',
+          body: { [field]: value, version: latestTask.version },
+        })) as Task;
+      }
+    },
     onMutate: async ({ taskId, field, value }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
       const previous = queryClient.getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId));
