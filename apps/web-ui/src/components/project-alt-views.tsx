@@ -11,7 +11,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, type DragEvent } from 'react';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Paperclip } from 'lucide-react';
 import TaskDetailDrawer from '@/components/task-detail-drawer';
@@ -399,6 +399,14 @@ export function ProjectCalendarView({
 
   const allTasksById = new Map(tasks.map((task) => [task.id, task]));
 
+  const resolveDraggedTaskId = (event: DragEvent<HTMLElement>) => {
+    const fromCustomType = event.dataTransfer.getData('text/task-id');
+    if (fromCustomType) return fromCustomType;
+    const fromPlainText = event.dataTransfer.getData('text/plain');
+    if (fromPlainText && allTasksById.has(fromPlainText)) return fromPlainText;
+    return draggingTaskIdRef.current || draggingTaskId;
+  };
+
   const updateTaskDate = (taskId: string, dateIso: string | null) => {
     const task = allTasksById.get(taskId);
     if (!task) return;
@@ -480,7 +488,7 @@ export function ProjectCalendarView({
             onDrop={(event) => {
               if (!cell) return;
               event.preventDefault();
-              const taskId = event.dataTransfer.getData('text/task-id') || draggingTaskIdRef.current || draggingTaskId;
+              const taskId = resolveDraggedTaskId(event);
               if (!taskId) return;
               updateTaskDate(taskId, cell.isoPrefix);
               draggingTaskIdRef.current = null;
@@ -501,6 +509,7 @@ export function ProjectCalendarView({
                       draggable
                       onDragStart={(event) => {
                         event.dataTransfer.setData('text/task-id', task.id);
+                        event.dataTransfer.setData('text/plain', task.id);
                         draggingTaskIdRef.current = task.id;
                         setDraggingTaskId(task.id);
                       }}
@@ -528,7 +537,7 @@ export function ProjectCalendarView({
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => {
           event.preventDefault();
-          const taskId = event.dataTransfer.getData('text/task-id') || draggingTaskIdRef.current || draggingTaskId;
+          const taskId = resolveDraggedTaskId(event);
           if (!taskId) return;
           updateTaskDate(taskId, null);
           draggingTaskIdRef.current = null;
@@ -554,6 +563,7 @@ export function ProjectCalendarView({
                 data-testid={dateField === 'dueAt' ? `calendar-no-due-task-${task.id}` : `calendar-no-start-task-${task.id}`}
                 onDragStart={(event) => {
                   event.dataTransfer.setData('text/task-id', task.id);
+                  event.dataTransfer.setData('text/plain', task.id);
                   draggingTaskIdRef.current = task.id;
                   setDraggingTaskId(task.id);
                 }}
