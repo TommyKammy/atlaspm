@@ -140,11 +140,18 @@ export function ApprovalSection({ task, currentUserId, isProjectAdmin }: Approva
                 </Button>
                 <Button
                   size="sm"
-                  onClick={() => requestApproval.mutate({ approverUserId: approverId, comment })}
+                  onClick={() => {
+                    const trimmedComment = comment.trim();
+                    if (trimmedComment) {
+                      requestApproval.mutate({ approverUserId: approverId, comment: trimmedComment });
+                    } else {
+                      requestApproval.mutate({ approverUserId: approverId });
+                    }
+                  }}
                   disabled={!approverId.trim() || requestApproval.isPending}
                   className="flex-1"
                 >
-                  {requestApproval.isPending ? t('sending') : t('requestApproval')}
+                  {requestApproval.isPending ? t('requesting') : t('requestApproval')}
                 </Button>
               </div>
             </div>
@@ -197,7 +204,12 @@ export function ApprovalSection({ task, currentUserId, isProjectAdmin }: Approva
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => respondApproval.mutate({ status: 'REJECTED', comment })}
+                  onClick={() => {
+                    const trimmedComment = comment.trim();
+                    const payload: { status: 'REJECTED'; comment?: string } = { status: 'REJECTED' };
+                    if (trimmedComment) payload.comment = trimmedComment;
+                    respondApproval.mutate(payload);
+                  }}
                   disabled={respondApproval.isPending}
                   className="flex-1"
                 >
@@ -205,7 +217,12 @@ export function ApprovalSection({ task, currentUserId, isProjectAdmin }: Approva
                 </Button>
                 <Button
                   size="sm"
-                  onClick={() => respondApproval.mutate({ status: 'APPROVED', comment })}
+                  onClick={() => {
+                    const trimmedComment = comment.trim();
+                    const payload: { status: 'APPROVED'; comment?: string } = { status: 'APPROVED' };
+                    if (trimmedComment) payload.comment = trimmedComment;
+                    respondApproval.mutate(payload);
+                  }}
                   disabled={respondApproval.isPending}
                   className="flex-1 bg-green-600 hover:bg-green-700"
                 >

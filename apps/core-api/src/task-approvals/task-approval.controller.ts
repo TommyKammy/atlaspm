@@ -7,8 +7,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, ProjectRole, TaskStatus, TaskType } from '@prisma/client';
 import { IsEnum, IsOptional, IsString } from 'class-validator';
 
-type TaskApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
-
 class RequestApprovalDto {
   @IsString()
   approverUserId!: string;
@@ -19,8 +17,8 @@ class RequestApprovalDto {
 }
 
 class RespondApprovalDto {
-  @IsEnum(['PENDING', 'APPROVED', 'REJECTED'] as const)
-  status!: TaskApprovalStatus;
+  @IsEnum(['APPROVED', 'REJECTED'] as const)
+  status!: 'APPROVED' | 'REJECTED';
 
   @IsOptional()
   @IsString()
@@ -79,6 +77,15 @@ export class TaskApprovalController {
       throw new ConflictException('Approval request already pending');
     }
 
+    const approver = await this.prisma.user.findFirst({
+      where: { id: body.approverUserId },
+    });
+    if (!approver) {
+      throw new NotFoundException('Approver user not found');
+    }
+
+    const trimmedComment = body.comment?.trim() || null;
+
     const approval = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const upserted = await tx.taskApproval.upsert({
         where: { taskId },
@@ -86,13 +93,13 @@ export class TaskApprovalController {
           taskId,
           status: 'PENDING',
           approverUserId: body.approverUserId,
-          comment: body.comment,
+          comment: trimmedComment,
           requestedAt: new Date(),
         },
         update: {
           status: 'PENDING',
           approverUserId: body.approverUserId,
-          comment: body.comment,
+          comment: trimmedComment,
           requestedAt: new Date(),
           respondedAt: null,
         },
@@ -112,13 +119,23 @@ export class TaskApprovalController {
         payload: { taskId, approvalId: upserted.id, approverUserId: body.approverUserId },
       });
 
+      await tx.inboxNotification.deleteMany({
+        where: {
+          userId: body.approverUserId,
+          taskId,
+          type: 'APPROVAL_REQUESTED',
+          sourceType: 'task',
+          sourceId: taskId,
+        },
+      });
+
       await tx.inboxNotification.create({
         data: {
           userId: body.approverUserId,
           projectId: task.projectId,
           taskId,
           type: 'APPROVAL_REQUESTED',
-          sourceType: 'Task',
+          sourceType: 'task',
           sourceId: taskId,
           triggeredByUserId: req.user.sub,
           readAt: null,
@@ -158,12 +175,14 @@ export class TaskApprovalController {
       await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.ADMIN);
     }
 
+    const trimmedComment = body.comment?.trim() || null;
+
     const updatedApproval = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const updated = await tx.taskApproval.update({
         where: { taskId },
         data: {
           status: body.status,
-          comment: body.comment,
+          comment: trimmedComment,
           respondedAt: new Date(),
         },
         include: { approver: { select: { id: true, displayName: true } } },
@@ -185,26 +204,52 @@ export class TaskApprovalController {
       });
 
       if (body.status === 'APPROVED') {
-        await tx.task.update({
+        const beforeTask = task;
+        const updatedTask = await tx.task.update({
           where: { id: taskId },
           data: { status: TaskStatus.DONE, completedAt: new Date() },
+        });
+
+        await this.domain.appendAuditOutbox({
+          tx,
+          actor: req.user.sub,
+          entityType: 'Task',
+          entityId: updatedTask.id,
+          action: 'task.completed',
+          beforeJson: beforeTask,
+          afterJson: updatedTask,
+          correlationId: req.correlationId,
+          outboxType: 'task.completed',
+          payload: { taskId },
         });
       }
 
       const notificationType = body.status === 'APPROVED' ? 'APPROVAL_APPROVED' : 'APPROVAL_REJECTED';
       
-      await tx.inboxNotification.create({
-        data: {
-          userId: task.assigneeUserId || '',
-          projectId: task.projectId,
-          taskId,
-          type: notificationType,
-          sourceType: 'Task',
-          sourceId: taskId,
-          triggeredByUserId: req.user.sub,
-          readAt: null,
-        },
-      });
+      if (task.assigneeUserId) {
+        await tx.inboxNotification.deleteMany({
+          where: {
+            userId: task.assigneeUserId,
+            taskId,
+            type: notificationType,
+            sourceType: 'task',
+            sourceId: taskId,
+          },
+        });
+
+        await tx.inboxNotification.create({
+          data: {
+            userId: task.assigneeUserId,
+            projectId: task.projectId,
+            taskId,
+            type: notificationType,
+            sourceType: 'task',
+            sourceId: taskId,
+            triggeredByUserId: req.user.sub,
+            readAt: null,
+          },
+        });
+      }
 
       return updated;
     });
