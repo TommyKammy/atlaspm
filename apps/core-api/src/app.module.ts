@@ -31,6 +31,7 @@ import { RecurringTasksController } from './recurring-tasks/recurring-tasks.cont
 import { RecurringTaskWorker } from './recurring-tasks/recurring-task.worker';
 import { FormsController } from './forms/forms.controller';
 import { TaskApprovalController } from './task-approvals/task-approval.controller';
+import { TaskTimeTrackingController } from './task-time-tracking/task-time-tracking.controller';
 import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
 
 @Module({
@@ -52,6 +53,7 @@ import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
     RecurringTasksController,
     FormsController,
     TaskApprovalController,
+    TaskTimeTrackingController,
   ],
   providers: [
     PrismaService,
