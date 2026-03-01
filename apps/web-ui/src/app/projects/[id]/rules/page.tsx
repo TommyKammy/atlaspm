@@ -18,6 +18,23 @@ import type {
 const triggerOptions = ['task.progress.changed'] as const;
 type LogicalOperator = NonNullable<RuleDefinition['logicalOperator']>;
 
+function parseApiErrorPayload(error: unknown): { code?: string; message?: string } | null {
+  if (!(error instanceof Error)) return null;
+  const matched = error.message.match(/^API\s+\d+:\s*(.*)$/s);
+  if (!matched) return null;
+  const raw = matched[1]?.trim();
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      return parsed as { code?: string; message?: string };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 function ensureRuleDefinition(rule: Rule): RuleDefinition {
   if (rule.definition?.trigger && rule.definition.conditions && rule.definition.actions) {
     return {
@@ -699,9 +716,7 @@ export default function RulesPage() {
     try {
       await deleteMutation.mutateAsync(rule.id);
     } catch (err) {
-      const errorData = err && typeof err === 'object' && 'code' in err
-        ? (err as { code?: string; message?: string })
-        : null;
+      const errorData = parseApiErrorPayload(err);
       if (errorData?.code === 'TEMPLATE_RULE_DELETION_FORBIDDEN') {
         alert(t('ruleDeleteTemplateForbidden'));
       } else {
