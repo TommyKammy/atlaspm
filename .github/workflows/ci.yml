@@ -122,7 +122,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm --filter @atlaspm/playwright exec playwright install --with-deps chromium
+      - run: pnpm --filter @atlaspm/playwright exec playwright install --with-deps
 
       - run: pnpm e2e
 
