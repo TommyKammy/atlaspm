@@ -373,16 +373,24 @@ function RuleCreator({
     const actions: RuleAction[] = [{ type: 'setStatus', status: actionStatus }];
     if (setNow) actions.push({ type: 'setCompletedAtNow' });
     if (setNull) actions.push({ type: 'setCompletedAtNull' });
-    await onSave({
-      name: name.trim(),
-      templateKey: `custom_${Date.now()}`,
-      definition: {
-        trigger,
-        logicalOperator,
-        conditions,
-        actions,
-      },
-    });
+    try {
+      await onSave({
+        name: name.trim(),
+        templateKey: `custom_${crypto.randomUUID()}`,
+        definition: {
+          trigger,
+          logicalOperator,
+          conditions,
+          actions,
+        },
+      });
+    } catch (err) {
+      const message =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message?: string }).message)
+          : t('ruleCreateFailed');
+      setError(message);
+    }
   };
 
   const fieldBase = 'h-8 rounded border bg-background px-2 text-xs';
@@ -637,7 +645,7 @@ export default function RulesPage() {
     if (!meId || !membersQuery.data) return null;
     return membersQuery.data.find((member) => member.userId === meId)?.role ?? null;
   }, [meQuery.data?.id, membersQuery.data]);
-  const canCreateRule = currentProjectRole ? currentProjectRole !== 'VIEWER' : true;
+  const canCreateRule = currentProjectRole ? currentProjectRole !== 'VIEWER' : false;
 
   const createMutation = useMutation({
     mutationFn: (body: {

@@ -411,6 +411,8 @@ const dictionaries: Record<Locale, Dictionary> = {
     completedAtNull: 'completedAt null',
     min: 'Min',
     max: 'Max',
+    value: 'Value',
+    ruleCreateFailed: 'Failed to create rule. Please try again.',
   },
   ja: {
     appName: 'AtlasPM',
@@ -817,6 +819,8 @@ const dictionaries: Record<Locale, Dictionary> = {
     completedAtNull: 'completedAtを null に',
     min: '最小',
     max: '最大',
+    value: '値',
+    ruleCreateFailed: 'ルールの作成に失敗しました。もう一度お試しください。',
   },
 };
 
