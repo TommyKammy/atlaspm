@@ -32,7 +32,6 @@ describe('rule-definition', () => {
 
   it('keeps templates backward-compatible with AND operator', () => {
     expect(templateDefinition('progress_to_done').logicalOperator).toBe('AND');
-    expect(templateDefinition('progress_incomplete').logicalOperator).toBe('AND');
+    expect(templateDefinition('progress_to_in_progress').logicalOperator).toBe('AND');
   });
 });
-

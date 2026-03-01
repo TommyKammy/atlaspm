@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
@@ -60,15 +60,16 @@ export class RulesController {
   @Post('projects/:id/rules')
   @RequireProjectRole(ProjectRole.MEMBER)
   async create(@Param('id') projectId: string, @Body() body: CreateRuleDto, @CurrentRequest() req: AppRequest) {
+    const parsedDefinition = body.definition ? parseRuleDefinition(body.definition) : undefined;
+    this.ensureDefinitionHasConditions(parsedDefinition);
+
     return this.prisma.$transaction(async (tx) => {
       const rule = await tx.rule.create({
         data: {
           projectId,
           name: body.name,
           templateKey: body.templateKey,
-          definition: (body.definition
-            ? parseRuleDefinition(body.definition)
-            : templateDefinition(body.templateKey)) as Prisma.InputJsonValue,
+          definition: (parsedDefinition ?? templateDefinition(body.templateKey)) as Prisma.InputJsonValue,
           enabled: body.enabled ?? true,
           cooldownSec: body.cooldownSec ?? 60,
         },
@@ -93,6 +94,7 @@ export class RulesController {
     const rule = await this.prisma.rule.findUniqueOrThrow({ where: { id } });
     await this.domain.requireProjectRole(rule.projectId, req.user.sub, ProjectRole.MEMBER);
     const definition = body.definition ? parseRuleDefinition(body.definition) : undefined;
+    this.ensureDefinitionHasConditions(definition);
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.rule.update({
@@ -148,5 +150,11 @@ export class RulesController {
       });
       return updated;
     });
+  }
+
+  private ensureDefinitionHasConditions(definition?: { conditions: unknown[] }) {
+    if (definition && definition.conditions.length === 0) {
+      throw new BadRequestException('Rule definition must include at least one condition');
+    }
   }
 }

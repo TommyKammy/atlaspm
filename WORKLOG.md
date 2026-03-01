@@ -2119,3 +2119,31 @@
 - Risks/known gaps:
   - Current builder is intentionally minimal and numeric-condition oriented; richer condition groups/nested logic are out of scope.
   - Node engine warning remains in local env (`v25` vs expected `>=20 <21`), but tests/build passed.
+
+## 2026-03-01 - PR #100 review follow-up (Issue #83 minimal fixes)
+- What changed:
+  - Addressed review comment #1 (type safety for legacy rules):
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/lib/types.ts`
+    - made `RuleDefinition.logicalOperator` optional in API-facing type to reflect legacy persisted definitions that may omit it.
+  - Addressed review comment #2 (template key mismatch in test):
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/rule-definition.test.ts`
+    - replaced `progress_incomplete` assertion with actual key `progress_to_in_progress`.
+  - Addressed review comment #3 (missing OR/AND execution coverage):
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/test/core.integration.test.ts`
+    - added multi-condition `OR` rule and multi-condition `AND` rule assertions in custom-field rule flow to verify operator behavior.
+  - Addressed review comment #4 with safe compatibility strategy:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/src/rules/rules.controller.ts`
+    - rejected create/patch payloads with empty `definition.conditions` via 400, while keeping parser compatibility for legacy stored definitions.
+  - Minor type fix in rules editor state after optional API type update:
+    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/app/projects/[id]/rules/page.tsx`
+    - narrowed editor state `logicalOperator` to non-nullable local type.
+- Why:
+  - Incorporate valid PR #100 review feedback without breaking backward compatibility or existing persisted rules.
+- How tested (exact commands):
+  - `pnpm -r --if-present lint`
+  - `pnpm -r --if-present type-check`
+  - `pnpm e2e:up`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - `GET /projects/:id/rules` still returns raw persisted definition JSON; editor normalization remains client-side (`ensureRuleDefinition`).

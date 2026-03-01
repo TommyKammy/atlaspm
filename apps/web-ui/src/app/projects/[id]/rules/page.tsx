@@ -14,6 +14,7 @@ import type {
 } from '@/lib/types';
 
 const triggerOptions = ['task.progress.changed'] as const;
+type LogicalOperator = NonNullable<RuleDefinition['logicalOperator']>;
 
 function ensureRuleDefinition(rule: Rule): RuleDefinition {
   if (rule.definition?.trigger && rule.definition.conditions && rule.definition.actions) {
@@ -73,7 +74,7 @@ function RuleEditor({
   );
   const [name, setName] = useState(rule.name);
   const [trigger, setTrigger] = useState<RuleDefinition['trigger']>(base.trigger);
-  const [logicalOperator, setLogicalOperator] = useState<RuleDefinition['logicalOperator']>(
+  const [logicalOperator, setLogicalOperator] = useState<LogicalOperator>(
     base.logicalOperator ?? 'AND',
   );
   const [conditions, setConditions] = useState<RuleCondition[]>(
@@ -141,7 +142,7 @@ function RuleEditor({
           <select
             className={fieldBase}
             value={logicalOperator}
-            onChange={(e) => setLogicalOperator(e.target.value as RuleDefinition['logicalOperator'])}
+            onChange={(e) => setLogicalOperator(e.target.value as LogicalOperator)}
             data-testid={`rule-condition-mode-${rule.id}`}
           >
             <option value="AND">All conditions (AND)</option>
