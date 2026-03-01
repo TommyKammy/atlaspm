@@ -413,6 +413,9 @@ const dictionaries: Record<Locale, Dictionary> = {
     max: 'Max',
     value: 'Value',
     ruleCreateFailed: 'Failed to create rule. Please try again.',
+    ruleDeleteConfirm: 'Are you sure you want to delete this rule? This action cannot be undone.',
+    ruleDeleteTemplateForbidden: 'Template rules cannot be deleted. You can disable them instead.',
+    ruleDeleteFailed: 'Failed to delete rule. Please try again.',
   },
   ja: {
     appName: 'AtlasPM',
@@ -821,6 +824,9 @@ const dictionaries: Record<Locale, Dictionary> = {
     max: '最大',
     value: '値',
     ruleCreateFailed: 'ルールの作成に失敗しました。もう一度お試しください。',
+    ruleDeleteConfirm: 'このルールを削除してもよろしいですか？この操作は元に戻せません。',
+    ruleDeleteTemplateForbidden: 'テンプレートルールは削除できません。無効化することは可能です。',
+    ruleDeleteFailed: 'ルールの削除に失敗しました。もう一度お試しください。',
   },
 };
 

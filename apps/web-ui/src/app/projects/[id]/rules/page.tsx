@@ -18,6 +18,23 @@ import type {
 const triggerOptions = ['task.progress.changed'] as const;
 type LogicalOperator = NonNullable<RuleDefinition['logicalOperator']>;
 
+function parseApiErrorPayload(error: unknown): { code?: string; message?: string } | null {
+  if (!(error instanceof Error)) return null;
+  const matched = error.message.match(/^API\s+\d+:\s*(.*)$/s);
+  if (!matched) return null;
+  const raw = matched[1]?.trim();
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      return parsed as { code?: string; message?: string };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 function ensureRuleDefinition(rule: Rule): RuleDefinition {
   if (rule.definition?.trigger && rule.definition.conditions && rule.definition.actions) {
     return {
@@ -683,6 +700,31 @@ export default function RulesPage() {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api(`/rules/${id}`, { method: 'DELETE' }) as Promise<void>,
+    onSuccess: (_, id) => {
+      queryClient.setQueryData<Rule[]>(queryKeys.projectRules(projectId), (current = []) =>
+        current.filter((rule) => rule.id !== id),
+      );
+    },
+  });
+
+  const handleDelete = async (rule: Rule) => {
+    if (!confirm(t('ruleDeleteConfirm'))) {
+      return;
+    }
+    try {
+      await deleteMutation.mutateAsync(rule.id);
+    } catch (err) {
+      const errorData = parseApiErrorPayload(err);
+      if (errorData?.code === 'TEMPLATE_RULE_DELETION_FORBIDDEN') {
+        alert(t('ruleDeleteTemplateForbidden'));
+      } else {
+        alert(t('ruleDeleteFailed'));
+      }
+    }
+  };
+
   const rules = useMemo(() => rulesQuery.data ?? [], [rulesQuery.data]);
   const customFields = useMemo(() => customFieldsQuery.data ?? [], [customFieldsQuery.data]);
 
@@ -742,6 +784,17 @@ export default function RulesPage() {
               >
                 {rule.enabled ? 'Disable' : 'Enable'}
               </button>
+              {canCreateRule ? (
+                <button
+                  type="button"
+                  data-testid={`rule-delete-${rule.id}`}
+                  className="h-8 rounded border bg-background px-3 text-xs text-destructive hover:text-destructive/80"
+                  onClick={() => handleDelete(rule)}
+                  disabled={deleteMutation.isPending}
+                >
+                  {t('delete')}
+                </button>
+              ) : null}
             </div>
           </div>
 
