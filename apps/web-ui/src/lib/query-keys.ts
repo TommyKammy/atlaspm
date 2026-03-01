@@ -34,4 +34,10 @@ export const queryKeys = {
   taskDependents: (taskId: string) => ['task', taskId, 'dependents'] as const,
   taskBlocked: (taskId: string) => ['task', taskId, 'blocked'] as const,
   projectDependencyGraph: (projectId: string) => ['project', projectId, 'dependency-graph'] as const,
+
+  // Form keys
+  projectForms: (projectId: string) => ['project', projectId, 'forms'] as const,
+  formDetail: (formId: string) => ['form', formId] as const,
+  formQuestions: (formId: string) => ['form', formId, 'questions'] as const,
+  formSubmissions: (formId: string) => ['form', formId, 'submissions'] as const,
 };

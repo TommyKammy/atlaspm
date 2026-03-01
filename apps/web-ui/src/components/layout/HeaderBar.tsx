@@ -891,6 +891,11 @@ export function HeaderBar({
                     {t('rules')}
                   </Link>
                 </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href={`/projects/${projectId}/forms`} data-testid="forms-page-link">
+                    {t('forms')}
+                  </Link>
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </>

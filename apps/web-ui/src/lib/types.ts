@@ -387,3 +387,60 @@ export type ProjectStatusUpdate = {
     email?: string | null;
   };
 };
+
+export type FormQuestionType = 'TEXT' | 'TEXTAREA' | 'NUMBER' | 'EMAIL' | 'SELECT' | 'MULTI_SELECT' | 'DATE' | 'CHECKBOX';
+
+export type FormQuestionOption = {
+  label: string;
+  value: string;
+};
+
+export type FormQuestion = {
+  id: string;
+  formId: string;
+  type: FormQuestionType;
+  label: string;
+  description?: string | null;
+  required: boolean;
+  options?: FormQuestionOption[] | null;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Form = {
+  id: string;
+  projectId: string;
+  title: string;
+  description?: string | null;
+  isPublic: boolean;
+  publicToken?: string | null;
+  createdByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string | null;
+  questions?: FormQuestion[];
+  _count?: {
+    questions: number;
+    submissions: number;
+  };
+};
+
+export type FormAnswerInput = {
+  questionId: string;
+  value: string | number | boolean | string[];
+};
+
+export type FormSubmission = {
+  id: string;
+  formId: string;
+  submitterName: string;
+  submitterEmail: string;
+  createdTaskId?: string | null;
+  createdAt: string;
+  answers?: {
+    questionId: string;
+    questionLabel: string;
+    value: string | number | boolean | string[];
+  }[];
+};

@@ -49,6 +49,28 @@ async function dragBoardTaskToTask(page: Page, taskTitle: string, targetTitle: s
   await page.mouse.up();
 }
 
+async function dispatchHtml5Drag(page: Page, sourceSelector: string, targetSelector: string, taskId: string) {
+  const result = await page.evaluate(
+    ({ sourceSelector, targetSelector, taskId }) => {
+      const source = document.querySelector(sourceSelector);
+      const target = document.querySelector(targetSelector);
+      if (!source || !target) return { ok: false, reason: 'missing-element' as const };
+      const dataTransfer = new DataTransfer();
+      dataTransfer.setData('text/task-id', taskId);
+      dataTransfer.setData('text/plain', taskId);
+
+      source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+      target.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer }));
+      target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }));
+      target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
+      source.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
+      return { ok: true as const };
+    },
+    { sourceSelector, targetSelector, taskId },
+  );
+  expect(result.ok).toBe(true);
+}
+
 async function switchProjectView(page: Page, view: 'list' | 'board' | 'calendar' | 'files') {
   await page.click(`[data-testid="project-view-${view}"]`);
   await expect(page).toHaveURL(new RegExp(`[?&]view=${view}`));
@@ -255,9 +277,11 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
   const taskAId = taskAData.flatMap((g: any) => g.tasks).find((task: any) => task.title === 'Task A').id;
   await expect(page.locator(`[data-testid="calendar-no-due-task-${taskAId}"]`)).toBeVisible();
   await expect(page.locator(`[data-testid="calendar-day-${targetDate}"]`)).toBeVisible();
-  await page.locator(`[data-testid="calendar-no-due-task-${taskAId}"]`).dragTo(
-    page.locator(`[data-testid="calendar-day-${targetDate}"]`),
-    { force: true },
+  await dispatchHtml5Drag(
+    page,
+    `[data-testid="calendar-no-due-task-${taskAId}"]`,
+    `[data-testid="calendar-day-${targetDate}"]`,
+    taskAId,
   );
   await expect
     .poll(async () => {
@@ -269,9 +293,11 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
 
   await page.click('[data-testid="calendar-field-start"]');
   await expect(page.locator(`[data-testid="calendar-no-start-task-${taskAId}"]`)).toBeVisible();
-  await page.locator(`[data-testid="calendar-no-start-task-${taskAId}"]`).dragTo(
-    page.locator(`[data-testid="calendar-day-${targetDate}"]`),
-    { force: true },
+  await dispatchHtml5Drag(
+    page,
+    `[data-testid="calendar-no-start-task-${taskAId}"]`,
+    `[data-testid="calendar-day-${targetDate}"]`,
+    taskAId,
   );
   await expect
     .poll(async () => {
@@ -280,9 +306,12 @@ test('AtlasPM Asana-like UX flow', async ({ page }) => {
       return taskAAfter?.startAt ? String(taskAAfter.startAt).slice(0, 10) : null;
     })
     .toBe(targetDate);
-  await page.locator(`[data-testid="calendar-task-${taskAId}"]`).dragTo(page.locator('[data-testid="calendar-no-start"]'), {
-    force: true,
-  });
+  await dispatchHtml5Drag(
+    page,
+    `[data-testid="calendar-task-${taskAId}"]`,
+    '[data-testid="calendar-no-start"]',
+    taskAId,
+  );
   await expect
     .poll(async () => {
       const taskGroups = await api(`/projects/${projectA.id}/tasks?groupBy=section`, token);

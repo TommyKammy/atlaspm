@@ -11,7 +11,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState, type DragEvent } from 'react';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Paperclip } from 'lucide-react';
 import TaskDetailDrawer from '@/components/task-detail-drawer';
@@ -38,6 +38,11 @@ function taskMatchesFilters(
   const byStatus = statusFilter === 'ALL' || task.status === statusFilter;
   const byPriority = priorityFilter === 'ALL' || task.priority === priorityFilter;
   return bySearch && byStatus && byPriority;
+}
+
+function isApiConflictError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /^API 409:/.test(error.message);
 }
 
 function moveTaskPreview(
@@ -310,6 +315,9 @@ export function ProjectCalendarView({
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
+  const draggingTaskIdRef = useRef<string | null>(null);
+  const pointerDragTaskIdRef = useRef<string | null>(null);
+  const nativeDropHandledRef = useRef(false);
   const [dateField, setDateField] = useState<'dueAt' | 'startAt'>('dueAt');
 
   const groupsQuery = useQuery<SectionTaskGroup[]>({
@@ -318,7 +326,7 @@ export function ProjectCalendarView({
   });
 
   const patchTaskDate = useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       taskId,
       field,
       value,
@@ -328,8 +336,21 @@ export function ProjectCalendarView({
       field: 'dueAt' | 'startAt';
       value: string | null;
       version: number;
-    }) =>
-      api(`/tasks/${taskId}`, { method: 'PATCH', body: { [field]: value, version } }) as Promise<Task>,
+    }) => {
+      try {
+        return (await api(`/tasks/${taskId}`, {
+          method: 'PATCH',
+          body: { [field]: value, version },
+        })) as Task;
+      } catch (error) {
+        if (!isApiConflictError(error)) throw error;
+        const latestTask = (await api(`/tasks/${taskId}`)) as Task;
+        return (await api(`/tasks/${taskId}`, {
+          method: 'PATCH',
+          body: { [field]: value, version: latestTask.version },
+        })) as Task;
+      }
+    },
     onMutate: async ({ taskId, field, value }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
       const previous = queryClient.getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId));
@@ -380,6 +401,14 @@ export function ProjectCalendarView({
 
   const allTasksById = new Map(tasks.map((task) => [task.id, task]));
 
+  const resolveDraggedTaskId = (event: DragEvent<HTMLElement>) => {
+    const fromCustomType = event.dataTransfer.getData('text/task-id');
+    if (fromCustomType) return fromCustomType;
+    const fromPlainText = event.dataTransfer.getData('text/plain');
+    if (fromPlainText && allTasksById.has(fromPlainText)) return fromPlainText;
+    return draggingTaskIdRef.current || pointerDragTaskIdRef.current || draggingTaskId;
+  };
+
   const updateTaskDate = (taskId: string, dateIso: string | null) => {
     const task = allTasksById.get(taskId);
     if (!task) return;
@@ -393,6 +422,18 @@ export function ProjectCalendarView({
       value: dateIso ? `${dateIso}T00:00:00.000Z` : null,
       version: task.version,
     });
+  };
+
+  const updateTaskDateFromPointer = (dateIso: string | null) => {
+    if (nativeDropHandledRef.current) {
+      nativeDropHandledRef.current = false;
+      pointerDragTaskIdRef.current = null;
+      return;
+    }
+    const taskId = pointerDragTaskIdRef.current;
+    if (!taskId) return;
+    updateTaskDate(taskId, dateIso);
+    pointerDragTaskIdRef.current = null;
   };
 
   if (groupsQuery.isLoading) {
@@ -461,10 +502,16 @@ export function ProjectCalendarView({
             onDrop={(event) => {
               if (!cell) return;
               event.preventDefault();
-              const taskId = event.dataTransfer.getData('text/task-id') || draggingTaskId;
+              const taskId = resolveDraggedTaskId(event);
               if (!taskId) return;
+              nativeDropHandledRef.current = true;
               updateTaskDate(taskId, cell.isoPrefix);
+              draggingTaskIdRef.current = null;
               setDraggingTaskId(null);
+            }}
+            onPointerUp={() => {
+              if (!cell) return;
+              updateTaskDateFromPointer(cell.isoPrefix);
             }}
           >
             {cell ? (
@@ -481,9 +528,20 @@ export function ProjectCalendarView({
                       draggable
                       onDragStart={(event) => {
                         event.dataTransfer.setData('text/task-id', task.id);
+                        event.dataTransfer.setData('text/plain', task.id);
+                        draggingTaskIdRef.current = task.id;
                         setDraggingTaskId(task.id);
                       }}
-                      onDragEnd={() => setDraggingTaskId(null)}
+                      onDragEnd={() => {
+                        draggingTaskIdRef.current = null;
+                        setDraggingTaskId(null);
+                      }}
+                      onPointerDown={() => {
+                        pointerDragTaskIdRef.current = task.id;
+                      }}
+                      onPointerUp={() => {
+                        pointerDragTaskIdRef.current = null;
+                      }}
                     >
                       {task.title}
                     </button>
@@ -504,10 +562,15 @@ export function ProjectCalendarView({
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => {
           event.preventDefault();
-          const taskId = event.dataTransfer.getData('text/task-id') || draggingTaskId;
+          const taskId = resolveDraggedTaskId(event);
           if (!taskId) return;
+          nativeDropHandledRef.current = true;
           updateTaskDate(taskId, null);
+          draggingTaskIdRef.current = null;
           setDraggingTaskId(null);
+        }}
+        onPointerUp={() => {
+          updateTaskDateFromPointer(null);
         }}
       >
         <h4 className="mb-2 text-sm font-medium">
@@ -529,9 +592,20 @@ export function ProjectCalendarView({
                 data-testid={dateField === 'dueAt' ? `calendar-no-due-task-${task.id}` : `calendar-no-start-task-${task.id}`}
                 onDragStart={(event) => {
                   event.dataTransfer.setData('text/task-id', task.id);
+                  event.dataTransfer.setData('text/plain', task.id);
+                  draggingTaskIdRef.current = task.id;
                   setDraggingTaskId(task.id);
                 }}
-                onDragEnd={() => setDraggingTaskId(null)}
+                onDragEnd={() => {
+                  draggingTaskIdRef.current = null;
+                  setDraggingTaskId(null);
+                }}
+                onPointerDown={() => {
+                  pointerDragTaskIdRef.current = task.id;
+                }}
+                onPointerUp={() => {
+                  pointerDragTaskIdRef.current = null;
+                }}
               >
                 {task.title}
               </button>

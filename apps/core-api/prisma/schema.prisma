@@ -84,6 +84,7 @@ model User {
   dashboards           Dashboard[]
   reminders            TaskReminder[]
   statusUpdates        ProjectStatusUpdate[]
+  createdForms         Form[]
 }
 
 model WorkspaceMembership {
@@ -136,6 +137,7 @@ model Project {
   customFieldDefinitions CustomFieldDefinition[]
   statusUpdates ProjectStatusUpdate[]
   recurringRules RecurringRule[]
+  forms       Form[]
 }
 
 model ProjectStatusUpdate {
@@ -229,6 +231,7 @@ model Task {
   recurringRule RecurringRule? @relation(fields: [recurringRuleId], references: [id])
   recurringRuleId String?
   recurringGeneration RecurringTaskGeneration?
+  formSubmission FormSubmission?
 
   @@index([projectId, sectionId, position])
   @@index([projectId, sectionId, deletedAt, position])
@@ -600,4 +603,88 @@ model RecurringTaskGeneration {
 
   @@unique([ruleId, scheduledAt])
   @@index([status, retryCount])
+}
+
+enum FormQuestionType {
+  TEXT
+  TEXTAREA
+  NUMBER
+  EMAIL
+  SELECT
+  MULTI_SELECT
+  DATE
+  CHECKBOX
+}
+
+model Form {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  title       String
+  description String?
+  isPublic    Boolean  @default(false) @map("is_public")
+  publicToken String?  @unique @map("public_token")
+  createdByUserId String @map("created_by_user_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  archivedAt  DateTime? @map("archived_at")
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User    @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
+  questions FormQuestion[]
+  submissions FormSubmission[]
+
+  @@index([projectId, archivedAt])
+  @@map("forms")
+}
+
+model FormQuestion {
+  id          String   @id @default(uuid())
+  formId      String   @map("form_id")
+  type        FormQuestionType
+  label       String
+  description String?
+  required    Boolean  @default(false)
+  options     Json?    // For SELECT/MULTI_SELECT: [{label, value}]
+  position    Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  form Form @relation(fields: [formId], references: [id], onDelete: Cascade)
+  answers FormAnswer[]
+
+  @@index([formId, position])
+  @@map("form_questions")
+}
+
+model FormSubmission {
+  id          String   @id @default(uuid())
+  formId      String   @map("form_id")
+  submitterName String @map("submitter_name")
+  submitterEmail String @map("submitter_email")
+  createdTaskId String? @unique @map("created_task_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  form Form @relation(fields: [formId], references: [id], onDelete: Cascade)
+  createdTask Task? @relation(fields: [createdTaskId], references: [id], onDelete: SetNull)
+  answers FormAnswer[]
+
+  @@index([formId, createdAt])
+  @@map("form_submissions")
+}
+
+model FormAnswer {
+  id           String   @id @default(uuid())
+  submissionId String   @map("submission_id")
+  questionId   String   @map("question_id")
+  valueText    String?  @map("value_text")
+  valueNumber  Decimal? @map("value_number")
+  valueBoolean Boolean? @map("value_boolean")
+  valueJson    Json?    @map("value_json") // For arrays (multi-select)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  submission FormSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  question   FormQuestion   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([submissionId, questionId])
+  @@map("form_answers")
 }
