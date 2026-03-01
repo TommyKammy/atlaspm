@@ -390,6 +390,10 @@ const dictionaries: Record<Locale, Dictionary> = {
     requestedAt: 'Requested',
     respondedAt: 'Responded',
     approvalStatus: 'Approval status',
+    noProjects: 'No projects',
+    addProject: 'Add project',
+    selectProject: 'Select project',
+    setAsPrimary: 'Set as primary',
   },
   ja: {
     appName: 'AtlasPM',
@@ -775,6 +779,10 @@ const dictionaries: Record<Locale, Dictionary> = {
     requestedAt: '依頼日時',
     respondedAt: '回答日時',
     approvalStatus: '承認状況',
+    noProjects: 'プロジェクトが未設定です',
+    addProject: 'プロジェクトを追加',
+    selectProject: 'プロジェクトを選択',
+    setAsPrimary: 'プライマリに設定',
   },
 };
 

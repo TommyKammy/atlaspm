@@ -25,7 +25,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { Calendar, Check, CheckCircle2, ChevronDown, ChevronRight, Circle, Diamond, ExternalLink, Plus, Stamp, Trash2, User } from 'lucide-react';
+import { Calendar, Check, CheckCircle2, ChevronDown, ChevronRight, Circle, Diamond, ExternalLink, Folder, Plus, Stamp, Trash2, User } from 'lucide-react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type {
@@ -1055,7 +1055,14 @@ function TaskRow({
     }
 
     if (column.key === 'projects') {
-      return <span className="text-[11px] text-muted-foreground">{projectName}</span>;
+      return (
+        <div className="flex flex-wrap gap-1">
+          <Badge variant="secondary" className="text-[10px]">
+            <Folder className="mr-1 h-3 w-3" />
+            {projectName}
+          </Badge>
+        </div>
+      );
     }
 
     if (column.key === 'dependencies') {
