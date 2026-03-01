@@ -29,10 +29,9 @@ class UpdateTimeLogDto {
 }
 
 class UpdateEstimateDto {
-  @IsOptional()
   @IsInt()
   @Min(0)
-  estimateMinutes?: number;
+  estimateMinutes!: number;
 }
 
 @Controller()
@@ -121,16 +120,15 @@ export class TaskTimeTrackingController {
   ) {
     const timeLog = await this.prisma.taskTimeLog.findFirst({
       where: { id },
-      include: { task: true },
+      include: { task: true, user: { select: { id: true, displayName: true } } },
     });
 
     if (!timeLog) {
       throw new NotFoundException('Time log not found');
     }
 
-    if (timeLog.userId !== req.user.sub) {
-      await this.domain.requireProjectRole(timeLog.task.projectId, req.user.sub, ProjectRole.ADMIN);
-    }
+    const requiredRole = timeLog.userId === req.user.sub ? ProjectRole.MEMBER : ProjectRole.ADMIN;
+    await this.domain.requireProjectRole(timeLog.task.projectId, req.user.sub, requiredRole);
 
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const minutesDiff = (body.minutes ?? timeLog.minutes) - timeLog.minutes;
@@ -139,7 +137,7 @@ export class TaskTimeTrackingController {
         where: { id },
         data: {
           minutes: body.minutes,
-          description: body.description?.trim() || null,
+          description: body.description === undefined ? undefined : body.description.trim() || null,
         },
         include: { user: { select: { id: true, displayName: true } } },
       });
@@ -175,16 +173,15 @@ export class TaskTimeTrackingController {
   ) {
     const timeLog = await this.prisma.taskTimeLog.findFirst({
       where: { id },
-      include: { task: true },
+      include: { task: true, user: { select: { id: true, displayName: true } } },
     });
 
     if (!timeLog) {
       throw new NotFoundException('Time log not found');
     }
 
-    if (timeLog.userId !== req.user.sub) {
-      await this.domain.requireProjectRole(timeLog.task.projectId, req.user.sub, ProjectRole.ADMIN);
-    }
+    const requiredRole = timeLog.userId === req.user.sub ? ProjectRole.MEMBER : ProjectRole.ADMIN;
+    await this.domain.requireProjectRole(timeLog.task.projectId, req.user.sub, requiredRole);
 
     await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.taskTimeLog.delete({ where: { id } });
@@ -260,13 +257,13 @@ export class TaskTimeTrackingController {
     const [taskAgg, userAgg] = await Promise.all([
       this.prisma.taskTimeLog.groupBy({
         by: ['taskId'],
-        where: { task: { projectId } },
+        where: { task: { projectId, deletedAt: null } },
         _sum: { minutes: true },
         _count: { id: true },
       }),
       this.prisma.taskTimeLog.groupBy({
         by: ['userId'],
-        where: { task: { projectId } },
+        where: { task: { projectId, deletedAt: null } },
         _sum: { minutes: true },
         _count: { id: true },
       }),
