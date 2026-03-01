@@ -1432,6 +1432,31 @@ describe('Core API Integration', () => {
     expect(outbox.body.some((event: any) => event.type === 'task.estimate.updated')).toBe(true);
   });
 
+  test('workload effort mode accepts numeric query params and enforces supported period list', async () => {
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = wsRes.body[0].id as string;
+
+    const effortRes = await request(app.getHttpServer())
+      .get('/workload/me?viewMode=effort&periodWeeks=8')
+      .set('Authorization', `Bearer ${token}`)
+      .set('x-workspace-id', workspaceId)
+      .expect(200);
+
+    expect(Array.isArray(effortRes.body.weeklyBreakdown)).toBe(true);
+    expect(effortRes.body.weeklyBreakdown.length).toBe(8);
+    expect(typeof effortRes.body.totalEstimateMinutes).toBe('number');
+    expect(typeof effortRes.body.totalSpentMinutes).toBe('number');
+
+    await request(app.getHttpServer())
+      .get('/workload/me?viewMode=effort&periodWeeks=3')
+      .set('Authorization', `Bearer ${token}`)
+      .set('x-workspace-id', workspaceId)
+      .expect(400);
+  });
+
   test('task retention worker purges expired soft-deleted tasks and keeps recent deletions', async () => {
     const wsRes = await request(app.getHttpServer())
       .get('/workspaces')
