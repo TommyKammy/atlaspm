@@ -1250,12 +1250,14 @@ describe('Core API Integration', () => {
         enabled: true,
         definition: {
           trigger: 'task.progress.changed',
+          logicalOperator: 'OR',
           conditions: [{ field: 'customFieldNumber', fieldId: scoreField.body.id, op: 'gt', value: 80 }],
           actions: [{ type: 'setStatus', status: 'BLOCKED' }],
         },
       })
       .expect(201);
     expect(customRule.body.id).toBeTruthy();
+    expect(customRule.body.definition?.logicalOperator).toBe('OR');
 
     const patchTriggerRule = await request(app.getHttpServer())
       .patch(`/tasks/${taskId}/custom-fields`)

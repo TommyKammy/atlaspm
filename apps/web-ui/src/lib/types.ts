@@ -272,6 +272,7 @@ export type RuleAction =
 
 export type RuleDefinition = {
   trigger: 'task.progress.changed';
+  logicalOperator: 'AND' | 'OR';
   conditions: RuleCondition[];
   actions: RuleAction[];
 };

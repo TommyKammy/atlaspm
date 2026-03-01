@@ -2283,7 +2283,7 @@ export class TasksController {
       if (recentRun) continue;
 
       const definition = this.resolveRuleDefinition(rule);
-      const conditionsMatched = definition.conditions.every((condition) => {
+      const conditionResults = definition.conditions.map((condition) => {
         const value =
           condition.field === 'progressPercent'
             ? task.progressPercent
@@ -2299,6 +2299,12 @@ export class TasksController {
         if (condition.op === 'gte') return value >= Number(condition.value);
         return false;
       });
+      const conditionsMatched =
+        conditionResults.length === 0
+          ? false
+          : definition.logicalOperator === 'OR'
+            ? conditionResults.some(Boolean)
+            : conditionResults.every(Boolean);
 
       let patch: any = null;
       if (conditionsMatched) {

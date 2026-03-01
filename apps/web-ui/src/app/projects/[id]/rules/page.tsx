@@ -17,20 +17,39 @@ const triggerOptions = ['task.progress.changed'] as const;
 
 function ensureRuleDefinition(rule: Rule): RuleDefinition {
   if (rule.definition?.trigger && rule.definition.conditions && rule.definition.actions) {
-    return rule.definition;
+    return {
+      ...rule.definition,
+      logicalOperator: rule.definition.logicalOperator ?? 'AND',
+    };
   }
   if (rule.templateKey === 'progress_to_done') {
     return {
       trigger: 'task.progress.changed',
+      logicalOperator: 'AND',
       conditions: [{ field: 'progressPercent', op: 'eq', value: 100 }],
       actions: [{ type: 'setStatus', status: 'DONE' }, { type: 'setCompletedAtNow' }],
     };
   }
   return {
     trigger: 'task.progress.changed',
+    logicalOperator: 'AND',
     conditions: [{ field: 'progressPercent', op: 'between', min: 0, max: 99 }],
     actions: [{ type: 'setStatus', status: 'IN_PROGRESS' }, { type: 'setCompletedAtNull' }],
   };
+}
+
+function defaultRuleCondition(): RuleCondition {
+  return { field: 'progressPercent', op: 'eq', value: 100 };
+}
+
+function withOperator(condition: RuleCondition, op: RuleCondition['op']): RuleCondition {
+  if (op === 'between') {
+    const min = typeof condition.min === 'number' ? condition.min : typeof condition.value === 'number' ? condition.value : 0;
+    const max = typeof condition.max === 'number' ? condition.max : typeof condition.value === 'number' ? condition.value : 100;
+    return { ...condition, op, min, max };
+  }
+  const value = typeof condition.value === 'number' ? condition.value : typeof condition.min === 'number' ? condition.min : 0;
+  return { ...condition, op, value };
 }
 
 function RuleEditor({
@@ -54,8 +73,11 @@ function RuleEditor({
   );
   const [name, setName] = useState(rule.name);
   const [trigger, setTrigger] = useState<RuleDefinition['trigger']>(base.trigger);
-  const [condition, setCondition] = useState<RuleCondition>(
-    base.conditions[0] ?? { field: 'progressPercent', op: 'eq', value: 100 },
+  const [logicalOperator, setLogicalOperator] = useState<RuleDefinition['logicalOperator']>(
+    base.logicalOperator ?? 'AND',
+  );
+  const [conditions, setConditions] = useState<RuleCondition[]>(
+    base.conditions.length ? base.conditions : [defaultRuleCondition()],
   );
   const [actionStatus, setActionStatus] = useState<'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED'>(
     (base.actions.find((action): action is Extract<RuleAction, { type: 'setStatus' }> => action.type === 'setStatus')
@@ -63,12 +85,15 @@ function RuleEditor({
   );
   const [setNow, setSetNow] = useState(base.actions.some((action) => action.type === 'setCompletedAtNow'));
   const [setNull, setSetNull] = useState(base.actions.some((action) => action.type === 'setCompletedAtNull'));
-
-  const selectedFieldKey =
-    condition.field === 'customFieldNumber' ? `cf:${condition.fieldId}` : 'progressPercent';
+  const hasInvalidCustomFieldCondition = conditions.some(
+    (condition) => condition.field === 'customFieldNumber' && !condition.fieldId,
+  );
+  const updateConditionAt = (index: number, next: RuleCondition) => {
+    setConditions((current) => current.map((condition, cursor) => (cursor === index ? next : condition)));
+  };
 
   const save = async () => {
-    if (condition.field === 'customFieldNumber' && !condition.fieldId) {
+    if (!conditions.length || hasInvalidCustomFieldCondition) {
       return;
     }
     const actions: RuleAction[] = [{ type: 'setStatus', status: actionStatus }];
@@ -78,7 +103,8 @@ function RuleEditor({
       name,
       definition: {
         trigger,
-        conditions: [condition],
+        logicalOperator,
+        conditions,
         actions,
       },
     });
@@ -110,104 +136,142 @@ function RuleEditor({
             ))}
           </select>
         </label>
+        <label className="space-y-1 text-xs text-muted-foreground">
+          Condition mode
+          <select
+            className={fieldBase}
+            value={logicalOperator}
+            onChange={(e) => setLogicalOperator(e.target.value as RuleDefinition['logicalOperator'])}
+            data-testid={`rule-condition-mode-${rule.id}`}
+          >
+            <option value="AND">All conditions (AND)</option>
+            <option value="OR">Any condition (OR)</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="space-y-2">
+        {conditions.map((condition, index) => {
+          const selectedFieldKey =
+            condition.field === 'customFieldNumber' ? `cf:${condition.fieldId}` : 'progressPercent';
+          return (
+            <div key={`${rule.id}-condition-${index}`} className="grid gap-2 md:grid-cols-5">
+              <label className="space-y-1 text-xs text-muted-foreground">
+                Condition field
+                <select
+                  className={fieldBase}
+                  value={selectedFieldKey}
+                  data-testid={`rule-condition-field-${rule.id}-${index}`}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    if (next === 'progressPercent') {
+                      updateConditionAt(index, { field: 'progressPercent', op: condition.op, ...(condition.op === 'between'
+                        ? {
+                            min: typeof condition.min === 'number' ? condition.min : 0,
+                            max: typeof condition.max === 'number' ? condition.max : 100,
+                          }
+                        : { value: typeof condition.value === 'number' ? condition.value : 0 }) });
+                      return;
+                    }
+                    const [, parsedFieldId] = next.split(':');
+                    const fieldId = parsedFieldId ?? numberCustomFields[0]?.id;
+                    if (!fieldId) return;
+                    updateConditionAt(index, {
+                      field: 'customFieldNumber',
+                      fieldId,
+                      op: condition.op,
+                      ...(condition.op === 'between'
+                        ? {
+                            min: typeof condition.min === 'number' ? condition.min : 0,
+                            max: typeof condition.max === 'number' ? condition.max : 100,
+                          }
+                        : { value: typeof condition.value === 'number' ? condition.value : 0 }),
+                    });
+                  }}
+                >
+                  <option value="progressPercent">progressPercent</option>
+                  {numberCustomFields.map((field) => (
+                    <option key={field.id} value={`cf:${field.id}`}>
+                      {field.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1 text-xs text-muted-foreground">
+                Condition op
+                <select
+                  className={fieldBase}
+                  value={condition.op}
+                  data-testid={`rule-condition-op-${rule.id}-${index}`}
+                  onChange={(e) => updateConditionAt(index, withOperator(condition, e.target.value as RuleCondition['op']))}
+                >
+                  <option value="eq">eq</option>
+                  <option value="lt">lt</option>
+                  <option value="lte">lte</option>
+                  <option value="gt">gt</option>
+                  <option value="gte">gte</option>
+                  <option value="between">between</option>
+                </select>
+              </label>
+              {condition.op === 'between' ? (
+                <>
+                  <label className="space-y-1 text-xs text-muted-foreground">
+                    Min
+                    <input
+                      className={fieldBase}
+                      type="number"
+                      value={condition.min ?? 0}
+                      onChange={(e) => updateConditionAt(index, { ...condition, min: Number(e.target.value) })}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-muted-foreground">
+                    Max
+                    <input
+                      className={fieldBase}
+                      type="number"
+                      value={condition.max ?? 100}
+                      onChange={(e) => updateConditionAt(index, { ...condition, max: Number(e.target.value) })}
+                    />
+                  </label>
+                </>
+              ) : (
+                <label className="space-y-1 text-xs text-muted-foreground">
+                  Value
+                  <input
+                    className={fieldBase}
+                    type="number"
+                    value={condition.value ?? 0}
+                    onChange={(e) => updateConditionAt(index, { ...condition, value: Number(e.target.value) })}
+                  />
+                </label>
+              )}
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  className="h-8 rounded border bg-background px-3 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={conditions.length <= 1}
+                  data-testid={`rule-condition-remove-${rule.id}-${index}`}
+                  onClick={() =>
+                    setConditions((current) => current.filter((_, cursor) => cursor !== index))
+                  }
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          );
+        })}
+        <button
+          type="button"
+          className="h-8 rounded border bg-background px-3 text-xs text-muted-foreground hover:text-foreground"
+          data-testid={`rule-condition-add-${rule.id}`}
+          onClick={() => setConditions((current) => [...current, defaultRuleCondition()])}
+        >
+          Add condition
+        </button>
       </div>
 
       <div className="grid gap-2 md:grid-cols-4">
-        <label className="space-y-1 text-xs text-muted-foreground">
-          Condition field
-          <select
-            className={fieldBase}
-            value={selectedFieldKey}
-            onChange={(e) => {
-              const next = e.target.value;
-              const carryNumericCondition = (
-                base:
-                  | { field: 'progressPercent'; op: RuleCondition['op'] }
-                  | { field: 'customFieldNumber'; fieldId: string; op: RuleCondition['op'] },
-                prev: RuleCondition,
-              ): RuleCondition => {
-                const withValue =
-                  prev.op === 'between'
-                    ? {
-                        ...base,
-                        ...(typeof prev.min === 'number' ? { min: prev.min } : {}),
-                        ...(typeof prev.max === 'number' ? { max: prev.max } : {}),
-                      }
-                    : {
-                        ...base,
-                        ...(typeof prev.value === 'number' ? { value: prev.value } : {}),
-                      };
-                return withValue;
-              };
-              if (next === 'progressPercent') {
-                setCondition((prev) => carryNumericCondition({ field: 'progressPercent', op: prev.op }, prev));
-                return;
-              }
-              const [, parsedFieldId] = next.split(':');
-              const fieldId = parsedFieldId ?? numberCustomFields[0]?.id;
-              if (!fieldId) return;
-              setCondition((prev) =>
-                carryNumericCondition({ field: 'customFieldNumber', fieldId, op: prev.op }, prev),
-              );
-            }}
-          >
-            <option value="progressPercent">progressPercent</option>
-            {numberCustomFields.map((field) => (
-              <option key={field.id} value={`cf:${field.id}`}>
-                {field.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="space-y-1 text-xs text-muted-foreground">
-          Condition op
-          <select
-            className={fieldBase}
-            value={condition.op}
-            onChange={(e) =>
-              setCondition((prev) => ({ ...prev, op: e.target.value as RuleCondition['op'] }))
-            }
-          >
-            <option value="eq">eq</option>
-            <option value="lt">lt</option>
-            <option value="lte">lte</option>
-            <option value="gt">gt</option>
-            <option value="gte">gte</option>
-            <option value="between">between</option>
-          </select>
-        </label>
-        {condition.op === 'between' ? (
-          <>
-            <label className="space-y-1 text-xs text-muted-foreground">
-              Min
-              <input
-                className={fieldBase}
-                type="number"
-                value={condition.min ?? 0}
-                onChange={(e) => setCondition((prev) => ({ ...prev, min: Number(e.target.value) }))}
-              />
-            </label>
-            <label className="space-y-1 text-xs text-muted-foreground">
-              Max
-              <input
-                className={fieldBase}
-                type="number"
-                value={condition.max ?? 100}
-                onChange={(e) => setCondition((prev) => ({ ...prev, max: Number(e.target.value) }))}
-              />
-            </label>
-          </>
-        ) : (
-          <label className="space-y-1 text-xs text-muted-foreground">
-            Value
-            <input
-              className={fieldBase}
-              type="number"
-              value={condition.value ?? 0}
-              onChange={(e) => setCondition((prev) => ({ ...prev, value: Number(e.target.value) }))}
-            />
-          </label>
-        )}
         <label className="space-y-1 text-xs text-muted-foreground">
           Set status
           <select
@@ -223,7 +287,7 @@ function RuleEditor({
         </label>
       </div>
 
-      <div className="flex items-center gap-4 text-xs text-muted-foreground-foreground">
+      <div className="flex items-center gap-4 text-xs text-muted-foreground">
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={setNow} onChange={(e) => setSetNow(e.target.checked)} />
           completedAt now
@@ -239,14 +303,14 @@ function RuleEditor({
           type="button"
           className="h-8 rounded bg-primary px-3 text-xs font-medium text-primary-foreground"
           data-testid={`rule-save-${rule.id}`}
-          disabled={condition.field === 'customFieldNumber' && !condition.fieldId}
+          disabled={hasInvalidCustomFieldCondition || !conditions.length}
           onClick={() => void save()}
         >
           Save
         </button>
         <button
           type="button"
-          className="h-8 rounded border bg-background px-3 text-xs text-muted-foreground-foreground hover:text-foreground"
+          className="h-8 rounded border bg-background px-3 text-xs text-muted-foreground hover:text-foreground"
           onClick={onCancel}
         >
           Cancel
@@ -311,20 +375,20 @@ export default function RulesPage() {
           <div className="ml-1 flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="font-medium" data-testid={`rule-name-${rule.id}`}>{rule.name}</div>
-              <div className="text-[11px] text-muted-foreground-foreground">template: {rule.templateKey} | cooldown: {rule.cooldownSec}s</div>
+              <div className="text-[11px] text-muted-foreground">template: {rule.templateKey} | cooldown: {rule.cooldownSec}s</div>
             </div>
             <div className="flex gap-2">
               <button
                 type="button"
                 data-testid={`rule-edit-${rule.id}`}
-                className="h-8 rounded border bg-background px-3 text-xs text-muted-foreground-foreground hover:text-foreground"
+                className="h-8 rounded border bg-background px-3 text-xs text-muted-foreground hover:text-foreground"
                 onClick={() => setEditingRuleId(rule.id)}
               >
                 Edit
               </button>
               <button
                 type="button"
-                className="h-8 rounded border bg-background px-3 text-xs text-muted-foreground-foreground hover:text-foreground"
+                className="h-8 rounded border bg-background px-3 text-xs text-muted-foreground hover:text-foreground"
                 onClick={() => toggleMutation.mutate({ id: rule.id, enabled: rule.enabled })}
               >
                 {rule.enabled ? 'Disable' : 'Enable'}
@@ -348,7 +412,7 @@ export default function RulesPage() {
       ))}
 
       {!rules.length ? (
-        <div className="rounded-lg border border-dashed bg-card p-6 text-sm text-muted-foreground-foreground">No rules found.</div>
+        <div className="rounded-lg border border-dashed bg-card p-6 text-sm text-muted-foreground">No rules found.</div>
       ) : null}
     </div>
   );
