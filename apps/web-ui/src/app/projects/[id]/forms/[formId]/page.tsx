@@ -43,7 +43,7 @@ export default function FormBuilderPage() {
 
   const questionsQuery = useQuery<FormQuestion[]>({
     queryKey: queryKeys.formQuestions(formId),
-    queryFn: () => api(`/forms/${formId}`),
+    queryFn: () => api(`/forms/${formId}`).then((form: Form) => form.questions || []),
   });
 
   const updateForm = useMutation({
@@ -169,13 +169,19 @@ export default function FormBuilderPage() {
                   <div className="flex gap-2">
                     <Input
                       readOnly
-                      value={`${window.location.origin}/forms/${form.publicToken}`}
+                      value={
+                        typeof window !== 'undefined'
+                          ? `${window.location.origin}/forms/${form.publicToken}`
+                          : ''
+                      }
                     />
                     <Button
                       variant="outline"
-                      onClick={() =>
-                        navigator.clipboard.writeText(`${window.location.origin}/forms/${form.publicToken}`)
-                      }
+                      onClick={() => {
+                        if (typeof window !== 'undefined') {
+                          navigator.clipboard.writeText(`${window.location.origin}/forms/${form.publicToken}`);
+                        }
+                      }}
                     >
                       {t('copy')}
                     </Button>
@@ -230,7 +236,8 @@ export default function FormBuilderPage() {
               <Button
                 variant="outline"
                 className="w-full"
-                onClick={() => router.push(`/projects/${projectId}/forms/${formId}/submissions`)}
+                disabled
+                title="Submissions view coming soon"
               >
                 {t('viewSubmissions')}
               </Button>
@@ -273,9 +280,26 @@ function AddQuestionDialog({
     };
 
     if (needsOptions && options) {
-      data.options = options.split('\n').map((opt) => {
-        const trimmed = opt.trim();
-        return { label: trimmed, value: trimmed.toLowerCase().replace(/\s+/g, '-') };
+      const optionLabels = options
+        .split('\n')
+        .map((opt) => opt.trim())
+        .filter((trimmed) => trimmed.length > 0);
+
+      const usedValues = new Set<string>();
+
+      data.options = optionLabels.map((optionLabel) => {
+        const baseValue = optionLabel.toLowerCase().replace(/\s+/g, '-');
+        let value = baseValue;
+        let suffix = 1;
+
+        while (usedValues.has(value)) {
+          value = `${baseValue}-${suffix}`;
+          suffix += 1;
+        }
+
+        usedValues.add(value);
+
+        return { label: optionLabel, value };
       });
     }
 

@@ -29,7 +29,7 @@ export default function FormsPage() {
 
   const formsQuery = useQuery<Form[]>({
     queryKey: queryKeys.projectForms(projectId),
-    queryFn: () => api(`/projects/${projectId}/forms`),
+    queryFn: () => api(`/projects/${projectId}/forms?includeArchived=true`),
   });
 
   const createForm = useMutation({
@@ -53,7 +53,7 @@ export default function FormsPage() {
 
   const archiveForm = useMutation({
     mutationFn: (formId: string) =>
-      api(`/forms/${formId}`, { method: 'PATCH', body: { isArchived: true } }),
+      api(`/forms/${formId}`, { method: 'DELETE' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projectForms(projectId) });
     },

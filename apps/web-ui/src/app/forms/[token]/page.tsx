@@ -82,10 +82,11 @@ export default function FormSubmitPage() {
             {createdTaskId && (
               <div className="bg-muted p-4 rounded-lg">
                 <p className="text-sm text-muted-foreground mb-2">{t('taskCreated')}</p>
-                <Link href={`/projects/${form.projectId}?task=${createdTaskId}`} passHref legacyBehavior>
-                  <Button className="w-full">
-                    {t('viewTask')}
-                  </Button>
+                <Link
+                  href={`/projects/${form.projectId}?task=${createdTaskId}`}
+                  className="inline-flex items-center justify-center rounded-md text-sm font-medium bg-primary text-primary-foreground hover:opacity-90 h-9 px-4 py-2 w-full"
+                >
+                  {t('viewTask')}
                 </Link>
               </div>
             )}
