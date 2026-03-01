@@ -316,6 +316,8 @@ export function ProjectCalendarView({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const draggingTaskIdRef = useRef<string | null>(null);
+  const pointerDragTaskIdRef = useRef<string | null>(null);
+  const nativeDropHandledRef = useRef(false);
   const [dateField, setDateField] = useState<'dueAt' | 'startAt'>('dueAt');
 
   const groupsQuery = useQuery<SectionTaskGroup[]>({
@@ -404,7 +406,7 @@ export function ProjectCalendarView({
     if (fromCustomType) return fromCustomType;
     const fromPlainText = event.dataTransfer.getData('text/plain');
     if (fromPlainText && allTasksById.has(fromPlainText)) return fromPlainText;
-    return draggingTaskIdRef.current || draggingTaskId;
+    return draggingTaskIdRef.current || pointerDragTaskIdRef.current || draggingTaskId;
   };
 
   const updateTaskDate = (taskId: string, dateIso: string | null) => {
@@ -420,6 +422,18 @@ export function ProjectCalendarView({
       value: dateIso ? `${dateIso}T00:00:00.000Z` : null,
       version: task.version,
     });
+  };
+
+  const updateTaskDateFromPointer = (dateIso: string | null) => {
+    if (nativeDropHandledRef.current) {
+      nativeDropHandledRef.current = false;
+      pointerDragTaskIdRef.current = null;
+      return;
+    }
+    const taskId = pointerDragTaskIdRef.current;
+    if (!taskId) return;
+    updateTaskDate(taskId, dateIso);
+    pointerDragTaskIdRef.current = null;
   };
 
   if (groupsQuery.isLoading) {
@@ -490,9 +504,14 @@ export function ProjectCalendarView({
               event.preventDefault();
               const taskId = resolveDraggedTaskId(event);
               if (!taskId) return;
+              nativeDropHandledRef.current = true;
               updateTaskDate(taskId, cell.isoPrefix);
               draggingTaskIdRef.current = null;
               setDraggingTaskId(null);
+            }}
+            onPointerUp={() => {
+              if (!cell) return;
+              updateTaskDateFromPointer(cell.isoPrefix);
             }}
           >
             {cell ? (
@@ -517,6 +536,12 @@ export function ProjectCalendarView({
                         draggingTaskIdRef.current = null;
                         setDraggingTaskId(null);
                       }}
+                      onPointerDown={() => {
+                        pointerDragTaskIdRef.current = task.id;
+                      }}
+                      onPointerUp={() => {
+                        pointerDragTaskIdRef.current = null;
+                      }}
                     >
                       {task.title}
                     </button>
@@ -539,9 +564,13 @@ export function ProjectCalendarView({
           event.preventDefault();
           const taskId = resolveDraggedTaskId(event);
           if (!taskId) return;
+          nativeDropHandledRef.current = true;
           updateTaskDate(taskId, null);
           draggingTaskIdRef.current = null;
           setDraggingTaskId(null);
+        }}
+        onPointerUp={() => {
+          updateTaskDateFromPointer(null);
         }}
       >
         <h4 className="mb-2 text-sm font-medium">
@@ -570,6 +599,12 @@ export function ProjectCalendarView({
                 onDragEnd={() => {
                   draggingTaskIdRef.current = null;
                   setDraggingTaskId(null);
+                }}
+                onPointerDown={() => {
+                  pointerDragTaskIdRef.current = task.id;
+                }}
+                onPointerUp={() => {
+                  pointerDragTaskIdRef.current = null;
                 }}
               >
                 {task.title}
