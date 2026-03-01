@@ -299,6 +299,7 @@ export type Rule = {
   enabled: boolean;
   cooldownSec: number;
   definition?: RuleDefinition;
+  createdAt: string;
 };
 
 

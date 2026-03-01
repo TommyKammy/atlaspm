@@ -5,12 +5,14 @@ import { useParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
+import { useI18n } from '@/lib/i18n';
 import type {
   CustomFieldDefinition,
   Rule,
   RuleAction,
   RuleCondition,
   RuleDefinition,
+  ProjectMember,
 } from '@/lib/types';
 
 const triggerOptions = ['task.progress.changed'] as const;
@@ -321,11 +323,302 @@ function RuleEditor({
   );
 }
 
+function RuleCreator({
+  customFields,
+  onSave,
+  onCancel,
+}: {
+  customFields: CustomFieldDefinition[];
+  onSave: (data: {
+    name: string;
+    templateKey: string;
+    definition: RuleDefinition;
+  }) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const { t } = useI18n();
+  const numberCustomFields = useMemo(
+    () =>
+      customFields
+        .filter((field) => field.type === 'NUMBER' && !field.archivedAt)
+        .sort((left, right) => left.position - right.position),
+    [customFields],
+  );
+  const [name, setName] = useState('');
+  const [trigger, setTrigger] = useState<RuleDefinition['trigger']>('task.progress.changed');
+  const [logicalOperator, setLogicalOperator] = useState<LogicalOperator>('AND');
+  const [conditions, setConditions] = useState<RuleCondition[]>([defaultRuleCondition()]);
+  const [actionStatus, setActionStatus] = useState<'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED'>('TODO');
+  const [setNow, setSetNow] = useState(false);
+  const [setNull, setSetNull] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const hasInvalidCustomFieldCondition = conditions.some(
+    (condition) => condition.field === 'customFieldNumber' && !condition.fieldId,
+  );
+
+  const updateConditionAt = (index: number, next: RuleCondition) => {
+    setConditions((current) => current.map((condition, cursor) => (cursor === index ? next : condition)));
+  };
+
+  const save = async () => {
+    if (!name.trim()) {
+      setError(t('ruleNameRequired'));
+      return;
+    }
+    if (!conditions.length || hasInvalidCustomFieldCondition) {
+      setError(t('ruleConditionsInvalid'));
+      return;
+    }
+    setError(null);
+    const actions: RuleAction[] = [{ type: 'setStatus', status: actionStatus }];
+    if (setNow) actions.push({ type: 'setCompletedAtNow' });
+    if (setNull) actions.push({ type: 'setCompletedAtNull' });
+    try {
+      await onSave({
+        name: name.trim(),
+        templateKey: `custom_${crypto.randomUUID()}`,
+        definition: {
+          trigger,
+          logicalOperator,
+          conditions,
+          actions,
+        },
+      });
+    } catch (err) {
+      const message =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message?: string }).message)
+          : t('ruleCreateFailed');
+      setError(message);
+    }
+  };
+
+  const fieldBase = 'h-8 rounded border bg-background px-2 text-xs';
+
+  return (
+    <div className="rounded-lg border bg-card p-4">
+      <h3 className="mb-4 font-medium">{t('createRule')}</h3>
+      {error ? <div className="mb-3 text-xs text-destructive">{error}</div> : null}
+      <div className="space-y-3">
+        <div className="grid gap-2 md:grid-cols-2">
+          <label className="space-y-1 text-xs text-muted-foreground">
+            {t('ruleName')}
+            <input
+              className={fieldBase}
+              value={name}
+              data-testid="rule-create-name-input"
+              onChange={(e) => setName(e.target.value)}
+              placeholder={t('ruleNamePlaceholder')}
+            />
+          </label>
+          <label className="space-y-1 text-xs text-muted-foreground">
+            {t('trigger')}
+            <select
+              className={fieldBase}
+              value={trigger}
+              onChange={(e) => setTrigger(e.target.value as RuleDefinition['trigger'])}
+            >
+              {triggerOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1 text-xs text-muted-foreground">
+            {t('conditionMode')}
+            <select
+              className={fieldBase}
+              value={logicalOperator}
+              onChange={(e) => setLogicalOperator(e.target.value as LogicalOperator)}
+              data-testid="rule-create-condition-mode"
+            >
+              <option value="AND">{t('conditionModeAll')}</option>
+              <option value="OR">{t('conditionModeAny')}</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="space-y-2">
+          {conditions.map((condition, index) => {
+            const selectedFieldKey =
+              condition.field === 'customFieldNumber' ? `cf:${condition.fieldId}` : 'progressPercent';
+            return (
+              <div key={`create-condition-${index}`} className="grid gap-2 md:grid-cols-5">
+                <label className="space-y-1 text-xs text-muted-foreground">
+                  {t('conditionField')}
+                  <select
+                    className={fieldBase}
+                    value={selectedFieldKey}
+                    data-testid={`rule-create-condition-field-${index}`}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      if (next === 'progressPercent') {
+                        updateConditionAt(index, {
+                          field: 'progressPercent',
+                          op: condition.op,
+                          ...(condition.op === 'between'
+                            ? {
+                                min: typeof condition.min === 'number' ? condition.min : 0,
+                                max: typeof condition.max === 'number' ? condition.max : 100,
+                              }
+                            : { value: typeof condition.value === 'number' ? condition.value : 0 }),
+                        });
+                        return;
+                      }
+                      const [, parsedFieldId] = next.split(':');
+                      const fieldId = parsedFieldId ?? numberCustomFields[0]?.id;
+                      if (!fieldId) return;
+                      updateConditionAt(index, {
+                        field: 'customFieldNumber',
+                        fieldId,
+                        op: condition.op,
+                        ...(condition.op === 'between'
+                          ? {
+                              min: typeof condition.min === 'number' ? condition.min : 0,
+                              max: typeof condition.max === 'number' ? condition.max : 100,
+                            }
+                          : { value: typeof condition.value === 'number' ? condition.value : 0 }),
+                      });
+                    }}
+                  >
+                    <option value="progressPercent">progressPercent</option>
+                    {numberCustomFields.map((field) => (
+                      <option key={field.id} value={`cf:${field.id}`}>
+                        {field.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-1 text-xs text-muted-foreground">
+                  {t('conditionOp')}
+                  <select
+                    className={fieldBase}
+                    value={condition.op}
+                    data-testid={`rule-create-condition-op-${index}`}
+                    onChange={(e) => updateConditionAt(index, withOperator(condition, e.target.value as RuleCondition['op']))}
+                  >
+                    <option value="eq">eq</option>
+                    <option value="lt">lt</option>
+                    <option value="lte">lte</option>
+                    <option value="gt">gt</option>
+                    <option value="gte">gte</option>
+                    <option value="between">between</option>
+                  </select>
+                </label>
+                {condition.op === 'between' ? (
+                  <>
+                    <label className="space-y-1 text-xs text-muted-foreground">
+                      {t('min')}
+                      <input
+                        className={fieldBase}
+                        type="number"
+                        value={condition.min ?? 0}
+                        onChange={(e) => updateConditionAt(index, { ...condition, min: Number(e.target.value) })}
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs text-muted-foreground">
+                      {t('max')}
+                      <input
+                        className={fieldBase}
+                        type="number"
+                        value={condition.max ?? 100}
+                        onChange={(e) => updateConditionAt(index, { ...condition, max: Number(e.target.value) })}
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <label className="space-y-1 text-xs text-muted-foreground">
+                    {t('value')}
+                    <input
+                      className={fieldBase}
+                      type="number"
+                      value={condition.value ?? 0}
+                      onChange={(e) => updateConditionAt(index, { ...condition, value: Number(e.target.value) })}
+                    />
+                  </label>
+                )}
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    className="h-8 rounded border bg-background px-3 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={conditions.length <= 1}
+                    data-testid={`rule-create-condition-remove-${index}`}
+                    onClick={() => setConditions((current) => current.filter((_, cursor) => cursor !== index))}
+                  >
+                    {t('remove')}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+          <button
+            type="button"
+            className="h-8 rounded border bg-background px-3 text-xs text-muted-foreground hover:text-foreground"
+            data-testid="rule-create-condition-add"
+            onClick={() => setConditions((current) => [...current, defaultRuleCondition()])}
+          >
+            {t('addCondition')}
+          </button>
+        </div>
+
+        <div className="grid gap-2 md:grid-cols-4">
+          <label className="space-y-1 text-xs text-muted-foreground">
+            {t('setStatus')}
+            <select
+              className={fieldBase}
+              value={actionStatus}
+              onChange={(e) => setActionStatus(e.target.value as 'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED')}
+            >
+              <option value="TODO">TODO</option>
+              <option value="IN_PROGRESS">IN_PROGRESS</option>
+              <option value="DONE">DONE</option>
+              <option value="BLOCKED">BLOCKED</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={setNow} onChange={(e) => setSetNow(e.target.checked)} />
+            {t('completedAtNow')}
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={setNull} onChange={(e) => setSetNull(e.target.checked)} />
+            {t('completedAtNull')}
+          </label>
+        </div>
+
+        <div className="flex gap-2 pt-2">
+          <button
+            type="button"
+            className="h-8 rounded bg-primary px-3 text-xs font-medium text-primary-foreground"
+            data-testid="rule-create-save"
+            disabled={hasInvalidCustomFieldCondition || !conditions.length}
+            onClick={() => void save()}
+          >
+            {t('create')}
+          </button>
+          <button
+            type="button"
+            className="h-8 rounded border bg-background px-3 text-xs text-muted-foreground hover:text-foreground"
+            onClick={onCancel}
+          >
+            {t('cancel')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function RulesPage() {
+  const { t } = useI18n();
   const params = useParams<{ id: string }>();
   const projectId = params.id;
   const queryClient = useQueryClient();
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
 
   const rulesQuery = useQuery<Rule[]>({
     queryKey: queryKeys.projectRules(projectId),
@@ -336,6 +629,37 @@ export default function RulesPage() {
     queryKey: queryKeys.projectCustomFields(projectId),
     queryFn: () => api(`/projects/${projectId}/custom-fields`),
     enabled: Boolean(projectId),
+  });
+  const membersQuery = useQuery<ProjectMember[]>({
+    queryKey: queryKeys.projectMembers(projectId),
+    queryFn: () => api(`/projects/${projectId}/members`),
+    enabled: Boolean(projectId),
+  });
+  const meQuery = useQuery<{ id: string }>({
+    queryKey: queryKeys.me,
+    queryFn: () => api('/me'),
+  });
+
+  const currentProjectRole = useMemo(() => {
+    const meId = meQuery.data?.id;
+    if (!meId || !membersQuery.data) return null;
+    return membersQuery.data.find((member) => member.userId === meId)?.role ?? null;
+  }, [meQuery.data?.id, membersQuery.data]);
+  const canCreateRule = currentProjectRole ? currentProjectRole !== 'VIEWER' : false;
+
+  const createMutation = useMutation({
+    mutationFn: (body: {
+      name: string;
+      templateKey: string;
+      definition: RuleDefinition;
+    }) => api(`/projects/${projectId}/rules`, { method: 'POST', body }) as Promise<Rule>,
+    onSuccess: (created) => {
+      queryClient.setQueryData<Rule[]>(queryKeys.projectRules(projectId), (current = []) => {
+        if (current.some((rule) => rule.id === created.id)) return current;
+        return [...current, created].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      });
+      setIsCreating(false);
+    },
   });
 
   const toggleMutation = useMutation({
@@ -366,6 +690,30 @@ export default function RulesPage() {
 
   return (
     <div className="space-y-3">
+      {canCreateRule ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            data-testid="rule-create-button"
+            className="h-8 rounded bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50"
+            disabled={isCreating}
+            onClick={() => setIsCreating(true)}
+          >
+            {t('createRule')}
+          </button>
+        </div>
+      ) : null}
+
+      {isCreating ? (
+        <RuleCreator
+          customFields={customFields}
+          onCancel={() => setIsCreating(false)}
+          onSave={async (data) => {
+            await createMutation.mutateAsync(data);
+          }}
+        />
+      ) : null}
+
       {rules.map((rule) => (
         <article
           key={rule.id}
