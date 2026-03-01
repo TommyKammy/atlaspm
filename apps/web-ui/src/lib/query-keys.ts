@@ -40,4 +40,5 @@ export const queryKeys = {
   formDetail: (formId: string) => ['form', formId] as const,
   formQuestions: (formId: string) => ['form', formId, 'questions'] as const,
   formSubmissions: (formId: string) => ['form', formId, 'submissions'] as const,
+  taskApproval: (taskId: string) => ['task', taskId, 'approval'] as const,
 };
