@@ -1169,7 +1169,7 @@ function QuickAddTask({
     const trimmed = title.trim();
     if (!trimmed) return;
     await onCreate(sectionId, trimmed);
-    setTitle('');
+    setTitle((current) => (current.trim() === trimmed ? '' : current));
     inputRef.current?.focus();
   };
 
