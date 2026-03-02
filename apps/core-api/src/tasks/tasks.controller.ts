@@ -37,6 +37,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
+import { assertValidDateRange } from '../common/date-validation';
 import { Prisma, Priority, ProjectRole, TaskStatus, TaskType, DependencyType, CustomFieldType } from '@prisma/client';
 import { SubtaskService } from './subtask.service';
 import { SearchService } from '../search/search.service';
@@ -520,6 +521,8 @@ export class TasksController {
   async create(@Param('id') projectId: string, @Body() body: CreateTaskDto, @CurrentRequest() req: AppRequest) {
     await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
 
+    assertValidDateRange(body.startAt, body.dueAt);
+
     let sectionId = body.sectionId;
     if (!sectionId) {
       const defaultSection = await this.prisma.section.findFirst({ where: { projectId, isDefault: true } });
@@ -589,6 +592,8 @@ export class TasksController {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (body.version && body.version !== task.version) throw new ConflictException('Version conflict');
+
+    assertValidDateRange(body.startAt, body.dueAt);
 
     const newType = body.type ?? task.type;
     const requestedStatus = body.status ?? task.status;
