@@ -2124,4 +2124,48 @@ describe('Core API Integration', () => {
       message: expect.stringContaining('startAt must be before or equal to dueAt'),
     });
   });
+
+  test('PATCH /tasks/:id rejects partial update that creates invalid range', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Partial Update Test ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() + 1);
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() + 7);
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Task with dates',
+        startAt: startDate.toISOString(),
+        dueAt: dueDate.toISOString(),
+      })
+      .expect(201);
+    const taskId = taskRes.body.id;
+
+    const earlierDueDate = new Date();
+    earlierDueDate.setDate(earlierDueDate.getDate() - 1);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        dueAt: earlierDueDate.toISOString(),
+      })
+      .expect(400);
+
+    expect(res.body).toMatchObject({
+      code: 'INVALID_DATE_RANGE',
+      message: expect.stringContaining('startAt must be before or equal to dueAt'),
+    });
+  });
 });

@@ -593,7 +593,9 @@ export class TasksController {
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (body.version && body.version !== task.version) throw new ConflictException('Version conflict');
 
-    assertValidDateRange(body.startAt, body.dueAt);
+    const effectiveStartAt = body.startAt === undefined ? task.startAt?.toISOString() : body.startAt;
+    const effectiveDueAt = body.dueAt === undefined ? task.dueAt?.toISOString() : body.dueAt;
+    assertValidDateRange(effectiveStartAt, effectiveDueAt);
 
     const newType = body.type ?? task.type;
     const requestedStatus = body.status ?? task.status;
