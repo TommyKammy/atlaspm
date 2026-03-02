@@ -1883,4 +1883,100 @@ describe('Core API Integration', () => {
 
     await request(app.getHttpServer()).delete(`/rules/non-existent-rule-id`).set('Authorization', `Bearer ${token}`).expect(404);
   });
+
+  test('POST /projects/:id/rules creates rule with audit/outbox events', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Rule Create Test ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const ruleName = `Test Rule ${Date.now()}`;
+    const createRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/rules`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: ruleName,
+        templateKey: `custom_create_test_${Date.now()}`,
+        enabled: true,
+        definition: {
+          trigger: 'task.progress.changed',
+          logicalOperator: 'AND',
+          conditions: [{ field: 'progressPercent', op: 'gte', value: 75 }],
+          actions: [{ type: 'setStatus', status: 'DONE' }],
+        },
+      })
+      .expect(201);
+
+    const createdRule = createRes.body;
+    expect(createdRule.id).toBeTruthy();
+    expect(createdRule.name).toBe(ruleName);
+    expect(createdRule.projectId).toBe(projectId);
+    expect(createdRule.enabled).toBe(true);
+    expect(createdRule.definition).toMatchObject({
+      trigger: 'task.progress.changed',
+      logicalOperator: 'AND',
+      conditions: [{ field: 'progressPercent', op: 'gte', value: 75 }],
+      actions: [{ type: 'setStatus', status: 'DONE' }],
+    });
+
+    const createAudit = await prisma.auditEvent.findFirst({
+      where: { entityType: 'Rule', entityId: createdRule.id, action: 'rule.created' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(createAudit).toBeTruthy();
+    expect(createAudit?.beforeJson).toBeNull();
+    expect(createAudit?.afterJson).toBeTruthy();
+    expect((createAudit?.afterJson as any)?.name).toBe(ruleName);
+
+    const recentRuleCreatedOutboxEvents = await prisma.outboxEvent.findMany({
+      where: { type: 'rule.created' },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    const createOutbox = recentRuleCreatedOutboxEvents.find(
+      (event) => (event.payload as any)?.id === createdRule.id,
+    );
+    expect(createOutbox).toBeTruthy();
+    expect((createOutbox?.payload as any)?.name).toBe(ruleName);
+    expect((createOutbox?.payload as any)?.projectId).toBe(projectId);
+  });
+
+  test('DELETE /rules/:id returns 409 for template-backed rules', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Template Guard Test ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const rules = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/rules`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const templateRule = rules.body.find((r: any) => r.templateKey === 'progress_to_done' || r.templateKey === 'progress_to_in_progress');
+    expect(templateRule).toBeTruthy();
+    const templateRuleId = templateRule.id;
+
+    const deleteRes = await request(app.getHttpServer())
+      .delete(`/rules/${templateRuleId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(409);
+
+    expect(deleteRes.body).toMatchObject({
+      code: 'TEMPLATE_RULE_DELETION_FORBIDDEN',
+      message: expect.stringContaining('Template-backed rules cannot be deleted'),
+    });
+
+    const ruleStillExists = await prisma.rule.findUnique({ where: { id: templateRuleId } });
+    expect(ruleStillExists).toBeTruthy();
+  });
 });
