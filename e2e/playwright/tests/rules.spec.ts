@@ -1,19 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
 
-const API = process.env.E2E_CORE_API_URL ?? 'http://localhost:3001';
-
-async function api(path: string, token: string, method = 'GET', body?: unknown) {
-  const res = await fetch(`${API}${path}`, {
-    method,
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
-  const raw = await res.text();
-  if (!raw) return null;
-  return JSON.parse(raw);
-}
-
 async function login(page: Page) {
   const sub = `e2e-rules-user-${Date.now()}`;
   const email = `e2e-rules-${Date.now()}@example.com`;
@@ -30,28 +16,34 @@ async function login(page: Page) {
   return { sub, email, token };
 }
 
-async function createProjectAndOpenRules(page: Page, token: string, projectNamePrefix: string) {
+async function createProjectAndOpenRules(page: Page, projectNamePrefix: string) {
   const projectName = `${projectNamePrefix} ${Date.now()}`;
   await page.fill('input[placeholder="Project name"]', projectName);
   await page.click('[data-testid="create-project-btn"]');
-  await expect(page.getByText(projectName).first()).toBeVisible();
+  const projectLink = page.locator('a[href^="/projects/"]', { hasText: projectName }).first();
+  await expect(projectLink).toBeVisible();
 
-  const projects = await api('/projects', token);
-  const project = projects.find((p: any) => p.name === projectName);
-  expect(project).toBeTruthy();
+  const href = await projectLink.getAttribute('href');
+  expect(href).toBeTruthy();
+  const projectId = href?.match(/\/projects\/([^/?#]+)/)?.[1];
+  expect(projectId).toBeTruthy();
 
-  await page.goto(`/projects/${project.id}/rules`);
+  await projectLink.click();
+  await page.waitForURL(`**/projects/${projectId}`);
+  await page.getByTestId('project-settings-menu-trigger').click();
+  await page.getByTestId('rules-page-link').click();
+  await page.waitForURL(`**/projects/${projectId}/rules`);
   await expect(page.locator('[data-testid^="rule-card-"]').first()).toBeVisible({ timeout: 15000 });
 }
 
 test('Rules page renders with rule cards', async ({ page }) => {
-  const { token } = await login(page);
-  await createProjectAndOpenRules(page, token, 'Rules Render Test');
+  await login(page);
+  await createProjectAndOpenRules(page, 'Rules Render Test');
 });
 
 test('Rule can be created from rules page', async ({ page }) => {
-  const { token } = await login(page);
-  await createProjectAndOpenRules(page, token, 'Rules Create Test');
+  await login(page);
+  await createProjectAndOpenRules(page, 'Rules Create Test');
 
   const ruleName = `UI Rule ${Date.now()}`;
 
@@ -63,8 +55,8 @@ test('Rule can be created from rules page', async ({ page }) => {
 });
 
 test('Custom rule can be deleted from rules page', async ({ page }) => {
-  const { token } = await login(page);
-  await createProjectAndOpenRules(page, token, 'Rules Delete Test');
+  await login(page);
+  await createProjectAndOpenRules(page, 'Rules Delete Test');
 
   const ruleName = `Delete Rule ${Date.now()}`;
 
@@ -85,8 +77,8 @@ test('Custom rule can be deleted from rules page', async ({ page }) => {
 });
 
 test('Rules page shows Japanese labels when locale is ja', async ({ page }) => {
-  const { token } = await login(page);
-  await createProjectAndOpenRules(page, token, 'Rules JA Test');
+  await login(page);
+  await createProjectAndOpenRules(page, 'Rules JA Test');
 
   await page.getByTestId('personal-settings-trigger').click();
   await page.getByTestId('language-toggle-menu').click();
