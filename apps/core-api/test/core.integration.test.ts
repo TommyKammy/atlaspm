@@ -1979,4 +1979,232 @@ describe('Core API Integration', () => {
     const ruleStillExists = await prisma.rule.findUnique({ where: { id: templateRuleId } });
     expect(ruleStillExists).toBeTruthy();
   });
+
+  test('POST /projects/:id/tasks rejects invalid date range', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Date Range Test ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + 7);
+    const pastDate = new Date();
+    pastDate.setDate(pastDate.getDate() - 7);
+
+    const res = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Task with invalid date range',
+        startAt: futureDate.toISOString(),
+        dueAt: pastDate.toISOString(),
+      })
+      .expect(400);
+
+    expect(res.body).toMatchObject({
+      code: 'INVALID_DATE_RANGE',
+      message: expect.stringContaining('startAt must be before or equal to dueAt'),
+    });
+  });
+
+  test('POST /projects/:id/tasks accepts valid date range', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Valid Date Test ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() + 1);
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() + 7);
+
+    const res = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Task with valid date range',
+        startAt: startDate.toISOString(),
+        dueAt: dueDate.toISOString(),
+      })
+      .expect(201);
+
+    expect(res.body.startAt).toBeTruthy();
+    expect(res.body.dueAt).toBeTruthy();
+  });
+
+  test('POST /projects/:id/tasks accepts open-ended date ranges', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Open Range Test ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + 7);
+
+    const startOnly = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Task with start date only',
+        startAt: futureDate.toISOString(),
+      })
+      .expect(201);
+    expect(startOnly.body.startAt).toBeTruthy();
+
+    const dueOnly = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Task with due date only',
+        dueAt: futureDate.toISOString(),
+      })
+      .expect(201);
+    expect(dueOnly.body.dueAt).toBeTruthy();
+
+    const noDates = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Task with no dates',
+      })
+      .expect(201);
+    expect(noDates.body.startAt).toBeNull();
+    expect(noDates.body.dueAt).toBeNull();
+  });
+
+  test('PATCH /tasks/:id rejects invalid date range update', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Patch Date Test ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Task to update' })
+      .expect(201);
+    const taskId = taskRes.body.id;
+
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + 7);
+    const pastDate = new Date();
+    pastDate.setDate(pastDate.getDate() - 7);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        startAt: futureDate.toISOString(),
+        dueAt: pastDate.toISOString(),
+      })
+      .expect(400);
+
+    expect(res.body).toMatchObject({
+      code: 'INVALID_DATE_RANGE',
+      message: expect.stringContaining('startAt must be before or equal to dueAt'),
+    });
+  });
+
+  test('PATCH /tasks/:id rejects partial update that creates invalid range', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Partial Update Test ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() + 1);
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() + 7);
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Task with dates',
+        startAt: startDate.toISOString(),
+        dueAt: dueDate.toISOString(),
+      })
+      .expect(201);
+    const taskId = taskRes.body.id;
+
+    const earlierDueDate = new Date();
+    earlierDueDate.setDate(earlierDueDate.getDate() - 1);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        dueAt: earlierDueDate.toISOString(),
+      })
+      .expect(400);
+
+    expect(res.body).toMatchObject({
+      code: 'INVALID_DATE_RANGE',
+      message: expect.stringContaining('startAt must be before or equal to dueAt'),
+    });
+  });
+
+  test('POST /tasks/:id/subtasks rejects invalid date range', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Subtask Date Test ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const parentTaskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Parent task' })
+      .expect(201);
+    const parentTaskId = parentTaskRes.body.id as string;
+
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + 7);
+    const pastDate = new Date();
+    pastDate.setDate(pastDate.getDate() - 7);
+
+    const res = await request(app.getHttpServer())
+      .post(`/tasks/${parentTaskId}/subtasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Subtask with invalid date range',
+        startAt: futureDate.toISOString(),
+        dueAt: pastDate.toISOString(),
+      })
+      .expect(400);
+
+    expect(res.body).toMatchObject({
+      code: 'INVALID_DATE_RANGE',
+      message: expect.stringContaining('startAt must be before or equal to dueAt'),
+    });
+  });
 });
