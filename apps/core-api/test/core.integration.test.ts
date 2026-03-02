@@ -2007,10 +2007,8 @@ describe('Core API Integration', () => {
       .expect(400);
 
     expect(res.body).toMatchObject({
-      error: {
-        code: 'INVALID_DATE_RANGE',
-        message: expect.stringContaining('startAt must be before or equal to dueAt'),
-      },
+      code: 'INVALID_DATE_RANGE',
+      message: expect.stringContaining('startAt must be before or equal to dueAt'),
     });
   });
 
@@ -2122,10 +2120,8 @@ describe('Core API Integration', () => {
       .expect(400);
 
     expect(res.body).toMatchObject({
-      error: {
-        code: 'INVALID_DATE_RANGE',
-        message: expect.stringContaining('startAt must be before or equal to dueAt'),
-      },
+      code: 'INVALID_DATE_RANGE',
+      message: expect.stringContaining('startAt must be before or equal to dueAt'),
     });
   });
 });
