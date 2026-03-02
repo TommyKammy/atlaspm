@@ -1727,6 +1727,7 @@ export class TasksController {
   async createSubtask(@Param('id') parentId: string, @Body() body: CreateSubtaskDto, @CurrentRequest() req: AppRequest) {
     const parentTask = await this.prisma.task.findFirstOrThrow({ where: { id: parentId, deletedAt: null } });
     await this.domain.requireProjectRole(parentTask.projectId, req.user.sub, ProjectRole.MEMBER);
+    assertValidDateRange(body.startAt, body.dueAt);
 
     const topTask = await this.prisma.task.findFirst({
       where: { projectId: parentTask.projectId, sectionId: parentTask.sectionId, deletedAt: null },
