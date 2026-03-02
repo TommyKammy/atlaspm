@@ -2207,4 +2207,236 @@ describe('Core API Integration', () => {
       message: expect.stringContaining('startAt must be before or equal to dueAt'),
     });
   });
+
+  // Dependency cycle detection tests for Issue #119
+  describe('Task dependency cycle detection', () => {
+    test('POST /tasks/:id/dependencies rejects self-dependency', async () => {
+      const workspaceRes = await request(app.getHttpServer())
+        .get('/workspaces')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const workspaceId = workspaceRes.body[0].id;
+
+      const projectRes = await request(app.getHttpServer())
+        .post('/projects')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ workspaceId, name: 'Dependency Test Project - Self' })
+        .expect(201);
+      const projectId = projectRes.body.id as string;
+
+      const taskRes = await request(app.getHttpServer())
+        .post(`/projects/${projectId}/tasks`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ title: 'Task for self-dependency test' })
+        .expect(201);
+      const taskId = taskRes.body.id as string;
+
+      const res = await request(app.getHttpServer())
+        .post(`/tasks/${taskId}/dependencies`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ dependsOnId: taskId })
+        .expect(409);
+
+      expect(res.body).toMatchObject({
+        code: 'DEPENDENCY_CYCLE_DETECTED',
+        message: expect.stringContaining('cannot depend on itself'),
+      });
+    });
+
+    test('POST /tasks/:id/dependencies rejects direct cycle (A -> B -> A)', async () => {
+      const workspaceRes = await request(app.getHttpServer())
+        .get('/workspaces')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const workspaceId = workspaceRes.body[0].id;
+
+      const projectRes = await request(app.getHttpServer())
+        .post('/projects')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ workspaceId, name: 'Dependency Test Project - Direct Cycle' })
+        .expect(201);
+      const projectId = projectRes.body.id as string;
+
+      const taskARes = await request(app.getHttpServer())
+        .post(`/projects/${projectId}/tasks`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ title: 'Task A' })
+        .expect(201);
+      const taskAId = taskARes.body.id as string;
+
+      const taskBRes = await request(app.getHttpServer())
+        .post(`/projects/${projectId}/tasks`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ title: 'Task B' })
+        .expect(201);
+      const taskBId = taskBRes.body.id as string;
+
+      // Create A -> B dependency
+      await request(app.getHttpServer())
+        .post(`/tasks/${taskAId}/dependencies`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ dependsOnId: taskBId })
+        .expect(201);
+
+      // Try to create B -> A (should fail with cycle error)
+      const res = await request(app.getHttpServer())
+        .post(`/tasks/${taskBId}/dependencies`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ dependsOnId: taskAId })
+        .expect(409);
+
+      expect(res.body).toMatchObject({
+        code: 'DEPENDENCY_CYCLE_DETECTED',
+        message: expect.stringContaining('circular dependency'),
+      });
+    });
+
+    test('POST /tasks/:id/dependencies rejects transitive cycle (A -> B -> C -> A)', async () => {
+      const workspaceRes = await request(app.getHttpServer())
+        .get('/workspaces')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const workspaceId = workspaceRes.body[0].id;
+
+      const projectRes = await request(app.getHttpServer())
+        .post('/projects')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ workspaceId, name: 'Dependency Test Project - Transitive Cycle' })
+        .expect(201);
+      const projectId = projectRes.body.id as string;
+
+      const taskARes = await request(app.getHttpServer())
+        .post(`/projects/${projectId}/tasks`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ title: 'Task A' })
+        .expect(201);
+      const taskAId = taskARes.body.id as string;
+
+      const taskBRes = await request(app.getHttpServer())
+        .post(`/projects/${projectId}/tasks`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ title: 'Task B' })
+        .expect(201);
+      const taskBId = taskBRes.body.id as string;
+
+      const taskCRes = await request(app.getHttpServer())
+        .post(`/projects/${projectId}/tasks`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ title: 'Task C' })
+        .expect(201);
+      const taskCId = taskCRes.body.id as string;
+
+      // Create A -> B -> C chain
+      await request(app.getHttpServer())
+        .post(`/tasks/${taskAId}/dependencies`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ dependsOnId: taskBId })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post(`/tasks/${taskBId}/dependencies`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ dependsOnId: taskCId })
+        .expect(201);
+
+      // Try to create C -> A (should fail with cycle error)
+      const res = await request(app.getHttpServer())
+        .post(`/tasks/${taskCId}/dependencies`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ dependsOnId: taskAId })
+        .expect(409);
+
+      expect(res.body).toMatchObject({
+        code: 'DEPENDENCY_CYCLE_DETECTED',
+        message: expect.stringContaining('circular dependency'),
+      });
+    });
+
+    test('POST /tasks/:id/dependencies rejects cross-project dependency', async () => {
+      const workspaceRes = await request(app.getHttpServer())
+        .get('/workspaces')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const workspaceId = workspaceRes.body[0].id;
+
+      const project1Res = await request(app.getHttpServer())
+        .post('/projects')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ workspaceId, name: 'Project 1' })
+        .expect(201);
+      const project1Id = project1Res.body.id as string;
+
+      const project2Res = await request(app.getHttpServer())
+        .post('/projects')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ workspaceId, name: 'Project 2' })
+        .expect(201);
+      const project2Id = project2Res.body.id as string;
+
+      const task1Res = await request(app.getHttpServer())
+        .post(`/projects/${project1Id}/tasks`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ title: 'Task in Project 1' })
+        .expect(201);
+      const task1Id = task1Res.body.id as string;
+
+      const task2Res = await request(app.getHttpServer())
+        .post(`/projects/${project2Id}/tasks`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ title: 'Task in Project 2' })
+        .expect(201);
+      const task2Id = task2Res.body.id as string;
+
+      const res = await request(app.getHttpServer())
+        .post(`/tasks/${task1Id}/dependencies`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ dependsOnId: task2Id })
+        .expect(409);
+
+      expect(res.body).toMatchObject({
+        code: 'CROSS_PROJECT_DEPENDENCY',
+        message: expect.stringContaining('same project'),
+      });
+    });
+
+    test('POST /tasks/:id/dependencies accepts valid dependency', async () => {
+      const workspaceRes = await request(app.getHttpServer())
+        .get('/workspaces')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const workspaceId = workspaceRes.body[0].id;
+
+      const projectRes = await request(app.getHttpServer())
+        .post('/projects')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ workspaceId, name: 'Dependency Test Project - Valid' })
+        .expect(201);
+      const projectId = projectRes.body.id as string;
+
+      const taskARes = await request(app.getHttpServer())
+        .post(`/projects/${projectId}/tasks`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ title: 'Task A' })
+        .expect(201);
+      const taskAId = taskARes.body.id as string;
+
+      const taskBRes = await request(app.getHttpServer())
+        .post(`/projects/${projectId}/tasks`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ title: 'Task B' })
+        .expect(201);
+      const taskBId = taskBRes.body.id as string;
+
+      const res = await request(app.getHttpServer())
+        .post(`/tasks/${taskAId}/dependencies`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ dependsOnId: taskBId })
+        .expect(201);
+
+      expect(res.body).toMatchObject({
+        taskId: taskAId,
+        dependsOnId: taskBId,
+      });
+    });
+  });
 });

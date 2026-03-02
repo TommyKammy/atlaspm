@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CycleDetectionService } from './cycle-detection.service';
 import { Prisma, DependencyType, type Task } from '@prisma/client';
@@ -24,8 +24,8 @@ export interface DependencyInfo {
 @Injectable()
 export class SubtaskService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly cycleDetection: CycleDetectionService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CycleDetectionService) private readonly cycleDetection: CycleDetectionService,
   ) {}
 
   /**
@@ -133,10 +133,55 @@ export class SubtaskService {
     dependsOnId: string,
     type: DependencyType = DependencyType.BLOCKS,
   ): Promise<DependencyInfo> {
-    // Check for cycles
+    // Self-dependency check
+    if (taskId === dependsOnId) {
+      throw new ConflictException({
+        code: 'DEPENDENCY_CYCLE_DETECTED',
+        message: 'Cannot create dependency: a task cannot depend on itself',
+      });
+    }
+
+    // Check if tasks exist and belong to the same project
+    const [task, dependsOnTask] = await Promise.all([
+      this.prisma.task.findFirst({
+        where: { id: taskId, deletedAt: null },
+        select: { id: true, projectId: true },
+      }),
+      this.prisma.task.findFirst({
+        where: { id: dependsOnId, deletedAt: null },
+        select: { id: true, projectId: true },
+      }),
+    ]);
+
+    if (!task) {
+      throw new BadRequestException({
+        code: 'TASK_NOT_FOUND',
+        message: `Task ${taskId} not found`,
+      });
+    }
+
+    if (!dependsOnTask) {
+      throw new BadRequestException({
+        code: 'DEPENDENCY_TASK_NOT_FOUND',
+        message: `Dependency task ${dependsOnId} not found`,
+      });
+    }
+
+    // Cross-project dependency check
+    if (task.projectId !== dependsOnTask.projectId) {
+      throw new ConflictException({
+        code: 'CROSS_PROJECT_DEPENDENCY',
+        message: 'Cannot create dependency: tasks must belong to the same project',
+      });
+    }
+
+    // Check for cycles (direct and transitive)
     const wouldCreateCycle = await this.cycleDetection.wouldCreateCycle(taskId, dependsOnId);
     if (wouldCreateCycle) {
-      throw new BadRequestException('Cannot create dependency: would create a circular dependency');
+      throw new ConflictException({
+        code: 'DEPENDENCY_CYCLE_DETECTED',
+        message: 'Cannot create dependency: would create a circular dependency',
+      });
     }
 
     const dependency = await this.prisma.taskDependency.create({
@@ -162,7 +207,7 @@ export class SubtaskService {
       dependsOnId: dependency.dependsOnId,
       type: dependency.type,
       createdAt: dependency.createdAt,
-      dependsOnTask: dependency.dependsOn,
+      dependsOnTask: dependency.dependsOn ?? undefined,
     };
   }
 
