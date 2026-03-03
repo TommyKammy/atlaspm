@@ -2241,3 +2241,36 @@
 - Risks/known gaps:
   - Timeline is intentionally read-only in this wave (no drag/resize/inline date edits yet).
   - Current timeline window defaults to a fixed rolling range (previous 7 days to next 21 days); zoom presets are not implemented.
+
+## 2026-03-03 - Issues #126/#127: Timeline controls + timeline E2E smoke suite
+- What changed:
+  - Added timeline controls and persisted timeline view state:
+    - `apps/web-ui/src/components/project-timeline-view.tsx`
+      - added zoom controls (`day/week/month`) with test IDs.
+      - wired previous/next/today window navigation to zoom-specific step size.
+      - persisted timeline preferences (`zoom`, `anchorDate`) in localStorage per `(userId, projectId)`.
+      - kept renderer read-only while preserving task-detail drawer open on bar click.
+  - Added runtime timeline feature-flag hook with local override support:
+    - `apps/web-ui/src/lib/feature-flags.ts`
+      - introduced `useTimelineEnabled()` with env + localStorage resolution.
+      - allows test/staged UI enablement via `atlaspm:feature:timeline=enabled`.
+    - `apps/web-ui/src/components/layout/HeaderBar.tsx`
+    - `apps/web-ui/src/app/projects/[id]/page.tsx`
+      - switched to hook-based gating so timeline tab/route reacts correctly in client runtime.
+  - Added dedicated timeline E2E smoke:
+    - `e2e/playwright/tests/timeline.spec.ts`
+      - opens timeline from tab, verifies bar rendering, opens task detail from bar.
+      - verifies zoom/window state persists after refresh.
+  - Added timeline control i18n labels:
+    - `apps/web-ui/src/lib/i18n.tsx`
+      - `timelineZoomDay`, `timelineZoomWeek`, `timelineZoomMonth` (EN/JA).
+- Why:
+  - Issue #126 requires practical timeline controls with non-destructive client-side navigation and persisted state.
+  - Issue #127 requires dedicated timeline flow E2E coverage beyond feature-gate smoke.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Timeline is still read-only in this wave (no drag/resize editing yet).
+  - Feature override (`atlaspm:feature:timeline`) is a client-side toggle for staged testing and is not a permission control.

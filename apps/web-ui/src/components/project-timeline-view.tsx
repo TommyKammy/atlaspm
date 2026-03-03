@@ -1,17 +1,28 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import TaskDetailDrawer from '@/components/task-detail-drawer';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useTimelineData } from '@/hooks/use-timeline-data';
+import { api } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import { queryKeys } from '@/lib/query-keys';
 import type { Task } from '@/lib/types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const DAY_COL_WIDTH = 36;
 const TASK_NAME_COL_WIDTH = 260;
+const TIMELINE_VIEW_STORAGE_PREFIX = 'atlaspm:timeline-view';
+
+type TimelineZoom = 'day' | 'week' | 'month';
+
+const TIMELINE_ZOOM_CONFIG: Record<TimelineZoom, { beforeDays: number; afterDays: number; stepDays: number; dayColWidth: number }> = {
+  day: { beforeDays: 1, afterDays: 5, stepDays: 1, dayColWidth: 64 },
+  week: { beforeDays: 7, afterDays: 21, stepDays: 7, dayColWidth: 36 },
+  month: { beforeDays: 31, afterDays: 92, stepDays: 30, dayColWidth: 24 },
+};
 
 function startOfDay(value: Date): Date {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate());
@@ -63,15 +74,62 @@ export function ProjectTimelineView({
   priorityFilter: 'ALL' | NonNullable<Task['priority']>;
 }) {
   const { t } = useI18n();
+  const meQuery = useQuery<{ id: string }>({
+    queryKey: queryKeys.me,
+    queryFn: () => api('/me'),
+  });
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [zoom, setZoom] = useState<TimelineZoom>('week');
   const [anchorDate, setAnchorDate] = useState(() => startOfDay(new Date()));
+  const [preferencesHydrated, setPreferencesHydrated] = useState(false);
+
+  const timelineStorageKey = useMemo(
+    () => `${TIMELINE_VIEW_STORAGE_PREFIX}:${meQuery.data?.id ?? 'anonymous'}:${projectId}`,
+    [meQuery.data?.id, projectId],
+  );
+
+  useEffect(() => {
+    setPreferencesHydrated(false);
+    if (typeof window === 'undefined') return;
+    const raw = window.localStorage.getItem(timelineStorageKey);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as { zoom?: TimelineZoom; anchorDate?: string };
+        if (parsed.zoom && parsed.zoom in TIMELINE_ZOOM_CONFIG) {
+          setZoom(parsed.zoom);
+        }
+        if (parsed.anchorDate) {
+          const parsedDate = new Date(parsed.anchorDate);
+          if (!Number.isNaN(parsedDate.valueOf())) {
+            setAnchorDate(startOfDay(parsedDate));
+          }
+        }
+      } catch {
+        // Ignore malformed local preference state.
+      }
+    }
+    setPreferencesHydrated(true);
+  }, [timelineStorageKey]);
+
+  useEffect(() => {
+    if (!preferencesHydrated || typeof window === 'undefined') return;
+    window.localStorage.setItem(
+      timelineStorageKey,
+      JSON.stringify({
+        zoom,
+        anchorDate: anchorDate.toISOString(),
+      }),
+    );
+  }, [anchorDate, preferencesHydrated, timelineStorageKey, zoom]);
+
+  const zoomConfig = TIMELINE_ZOOM_CONFIG[zoom];
 
   const timelineWindow = useMemo(
     () => ({
-      start: addDays(anchorDate, -7),
-      end: addDays(anchorDate, 21),
+      start: addDays(anchorDate, -zoomConfig.beforeDays),
+      end: addDays(anchorDate, zoomConfig.afterDays),
     }),
-    [anchorDate],
+    [anchorDate, zoomConfig.afterDays, zoomConfig.beforeDays],
   );
 
   const timeline = useTimelineData(projectId, timelineWindow);
@@ -101,7 +159,7 @@ export function ProjectTimelineView({
 
   const scheduledTasks = filteredTasks.filter((task) => task.hasSchedule && task.inWindow);
   const unscheduledTasks = filteredTasks.filter((task) => !task.hasSchedule);
-  const gridWidth = Math.max(1, days.length) * DAY_COL_WIDTH;
+  const gridWidth = Math.max(1, days.length) * zoomConfig.dayColWidth;
 
   if (timeline.isLoading) {
     return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">{t('loadingTimeline')}</div>;
@@ -115,11 +173,28 @@ export function ProjectTimelineView({
     <div className="space-y-4" data-testid="timeline-view">
       <div className="flex items-center justify-between rounded-lg border bg-card p-3">
         <div className="flex items-center gap-2">
+          <div className="inline-flex items-center rounded-md border bg-background/60 p-0.5">
+            {(['day', 'week', 'month'] as TimelineZoom[]).map((zoomOption) => (
+              <Button
+                key={zoomOption}
+                type="button"
+                size="sm"
+                variant={zoomOption === zoom ? 'default' : 'ghost'}
+                className="h-7 px-2 text-xs"
+                onClick={() => setZoom(zoomOption)}
+                data-testid={`timeline-zoom-${zoomOption}`}
+                data-active={zoomOption === zoom ? 'true' : 'false'}
+              >
+                {zoomOption === 'day' ? t('timelineZoomDay') : zoomOption === 'week' ? t('timelineZoomWeek') : t('timelineZoomMonth')}
+              </Button>
+            ))}
+          </div>
           <Button
             variant="outline"
             size="icon"
             aria-label={t('previousWindow')}
-            onClick={() => setAnchorDate((current) => addDays(current, -7))}
+            onClick={() => setAnchorDate((current) => addDays(current, -zoomConfig.stepDays))}
+            data-testid="timeline-prev-window"
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -127,6 +202,7 @@ export function ProjectTimelineView({
             variant="outline"
             size="sm"
             onClick={() => setAnchorDate(startOfDay(new Date()))}
+            data-testid="timeline-today"
           >
             {t('today')}
           </Button>
@@ -134,7 +210,8 @@ export function ProjectTimelineView({
             variant="outline"
             size="icon"
             aria-label={t('nextWindow')}
-            onClick={() => setAnchorDate((current) => addDays(current, 7))}
+            onClick={() => setAnchorDate((current) => addDays(current, zoomConfig.stepDays))}
+            data-testid="timeline-next-window"
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
@@ -160,7 +237,7 @@ export function ProjectTimelineView({
           <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {t('taskName')}
           </div>
-          <div className="grid" style={{ gridTemplateColumns: `repeat(${days.length}, ${DAY_COL_WIDTH}px)` }}>
+          <div className="grid" style={{ gridTemplateColumns: `repeat(${days.length}, ${zoomConfig.dayColWidth}px)` }}>
             {days.map((day) => (
               <div key={day.toISOString()} className="border-l px-1 py-1 text-center">
                 <p className="text-[10px] text-muted-foreground">{formatWeekday(day)}</p>
@@ -214,8 +291,8 @@ export function ProjectTimelineView({
                           type="button"
                           className="absolute top-1/2 h-6 -translate-y-1/2 rounded bg-primary/20 px-2 text-left text-[11px] text-primary hover:bg-primary/25"
                           style={{
-                            left: `${Math.max(0, dayDiff(timeline.window.start, visibleStart ?? task.timelineStart)) * DAY_COL_WIDTH}px`,
-                            width: `${Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1) * DAY_COL_WIDTH}px`,
+                            left: `${Math.max(0, dayDiff(timeline.window.start, visibleStart ?? task.timelineStart)) * zoomConfig.dayColWidth}px`,
+                            width: `${Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1) * zoomConfig.dayColWidth}px`,
                           }}
                           onClick={() => setSelectedTaskId(task.id)}
                           data-testid={`timeline-bar-${task.id}`}
