@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Delete,
   ForbiddenException,
@@ -216,6 +217,19 @@ class PatchTaskDto {
   @IsOptional()
   @IsInt()
   version?: number;
+}
+
+class RescheduleTaskDto {
+  @IsOptional()
+  @IsISO8601()
+  startAt?: string | null;
+
+  @IsOptional()
+  @IsISO8601()
+  dueAt?: string | null;
+
+  @IsInt()
+  version!: number;
 }
 
 class CompleteTaskDto {
@@ -691,6 +705,70 @@ export class TasksController {
         });
       }
 
+      return updated;
+    }).then((updated) => {
+      void this.indexTaskWithCustomFields(updated);
+      return updated;
+    });
+  }
+
+  @Patch('tasks/:id/reschedule')
+  async reschedule(@Param('id') id: string, @Body() body: RescheduleTaskDto, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    if (body.startAt === undefined && body.dueAt === undefined) {
+      throw new BadRequestException('Either startAt or dueAt must be provided');
+    }
+    if (body.version !== task.version) {
+      throw new ConflictException({
+        message: 'Version conflict',
+        latest: {
+          version: task.version,
+          startAt: task.startAt,
+          dueAt: task.dueAt,
+        },
+      });
+    }
+
+    const effectiveStartAt = body.startAt === undefined ? task.startAt?.toISOString() : body.startAt;
+    const effectiveDueAt = body.dueAt === undefined ? task.dueAt?.toISOString() : body.dueAt;
+    assertValidDateRange(effectiveStartAt, effectiveDueAt);
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.task.update({
+        where: { id },
+        data: {
+          startAt: body.startAt ? new Date(body.startAt) : body.startAt === null ? null : undefined,
+          dueAt: body.dueAt ? new Date(body.dueAt) : body.dueAt === null ? null : undefined,
+          version: { increment: 1 },
+        },
+      });
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'Task',
+        entityId: id,
+        action: 'task.rescheduled',
+        beforeJson: {
+          version: task.version,
+          startAt: task.startAt,
+          dueAt: task.dueAt,
+        },
+        afterJson: {
+          version: updated.version,
+          startAt: updated.startAt,
+          dueAt: updated.dueAt,
+        },
+        correlationId: req.correlationId,
+        outboxType: 'task.rescheduled',
+        payload: {
+          taskId: id,
+          projectId: task.projectId,
+          version: updated.version,
+          startAt: updated.startAt,
+          dueAt: updated.dueAt,
+        },
+      });
       return updated;
     }).then((updated) => {
       void this.indexTaskWithCustomFields(updated);

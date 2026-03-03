@@ -45,6 +45,20 @@ function isApiConflictError(error: unknown): boolean {
   return /^API 409:/.test(error.message);
 }
 
+function extractConflictLatestVersion(error: unknown): number | null {
+  if (!(error instanceof Error)) return null;
+  const prefix = 'API 409:';
+  if (!error.message.startsWith(prefix)) return null;
+  const rawBody = error.message.slice(prefix.length).trim();
+  if (!rawBody) return null;
+  try {
+    const parsed = JSON.parse(rawBody) as { latest?: { version?: unknown } };
+    return typeof parsed.latest?.version === 'number' ? parsed.latest.version : null;
+  } catch {
+    return null;
+  }
+}
+
 function moveTaskPreview(
   groups: SectionTaskGroup[],
   taskId: string,
@@ -338,16 +352,18 @@ export function ProjectCalendarView({
       version: number;
     }) => {
       try {
-        return (await api(`/tasks/${taskId}`, {
+        return (await api(`/tasks/${taskId}/reschedule`, {
           method: 'PATCH',
           body: { [field]: value, version },
         })) as Task;
       } catch (error) {
         if (!isApiConflictError(error)) throw error;
-        const latestTask = (await api(`/tasks/${taskId}`)) as Task;
-        return (await api(`/tasks/${taskId}`, {
+        const latestVersion = extractConflictLatestVersion(error);
+        const fallbackVersion =
+          latestVersion ?? ((await api(`/tasks/${taskId}`)) as Task).version;
+        return (await api(`/tasks/${taskId}/reschedule`, {
           method: 'PATCH',
-          body: { [field]: value, version: latestTask.version },
+          body: { [field]: value, version: fallbackVersion },
         })) as Task;
       }
     },

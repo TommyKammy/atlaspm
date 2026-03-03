@@ -2324,3 +2324,26 @@
   - `pnpm --filter @atlaspm/web-ui build`
 - Risks/known gaps:
   - This smoke focuses on single-project deterministic setup; multi-user conflict paths are covered in Phase P3 issues.
+
+## 2026-03-04 - Issue #134: Reschedule API with optimistic locking
+- What changed:
+  - Added dedicated reschedule endpoint in core API:
+    - `apps/core-api/src/tasks/tasks.controller.ts`
+      - new `PATCH /tasks/:id/reschedule` with required `version`.
+      - validates input (`startAt`/`dueAt` at least one required + date range validation).
+      - returns structured `409` payload with latest server truth on version mismatch.
+      - appends audit/outbox (`task.rescheduled`) with before/after date payloads.
+  - Switched calendar drag-drop date updates to the dedicated reschedule API:
+    - `apps/web-ui/src/components/project-alt-views.tsx`
+      - retries on `409` using returned `latest.version` (fallback to task fetch when needed).
+  - Added integration coverage:
+    - `apps/core-api/test/core.integration.test.ts`
+      - success path verifies optimistic lock increment + audit/outbox emission.
+      - conflict path verifies `409` includes latest version/date truth.
+- Why:
+  - Issue #134 requires a safe scheduling write path with explicit optimistic locking and deterministic conflict handling before timeline/gantt drag editing.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api test -- test/core.integration.test.ts`
+  - `pnpm --filter @atlaspm/web-ui build`
+- Risks/known gaps:
+  - List/detail date edits still use general `PATCH /tasks/:id` in this wave; drag-based schedule updates now use dedicated reschedule endpoint.

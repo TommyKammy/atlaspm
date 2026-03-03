@@ -2189,6 +2189,110 @@ describe('Core API Integration', () => {
     });
   });
 
+  test('PATCH /tasks/:id/reschedule updates dates with optimistic locking and emits audit/outbox', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Reschedule Test ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() + 2);
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() + 5);
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Task to reschedule',
+        startAt: startDate.toISOString(),
+        dueAt: dueDate.toISOString(),
+      })
+      .expect(201);
+
+    const taskId = taskRes.body.id as string;
+    const newDueDate = new Date();
+    newDueDate.setDate(newDueDate.getDate() + 10);
+    const rescheduleStart = new Date();
+    const rescheduleRes = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/reschedule`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        dueAt: newDueDate.toISOString(),
+        version: taskRes.body.version,
+      })
+      .expect(200);
+
+    expect(rescheduleRes.body.id).toBe(taskId);
+    expect(rescheduleRes.body.version).toBe(taskRes.body.version + 1);
+    expect(String(rescheduleRes.body.dueAt).slice(0, 10)).toBe(newDueDate.toISOString().slice(0, 10));
+
+    const rescheduleAudit = await prisma.auditEvent.findFirst({
+      where: {
+        entityType: 'Task',
+        entityId: taskId,
+        action: 'task.rescheduled',
+        createdAt: { gte: rescheduleStart },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(rescheduleAudit).toBeTruthy();
+    expect((rescheduleAudit?.beforeJson as any)?.dueAt).toBeTruthy();
+    expect((rescheduleAudit?.afterJson as any)?.dueAt).toBeTruthy();
+
+    const rescheduleOutboxEvents = await prisma.outboxEvent.findMany({
+      where: { type: 'task.rescheduled', createdAt: { gte: rescheduleStart } },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    const rescheduleOutbox = rescheduleOutboxEvents.find((event) => (event.payload as any)?.taskId === taskId);
+    expect(rescheduleOutbox).toBeTruthy();
+    expect((rescheduleOutbox?.payload as any)?.projectId).toBe(projectId);
+    expect((rescheduleOutbox?.payload as any)?.dueAt).toBeTruthy();
+  });
+
+  test('PATCH /tasks/:id/reschedule returns 409 with latest server truth on version conflict', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Reschedule Conflict ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Task with conflict' })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+
+    const staleVersion = taskRes.body.version - 1;
+    const conflictRes = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/reschedule`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        startAt: new Date().toISOString(),
+        version: staleVersion,
+      })
+      .expect(409);
+
+    expect(conflictRes.body).toMatchObject({
+      message: 'Version conflict',
+      latest: {
+        version: taskRes.body.version,
+      },
+    });
+    expect(conflictRes.body.latest).toHaveProperty('startAt');
+    expect(conflictRes.body.latest).toHaveProperty('dueAt');
+  });
+
   test('POST /tasks/:id/subtasks rejects invalid date range', async () => {
     const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
     const workspaceId = wsRes.body[0].id;
