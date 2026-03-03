@@ -154,7 +154,7 @@ test.describe('Task Dependencies Feature', () => {
       });
       expect(false).toBe(true);
     } catch (error: any) {
-      expect(error.message).toContain('400');
+      expect(error.message).toContain('409');
     }
   });
 

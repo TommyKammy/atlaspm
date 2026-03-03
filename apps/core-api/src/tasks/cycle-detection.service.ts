@@ -1,15 +1,29 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import type { PrismaClient } from '@prisma/client';
 
 @Injectable()
 export class CycleDetectionService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   /**
    * Check if adding a dependency would create a cycle
    * Uses DFS to detect cycles in the dependency graph
    */
   async wouldCreateCycle(taskId: string, dependsOnId: string): Promise<boolean> {
+    return this.wouldCreateCycleWithTx(this.prisma, taskId, dependsOnId);
+  }
+
+  /**
+   * Check if adding a dependency would create a cycle (transaction-aware)
+   * Uses DFS to detect cycles in the dependency graph
+   * Accepts a transaction client for atomic operations
+   */
+  async wouldCreateCycleWithTx(
+    tx: PrismaClient | Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>,
+    taskId: string,
+    dependsOnId: string,
+  ): Promise<boolean> {
     // Direct self-dependency check
     if (taskId === dependsOnId) {
       return true;
@@ -23,7 +37,7 @@ export class CycleDetectionService {
       recursionStack.add(currentId);
 
       // Get all tasks that currentId depends on
-      const dependencies = await this.prisma.taskDependency.findMany({
+      const dependencies = await tx.taskDependency.findMany({
         where: { taskId: currentId },
         select: { dependsOnId: true },
       });
@@ -51,7 +65,7 @@ export class CycleDetectionService {
     recursionStack.add(taskId);
 
     // Check if dependsOnId can reach taskId (which would create a cycle)
-    const dependencies = await this.prisma.taskDependency.findMany({
+    const dependencies = await tx.taskDependency.findMany({
       where: { taskId: dependsOnId },
       select: { dependsOnId: true },
     });
