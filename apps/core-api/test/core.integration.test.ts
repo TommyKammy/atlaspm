@@ -2028,6 +2028,7 @@ describe('Core API Integration', () => {
     const dueDate = new Date();
     dueDate.setDate(dueDate.getDate() + 7);
 
+    const createStart = new Date();
     const res = await request(app.getHttpServer())
       .post(`/projects/${projectId}/tasks`)
       .set('Authorization', `Bearer ${token}`)
@@ -2040,6 +2041,25 @@ describe('Core API Integration', () => {
 
     expect(res.body.startAt).toBeTruthy();
     expect(res.body.dueAt).toBeTruthy();
+
+    const taskId = res.body.id as string;
+    const dateCreateAudit = await prisma.auditEvent.findFirst({
+      where: { entityType: 'Task', entityId: taskId, action: 'task.created' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(dateCreateAudit).toBeTruthy();
+    expect((dateCreateAudit?.afterJson as any)?.startAt).toBeTruthy();
+    expect((dateCreateAudit?.afterJson as any)?.dueAt).toBeTruthy();
+
+    const dateCreateOutboxEvents = await prisma.outboxEvent.findMany({
+      where: { type: 'task.created', createdAt: { gte: createStart } },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    const dateCreateOutbox = dateCreateOutboxEvents.find((event) => (event.payload as any)?.id === taskId);
+    expect(dateCreateOutbox).toBeTruthy();
+    expect((dateCreateOutbox?.payload as any)?.startAt).toBeTruthy();
+    expect((dateCreateOutbox?.payload as any)?.dueAt).toBeTruthy();
   });
 
   test('POST /projects/:id/tasks accepts open-ended date ranges', async () => {
@@ -2427,6 +2447,7 @@ describe('Core API Integration', () => {
         .expect(201);
       const taskBId = taskBRes.body.id as string;
 
+      const createStart = new Date();
       const res = await request(app.getHttpServer())
         .post(`/tasks/${taskAId}/dependencies`)
         .set('Authorization', `Bearer ${token}`)
@@ -2437,6 +2458,55 @@ describe('Core API Integration', () => {
         taskId: taskAId,
         dependsOnId: taskBId,
       });
+
+      const dependencyId = res.body.id as string;
+      const dependencyCreateAudit = await prisma.auditEvent.findFirst({
+        where: {
+          entityType: 'TaskDependency',
+          entityId: dependencyId,
+          action: 'task.dependency.created',
+          createdAt: { gte: createStart },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(dependencyCreateAudit).toBeTruthy();
+
+      const dependencyCreateOutboxEvents = await prisma.outboxEvent.findMany({
+        where: { type: 'task.dependency.created', createdAt: { gte: createStart } },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      });
+      const dependencyCreateOutbox = dependencyCreateOutboxEvents.find((event) => (event.payload as any)?.id === dependencyId);
+      expect(dependencyCreateOutbox).toBeTruthy();
+      expect((dependencyCreateOutbox?.payload as any)?.taskId).toBe(taskAId);
+      expect((dependencyCreateOutbox?.payload as any)?.dependsOnId).toBe(taskBId);
+
+      const removeStart = new Date();
+      await request(app.getHttpServer())
+        .delete(`/tasks/${taskAId}/dependencies/${taskBId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      const dependencyRemoveAudit = await prisma.auditEvent.findFirst({
+        where: {
+          entityType: 'TaskDependency',
+          entityId: dependencyId,
+          action: 'task.dependency.removed',
+          createdAt: { gte: removeStart },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(dependencyRemoveAudit).toBeTruthy();
+
+      const dependencyRemoveOutboxEvents = await prisma.outboxEvent.findMany({
+        where: { type: 'task.dependency.removed', createdAt: { gte: removeStart } },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      });
+      const dependencyRemoveOutbox = dependencyRemoveOutboxEvents.find((event) => (event.payload as any)?.id === dependencyId);
+      expect(dependencyRemoveOutbox).toBeTruthy();
+      expect((dependencyRemoveOutbox?.payload as any)?.taskId).toBe(taskAId);
+      expect((dependencyRemoveOutbox?.payload as any)?.dependsOnId).toBe(taskBId);
     });
   });
 });

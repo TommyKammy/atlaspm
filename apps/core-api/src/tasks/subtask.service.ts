@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, Inject, Logger } fr
 import { PrismaService } from '../prisma/prisma.service';
 import { CycleDetectionService } from './cycle-detection.service';
 import { Prisma, DependencyType, type Task } from '@prisma/client';
+import { DomainService } from '../common/domain.service';
 
 export interface SubtaskTreeNode extends Task {
   children: SubtaskTreeNode[];
@@ -28,6 +29,7 @@ export class SubtaskService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CycleDetectionService) private readonly cycleDetection: CycleDetectionService,
+    @Inject(DomainService) private readonly domain: DomainService,
   ) {}
 
   /**
@@ -135,6 +137,8 @@ export class SubtaskService {
     taskId: string,
     dependsOnId: string,
     type: DependencyType = DependencyType.BLOCKS,
+    actor: string = 'system',
+    correlationId?: string,
   ): Promise<DependencyInfo> {
     // Self-dependency check (early validation)
     if (taskId === dependsOnId) {
@@ -209,6 +213,26 @@ export class SubtaskService {
           },
         });
 
+        const dependencyEventPayload = {
+          id: dependency.id,
+          taskId: dependency.taskId,
+          dependsOnId: dependency.dependsOnId,
+          type: dependency.type,
+          createdAt: dependency.createdAt,
+        };
+
+        await this.domain.appendAuditOutbox({
+          tx,
+          actor,
+          entityType: 'TaskDependency',
+          entityId: dependency.id,
+          action: 'task.dependency.created',
+          afterJson: dependencyEventPayload,
+          correlationId,
+          outboxType: 'task.dependency.created',
+          payload: dependencyEventPayload,
+        });
+
         this.logger.log(`Dependency created: ${taskId} -> ${dependsOnId} (type: ${type})`);
 
         return {
@@ -242,12 +266,54 @@ export class SubtaskService {
    * Remove a dependency
    */
   async removeDependency(taskId: string, dependsOnId: string): Promise<void> {
-    await this.prisma.taskDependency.deleteMany({
-      where: {
-        taskId,
-        dependsOnId,
+    await this.removeDependencyWithAudit(taskId, dependsOnId, 'system');
+  }
+
+  /**
+   * Remove dependency and append audit/outbox atomically in the same transaction.
+   */
+  async removeDependencyWithAudit(
+    taskId: string,
+    dependsOnId: string,
+    actor: string,
+    correlationId?: string,
+  ): Promise<void> {
+    await this.prisma.$transaction(
+      async (tx) => {
+        const existing = await tx.taskDependency.findUnique({
+          where: { taskId_dependsOnId: { taskId, dependsOnId } },
+        });
+        if (!existing) return;
+
+        await tx.taskDependency.delete({
+          where: { taskId_dependsOnId: { taskId, dependsOnId } },
+        });
+
+        await this.domain.appendAuditOutbox({
+          tx,
+          actor,
+          entityType: 'TaskDependency',
+          entityId: existing.id,
+          action: 'task.dependency.removed',
+          beforeJson: existing,
+          afterJson: null,
+          correlationId,
+          outboxType: 'task.dependency.removed',
+          payload: {
+            id: existing.id,
+            taskId: existing.taskId,
+            dependsOnId: existing.dependsOnId,
+            type: existing.type,
+          },
+        });
       },
-    });
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        maxWait: 5000,
+        timeout: 10000,
+      },
+    );
+
     this.logger.log(`Dependency removed: ${taskId} -> ${dependsOnId}`);
   }
 
