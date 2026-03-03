@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CycleDetectionService } from './cycle-detection.service';
-import { Prisma, DependencyType, type Task, PrismaClient } from '@prisma/client';
+import { Prisma, DependencyType, type Task } from '@prisma/client';
 
 export interface SubtaskTreeNode extends Task {
   children: SubtaskTreeNode[];
@@ -352,7 +352,7 @@ export class SubtaskService {
         source: d.dependsOnId,
         target: d.taskId,
         type: d.type,
-      }),
-    });
+      })),
+    };
   }
 }
