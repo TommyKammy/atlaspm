@@ -14,7 +14,7 @@ import { parseCustomFieldFilters } from '@/lib/project-filters';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useI18n } from '@/lib/i18n';
-import { timelineEnabled } from '@/lib/feature-flags';
+import { useTimelineEnabled } from '@/lib/feature-flags';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
@@ -38,6 +38,7 @@ function parseListParam(raw: string | null): string[] {
 
 export default function ProjectPage() {
   const { t } = useI18n();
+  const { timelineEnabled, timelineFlagHydrated } = useTimelineEnabled();
   const params = useParams<{ id: string }>();
   const pathname = usePathname();
   const router = useRouter();
@@ -234,10 +235,11 @@ export default function ProjectPage() {
   }, [openTaskId, setProjectQueryParam, view]);
 
   useEffect(() => {
+    if (!timelineFlagHydrated) return;
     if (!timelineEnabled && viewParam === 'timeline') {
       setProjectQueryParam('view', 'list');
     }
-  }, [setProjectQueryParam, viewParam]);
+  }, [setProjectQueryParam, timelineEnabled, timelineFlagHydrated, viewParam]);
 
   useEffect(() => {
     if (!showAddSectionInput) return;

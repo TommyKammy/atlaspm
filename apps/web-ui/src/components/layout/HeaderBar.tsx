@@ -17,7 +17,7 @@ import { queryKeys } from '@/lib/query-keys';
 import type { CustomFieldDefinition, Project, ProjectMember, Section, Task } from '@/lib/types';
 import { parseCustomFieldFilters, stringifyCustomFieldFilters, type CustomFieldFilter } from '@/lib/project-filters';
 import { useI18n } from '@/lib/i18n';
-import { timelineEnabled } from '@/lib/feature-flags';
+import { useTimelineEnabled } from '@/lib/feature-flags';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { NotificationCenter } from '@/components/notification-center';
@@ -231,6 +231,7 @@ export function HeaderBar({
   onToggleSidebarMode?: () => void;
 }) {
   const { t } = useI18n();
+  const { timelineEnabled } = useTimelineEnabled();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -268,7 +269,7 @@ export function HeaderBar({
         { id: 'calendar', label: t('calendar') },
         { id: 'files', label: t('files') },
       ] as const,
-    [t],
+    [t, timelineEnabled],
   );
 
   const sectionsQuery = useQuery<Section[]>({
