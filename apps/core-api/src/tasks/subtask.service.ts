@@ -1,7 +1,7 @@
-import { BadRequestException, ConflictException, Injectable, Inject } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CycleDetectionService } from './cycle-detection.service';
-import { Prisma, DependencyType, type Task } from '@prisma/client';
+import { Prisma, DependencyType, type Task, PrismaClient } from '@prisma/client';
 
 export interface SubtaskTreeNode extends Task {
   children: SubtaskTreeNode[];
@@ -23,6 +23,8 @@ export interface DependencyInfo {
 
 @Injectable()
 export class SubtaskService {
+  private readonly logger = new Logger(SubtaskService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CycleDetectionService) private readonly cycleDetection: CycleDetectionService,
@@ -127,88 +129,113 @@ export class SubtaskService {
 
   /**
    * Add a dependency between tasks
+   * Uses transaction to ensure race condition safety
    */
   async addDependency(
     taskId: string,
     dependsOnId: string,
     type: DependencyType = DependencyType.BLOCKS,
   ): Promise<DependencyInfo> {
-    // Self-dependency check
+    // Self-dependency check (early validation)
     if (taskId === dependsOnId) {
+      this.logger.warn(`Self-dependency attempt blocked: ${taskId}`);
       throw new ConflictException({
         code: 'DEPENDENCY_CYCLE_DETECTED',
         message: 'Cannot create dependency: a task cannot depend on itself',
       });
     }
 
-    // Check if tasks exist and belong to the same project
-    const [task, dependsOnTask] = await Promise.all([
-      this.prisma.task.findFirst({
-        where: { id: taskId, deletedAt: null },
-        select: { id: true, projectId: true },
-      }),
-      this.prisma.task.findFirst({
-        where: { id: dependsOnId, deletedAt: null },
-        select: { id: true, projectId: true },
-      }),
-    ]);
+    return await this.prisma.$transaction(async (tx) => {
+      // Check if tasks exist and belong to the same project (within transaction)
+      const [task, dependsOnTask] = await Promise.all([
+        tx.task.findFirst({
+          where: { id: taskId, deletedAt: null },
+          select: { id: true, projectId: true },
+        }),
+        tx.task.findFirst({
+          where: { id: dependsOnId, deletedAt: null },
+          select: { id: true, projectId: true },
+        }),
+      ]);
 
-    if (!task) {
-      throw new BadRequestException({
-        code: 'TASK_NOT_FOUND',
-        message: `Task ${taskId} not found`,
-      });
-    }
+      if (!task) {
+        throw new BadRequestException({
+          code: 'TASK_NOT_FOUND',
+          message: `Task ${taskId} not found`,
+        });
+      }
 
-    if (!dependsOnTask) {
-      throw new BadRequestException({
-        code: 'DEPENDENCY_TASK_NOT_FOUND',
-        message: `Dependency task ${dependsOnId} not found`,
-      });
-    }
+      if (!dependsOnTask) {
+        throw new BadRequestException({
+          code: 'DEPENDENCY_TASK_NOT_FOUND',
+          message: `Dependency task ${dependsOnId} not found`,
+        });
+      }
 
-    // Cross-project dependency check
-    if (task.projectId !== dependsOnTask.projectId) {
-      throw new ConflictException({
-        code: 'CROSS_PROJECT_DEPENDENCY',
-        message: 'Cannot create dependency: tasks must belong to the same project',
-      });
-    }
+      // Cross-project dependency check
+      if (task.projectId !== dependsOnTask.projectId) {
+        this.logger.warn(`Cross-project dependency attempt blocked: ${taskId} (project: ${task.projectId}) -> ${dependsOnId} (project: ${dependsOnTask.projectId})`);
+        throw new ConflictException({
+          code: 'CROSS_PROJECT_DEPENDENCY',
+          message: 'Cannot create dependency: tasks must belong to the same project',
+        });
+      }
 
-    // Check for cycles (direct and transitive)
-    const wouldCreateCycle = await this.cycleDetection.wouldCreateCycle(taskId, dependsOnId);
-    if (wouldCreateCycle) {
-      throw new ConflictException({
-        code: 'DEPENDENCY_CYCLE_DETECTED',
-        message: 'Cannot create dependency: would create a circular dependency',
-      });
-    }
+      // Check for cycles using transaction-aware cycle detection
+      const wouldCreateCycle = await this.cycleDetection.wouldCreateCycleWithTx(tx, taskId, dependsOnId);
+      if (wouldCreateCycle) {
+        this.logger.warn(`Circular dependency attempt blocked: ${taskId} -> ${dependsOnId}`);
+        throw new ConflictException({
+          code: 'DEPENDENCY_CYCLE_DETECTED',
+          message: 'Cannot create dependency: would create a circular dependency',
+        });
+      }
 
-    const dependency = await this.prisma.taskDependency.create({
-      data: {
-        taskId,
-        dependsOnId,
-        type,
-      },
-      include: {
-        dependsOn: {
-          select: {
-            id: true,
-            title: true,
-            status: true,
+      try {
+        const dependency = await tx.taskDependency.create({
+          data: {
+            taskId,
+            dependsOnId,
+            type,
           },
-        },
-      },
-    });
+          include: {
+            dependsOn: {
+              select: {
+                id: true,
+                title: true,
+                status: true,
+              },
+            },
+          },
+        });
 
-    return {
-      id: dependency.id,
-      taskId: dependency.taskId,
-      dependsOnId: dependency.dependsOnId,
-      type: dependency.type,
-      createdAt: dependency.createdAt,
-      dependsOnTask: dependency.dependsOn ?? undefined,
-    };
+        this.logger.log(`Dependency created: ${taskId} -> ${dependsOnId} (type: ${type})`);
+
+        return {
+          id: dependency.id,
+          taskId: dependency.taskId,
+          dependsOnId: dependency.dependsOnId,
+          type: dependency.type,
+          createdAt: dependency.createdAt,
+          dependsOnTask: dependency.dependsOn ?? undefined,
+        };
+      } catch (error: any) {
+        // Handle unique constraint violation (P2002)
+        if (error.code === 'P2002') {
+          this.logger.warn(`Duplicate dependency attempt: ${taskId} -> ${dependsOnId}`);
+          throw new ConflictException({
+            code: 'DEPENDENCY_ALREADY_EXISTS',
+            message: 'This dependency already exists',
+          });
+        }
+        throw error;
+      }
+    }, {
+      // Transaction options for better isolation
+      isolationLevel: 'Serializable',
+      maxWait: 5000,
+      timeout: 10000,
+    });
   }
 
   /**
@@ -221,6 +248,7 @@ export class SubtaskService {
         dependsOnId,
       },
     });
+    this.logger.log(`Dependency removed: ${taskId} -> ${dependsOnId}`);
   }
 
   /**
@@ -324,7 +352,7 @@ export class SubtaskService {
         source: d.dependsOnId,
         target: d.taskId,
         type: d.type,
-      })),
-    };
+      }),
+    });
   }
 }
