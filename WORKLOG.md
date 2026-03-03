@@ -2309,3 +2309,18 @@
   - `pnpm --dir e2e/playwright exec playwright test tests/timeline.spec.ts --reporter=list`
 - Risks/known gaps:
   - Virtualization keeps section headers as fixed-height placeholders when out-of-window; this prioritizes performance and connector alignment over header continuity while scrolling rapidly.
+
+## 2026-03-04 - Issue #133: Gantt E2E smoke coverage
+- What changed:
+  - Extended timeline Playwright smoke coverage:
+    - `e2e/playwright/tests/timeline.spec.ts`
+      - verifies dependency connector layer/path is visible.
+      - verifies opening task detail from both timeline row click and bar click.
+      - asserts the expected task title is loaded in drawer for each open path.
+- Why:
+  - Issue #133 requires explicit regression coverage for read-only Gantt interaction paths and dependency visualization.
+- How tested (exact commands):
+  - `pnpm --dir e2e/playwright exec playwright test tests/timeline.spec.ts --reporter=list`
+  - `pnpm --filter @atlaspm/web-ui build`
+- Risks/known gaps:
+  - This smoke focuses on single-project deterministic setup; multi-user conflict paths are covered in Phase P3 issues.
