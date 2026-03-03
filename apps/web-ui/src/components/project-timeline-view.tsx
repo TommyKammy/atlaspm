@@ -10,7 +10,7 @@ import { useTimelineData } from '@/hooks/use-timeline-data';
 import { api } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { queryKeys } from '@/lib/query-keys';
-import type { Task } from '@/lib/types';
+import type { SectionTaskGroup, Task } from '@/lib/types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TASK_NAME_COL_WIDTH = 260;
@@ -81,7 +81,7 @@ function shiftIsoByDays(value: string | null | undefined, days: number): string 
 }
 
 function applyTaskScheduleInGroups(
-  groups: Array<{ section: { id: string }; tasks: Task[] }>,
+  groups: SectionTaskGroup[],
   taskId: string,
   next: { startAt: string | null; dueAt: string | null },
 ) {
@@ -93,8 +93,6 @@ function applyTaskScheduleInGroups(
             ...task,
             startAt: next.startAt,
             dueAt: next.dueAt,
-            version: task.version + 1,
-            updatedAt: new Date().toISOString(),
           }
         : task,
     ),
@@ -140,6 +138,7 @@ export function ProjectTimelineView({
   } | null>(null);
   const suppressClickTaskIdRef = useRef<string | null>(null);
   const [rescheduleNotice, setRescheduleNotice] = useState<{ type: 'conflict' | 'error'; message: string } | null>(null);
+  const rescheduleInFlightTaskIdsRef = useRef(new Set<string>());
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollRafRef = useRef<number | null>(null);
   const markerId = `timeline-arrow-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
@@ -242,17 +241,32 @@ export function ProjectTimelineView({
     onMutate: async ({ taskId, startAt, dueAt }) => {
       setRescheduleNotice(null);
       await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
-      const previous = queryClient.getQueryData<Array<{ section: { id: string }; tasks: Task[] }>>(
+      await queryClient.cancelQueries({ queryKey: queryKeys.taskDetail(taskId) });
+      const previous = queryClient.getQueryData<SectionTaskGroup[]>(
         queryKeys.projectTasksGrouped(projectId),
       );
+      const previousTaskDetail = queryClient.getQueryData<Task>(queryKeys.taskDetail(taskId));
       if (previous) {
-        queryClient.setQueryData(queryKeys.projectTasksGrouped(projectId), applyTaskScheduleInGroups(previous, taskId, { startAt, dueAt }));
+        queryClient.setQueryData<SectionTaskGroup[]>(
+          queryKeys.projectTasksGrouped(projectId),
+          applyTaskScheduleInGroups(previous, taskId, { startAt, dueAt }),
+        );
       }
-      return { previous };
+      if (previousTaskDetail) {
+        queryClient.setQueryData<Task>(queryKeys.taskDetail(taskId), {
+          ...previousTaskDetail,
+          startAt,
+          dueAt,
+        });
+      }
+      return { previous, previousTaskDetail };
     },
-    onError: (error, _variables, context) => {
+    onError: (error, variables, context) => {
       if (context?.previous) {
-        queryClient.setQueryData(queryKeys.projectTasksGrouped(projectId), context.previous);
+        queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), context.previous);
+      }
+      if (context?.previousTaskDetail) {
+        queryClient.setQueryData<Task>(queryKeys.taskDetail(variables.taskId), context.previousTaskDetail);
       }
       if (isApiConflictError(error)) {
         setRescheduleNotice({ type: 'conflict', message: t('timelineRescheduleConflict') });
@@ -260,8 +274,10 @@ export function ProjectTimelineView({
         setRescheduleNotice({ type: 'error', message: t('timelineRescheduleFailed') });
       }
     },
-    onSettled: async () => {
+    onSettled: async (_result, _error, variables) => {
+      rescheduleInFlightTaskIdsRef.current.delete(variables.taskId);
       await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(variables.taskId) });
     },
   });
 
@@ -416,6 +432,7 @@ export function ProjectTimelineView({
   ]);
 
   const commitDragReschedule = (taskId: string, deltaDays: number) => {
+    if (rescheduleInFlightTaskIdsRef.current.has(taskId)) return;
     if (!deltaDays) return;
     const task = taskById.get(taskId);
     if (!task) return;
@@ -424,6 +441,7 @@ export function ProjectTimelineView({
     const dueAt = shiftIsoByDays(task.dueAt, deltaDays);
     if (!startAt && !dueAt) return;
 
+    rescheduleInFlightTaskIdsRef.current.add(taskId);
     rescheduleTask.mutate({
       taskId,
       startAt,
@@ -693,10 +711,11 @@ export function ProjectTimelineView({
                                 dragState?.taskId === task.id && dragState.moved ? 'cursor-grabbing opacity-90' : 'cursor-grab'
                               }`}
                               style={{
-                                left: `${
+                                left: `${Math.max(
+                                  0,
                                   Math.max(0, dayDiff(timeline.window.start, visibleStart ?? task.timelineStart)) * zoomConfig.dayColWidth
-                                  + (dragState?.taskId === task.id ? dragState.deltaDays * zoomConfig.dayColWidth : 0)
-                                }px`,
+                                    + (dragState?.taskId === task.id ? dragState.deltaDays * zoomConfig.dayColWidth : 0),
+                                )}px`,
                                 width: `${Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1) * zoomConfig.dayColWidth}px`,
                               }}
                               onClick={() => {
@@ -708,6 +727,7 @@ export function ProjectTimelineView({
                               }}
                               onPointerDown={(event) => {
                                 if (event.button !== 0) return;
+                                if (rescheduleInFlightTaskIdsRef.current.has(task.id)) return;
                                 event.preventDefault();
                                 beginBarDrag(task.id, event.pointerId, event.clientX);
                                 event.currentTarget.setPointerCapture(event.pointerId);

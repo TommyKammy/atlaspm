@@ -63,23 +63,23 @@ test('timeline drag reschedule supports optimistic success and conflict rollback
   const projectId = project.id as string;
   const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
 
-  const baseStart = new Date();
-  baseStart.setDate(baseStart.getDate() + 2);
-  baseStart.setHours(0, 0, 0, 0);
-  const baseDue = new Date(baseStart);
-  baseDue.setDate(baseDue.getDate() + 2);
+  const nowUtc = new Date();
+  const baseStartIso = new Date(
+    Date.UTC(nowUtc.getUTCFullYear(), nowUtc.getUTCMonth(), nowUtc.getUTCDate() + 2, 0, 0, 0, 0),
+  ).toISOString();
+  const baseDueIso = addDaysIso(baseStartIso, 2);
 
   const taskA = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
     title: `Drag Success ${now}`,
-    startAt: baseStart.toISOString(),
-    dueAt: baseDue.toISOString(),
+    startAt: baseStartIso,
+    dueAt: baseDueIso,
   });
   const taskB = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
     title: `Drag Conflict ${now}`,
-    startAt: baseStart.toISOString(),
-    dueAt: baseDue.toISOString(),
+    startAt: baseStartIso,
+    dueAt: baseDueIso,
   });
 
   await page.goto(`/projects/${projectId}?view=timeline`);
