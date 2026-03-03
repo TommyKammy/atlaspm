@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import TaskDetailDrawer from '@/components/task-detail-drawer';
@@ -84,6 +84,7 @@ export function ProjectTimelineView({
   const [zoom, setZoom] = useState<TimelineZoom>('week');
   const [anchorDate, setAnchorDate] = useState(() => startOfDay(new Date()));
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
+  const markerId = `timeline-arrow-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
   const timelineStorageKey = useMemo(
     () => (meQuery.data?.id ? `${TIMELINE_VIEW_STORAGE_PREFIX}:${meQuery.data.id}:${projectId}` : null),
@@ -303,7 +304,7 @@ export function ProjectTimelineView({
             >
               <defs>
                 <marker
-                  id="timeline-arrow"
+                  id={markerId}
                   markerWidth="6"
                   markerHeight="6"
                   refX="5"
@@ -322,11 +323,8 @@ export function ProjectTimelineView({
                 const y1 = from.y;
                 const x2 = to.left;
                 const y2 = to.y;
-                const isForward = x2 >= x1;
-                const cx = isForward ? x1 + Math.max(16, (x2 - x1) / 2) : x1 + 16;
-                const path = isForward
-                  ? `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`
-                  : `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`;
+                const cx = x2 >= x1 ? x1 + Math.max(16, (x2 - x1) / 2) : x1 + 16;
+                const path = `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`;
                 return (
                   <path
                     key={`${edge.source}-${edge.target}-${edge.type}`}
@@ -334,7 +332,7 @@ export function ProjectTimelineView({
                     fill="none"
                     stroke="hsl(var(--primary))"
                     strokeWidth="1.25"
-                    markerEnd="url(#timeline-arrow)"
+                    markerEnd={`url(#${markerId})`}
                     opacity={0.7}
                     data-testid={`timeline-connector-${edge.source}-${edge.target}`}
                   />
@@ -345,73 +343,73 @@ export function ProjectTimelineView({
 
           <div className="relative z-[1]">
             {timelineLayout.visibleSections.map(({ section, tasks: sectionTasks }) => {
-          if (!sectionTasks.length) return null;
-          return (
-            <div key={section.id} className="border-b last:border-b-0">
-              <div className="grid h-8 border-b bg-muted/20" style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}>
-                <div className="flex items-center px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {section.isDefault ? t('tasks') : section.name}
-                </div>
-                <div className="flex items-center px-2 text-xs text-muted-foreground">
-                  {sectionTasks.length} {t('tasks')}
-                </div>
-              </div>
-
-              {sectionTasks.map((task) => {
-                const fallbackName = task.title.trim() || t('untitledTask');
-                const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
-                  ? timeline.window.start
-                  : task.timelineStart;
-                const visibleEnd = task.timelineEnd && task.timelineEnd > timeline.window.end
-                  ? timeline.window.end
-                  : task.timelineEnd;
-                return (
-                  <div key={task.id} className="grid h-10 border-b last:border-b-0" style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}>
-                    <div className="flex h-full items-center gap-2 px-3">
-                      <button
-                        type="button"
-                        className="truncate text-left text-sm hover:underline"
-                        onClick={() => setSelectedTaskId(task.id)}
-                        data-testid={`timeline-task-${task.id}`}
-                      >
-                        {fallbackName}
-                      </button>
+              if (!sectionTasks.length) return null;
+              return (
+                <div key={section.id} className="border-b last:border-b-0">
+                  <div className="grid h-8 border-b bg-muted/20" style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}>
+                    <div className="flex items-center px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {section.isDefault ? t('tasks') : section.name}
                     </div>
-                    <div className="relative h-full border-l">
-                      {task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd ? (
-                        <button
-                          type="button"
-                          className="absolute top-1/2 h-6 -translate-y-1/2 rounded bg-primary/20 px-2 text-left text-[11px] text-primary hover:bg-primary/25"
-                          style={{
-                            left: `${Math.max(0, dayDiff(timeline.window.start, visibleStart ?? task.timelineStart)) * zoomConfig.dayColWidth}px`,
-                            width: `${Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1) * zoomConfig.dayColWidth}px`,
-                          }}
-                          onClick={() => setSelectedTaskId(task.id)}
-                          data-testid={`timeline-bar-${task.id}`}
-                          title={`${task.timelineStart.toLocaleDateString()} - ${task.timelineEnd.toLocaleDateString()}`}
-                        >
-                          <span className="block truncate">{fallbackName}</span>
-                        </button>
-                      ) : task.hasSchedule ? (
-                        <span className="absolute left-2 top-1/2 -translate-y-1/2 rounded border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground">
-                          {t('timelineOutOfWindow')}
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="absolute left-2 top-1/2 -translate-y-1/2 rounded border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40"
-                          onClick={() => setSelectedTaskId(task.id)}
-                          data-testid={`timeline-unscheduled-${task.id}`}
-                        >
-                          {t('timelineNoDates')}
-                        </button>
-                      )}
+                    <div className="flex items-center px-2 text-xs text-muted-foreground">
+                      {sectionTasks.length} {t('tasks')}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          );
+
+                  {sectionTasks.map((task) => {
+                    const fallbackName = task.title.trim() || t('untitledTask');
+                    const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
+                      ? timeline.window.start
+                      : task.timelineStart;
+                    const visibleEnd = task.timelineEnd && task.timelineEnd > timeline.window.end
+                      ? timeline.window.end
+                      : task.timelineEnd;
+                    return (
+                      <div key={task.id} className="grid h-10 border-b last:border-b-0" style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}>
+                        <div className="flex h-full items-center gap-2 px-3">
+                          <button
+                            type="button"
+                            className="truncate text-left text-sm hover:underline"
+                            onClick={() => setSelectedTaskId(task.id)}
+                            data-testid={`timeline-task-${task.id}`}
+                          >
+                            {fallbackName}
+                          </button>
+                        </div>
+                        <div className="relative h-full border-l">
+                          {task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd ? (
+                            <button
+                              type="button"
+                              className="absolute top-1/2 h-6 -translate-y-1/2 rounded bg-primary/20 px-2 text-left text-[11px] text-primary hover:bg-primary/25"
+                              style={{
+                                left: `${Math.max(0, dayDiff(timeline.window.start, visibleStart ?? task.timelineStart)) * zoomConfig.dayColWidth}px`,
+                                width: `${Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1) * zoomConfig.dayColWidth}px`,
+                              }}
+                              onClick={() => setSelectedTaskId(task.id)}
+                              data-testid={`timeline-bar-${task.id}`}
+                              title={`${task.timelineStart.toLocaleDateString()} - ${task.timelineEnd.toLocaleDateString()}`}
+                            >
+                              <span className="block truncate">{fallbackName}</span>
+                            </button>
+                          ) : task.hasSchedule ? (
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 rounded border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground">
+                              {t('timelineOutOfWindow')}
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="absolute left-2 top-1/2 -translate-y-1/2 rounded border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40"
+                              onClick={() => setSelectedTaskId(task.id)}
+                              data-testid={`timeline-unscheduled-${task.id}`}
+                            >
+                              {t('timelineNoDates')}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
             })}
           </div>
         </div>

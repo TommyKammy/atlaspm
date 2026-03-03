@@ -2278,7 +2278,7 @@
 ## 2026-03-04 - Issue #128: Read-only Gantt dependency connectors
 - What changed:
   - Added dependency connector rendering to timeline/Gantt view:
-    - `/Users/tomoakikawada/Dev/atlaspm/apps/web-ui/src/components/project-timeline-view.tsx`
+    - `apps/web-ui/src/components/project-timeline-view.tsx`
       - computed deterministic row/bar layout for visible scheduled tasks.
       - rendered SVG connector paths with arrow markers from dependency source to target.
       - filtered connector count/stat and drawing to visible/in-window tasks only.

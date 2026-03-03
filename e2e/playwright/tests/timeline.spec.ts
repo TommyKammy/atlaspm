@@ -59,6 +59,10 @@ test('timeline tab flow: bars render, detail opens, zoom/window persists', async
     startAt: end.toISOString(),
     dueAt: new Date(end.getTime() + (2 * 24 * 60 * 60 * 1000)).toISOString(),
   });
+  await api(`/tasks/${taskB.id}/dependencies`, token, 'POST', {
+    dependsOnId: taskA.id,
+    type: 'BLOCKS',
+  });
 
   await page.goto(`/projects/${projectId}`);
   await page.reload();
@@ -70,6 +74,8 @@ test('timeline tab flow: bars render, detail opens, zoom/window persists', async
 
   await expect(page.locator(`[data-testid="timeline-bar-${taskA.id}"]`)).toBeVisible();
   await expect(page.locator(`[data-testid="timeline-bar-${taskB.id}"]`)).toBeVisible();
+  await expect(page.locator('[data-testid="timeline-dependency-layer"]')).toBeVisible();
+  await expect(page.locator(`[data-testid="timeline-connector-${taskA.id}-${taskB.id}"]`)).toBeVisible();
 
   await page.click(`[data-testid="timeline-bar-${taskA.id}"]`);
   await expect(page.locator('[data-testid="task-detail-title-input"]')).toBeVisible();
