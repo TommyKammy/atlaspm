@@ -116,6 +116,7 @@ docker compose up -d --build
 - Invitation link base URL:
   - `INVITE_BASE_URL` (defaults to `http://localhost:3000/login`)
 - Collaboration in web-ui is feature-gated and off by default: `NEXT_PUBLIC_COLLAB_ENABLED=false`.
+- Timeline tab in web-ui is feature-gated and off by default: `NEXT_PUBLIC_TIMELINE_ENABLED=false`.
 
 ## Admin UX
 

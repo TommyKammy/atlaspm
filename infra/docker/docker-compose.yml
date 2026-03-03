@@ -54,6 +54,7 @@ services:
         NEXT_PUBLIC_COLLAB_ENABLED: 'true'
         NEXT_PUBLIC_COLLAB_SERVER_URL: ws://localhost:18080
         NEXT_PUBLIC_COLLAB_DEV_MODE: 'false'
+        NEXT_PUBLIC_TIMELINE_ENABLED: 'false'
     container_name: atlaspm-web-ui
     environment:
       NODE_ENV: development
@@ -64,6 +65,7 @@ services:
       NEXT_PUBLIC_COLLAB_ENABLED: 'true'
       NEXT_PUBLIC_COLLAB_SERVER_URL: ws://localhost:18080
       NEXT_PUBLIC_COLLAB_DEV_MODE: 'false'
+      NEXT_PUBLIC_TIMELINE_ENABLED: 'false'
     depends_on:
       core-api:
         condition: service_started

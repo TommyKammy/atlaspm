@@ -17,6 +17,7 @@ import { queryKeys } from '@/lib/query-keys';
 import type { CustomFieldDefinition, Project, ProjectMember, Section, Task } from '@/lib/types';
 import { parseCustomFieldFilters, stringifyCustomFieldFilters, type CustomFieldFilter } from '@/lib/project-filters';
 import { useI18n } from '@/lib/i18n';
+import { timelineEnabled } from '@/lib/feature-flags';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { NotificationCenter } from '@/components/notification-center';
@@ -241,6 +242,7 @@ export function HeaderBar({
   });
   const projectId = useMemo(() => pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null, [pathname]);
   const currentView = (resolvedSearchParams.get('view') ?? 'list').toLowerCase();
+  const resolvedCurrentView = !timelineEnabled && currentView === 'timeline' ? 'list' : currentView;
   const query = resolvedSearchParams.get('q') ?? '';
   const statusesParam = resolvedSearchParams.get('statuses');
   const assigneesParam = resolvedSearchParams.get('assignees');
@@ -257,12 +259,17 @@ export function HeaderBar({
     () => parseCustomFieldFilters(customFieldFiltersParam),
     [customFieldFiltersParam],
   );
-  const tabs = [
-    { id: 'list', label: t('list') },
-    { id: 'board', label: t('board') },
-    { id: 'calendar', label: t('calendar') },
-    { id: 'files', label: t('files') },
-  ] as const;
+  const tabs = useMemo(
+    () =>
+      [
+        { id: 'list', label: t('list') },
+        { id: 'board', label: t('board') },
+        ...(timelineEnabled ? [{ id: 'timeline', label: t('timeline') }] : []),
+        { id: 'calendar', label: t('calendar') },
+        { id: 'files', label: t('files') },
+      ] as const,
+    [t],
+  );
 
   const sectionsQuery = useQuery<Section[]>({
     queryKey: queryKeys.projectSections(projectId ?? ''),
@@ -402,27 +409,27 @@ export function HeaderBar({
       const emitFocus = () => {
         window.dispatchEvent(new CustomEvent('atlaspm:focus-section', { detail: { sectionId } }));
       };
-      if (currentView !== 'list') {
+      if (resolvedCurrentView !== 'list') {
         setProjectQueryParam('view', 'list');
         setTimeout(emitFocus, 220);
       } else {
         requestAnimationFrame(emitFocus);
       }
     },
-    [currentView, setProjectQueryParam],
+    [resolvedCurrentView, setProjectQueryParam],
   );
 
   const openAddSectionFromHeader = useCallback(() => {
     const emitAdd = () => {
       window.dispatchEvent(new CustomEvent('atlaspm:add-section'));
     };
-    if (currentView !== 'list') {
+    if (resolvedCurrentView !== 'list') {
       setProjectQueryParam('view', 'list');
       setTimeout(emitAdd, 220);
     } else {
       requestAnimationFrame(emitAdd);
     }
-  }, [currentView, setProjectQueryParam]);
+  }, [resolvedCurrentView, setProjectQueryParam]);
 
   useEffect(() => {
     setProjectSearchInput(query);
@@ -466,7 +473,7 @@ export function HeaderBar({
                   <button
                     key={tab.id}
                     type="button"
-                    className={tab.id === currentView ? 'border-b-2 border-primary px-1 py-1 text-xs font-medium' : 'px-1 py-1 text-xs text-muted-foreground'}
+                    className={tab.id === resolvedCurrentView ? 'border-b-2 border-primary px-1 py-1 text-xs font-medium' : 'px-1 py-1 text-xs text-muted-foreground'}
                     onClick={() => setProjectQueryParam('view', tab.id)}
                     data-testid={`project-view-${tab.id}`}
                   >

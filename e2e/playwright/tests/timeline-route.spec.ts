@@ -1,0 +1,43 @@
+import { expect, test } from '@playwright/test';
+
+const API = process.env.E2E_CORE_API_URL ?? 'http://localhost:3001';
+
+async function api(path: string, token: string, method = 'GET', body?: unknown) {
+  const res = await fetch(`${API}${path}`, {
+    method,
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${token}`,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+  const raw = await res.text();
+  return raw ? JSON.parse(raw) : null;
+}
+
+test('timeline route is feature-gated off by default', async ({ page }) => {
+  const now = Date.now();
+  await page.goto('/login');
+  await page.fill('input[placeholder="OIDC sub"]', `e2e-timeline-${now}`);
+  await page.fill('input[placeholder="Email"]', `e2e-timeline-${now}@example.com`);
+  await page.click('button:has-text("Dev Login")');
+  await page.waitForURL('**/');
+
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Route Gate ${now}`,
+  });
+  const projectId = project.id as string;
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+
+  await expect(page.locator('[data-testid="project-view-timeline"]')).toHaveCount(0);
+  await expect(page.locator('[data-testid="project-view-list"]')).toBeVisible();
+  await expect(page.locator('[data-testid="add-new-trigger"]')).toBeVisible();
+});

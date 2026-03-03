@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Plus } from 'lucide-react';
 import ProjectBoard from '@/components/project-board';
 import { ProjectBoardView, ProjectCalendarView, ProjectFilesView } from '@/components/project-alt-views';
+import { ProjectTimelineView } from '@/components/project-timeline-view';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { Project, ProjectMember, Section, SectionTaskGroup, Task } from '@/lib/types';
@@ -13,6 +14,7 @@ import { parseCustomFieldFilters } from '@/lib/project-filters';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useI18n } from '@/lib/i18n';
+import { timelineEnabled } from '@/lib/feature-flags';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
@@ -52,8 +54,13 @@ export default function ProjectPage() {
   const addSectionInputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
   const viewParam = (resolvedSearchParams.get('view') ?? 'list').toLowerCase();
-  const view: 'list' | 'board' | 'calendar' | 'files' =
-    viewParam === 'board' || viewParam === 'calendar' || viewParam === 'files' ? viewParam : 'list';
+  const view: 'list' | 'board' | 'timeline' | 'calendar' | 'files' =
+    viewParam === 'board'
+      || viewParam === 'calendar'
+      || viewParam === 'files'
+      || (timelineEnabled && viewParam === 'timeline')
+      ? (viewParam as 'list' | 'board' | 'timeline' | 'calendar' | 'files')
+      : 'list';
   const trashOpen = resolvedSearchParams.get('trash') === '1';
   const search = resolvedSearchParams.get('q') ?? '';
   const statusesParam = resolvedSearchParams.get('statuses');
@@ -225,6 +232,12 @@ export default function ProjectPage() {
       setProjectQueryParam('view', 'list');
     }
   }, [openTaskId, setProjectQueryParam, view]);
+
+  useEffect(() => {
+    if (!timelineEnabled && viewParam === 'timeline') {
+      setProjectQueryParam('view', 'list');
+    }
+  }, [setProjectQueryParam, viewParam]);
 
   useEffect(() => {
     if (!showAddSectionInput) return;
@@ -452,6 +465,13 @@ export default function ProjectPage() {
         />
       ) : view === 'calendar' ? (
         <ProjectCalendarView
+          projectId={projectId}
+          search={search}
+          statusFilter={statusFilter}
+          priorityFilter={priorityFilter}
+        />
+      ) : view === 'timeline' ? (
+        <ProjectTimelineView
           projectId={projectId}
           search={search}
           statusFilter={statusFilter}
