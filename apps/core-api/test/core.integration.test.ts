@@ -2217,7 +2217,6 @@ describe('Core API Integration', () => {
     const taskId = taskRes.body.id as string;
     const newDueDate = new Date();
     newDueDate.setDate(newDueDate.getDate() + 10);
-    const rescheduleStart = new Date();
     const rescheduleRes = await request(app.getHttpServer())
       .patch(`/tasks/${taskId}/reschedule`)
       .set('Authorization', `Bearer ${token}`)
@@ -2236,7 +2235,6 @@ describe('Core API Integration', () => {
         entityType: 'Task',
         entityId: taskId,
         action: 'task.rescheduled',
-        createdAt: { gte: rescheduleStart },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -2245,7 +2243,7 @@ describe('Core API Integration', () => {
     expect((rescheduleAudit?.afterJson as any)?.dueAt).toBeTruthy();
 
     const rescheduleOutboxEvents = await prisma.outboxEvent.findMany({
-      where: { type: 'task.rescheduled', createdAt: { gte: rescheduleStart } },
+      where: { type: 'task.rescheduled' },
       orderBy: { createdAt: 'desc' },
       take: 20,
     });
@@ -2291,6 +2289,52 @@ describe('Core API Integration', () => {
     });
     expect(conflictRes.body.latest).toHaveProperty('startAt');
     expect(conflictRes.body.latest).toHaveProperty('dueAt');
+  });
+
+  test('PATCH /tasks/:id/reschedule prioritizes 409 over date validation when version is stale', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Reschedule Stale Version ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() + 7);
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() + 10);
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Task with stale version and invalid date payload',
+        startAt: startDate.toISOString(),
+        dueAt: dueDate.toISOString(),
+      })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+
+    const invalidDueDate = new Date();
+    invalidDueDate.setDate(invalidDueDate.getDate() + 1);
+    const conflictRes = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/reschedule`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        dueAt: invalidDueDate.toISOString(),
+        version: taskRes.body.version - 1,
+      })
+      .expect(409);
+
+    expect(conflictRes.body).toMatchObject({
+      message: 'Version conflict',
+      latest: {
+        version: taskRes.body.version,
+      },
+    });
+    expect(conflictRes.body.code).toBeUndefined();
   });
 
   test('POST /tasks/:id/subtasks rejects invalid date range', async () => {
