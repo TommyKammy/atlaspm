@@ -1772,14 +1772,14 @@ export class TasksController {
   async addDependency(@Param('id') taskId: string, @Body() body: AddDependencyDto, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
-    return this.subtaskService.addDependency(taskId, body.dependsOnId, body.type);
+    return this.subtaskService.addDependency(taskId, body.dependsOnId, body.type, req.user.sub, req.correlationId);
   }
 
   @Delete('tasks/:id/dependencies/:dependsOnId')
   async removeDependency(@Param('id') taskId: string, @Param('dependsOnId') dependsOnId: string, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
-    await this.subtaskService.removeDependency(taskId, dependsOnId);
+    await this.subtaskService.removeDependencyWithAudit(taskId, dependsOnId, req.user.sub, req.correlationId);
     return { success: true };
   }
 

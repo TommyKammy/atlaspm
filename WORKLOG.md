@@ -2175,3 +2175,27 @@
 - Risks/known gaps:
   - EXPLAIN plans are local-dataset dependent; planner choice can differ under larger production distributions.
   - New indexes increase write amplification slightly; keep monitoring insert/update latency on large projects.
+
+## 2026-03-03 - Issue #121: Regression tests + dependency audit/outbox invariants
+- What changed:
+  - Added audit/outbox emission for dependency writes:
+    - `apps/core-api/src/tasks/subtask.service.ts`
+      - `addDependency` now appends `task.dependency.created` audit/outbox in the same transaction.
+      - added `removeDependencyWithAudit` to append `task.dependency.removed` audit/outbox.
+    - `apps/core-api/src/tasks/tasks.controller.ts`
+      - dependency add/remove endpoints now pass actor + correlationId to subtask service.
+  - Strengthened integration regression coverage:
+    - `apps/core-api/test/core.integration.test.ts`
+      - valid date-range task creation now asserts `task.created` audit/outbox payload has `startAt/dueAt`.
+      - valid dependency create/delete now asserts `task.dependency.created/removed` audit/outbox events.
+  - Added focused E2E smoke for list/detail stability:
+    - `e2e/playwright/tests/p0-regression-smoke.spec.ts`
+      - logs in, creates project/tasks/dependency, opens detail drawer, verifies tabs/close behavior.
+- Why:
+  - Issue #121 requires locking regression invariants around date/dependency handling and ensuring list/detail UX remains stable.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm e2e`
+  - `pnpm --filter @atlaspm/core-api build`
+- Risks/known gaps:
+  - Dependency audit/outbox is now emitted at controller-driven endpoints; direct DB writes or bypass paths still require service/API discipline.
