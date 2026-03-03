@@ -254,6 +254,7 @@ model Task {
   @@index([projectId, deletedAt, status, assigneeUserId, dueAt])
   @@index([projectId, deletedAt, updatedAt])
   @@index([projectId, deletedAt, type])
+  @@index([projectId, deletedAt, startAt])
   @@index([recurringRuleId])
 }
 
@@ -554,6 +555,8 @@ model TaskDependency {
   @@unique([taskId, dependsOnId])
   @@index([taskId])
   @@index([dependsOnId])
+  @@index([taskId, createdAt])
+  @@index([dependsOnId, createdAt])
 }
 
 
