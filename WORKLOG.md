@@ -2206,3 +2206,38 @@
   - `pnpm --filter @atlaspm/core-api build`
 - Risks/known gaps:
   - Dependency audit/outbox is now emitted at controller-driven endpoints; direct DB writes or bypass paths still require service/API discipline.
+
+## 2026-03-03 - Issues #122/#124/#125: Timeline route gating + shared hook + read-only renderer
+- What changed:
+  - Stabilized timeline route feature-gating behavior and E2E expectation:
+    - `e2e/playwright/tests/timeline-route.spec.ts`
+      - changed assertion from URL rewrite requirement to behavior-based assertion (timeline tab hidden, list view controls visible when feature flag is off).
+    - `apps/web-ui/src/components/layout/HeaderBar.tsx`
+      - added resolved current view handling so `?view=timeline` is treated as `list` when timeline feature flag is disabled.
+  - Added shared timeline data hook for normalized data access:
+    - `apps/web-ui/src/hooks/use-timeline-data.ts`
+      - introduced `useTimelineData(projectId, window)` returning normalized `sections/tasks/tasksBySection/members/dependencies`.
+      - reused existing query keys: `projectTasksGrouped`, `projectMembers`, `projectDependencyGraph`.
+      - added window normalization and in-window schedule computation for timeline consumers.
+  - Added read-only timeline renderer:
+    - `apps/web-ui/src/components/project-timeline-view.tsx`
+      - renders section rows and task bars against a date grid.
+      - handles tasks without dates via explicit “No dates” chip.
+      - clicking task bar or unscheduled chip opens existing `TaskDetailDrawer`.
+      - includes simple previous/today/next window controls.
+    - `apps/web-ui/src/app/projects/[id]/page.tsx`
+      - wired `view=timeline` to `ProjectTimelineView`.
+  - Added i18n strings required by timeline UI:
+    - `apps/web-ui/src/lib/i18n.tsx`
+      - `loadingTimeline`, `loadTimelineFailed`, `timelineNoTasks`, `timelineNoDates`, `timelineScheduledTasks`, `timelineUnscheduled`, `timelineDependencies`, `previousWindow`, `nextWindow`, `today` (EN/JA).
+- Why:
+  - Issue #122 requires route/tab wiring behind feature flag without regressions.
+  - Issue #124 requires a shared, typed normalization boundary for timeline/gantt consumers.
+  - Issue #125 requires a first read-only timeline surface that is usable and integrates with existing task detail UX.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm e2e`
+- Risks/known gaps:
+  - Timeline is intentionally read-only in this wave (no drag/resize/inline date edits yet).
+  - Current timeline window defaults to a fixed rolling range (previous 7 days to next 21 days); zoom presets are not implemented.
