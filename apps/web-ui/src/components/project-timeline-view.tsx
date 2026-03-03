@@ -87,8 +87,9 @@ export function ProjectTimelineView({
   const [anchorDate, setAnchorDate] = useState(() => startOfDay(new Date()));
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
-  const [viewportHeight, setViewportHeight] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(() => (typeof window === 'undefined' ? 800 : window.innerHeight));
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const scrollRafRef = useRef<number | null>(null);
   const markerId = `timeline-arrow-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
   const timelineStorageKey = useMemo(
@@ -230,7 +231,7 @@ export function ProjectTimelineView({
       bodyHeight: cursorY,
       totalRowCount: visibleSections.length + filteredTasks.length,
     };
-  }, [filteredBySection, filteredTasks.length, timeline.sections, timeline.window.end, timeline.window.start, zoomConfig.dayColWidth]);
+  }, [filteredBySection, timeline.sections, timeline.window.end, timeline.window.start, zoomConfig.dayColWidth]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -242,8 +243,14 @@ export function ProjectTimelineView({
     updateMeasurements();
     const observer = new ResizeObserver(updateMeasurements);
     observer.observe(container);
-    return () => observer.disconnect();
-  }, [timelineLayout.bodyHeight, projectId, zoom]);
+    return () => {
+      observer.disconnect();
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
+    };
+  }, [projectId, zoom]);
 
   const virtualizationEnabled = timelineLayout.totalRowCount > VIRTUALIZE_ROW_THRESHOLD;
   const visibleRange = useMemo(() => {
@@ -266,6 +273,14 @@ export function ProjectTimelineView({
     }
     return next;
   }, [filteredTaskIds, timelineLayout.taskRowsById, visibleRange.end, visibleRange.start, virtualizationEnabled]);
+
+  const totalDependencyEdges = useMemo(
+    () =>
+      timeline.dependencyEdges.filter(
+        (edge) => filteredTaskIds.has(edge.source) && filteredTaskIds.has(edge.target),
+      ).length,
+    [filteredTaskIds, timeline.dependencyEdges],
+  );
 
   const connectorEdges = useMemo(
     () =>
@@ -362,14 +377,23 @@ export function ProjectTimelineView({
           <span>{t('timelineScheduledTasks')}</span>
           <Badge variant="secondary">{unscheduledTasks.length}</Badge>
           <span>{t('timelineUnscheduled')}</span>
-          <Badge variant="secondary">{connectorEdges.length}</Badge>
+          <Badge variant="secondary">{totalDependencyEdges}</Badge>
           <span>{t('timelineDependencies')}</span>
         </div>
       </div>
 
       <div
         ref={scrollContainerRef}
-        onScroll={(event) => setScrollTop((event.currentTarget as HTMLDivElement).scrollTop)}
+        onScroll={(event) => {
+          const nextScrollTop = (event.currentTarget as HTMLDivElement).scrollTop;
+          if (scrollRafRef.current !== null) {
+            cancelAnimationFrame(scrollRafRef.current);
+          }
+          scrollRafRef.current = requestAnimationFrame(() => {
+            setScrollTop(nextScrollTop);
+            scrollRafRef.current = null;
+          });
+        }}
         className="overflow-auto rounded-lg border bg-card"
       >
         <div
