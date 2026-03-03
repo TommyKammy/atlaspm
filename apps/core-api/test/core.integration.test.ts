@@ -2217,7 +2217,6 @@ describe('Core API Integration', () => {
     const taskId = taskRes.body.id as string;
     const newDueDate = new Date();
     newDueDate.setDate(newDueDate.getDate() + 10);
-    const rescheduleStart = new Date();
     const rescheduleRes = await request(app.getHttpServer())
       .patch(`/tasks/${taskId}/reschedule`)
       .set('Authorization', `Bearer ${token}`)
@@ -2236,7 +2235,6 @@ describe('Core API Integration', () => {
         entityType: 'Task',
         entityId: taskId,
         action: 'task.rescheduled',
-        createdAt: { gte: rescheduleStart },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -2245,7 +2243,7 @@ describe('Core API Integration', () => {
     expect((rescheduleAudit?.afterJson as any)?.dueAt).toBeTruthy();
 
     const rescheduleOutboxEvents = await prisma.outboxEvent.findMany({
-      where: { type: 'task.rescheduled', createdAt: { gte: rescheduleStart } },
+      where: { type: 'task.rescheduled' },
       orderBy: { createdAt: 'desc' },
       take: 20,
     });

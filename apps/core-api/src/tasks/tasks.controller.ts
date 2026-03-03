@@ -719,30 +719,32 @@ export class TasksController {
     if (body.startAt === undefined && body.dueAt === undefined) {
       throw new BadRequestException('Either startAt or dueAt must be provided');
     }
-    if (body.version !== task.version) {
-      throw new ConflictException({
-        message: 'Version conflict',
-        latest: {
-          version: task.version,
-          startAt: task.startAt,
-          dueAt: task.dueAt,
-        },
-      });
-    }
-
     const effectiveStartAt = body.startAt === undefined ? task.startAt?.toISOString() : body.startAt;
     const effectiveDueAt = body.dueAt === undefined ? task.dueAt?.toISOString() : body.dueAt;
     assertValidDateRange(effectiveStartAt, effectiveDueAt);
 
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.task.update({
-        where: { id },
+      const updatedRows = await tx.task.updateMany({
+        where: { id, deletedAt: null, version: body.version },
         data: {
           startAt: body.startAt ? new Date(body.startAt) : body.startAt === null ? null : undefined,
           dueAt: body.dueAt ? new Date(body.dueAt) : body.dueAt === null ? null : undefined,
           version: { increment: 1 },
         },
       });
+      if (updatedRows.count === 0) {
+        const latest = await tx.task.findFirstOrThrow({ where: { id, deletedAt: null } });
+        throw new ConflictException({
+          message: 'Version conflict',
+          latest: {
+            version: latest.version,
+            startAt: latest.startAt,
+            dueAt: latest.dueAt,
+          },
+        });
+      }
+
+      const updated = await tx.task.findFirstOrThrow({ where: { id, deletedAt: null } });
       await this.domain.appendAuditOutbox({
         tx,
         actor: req.user.sub,
