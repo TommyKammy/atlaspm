@@ -2274,3 +2274,20 @@
 - Risks/known gaps:
   - Timeline is still read-only in this wave (no drag/resize editing yet).
   - Feature override (`atlaspm:feature:timeline`) is a client-side toggle for staged testing and is not a permission control.
+
+## 2026-03-04 - Issue #128: Read-only Gantt dependency connectors
+- What changed:
+  - Added dependency connector rendering to timeline/Gantt view:
+    - `apps/web-ui/src/components/project-timeline-view.tsx`
+      - computed deterministic row/bar layout for visible scheduled tasks.
+      - rendered SVG connector paths with arrow markers from dependency source to target.
+      - filtered connector count/stat and drawing to visible/in-window tasks only.
+      - stabilized section/task row heights for reliable connector alignment.
+- Why:
+  - Issue #128 requires dependency direction visualization in read-only Gantt without introducing edit interactions.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm --dir e2e/playwright exec playwright test tests/timeline.spec.ts --reporter=list`
+- Risks/known gaps:
+  - Connector routing is intentionally minimal (cubic curves) and may overlap on dense dependency graphs; no collision-avoidance in this wave.
