@@ -11,8 +11,6 @@ import type {
   Task,
 } from '@/lib/types';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 export type TimelineWindow = {
   start: Date;
   end: Date;
@@ -48,6 +46,12 @@ function startOfDay(value: Date): Date {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate());
 }
 
+function addCalendarDays(base: Date, delta: number): Date {
+  const result = startOfDay(base);
+  result.setDate(result.getDate() + delta);
+  return result;
+}
+
 function toDateOrNull(value: string | null | undefined): Date | null {
   if (!value) return null;
   const parsed = new Date(value);
@@ -72,8 +76,8 @@ function overlapsWindow(range: { start: Date | null; end: Date | null }, window:
 
 export function normalizeTimelineWindow(window?: Partial<TimelineWindow>): TimelineWindow {
   const today = startOfDay(new Date());
-  const fallbackStart = new Date(today.getTime() - (7 * DAY_MS));
-  const fallbackEnd = new Date(today.getTime() + (21 * DAY_MS));
+  const fallbackStart = addCalendarDays(today, -7);
+  const fallbackEnd = addCalendarDays(today, 21);
   const rawStart = window?.start ? startOfDay(window.start) : fallbackStart;
   const rawEnd = window?.end ? startOfDay(window.end) : fallbackEnd;
   if (rawStart <= rawEnd) return { start: rawStart, end: rawEnd };

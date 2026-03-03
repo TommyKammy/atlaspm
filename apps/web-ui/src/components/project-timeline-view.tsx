@@ -18,7 +18,17 @@ function startOfDay(value: Date): Date {
 }
 
 function addDays(base: Date, delta: number): Date {
-  return new Date(base.getTime() + (delta * DAY_MS));
+  const result = startOfDay(base);
+  result.setDate(result.getDate() + delta);
+  return result;
+}
+
+function dayNumber(date: Date): number {
+  return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / DAY_MS);
+}
+
+function dayDiff(from: Date, to: Date): number {
+  return dayNumber(to) - dayNumber(from);
 }
 
 function formatDay(date: Date): string {
@@ -170,12 +180,18 @@ export function ProjectTimelineView({
                   {section.isDefault ? t('tasks') : section.name}
                 </div>
                 <div className="px-2 py-2 text-xs text-muted-foreground">
-                  {sectionTasks.length} {t('tasks').toLowerCase()}
+                  {sectionTasks.length} {t('tasks')}
                 </div>
               </div>
 
               {sectionTasks.map((task) => {
                 const fallbackName = task.title.trim() || t('untitledTask');
+                const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
+                  ? timeline.window.start
+                  : task.timelineStart;
+                const visibleEnd = task.timelineEnd && task.timelineEnd > timeline.window.end
+                  ? timeline.window.end
+                  : task.timelineEnd;
                 return (
                   <div
                     key={task.id}
@@ -193,13 +209,13 @@ export function ProjectTimelineView({
                       </button>
                     </div>
                     <div className="relative h-10 border-l">
-                      {task.hasSchedule && task.timelineStart && task.timelineEnd ? (
+                      {task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd ? (
                         <button
                           type="button"
                           className="absolute top-1/2 h-6 -translate-y-1/2 rounded bg-primary/20 px-2 text-left text-[11px] text-primary hover:bg-primary/25"
                           style={{
-                            left: `${Math.max(0, Math.floor((Math.max(task.timelineStart.getTime(), timeline.window.start.getTime()) - timeline.window.start.getTime()) / DAY_MS) * DAY_COL_WIDTH)}px`,
-                            width: `${Math.max(1, (Math.floor((Math.min(task.timelineEnd.getTime(), timeline.window.end.getTime()) - Math.max(task.timelineStart.getTime(), timeline.window.start.getTime())) / DAY_MS) + 1) * DAY_COL_WIDTH)}px`,
+                            left: `${Math.max(0, dayDiff(timeline.window.start, visibleStart ?? task.timelineStart)) * DAY_COL_WIDTH}px`,
+                            width: `${Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1) * DAY_COL_WIDTH}px`,
                           }}
                           onClick={() => setSelectedTaskId(task.id)}
                           data-testid={`timeline-bar-${task.id}`}
@@ -207,6 +223,10 @@ export function ProjectTimelineView({
                         >
                           <span className="block truncate">{fallbackName}</span>
                         </button>
+                      ) : task.hasSchedule ? (
+                        <span className="absolute left-2 top-1/2 -translate-y-1/2 rounded border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground">
+                          {t('timelineOutOfWindow')}
+                        </span>
                       ) : (
                         <button
                           type="button"
