@@ -77,8 +77,13 @@ test('timeline tab flow: bars render, detail opens, zoom/window persists', async
   await expect(page.locator('[data-testid="timeline-dependency-layer"]')).toBeVisible();
   await expect(page.locator(`[data-testid="timeline-connector-${taskA.id}-${taskB.id}"]`)).toBeVisible();
 
+  await page.click(`[data-testid="timeline-task-${taskB.id}"]`);
+  await expect(page.locator('[data-testid="task-detail-title-input"]')).toHaveValue(`Timeline Task B ${now}`);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-testid="task-detail-title-input"]')).toHaveCount(0);
+
   await page.click(`[data-testid="timeline-bar-${taskA.id}"]`);
-  await expect(page.locator('[data-testid="task-detail-title-input"]')).toBeVisible();
+  await expect(page.locator('[data-testid="task-detail-title-input"]')).toHaveValue(`Timeline Task A ${now}`);
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-testid="task-detail-title-input"]')).toHaveCount(0);
 
