@@ -16,7 +16,7 @@ This patch adds indexes for timeline/date-window and dependency-panel access pat
 
 EXPLAIN output is captured in:
 
-- `/Users/tomoakikawada/Dev/atlaspm/docs/perf/EXPLAIN_P0_120_BASELINE.md`
+- `docs/perf/EXPLAIN_P0_120_BASELINE.md`
 
 Representative plan snippets:
 

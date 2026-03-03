@@ -129,13 +129,25 @@ LIMIT 200;
 \echo '--- Q6: Timeline date-window (project + startAt range) ---'
 EXPLAIN (ANALYZE, BUFFERS)
 WITH p AS (
-  SELECT id FROM "Project" ORDER BY "createdAt" DESC LIMIT 1
+  SELECT COALESCE(
+    (
+      SELECT t."projectId"
+      FROM "Task" t
+      WHERE t.deleted_at IS NULL
+        AND t."startAt" >= now() - interval '30 days'
+        AND t."startAt" <= now() + interval '90 days'
+      ORDER BY t."updatedAt" DESC
+      LIMIT 1
+    ),
+    (
+      SELECT id FROM "Project" ORDER BY "createdAt" DESC LIMIT 1
+    )
+  ) AS id
 )
 SELECT t.id, t."startAt", t."dueAt"
 FROM "Task" t
-WHERE t."projectId" = (SELECT id FROM p)
+WHERE t."projectId" = (SELECT p.id FROM p)
   AND t.deleted_at IS NULL
-  AND t."startAt" IS NOT NULL
   AND t."startAt" >= now() - interval '30 days'
   AND t."startAt" <= now() + interval '90 days'
 ORDER BY t."startAt" ASC
@@ -144,11 +156,21 @@ LIMIT 500;
 \echo '--- Q7: Dependency panel (task dependencies, newest first) ---'
 EXPLAIN (ANALYZE, BUFFERS)
 WITH target_task AS (
-  SELECT id FROM "Task" ORDER BY "updatedAt" DESC LIMIT 1
+  SELECT COALESCE(
+    (
+      SELECT d."taskId"
+      FROM "TaskDependency" d
+      ORDER BY d."createdAt" DESC
+      LIMIT 1
+    ),
+    (
+      SELECT t.id FROM "Task" t ORDER BY t."updatedAt" DESC LIMIT 1
+    )
+  ) AS id
 )
 SELECT d.id, d."dependsOnId", d.type, d."createdAt"
 FROM "TaskDependency" d
-WHERE d."taskId" = (SELECT id FROM target_task)
+WHERE d."taskId" = (SELECT target_task.id FROM target_task)
 ORDER BY d."createdAt" DESC
 LIMIT 200;
 SQL

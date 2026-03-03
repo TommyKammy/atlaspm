@@ -2151,20 +2151,20 @@
 ## 2026-03-03 - Issue #120: Timeline/Dependency index tuning + EXPLAIN baseline
 - What changed:
   - Added new DB indexes for timeline/dependency query paths:
-    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/prisma/schema.prisma`
+    - `apps/core-api/prisma/schema.prisma`
       - `Task @@index([projectId, deletedAt, startAt])`
       - `TaskDependency @@index([taskId, createdAt])`
       - `TaskDependency @@index([dependsOnId, createdAt])`
-    - `/Users/tomoakikawada/Dev/atlaspm/apps/core-api/prisma/migrations/20260303103000_p0_timeline_dependency_indexes/migration.sql`
+    - `apps/core-api/prisma/migrations/20260303103000_p0_timeline_dependency_indexes/migration.sql`
       - creates the three indexes above.
   - Extended EXPLAIN harness with representative queries for timeline date-window and dependency panel:
-    - `/Users/tomoakikawada/Dev/atlaspm/scripts/db-explain-baseline.sh`
+    - `scripts/db-explain-baseline.sh`
       - added Q6 (project + `startAt` range)
       - added Q7 (task dependency newest-first).
   - Captured baseline evidence and documented rationale/rollback:
-    - `/Users/tomoakikawada/Dev/atlaspm/docs/perf/EXPLAIN_P0_120_BASELINE.md`
-    - `/Users/tomoakikawada/Dev/atlaspm/docs/perf/P0_120_INDEX_NOTES.md`
-    - `/Users/tomoakikawada/Dev/atlaspm/docs/perf/README.md`
+    - `docs/perf/EXPLAIN_P0_120_BASELINE.md`
+    - `docs/perf/P0_120_INDEX_NOTES.md`
+    - `docs/perf/README.md`
 - Why:
   - Issue #120 requires date-window and dependency-path index hardening with concrete EXPLAIN evidence and rollback guidance before broader timeline work.
 - How tested (exact commands):
