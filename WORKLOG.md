@@ -2291,3 +2291,21 @@
   - `pnpm --dir e2e/playwright exec playwright test tests/timeline.spec.ts --reporter=list`
 - Risks/known gaps:
   - Connector routing is intentionally minimal (cubic curves) and may overlap on dense dependency graphs; no collision-avoidance in this wave.
+
+## 2026-03-04 - Issue #132: Timeline/Gantt performance guardrails
+- What changed:
+  - Added timeline virtualization guardrails and lightweight perf telemetry:
+    - `apps/web-ui/src/components/project-timeline-view.tsx`
+      - introduced row-threshold virtualization (`>120` rows) with overscan windowing.
+      - virtualized section/task row rendering while preserving total scroll geometry.
+      - limited connector drawing to visible task rows when virtualization is active.
+      - added development-only render budget logs (`[timeline:perf]`) for rows/connectors/virtualization state.
+      - added scroll container resize/scroll tracking with cleanup to avoid tab-switch leaks.
+- Why:
+  - Issue #132 targets smoothness under medium/large projects and requires minimizing paint cost without changing timeline behavior.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm --dir e2e/playwright exec playwright test tests/timeline.spec.ts --reporter=list`
+- Risks/known gaps:
+  - Virtualization keeps section headers as fixed-height placeholders when out-of-window; this prioritizes performance and connector alignment over header continuity while scrolling rapidly.

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import TaskDetailDrawer from '@/components/task-detail-drawer';
@@ -17,6 +17,8 @@ const TASK_NAME_COL_WIDTH = 260;
 const TIMELINE_VIEW_STORAGE_PREFIX = 'atlaspm:timeline-view';
 const SECTION_ROW_HEIGHT = 32;
 const TASK_ROW_HEIGHT = 40;
+const VIRTUALIZE_ROW_THRESHOLD = 120;
+const VIRTUAL_OVERSCAN_PX = 320;
 
 type TimelineZoom = 'day' | 'week' | 'month';
 
@@ -84,6 +86,9 @@ export function ProjectTimelineView({
   const [zoom, setZoom] = useState<TimelineZoom>('week');
   const [anchorDate, setAnchorDate] = useState(() => startOfDay(new Date()));
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const markerId = `timeline-arrow-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
   const timelineStorageKey = useMemo(
@@ -163,16 +168,35 @@ export function ProjectTimelineView({
   const scheduledTasks = filteredTasks.filter((task) => task.hasSchedule && task.inWindow);
   const unscheduledTasks = filteredTasks.filter((task) => !task.hasSchedule);
   const gridWidth = Math.max(1, days.length) * zoomConfig.dayColWidth;
+
   const timelineLayout = useMemo(() => {
     let cursorY = 0;
     const barsByTaskId: Record<string, { left: number; width: number; y: number }> = {};
+    const taskRowsById: Record<string, { top: number; height: number }> = {};
     const visibleSections = timeline.sections
       .map((section) => ({ section, tasks: filteredBySection[section.id] ?? [] }))
       .filter((entry) => entry.tasks.length > 0);
+    const sectionsWithRows: Array<{
+      section: (typeof visibleSections)[number]['section'];
+      tasks: (typeof visibleSections)[number]['tasks'];
+      top: number;
+      taskRows: Array<{
+        task: (typeof visibleSections)[number]['tasks'][number];
+        top: number;
+      }>;
+    }> = [];
 
     for (const entry of visibleSections) {
+      const sectionTop = cursorY;
       cursorY += SECTION_ROW_HEIGHT;
+      const taskRows: Array<{
+        task: (typeof entry)['tasks'][number];
+        top: number;
+      }> = [];
+
       for (const task of entry.tasks) {
+        const rowTop = cursorY;
+        taskRowsById[task.id] = { top: rowTop, height: TASK_ROW_HEIGHT };
         const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
           ? timeline.window.start
           : task.timelineStart;
@@ -187,26 +211,93 @@ export function ProjectTimelineView({
             y: cursorY + TASK_ROW_HEIGHT / 2,
           };
         }
+        taskRows.push({ task, top: rowTop });
         cursorY += TASK_ROW_HEIGHT;
       }
+      sectionsWithRows.push({
+        section: entry.section,
+        tasks: entry.tasks,
+        top: sectionTop,
+        taskRows,
+      });
     }
 
     return {
       visibleSections,
+      sectionsWithRows,
       barsByTaskId,
+      taskRowsById,
       bodyHeight: cursorY,
+      totalRowCount: visibleSections.length + filteredTasks.length,
     };
-  }, [filteredBySection, timeline.sections, timeline.window.end, timeline.window.start, zoomConfig.dayColWidth]);
+  }, [filteredBySection, filteredTasks.length, timeline.sections, timeline.window.end, timeline.window.start, zoomConfig.dayColWidth]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const updateMeasurements = () => {
+      setScrollTop(container.scrollTop);
+      setViewportHeight(container.clientHeight);
+    };
+    updateMeasurements();
+    const observer = new ResizeObserver(updateMeasurements);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [timelineLayout.bodyHeight, projectId, zoom]);
+
+  const virtualizationEnabled = timelineLayout.totalRowCount > VIRTUALIZE_ROW_THRESHOLD;
+  const visibleRange = useMemo(() => {
+    if (!virtualizationEnabled) {
+      return { start: 0, end: timelineLayout.bodyHeight };
+    }
+    return {
+      start: Math.max(0, scrollTop - VIRTUAL_OVERSCAN_PX),
+      end: scrollTop + Math.max(viewportHeight, 1) + VIRTUAL_OVERSCAN_PX,
+    };
+  }, [scrollTop, timelineLayout.bodyHeight, viewportHeight, virtualizationEnabled]);
+
+  const visibleTaskIds = useMemo(() => {
+    if (!virtualizationEnabled) return filteredTaskIds;
+    const next = new Set<string>();
+    for (const [taskId, row] of Object.entries(timelineLayout.taskRowsById)) {
+      if (row.top + row.height >= visibleRange.start && row.top <= visibleRange.end) {
+        next.add(taskId);
+      }
+    }
+    return next;
+  }, [filteredTaskIds, timelineLayout.taskRowsById, visibleRange.end, visibleRange.start, virtualizationEnabled]);
 
   const connectorEdges = useMemo(
     () =>
       timeline.dependencyEdges.filter((edge) =>
-        filteredTaskIds.has(edge.source)
-        && filteredTaskIds.has(edge.target)
+        visibleTaskIds.has(edge.source)
+        && visibleTaskIds.has(edge.target)
         && timelineLayout.barsByTaskId[edge.source]
         && timelineLayout.barsByTaskId[edge.target]),
-    [filteredTaskIds, timeline.dependencyEdges, timelineLayout.barsByTaskId],
+    [timeline.dependencyEdges, timelineLayout.barsByTaskId, visibleTaskIds],
   );
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'development') return;
+    // Lightweight render-budget signal for timeline tuning under larger datasets.
+    console.debug('[timeline:perf]', {
+      projectId,
+      zoom,
+      totalRows: timelineLayout.totalRowCount,
+      taskRows: filteredTasks.length,
+      dependencyEdges: timeline.dependencyEdges.length,
+      connectorsDrawn: connectorEdges.length,
+      virtualized: virtualizationEnabled,
+    });
+  }, [
+    connectorEdges.length,
+    filteredTasks.length,
+    projectId,
+    timeline.dependencyEdges.length,
+    timelineLayout.totalRowCount,
+    virtualizationEnabled,
+    zoom,
+  ]);
 
   if (timeline.isLoading) {
     return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">{t('loadingTimeline')}</div>;
@@ -276,7 +367,11 @@ export function ProjectTimelineView({
         </div>
       </div>
 
-      <div className="overflow-auto rounded-lg border bg-card">
+      <div
+        ref={scrollContainerRef}
+        onScroll={(event) => setScrollTop((event.currentTarget as HTMLDivElement).scrollTop)}
+        className="overflow-auto rounded-lg border bg-card"
+      >
         <div
           className="sticky top-0 z-[1] grid border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75"
           style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}
@@ -342,20 +437,43 @@ export function ProjectTimelineView({
           ) : null}
 
           <div className="relative z-[1]">
-            {timelineLayout.visibleSections.map(({ section, tasks: sectionTasks }) => {
+            {timelineLayout.sectionsWithRows.map(({ section, tasks: sectionTasks, top, taskRows }) => {
               if (!sectionTasks.length) return null;
+              const sectionVisible = !virtualizationEnabled
+                || (top + SECTION_ROW_HEIGHT >= visibleRange.start && top <= visibleRange.end);
+              const visibleTaskRows = virtualizationEnabled
+                ? taskRows.filter((entry) => entry.top + TASK_ROW_HEIGHT >= visibleRange.start && entry.top <= visibleRange.end)
+                : taskRows;
+              if (!sectionVisible && visibleTaskRows.length === 0) return null;
+              const firstVisibleIndex = visibleTaskRows.length
+                ? taskRows.findIndex((entry) => entry.task.id === visibleTaskRows[0]?.task.id)
+                : -1;
+              const lastVisibleIndex = visibleTaskRows.length
+                ? taskRows.findIndex((entry) => entry.task.id === visibleTaskRows[visibleTaskRows.length - 1]?.task.id)
+                : -1;
+              const topSpacer = firstVisibleIndex > 0 ? firstVisibleIndex * TASK_ROW_HEIGHT : 0;
+              const bottomSpacer = lastVisibleIndex >= 0
+                ? Math.max(0, (taskRows.length - lastVisibleIndex - 1) * TASK_ROW_HEIGHT)
+                : taskRows.length * TASK_ROW_HEIGHT;
+
               return (
                 <div key={section.id} className="border-b last:border-b-0">
-                  <div className="grid h-8 border-b bg-muted/20" style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}>
-                    <div className="flex items-center px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      {section.isDefault ? t('tasks') : section.name}
+                  {sectionVisible ? (
+                    <div className="grid h-8 border-b bg-muted/20" style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}>
+                      <div className="flex items-center px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {section.isDefault ? t('tasks') : section.name}
+                      </div>
+                      <div className="flex items-center px-2 text-xs text-muted-foreground">
+                        {sectionTasks.length} {t('tasks')}
+                      </div>
                     </div>
-                    <div className="flex items-center px-2 text-xs text-muted-foreground">
-                      {sectionTasks.length} {t('tasks')}
-                    </div>
-                  </div>
+                  ) : (
+                    <div style={{ height: `${SECTION_ROW_HEIGHT}px` }} />
+                  )}
 
-                  {sectionTasks.map((task) => {
+                  {topSpacer > 0 ? <div style={{ height: `${topSpacer}px` }} /> : null}
+
+                  {visibleTaskRows.map(({ task }) => {
                     const fallbackName = task.title.trim() || t('untitledTask');
                     const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
                       ? timeline.window.start
@@ -408,6 +526,8 @@ export function ProjectTimelineView({
                       </div>
                     );
                   })}
+
+                  {bottomSpacer > 0 ? <div style={{ height: `${bottomSpacer}px` }} /> : null}
                 </div>
               );
             })}
