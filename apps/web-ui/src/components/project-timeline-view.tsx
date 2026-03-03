@@ -84,13 +84,13 @@ export function ProjectTimelineView({
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
 
   const timelineStorageKey = useMemo(
-    () => `${TIMELINE_VIEW_STORAGE_PREFIX}:${meQuery.data?.id ?? 'anonymous'}:${projectId}`,
+    () => (meQuery.data?.id ? `${TIMELINE_VIEW_STORAGE_PREFIX}:${meQuery.data.id}:${projectId}` : null),
     [meQuery.data?.id, projectId],
   );
 
   useEffect(() => {
     setPreferencesHydrated(false);
-    if (typeof window === 'undefined') return;
+    if (!timelineStorageKey || typeof window === 'undefined') return;
     const raw = window.localStorage.getItem(timelineStorageKey);
     if (raw) {
       try {
@@ -112,7 +112,7 @@ export function ProjectTimelineView({
   }, [timelineStorageKey]);
 
   useEffect(() => {
-    if (!preferencesHydrated || typeof window === 'undefined') return;
+    if (!timelineStorageKey || !preferencesHydrated || typeof window === 'undefined') return;
     window.localStorage.setItem(
       timelineStorageKey,
       JSON.stringify({
