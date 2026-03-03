@@ -2147,3 +2147,31 @@
   - `pnpm e2e`
 - Risks/known gaps:
   - `GET /projects/:id/rules` still returns raw persisted definition JSON; editor normalization remains client-side (`ensureRuleDefinition`).
+
+## 2026-03-03 - Issue #120: Timeline/Dependency index tuning + EXPLAIN baseline
+- What changed:
+  - Added new DB indexes for timeline/dependency query paths:
+    - `apps/core-api/prisma/schema.prisma`
+      - `Task @@index([projectId, deletedAt, startAt])`
+      - `TaskDependency @@index([taskId, createdAt])`
+      - `TaskDependency @@index([dependsOnId, createdAt])`
+    - `apps/core-api/prisma/migrations/20260303103000_p0_timeline_dependency_indexes/migration.sql`
+      - creates the three indexes above.
+  - Extended EXPLAIN harness with representative queries for timeline date-window and dependency panel:
+    - `scripts/db-explain-baseline.sh`
+      - added Q6 (project + `startAt` range)
+      - added Q7 (task dependency newest-first).
+  - Captured baseline evidence and documented rationale/rollback:
+    - `docs/perf/EXPLAIN_P0_120_BASELINE.md`
+    - `docs/perf/P0_120_INDEX_NOTES.md`
+    - `docs/perf/README.md`
+- Why:
+  - Issue #120 requires date-window and dependency-path index hardening with concrete EXPLAIN evidence and rollback guidance before broader timeline work.
+- How tested (exact commands):
+  - `pnpm e2e:up`
+  - `REPORT_TITLE='AtlasPM DB EXPLAIN Baseline (P0-3 timeline/dependency paths)' ./scripts/db-explain-baseline.sh docs/perf/EXPLAIN_P0_120_BASELINE.md`
+  - `pnpm --filter @atlaspm/core-api test`
+  - `pnpm --filter @atlaspm/core-api build`
+- Risks/known gaps:
+  - EXPLAIN plans are local-dataset dependent; planner choice can differ under larger production distributions.
+  - New indexes increase write amplification slightly; keep monitoring insert/update latency on large projects.

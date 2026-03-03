@@ -125,6 +125,54 @@ WHERE n.user_id = (SELECT id FROM u)
   AND n.read_at IS NULL
 ORDER BY n.created_at DESC
 LIMIT 200;
+
+\echo '--- Q6: Timeline date-window (project + startAt range) ---'
+EXPLAIN (ANALYZE, BUFFERS)
+WITH p AS (
+  SELECT COALESCE(
+    (
+      SELECT t."projectId"
+      FROM "Task" t
+      WHERE t.deleted_at IS NULL
+        AND t."startAt" >= now() - interval '30 days'
+        AND t."startAt" <= now() + interval '90 days'
+      ORDER BY t."updatedAt" DESC
+      LIMIT 1
+    ),
+    (
+      SELECT id FROM "Project" ORDER BY "createdAt" DESC LIMIT 1
+    )
+  ) AS id
+)
+SELECT t.id, t."startAt", t."dueAt"
+FROM "Task" t
+WHERE t."projectId" = (SELECT p.id FROM p)
+  AND t.deleted_at IS NULL
+  AND t."startAt" >= now() - interval '30 days'
+  AND t."startAt" <= now() + interval '90 days'
+ORDER BY t."startAt" ASC
+LIMIT 500;
+
+\echo '--- Q7: Dependency panel (task dependencies, newest first) ---'
+EXPLAIN (ANALYZE, BUFFERS)
+WITH target_task AS (
+  SELECT COALESCE(
+    (
+      SELECT d."taskId"
+      FROM "TaskDependency" d
+      ORDER BY d."createdAt" DESC
+      LIMIT 1
+    ),
+    (
+      SELECT t.id FROM "Task" t ORDER BY t."updatedAt" DESC LIMIT 1
+    )
+  ) AS id
+)
+SELECT d.id, d."dependsOnId", d.type, d."createdAt"
+FROM "TaskDependency" d
+WHERE d."taskId" = (SELECT target_task.id FROM target_task)
+ORDER BY d."createdAt" DESC
+LIMIT 200;
 SQL
   echo '```'
 } > "$REPORT_PATH"
