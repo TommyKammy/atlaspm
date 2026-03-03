@@ -43,7 +43,6 @@ async function tokenFrom(page: Page) {
 }
 
 function normalizeConflictDetails(payload: any) {
-  if (payload?.latest && typeof payload?.message === 'string') return payload;
   if (payload?.error?.details?.latest && typeof payload?.error?.details?.message === 'string') {
     return payload.error.details;
   }
@@ -52,10 +51,10 @@ function normalizeConflictDetails(payload: any) {
 
 test('timeline reschedule conflict: one success, one 409; audit keeps actor/correlation', async ({ browser, page }) => {
   const now = Date.now();
-  const memberASub = `timeline-owner-${now}`;
-  const memberBSub = `timeline-member-${now}`;
+  const ownerSub = `timeline-owner-${now}`;
+  const memberSub = `timeline-member-${now}`;
 
-  await login(page, memberASub, `${memberASub}@example.com`);
+  await login(page, ownerSub, `${ownerSub}@example.com`);
   await page.evaluate(() => localStorage.setItem('atlaspm:feature:timeline', 'enabled'));
   const ownerToken = await tokenFrom(page);
 
@@ -81,74 +80,86 @@ test('timeline reschedule conflict: one success, one 409; audit keeps actor/corr
 
   const memberContext = await browser.newContext();
   const memberPage = await memberContext.newPage();
-  await login(memberPage, memberBSub, `${memberBSub}@example.com`);
-  await memberPage.evaluate(() => localStorage.setItem('atlaspm:feature:timeline', 'enabled'));
-  const memberToken = await tokenFrom(memberPage);
+  try {
+    await login(memberPage, memberSub, `${memberSub}@example.com`);
+    await memberPage.evaluate(() => localStorage.setItem('atlaspm:feature:timeline', 'enabled'));
+    const memberToken = await tokenFrom(memberPage);
 
-  const invitation = await api(`/workspaces/${workspaceId}/invitations`, ownerToken, {
-    method: 'POST',
-    body: { email: `${memberBSub}@example.com`, role: 'WS_MEMBER' },
-  });
-  const inviteToken = String(invitation.inviteLink).split('inviteToken=')[1];
-  expect(inviteToken).toBeTruthy();
-  await api('/invitations/accept', memberToken, { method: 'POST', body: { token: inviteToken } });
-  await api(`/projects/${projectId}/members`, ownerToken, {
-    method: 'POST',
-    body: { userId: memberBSub, role: 'MEMBER' },
-  });
+    const invitation = await api(`/workspaces/${workspaceId}/invitations`, ownerToken, {
+      method: 'POST',
+      body: { email: `${memberSub}@example.com`, role: 'WS_MEMBER' },
+    });
+    const inviteToken = String(invitation.inviteLink).split('inviteToken=')[1];
+    expect(inviteToken).toBeTruthy();
+    await api('/invitations/accept', memberToken, { method: 'POST', body: { token: inviteToken } });
+    await api(`/projects/${projectId}/members`, ownerToken, {
+      method: 'POST',
+      body: { userId: memberSub, role: 'MEMBER' },
+    });
 
-  await page.goto(`/projects/${projectId}?view=timeline`);
-  await memberPage.goto(`/projects/${projectId}?view=timeline`);
-  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
-  await expect(memberPage.locator('[data-testid="timeline-view"]')).toBeVisible();
+    await page.goto(`/projects/${projectId}?view=timeline`);
+    await memberPage.goto(`/projects/${projectId}?view=timeline`);
+    await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+    await expect(memberPage.locator('[data-testid="timeline-view"]')).toBeVisible();
 
-  const freshTask = await api(`/tasks/${taskId}`, ownerToken);
-  const staleVersion = freshTask.version as number;
+    const freshTask = await api(`/tasks/${taskId}`, ownerToken);
+    const staleVersion = freshTask.version as number;
 
-  const ownerCorrelationId = `e2e-reschedule-owner-${now}`;
-  const memberCorrelationId = `e2e-reschedule-member-${now}`;
+    const ownerCorrelationId = `e2e-reschedule-owner-${now}`;
+    const memberCorrelationId = `e2e-reschedule-member-${now}`;
 
-  const ownerDueAt = new Date(dueAt);
-  ownerDueAt.setDate(ownerDueAt.getDate() + 3);
-  const memberDueAt = new Date(dueAt);
-  memberDueAt.setDate(memberDueAt.getDate() + 5);
+    const ownerDueAt = new Date(dueAt);
+    ownerDueAt.setDate(ownerDueAt.getDate() + 3);
+    const memberDueAt = new Date(dueAt);
+    memberDueAt.setDate(memberDueAt.getDate() + 5);
 
-  const [ownerRes, memberRes] = await Promise.all([
-    apiRaw(`/tasks/${taskId}/reschedule`, ownerToken, {
-      method: 'PATCH',
-      headers: { 'x-correlation-id': ownerCorrelationId },
-      body: { dueAt: ownerDueAt.toISOString(), version: staleVersion },
-    }),
-    apiRaw(`/tasks/${taskId}/reschedule`, memberToken, {
-      method: 'PATCH',
-      headers: { 'x-correlation-id': memberCorrelationId },
-      body: { dueAt: memberDueAt.toISOString(), version: staleVersion },
-    }),
-  ]);
+    const [ownerRes, memberRes] = await Promise.all([
+      apiRaw(`/tasks/${taskId}/reschedule`, ownerToken, {
+        method: 'PATCH',
+        headers: { 'x-correlation-id': ownerCorrelationId },
+        body: { dueAt: ownerDueAt.toISOString(), version: staleVersion },
+      }),
+      apiRaw(`/tasks/${taskId}/reschedule`, memberToken, {
+        method: 'PATCH',
+        headers: { 'x-correlation-id': memberCorrelationId },
+        body: { dueAt: memberDueAt.toISOString(), version: staleVersion },
+      }),
+    ]);
 
-  const ownerBody = await ownerRes.json();
-  const memberBody = await memberRes.json();
-  const statuses = [ownerRes.status, memberRes.status].sort((a, b) => a - b);
-  expect(statuses).toEqual([200, 409]);
+    const ownerBody = await ownerRes.json();
+    const memberBody = await memberRes.json();
+    const statuses = [ownerRes.status, memberRes.status].sort((a, b) => a - b);
 
-  const successMeta =
-    ownerRes.status === 200
-      ? { actor: memberASub, correlationId: ownerCorrelationId, body: ownerBody }
-      : { actor: memberBSub, correlationId: memberCorrelationId, body: memberBody };
-  const conflictBody = normalizeConflictDetails(ownerRes.status === 409 ? ownerBody : memberBody);
+    if (!(statuses[0] === 200 && statuses[1] === 409)) {
+      throw new Error(
+        [
+          'Expected exactly one 200 and one 409 response status.',
+          `Got ownerRes.status=${ownerRes.status}, memberRes.status=${memberRes.status}.`,
+          `ownerBody=${JSON.stringify(ownerBody)},`,
+          `memberBody=${JSON.stringify(memberBody)}`,
+        ].join(' '),
+      );
+    }
 
-  expect(conflictBody).toMatchObject({
-    message: 'Version conflict',
-    latest: {
-      version: successMeta.body.version,
-    },
-  });
+    const successMeta =
+      ownerRes.status === 200
+        ? { actor: ownerSub, correlationId: ownerCorrelationId, body: ownerBody }
+        : { actor: memberSub, correlationId: memberCorrelationId, body: memberBody };
+    const conflictBody = normalizeConflictDetails(ownerRes.status === 409 ? ownerBody : memberBody);
 
-  const audit = await api(`/tasks/${taskId}/audit`, ownerToken);
-  const rescheduleEvents = (audit as Array<any>).filter((event) => event.action === 'task.rescheduled');
-  expect(rescheduleEvents).toHaveLength(1);
-  expect(rescheduleEvents[0].actor).toBe(successMeta.actor);
-  expect(rescheduleEvents[0].correlationId).toBe(successMeta.correlationId);
+    expect(conflictBody).toMatchObject({
+      message: 'Version conflict',
+      latest: {
+        version: successMeta.body.version,
+      },
+    });
 
-  await memberContext.close();
+    const audit = await api(`/tasks/${taskId}/audit`, ownerToken);
+    const rescheduleEvents = (audit as Array<any>).filter((event) => event.action === 'task.rescheduled');
+    expect(rescheduleEvents).toHaveLength(1);
+    expect(rescheduleEvents[0].actor).toBe(successMeta.actor);
+    expect(rescheduleEvents[0].correlationId).toBe(successMeta.correlationId);
+  } finally {
+    await memberContext.close();
+  }
 });
