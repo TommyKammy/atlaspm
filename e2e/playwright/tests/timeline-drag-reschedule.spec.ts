@@ -1,0 +1,117 @@
+import { expect, test, type Page } from '@playwright/test';
+
+const API = process.env.E2E_CORE_API_URL ?? 'http://localhost:3001';
+const DAY_COLUMN_WIDTH = 64;
+
+async function api(path: string, token: string, method = 'GET', body?: unknown) {
+  const res = await fetch(`${API}${path}`, {
+    method,
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${token}`,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+  const raw = await res.text();
+  return raw ? JSON.parse(raw) : null;
+}
+
+function addDaysIso(value: string, deltaDays: number): string {
+  const date = new Date(value);
+  date.setUTCDate(date.getUTCDate() + deltaDays);
+  return date.toISOString();
+}
+
+async function loginWithTimelineEnabled(page: Page, sub: string, email: string) {
+  await page.goto('/login');
+  await page.evaluate(() => localStorage.setItem('atlaspm:feature:timeline', 'enabled'));
+  await page.fill('input[placeholder="OIDC sub"]', sub);
+  await page.fill('input[placeholder="Email"]', email);
+  await page.click('button:has-text("Dev Login")');
+  await page.waitForURL('**/');
+}
+
+async function dragTimelineBar(page: Page, taskId: string, deltaDays: number) {
+  const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
+  await expect(bar).toBeVisible();
+  const box = await bar.boundingBox();
+  if (!box) throw new Error(`Unable to resolve bounds for timeline bar ${taskId}`);
+  const startX = box.x + Math.min(Math.max(8, box.width / 4), box.width - 4);
+  const startY = box.y + box.height / 2;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + (deltaDays * DAY_COLUMN_WIDTH), startY, { steps: 12 });
+  await page.mouse.up();
+}
+
+test('timeline drag reschedule supports optimistic success and conflict rollback banner', async ({ page }) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-drag-${now}`;
+  const email = `${sub}@example.com`;
+
+  await loginWithTimelineEnabled(page, sub, email);
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Drag ${now}`,
+  });
+  const projectId = project.id as string;
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+
+  const baseStart = new Date();
+  baseStart.setDate(baseStart.getDate() + 2);
+  baseStart.setHours(0, 0, 0, 0);
+  const baseDue = new Date(baseStart);
+  baseDue.setDate(baseDue.getDate() + 2);
+
+  const taskA = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Drag Success ${now}`,
+    startAt: baseStart.toISOString(),
+    dueAt: baseDue.toISOString(),
+  });
+  const taskB = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Drag Conflict ${now}`,
+    startAt: baseStart.toISOString(),
+    dueAt: baseDue.toISOString(),
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await page.click('[data-testid="timeline-zoom-day"]');
+  await expect(page.locator('[data-testid="timeline-zoom-day"]')).toHaveAttribute('data-active', 'true');
+
+  const taskABefore = await api(`/tasks/${taskA.id}`, token);
+  const expectedTaskADue = addDaysIso(taskABefore.dueAt, 2);
+  await dragTimelineBar(page, taskA.id, 2);
+  await expect
+    .poll(async () => {
+      const latest = await api(`/tasks/${taskA.id}`, token);
+      return String(latest.dueAt).slice(0, 10);
+    })
+    .toBe(expectedTaskADue.slice(0, 10));
+
+  const taskBStale = await api(`/tasks/${taskB.id}`, token);
+  const externalTaskBDue = addDaysIso(taskBStale.dueAt, 1);
+  await api(`/tasks/${taskB.id}/reschedule`, token, 'PATCH', {
+    dueAt: externalTaskBDue,
+    version: taskBStale.version,
+  });
+
+  await dragTimelineBar(page, taskB.id, 2);
+
+  await expect(page.locator('[data-testid="timeline-reschedule-conflict-banner"]')).toBeVisible();
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await expect
+    .poll(async () => {
+      const latest = await api(`/tasks/${taskB.id}`, token);
+      return String(latest.dueAt).slice(0, 10);
+    })
+    .toBe(externalTaskBDue.slice(0, 10));
+});

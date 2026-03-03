@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import TaskDetailDrawer from '@/components/task-detail-drawer';
 import { Badge } from '@/components/ui/badge';
@@ -19,6 +19,7 @@ const SECTION_ROW_HEIGHT = 32;
 const TASK_ROW_HEIGHT = 40;
 const VIRTUALIZE_ROW_THRESHOLD = 120;
 const VIRTUAL_OVERSCAN_PX = 320;
+const DRAG_START_THRESHOLD_PX = 6;
 
 type TimelineZoom = 'day' | 'week' | 'month';
 
@@ -66,6 +67,40 @@ function taskMatchesFilters(
   return bySearch && byStatus && byPriority;
 }
 
+function isApiConflictError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /^API 409:/.test(error.message);
+}
+
+function shiftIsoByDays(value: string | null | undefined, days: number): string | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) return null;
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return parsed.toISOString();
+}
+
+function applyTaskScheduleInGroups(
+  groups: Array<{ section: { id: string }; tasks: Task[] }>,
+  taskId: string,
+  next: { startAt: string | null; dueAt: string | null },
+) {
+  return groups.map((group) => ({
+    ...group,
+    tasks: group.tasks.map((task) =>
+      task.id === taskId
+        ? {
+            ...task,
+            startAt: next.startAt,
+            dueAt: next.dueAt,
+            version: task.version + 1,
+            updatedAt: new Date().toISOString(),
+          }
+        : task,
+    ),
+  }));
+}
+
 export function ProjectTimelineView({
   projectId,
   search,
@@ -78,6 +113,7 @@ export function ProjectTimelineView({
   priorityFilter: 'ALL' | NonNullable<Task['priority']>;
 }) {
   const { t } = useI18n();
+  const queryClient = useQueryClient();
   const meQuery = useQuery<{ id: string }>({
     queryKey: queryKeys.me,
     queryFn: () => api('/me'),
@@ -88,6 +124,22 @@ export function ProjectTimelineView({
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(() => (typeof window === 'undefined' ? 800 : window.innerHeight));
+  const [dragState, setDragState] = useState<{
+    taskId: string;
+    pointerId: number;
+    originX: number;
+    deltaDays: number;
+    moved: boolean;
+  } | null>(null);
+  const dragStateRef = useRef<{
+    taskId: string;
+    pointerId: number;
+    originX: number;
+    deltaDays: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressClickTaskIdRef = useRef<string | null>(null);
+  const [rescheduleNotice, setRescheduleNotice] = useState<{ type: 'conflict' | 'error'; message: string } | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollRafRef = useRef<number | null>(null);
   const markerId = `timeline-arrow-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
@@ -156,6 +208,7 @@ export function ProjectTimelineView({
   );
 
   const filteredTaskIds = useMemo(() => new Set(filteredTasks.map((task) => task.id)), [filteredTasks]);
+  const taskById = useMemo(() => new Map(filteredTasks.map((task) => [task.id, task])), [filteredTasks]);
   const filteredBySection = useMemo(() => {
     const next: Record<string, typeof filteredTasks> = {};
     for (const task of filteredTasks) {
@@ -169,6 +222,54 @@ export function ProjectTimelineView({
   const scheduledTasks = filteredTasks.filter((task) => task.hasSchedule && task.inWindow);
   const unscheduledTasks = filteredTasks.filter((task) => !task.hasSchedule);
   const gridWidth = Math.max(1, days.length) * zoomConfig.dayColWidth;
+
+  const rescheduleTask = useMutation({
+    mutationFn: async ({
+      taskId,
+      startAt,
+      dueAt,
+      version,
+    }: {
+      taskId: string;
+      startAt: string | null;
+      dueAt: string | null;
+      version: number;
+    }) =>
+      (await api(`/tasks/${taskId}/reschedule`, {
+        method: 'PATCH',
+        body: { startAt, dueAt, version },
+      })) as Task,
+    onMutate: async ({ taskId, startAt, dueAt }) => {
+      setRescheduleNotice(null);
+      await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      const previous = queryClient.getQueryData<Array<{ section: { id: string }; tasks: Task[] }>>(
+        queryKeys.projectTasksGrouped(projectId),
+      );
+      if (previous) {
+        queryClient.setQueryData(queryKeys.projectTasksGrouped(projectId), applyTaskScheduleInGroups(previous, taskId, { startAt, dueAt }));
+      }
+      return { previous };
+    },
+    onError: (error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.projectTasksGrouped(projectId), context.previous);
+      }
+      if (isApiConflictError(error)) {
+        setRescheduleNotice({ type: 'conflict', message: t('timelineRescheduleConflict') });
+      } else {
+        setRescheduleNotice({ type: 'error', message: t('timelineRescheduleFailed') });
+      }
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+    },
+  });
+
+  useEffect(() => {
+    if (!rescheduleNotice) return;
+    const timer = window.setTimeout(() => setRescheduleNotice(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [rescheduleNotice]);
 
   const timelineLayout = useMemo(() => {
     let cursorY = 0;
@@ -314,6 +415,57 @@ export function ProjectTimelineView({
     zoom,
   ]);
 
+  const commitDragReschedule = (taskId: string, deltaDays: number) => {
+    if (!deltaDays) return;
+    const task = taskById.get(taskId);
+    if (!task) return;
+
+    const startAt = shiftIsoByDays(task.startAt, deltaDays);
+    const dueAt = shiftIsoByDays(task.dueAt, deltaDays);
+    if (!startAt && !dueAt) return;
+
+    rescheduleTask.mutate({
+      taskId,
+      startAt,
+      dueAt,
+      version: task.version,
+    });
+  };
+
+  const beginBarDrag = (taskId: string, pointerId: number, originX: number) => {
+    const next = {
+      taskId,
+      pointerId,
+      originX,
+      deltaDays: 0,
+      moved: false,
+    };
+    dragStateRef.current = next;
+    setDragState(next);
+  };
+
+  const updateBarDrag = (pointerId: number, clientX: number) => {
+    const current = dragStateRef.current;
+    if (!current || current.pointerId !== pointerId) return;
+    const deltaPx = clientX - current.originX;
+    const deltaDays = Math.round(deltaPx / zoomConfig.dayColWidth);
+    const moved = current.moved || Math.abs(deltaPx) >= DRAG_START_THRESHOLD_PX;
+    if (deltaDays === current.deltaDays && moved === current.moved) return;
+    const next = { ...current, deltaDays, moved };
+    dragStateRef.current = next;
+    setDragState(next);
+  };
+
+  const finishBarDrag = (pointerId: number) => {
+    const current = dragStateRef.current;
+    if (!current || current.pointerId !== pointerId) return;
+    dragStateRef.current = null;
+    setDragState(null);
+    if (!current.moved) return;
+    suppressClickTaskIdRef.current = current.taskId;
+    commitDragReschedule(current.taskId, current.deltaDays);
+  };
+
   if (timeline.isLoading) {
     return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">{t('loadingTimeline')}</div>;
   }
@@ -324,6 +476,22 @@ export function ProjectTimelineView({
 
   return (
     <div className="space-y-4" data-testid="timeline-view">
+      {rescheduleNotice ? (
+        <div
+          className={`rounded-md border px-3 py-2 text-xs ${
+            rescheduleNotice.type === 'conflict'
+              ? 'border-warning/40 bg-warning/10 text-foreground'
+              : 'border-destructive/40 bg-destructive/10 text-foreground'
+          }`}
+          data-testid={
+            rescheduleNotice.type === 'conflict'
+              ? 'timeline-reschedule-conflict-banner'
+              : 'timeline-reschedule-error-banner'
+          }
+        >
+          {rescheduleNotice.message}
+        </div>
+      ) : null}
       <div className="flex items-center justify-between rounded-lg border bg-card p-3">
         <div className="flex items-center gap-2">
           <div className="inline-flex items-center rounded-md border bg-background/60 p-0.5">
@@ -521,12 +689,44 @@ export function ProjectTimelineView({
                           {task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd ? (
                             <button
                               type="button"
-                              className="absolute top-1/2 h-6 -translate-y-1/2 rounded bg-primary/20 px-2 text-left text-[11px] text-primary hover:bg-primary/25"
+                              className={`absolute top-1/2 h-6 -translate-y-1/2 rounded bg-primary/20 px-2 text-left text-[11px] text-primary hover:bg-primary/25 ${
+                                dragState?.taskId === task.id && dragState.moved ? 'cursor-grabbing opacity-90' : 'cursor-grab'
+                              }`}
                               style={{
-                                left: `${Math.max(0, dayDiff(timeline.window.start, visibleStart ?? task.timelineStart)) * zoomConfig.dayColWidth}px`,
+                                left: `${
+                                  Math.max(0, dayDiff(timeline.window.start, visibleStart ?? task.timelineStart)) * zoomConfig.dayColWidth
+                                  + (dragState?.taskId === task.id ? dragState.deltaDays * zoomConfig.dayColWidth : 0)
+                                }px`,
                                 width: `${Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1) * zoomConfig.dayColWidth}px`,
                               }}
-                              onClick={() => setSelectedTaskId(task.id)}
+                              onClick={() => {
+                                if (suppressClickTaskIdRef.current === task.id) {
+                                  suppressClickTaskIdRef.current = null;
+                                  return;
+                                }
+                                setSelectedTaskId(task.id);
+                              }}
+                              onPointerDown={(event) => {
+                                if (event.button !== 0) return;
+                                event.preventDefault();
+                                beginBarDrag(task.id, event.pointerId, event.clientX);
+                                event.currentTarget.setPointerCapture(event.pointerId);
+                              }}
+                              onPointerMove={(event) => {
+                                updateBarDrag(event.pointerId, event.clientX);
+                              }}
+                              onPointerUp={(event) => {
+                                finishBarDrag(event.pointerId);
+                                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                                  event.currentTarget.releasePointerCapture(event.pointerId);
+                                }
+                              }}
+                              onPointerCancel={(event) => {
+                                finishBarDrag(event.pointerId);
+                                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                                  event.currentTarget.releasePointerCapture(event.pointerId);
+                                }
+                              }}
                               data-testid={`timeline-bar-${task.id}`}
                               title={`${task.timelineStart.toLocaleDateString()} - ${task.timelineEnd.toLocaleDateString()}`}
                             >
