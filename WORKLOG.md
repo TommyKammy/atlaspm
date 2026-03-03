@@ -2191,6 +2191,13 @@
   - Added focused E2E smoke for list/detail stability:
     - `e2e/playwright/tests/p0-regression-smoke.spec.ts`
       - logs in, creates project/tasks/dependency, opens detail drawer, verifies tabs/close behavior.
+  - Applied PR review hardening:
+    - `apps/core-api/src/tasks/subtask.service.ts`
+      - dependency-created outbox payload normalized to minimal fields (`id/taskId/dependsOnId/type/createdAt`).
+      - remove-dependency audit transaction now uses serializable isolation + timeout settings.
+      - added method-level doc comment for audit-aware delete path.
+    - `apps/core-api/test/core.integration.test.ts`
+      - date-range outbox assertion now time-bounded (`createdAt >= createStart`) to avoid flaky cross-test picks.
 - Why:
   - Issue #121 requires locking regression invariants around date/dependency handling and ensuring list/detail UX remains stable.
 - How tested (exact commands):

@@ -2028,6 +2028,7 @@ describe('Core API Integration', () => {
     const dueDate = new Date();
     dueDate.setDate(dueDate.getDate() + 7);
 
+    const createStart = new Date();
     const res = await request(app.getHttpServer())
       .post(`/projects/${projectId}/tasks`)
       .set('Authorization', `Bearer ${token}`)
@@ -2051,7 +2052,7 @@ describe('Core API Integration', () => {
     expect((dateCreateAudit?.afterJson as any)?.dueAt).toBeTruthy();
 
     const dateCreateOutboxEvents = await prisma.outboxEvent.findMany({
-      where: { type: 'task.created' },
+      where: { type: 'task.created', createdAt: { gte: createStart } },
       orderBy: { createdAt: 'desc' },
       take: 20,
     });
