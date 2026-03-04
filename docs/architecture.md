@@ -9,6 +9,8 @@
 - Production mode: OIDC JWT verification using issuer/audience and JWKS.
 - Stable user id is JWT `sub`.
 - Dev auth mode (`DEV_AUTH_ENABLED=true`) allows short-lived local test JWTs only.
+- Risk is conditional: when `DEV_AUTH_ENABLED=true`, `POST /dev-auth/token` can mint tokens for arbitrary identities and must not be exposed beyond trusted local use.
+- Production guardrail: enforce `DEV_AUTH_ENABLED=false` in deployed environments.
 
 ## Audit + Outbox
 - Every write appends:
