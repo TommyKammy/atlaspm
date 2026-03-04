@@ -326,6 +326,19 @@ function countOpenSubtasksInTree(nodes: TaskTree[]) {
   return count;
 }
 
+function compareTasksByDueDateThenPosition(left: Task, right: Task) {
+  const leftDue = toDateInputValue(left.dueAt);
+  const rightDue = toDateInputValue(right.dueAt);
+
+  if (leftDue && rightDue) {
+    if (leftDue !== rightDue) return leftDue.localeCompare(rightDue);
+  } else if (leftDue || rightDue) {
+    return leftDue ? -1 : 1;
+  }
+
+  return left.position - right.position;
+}
+
 function buildSectionTaskTree(tasks: Task[]): TaskTreeNode[] {
   const byId = new Map<string, TaskTreeNode>();
   for (const task of tasks) byId.set(task.id, { task, children: [] });
@@ -347,21 +360,8 @@ function buildSectionTaskTree(tasks: Task[]): TaskTreeNode[] {
     parentNode.children.push(node);
   }
 
-  const compareTasksByDueDate = (left: Task, right: Task) => {
-    const leftDue = toDateInputValue(left.dueAt);
-    const rightDue = toDateInputValue(right.dueAt);
-
-    if (leftDue && rightDue) {
-      if (leftDue !== rightDue) return leftDue.localeCompare(rightDue);
-    } else if (leftDue || rightDue) {
-      return leftDue ? -1 : 1;
-    }
-
-    return left.position - right.position;
-  };
-
   const sortNodes = (nodes: TaskTreeNode[]) => {
-    nodes.sort((a, b) => compareTasksByDueDate(a.task, b.task));
+    nodes.sort((a, b) => compareTasksByDueDateThenPosition(a.task, b.task));
     for (const node of nodes) sortNodes(node.children);
   };
   sortNodes(roots);
@@ -2362,7 +2362,13 @@ export default function ProjectBoard({
     if (!toSectionId) return;
 
     const targetGroup = groups.find((group) => group.section.id === toSectionId);
-    const targetTasks = targetGroup?.tasks ?? [];
+    const visibleTargetTasks = groupedVisibleRows
+      .find(({ group }) => group.section.id === toSectionId)
+      ?.rows
+      .map((row) => row.task);
+    const targetTasks = visibleTargetTasks?.length
+      ? visibleTargetTasks
+      : [...(targetGroup?.tasks ?? [])].sort(compareTasksByDueDateThenPosition);
     const overIndex = droppedOnSection ? -1 : targetTasks.findIndex((task) => task.id === overTaskId);
     const beforeTaskId = overIndex > 0 ? targetTasks[overIndex - 1]?.id ?? null : null;
     const afterTaskId = overIndex >= 0 ? targetTasks[overIndex]?.id ?? null : null;
