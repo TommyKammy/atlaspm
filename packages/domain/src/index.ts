@@ -1,4 +1,4 @@
-export const DOMAIN_VERSION = '0.2.0';
+export const DOMAIN_VERSION = '0.1.0';
 
 export * from './entities/task.js';
 export * from './errors/domain-error.js';

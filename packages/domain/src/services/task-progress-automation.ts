@@ -32,7 +32,7 @@ export function applyTaskProgressAutomation(input: TaskProgressAutomationInput):
   }
 
   return {
-    status: input.status,
-    completedAt: input.completedAt,
+    status: 'IN_PROGRESS',
+    completedAt: null,
   };
 }

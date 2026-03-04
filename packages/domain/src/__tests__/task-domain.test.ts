@@ -119,3 +119,14 @@ test('applyTaskProgressAutomation reopens DONE task when progress decreases', ()
   assert.equal(next.status, 'IN_PROGRESS');
   assert.equal(next.completedAt, null);
 });
+
+test('applyTaskProgressAutomation derives IN_PROGRESS for non-100 progress', () => {
+  const next = applyTaskProgressAutomation({
+    status: 'TODO',
+    progressPercent: 70,
+    completedAt: null,
+  });
+
+  assert.equal(next.status, 'IN_PROGRESS');
+  assert.equal(next.completedAt, null);
+});

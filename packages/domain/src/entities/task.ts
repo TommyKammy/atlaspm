@@ -1,6 +1,7 @@
 import { DomainValidationError } from '../errors/domain-error.js';
 import type { TaskProgressChangedEvent, TaskStatusChangedEvent } from '../events/task-events.js';
 import { ProgressPercent } from '../value-objects/progress-percent.js';
+import { assertTaskStatus } from '../value-objects/task-status.js';
 import type { TaskStatus } from '../value-objects/task-status.js';
 
 export interface TaskSnapshot {
@@ -76,12 +77,16 @@ export class Task {
   private static validate(snapshot: TaskSnapshot) {
     if (!snapshot.id.trim()) throw new DomainValidationError('Task id is required');
     if (!snapshot.title.trim()) throw new DomainValidationError('Task title is required');
+    assertTaskStatus(snapshot.status);
     ProgressPercent.from(snapshot.progressPercent);
     if (!Number.isInteger(snapshot.version) || snapshot.version < 0) {
       throw new DomainValidationError(`Task version must be a non-negative integer. Received: ${snapshot.version}`);
     }
     if (snapshot.status === 'DONE' && !snapshot.completedAt) {
       throw new DomainValidationError('DONE task must have completedAt');
+    }
+    if (snapshot.status !== 'DONE' && snapshot.completedAt) {
+      throw new DomainValidationError('Non-DONE task must not have completedAt');
     }
   }
 }
