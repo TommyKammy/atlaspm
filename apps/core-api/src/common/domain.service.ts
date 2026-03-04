@@ -330,14 +330,12 @@ export class DomainService {
     progress: number;
     status: TaskStatus;
     hasStatusOverride: boolean;
-    hasProgressOverride: boolean;
   }) {
     return normalizeTaskProgressForType({
       taskType: this.toDomainTaskType(input.taskType),
       progressPercent: input.progress,
       status: this.toDomainTaskStatus(input.status),
       hasStatusOverride: input.hasStatusOverride,
-      hasProgressOverride: input.hasProgressOverride,
     });
   }
 
@@ -372,7 +370,7 @@ export class DomainService {
       case TaskStatus.BLOCKED:
         return 'BLOCKED';
       default:
-        return this.unhandledStatus(status as never, 'prisma->domain');
+        return this.unhandledEnumMapping(status as never, 'task-status prisma->domain');
     }
   }
 
@@ -387,7 +385,7 @@ export class DomainService {
       case 'BLOCKED':
         return TaskStatus.BLOCKED;
       default:
-        return this.unhandledStatus(status as never, 'domain->prisma');
+        return this.unhandledEnumMapping(status as never, 'task-status domain->prisma');
     }
   }
 
@@ -400,11 +398,11 @@ export class DomainService {
       case TaskType.APPROVAL:
         return 'APPROVAL';
       default:
-        return this.unhandledStatus(taskType as never, 'prisma-task-type->domain');
+        return this.unhandledEnumMapping(taskType as never, 'task-type prisma->domain');
     }
   }
 
-  private unhandledStatus(value: never, direction: string): never {
-    throw new Error(`Unhandled task status mapping (${direction}): ${String(value)}`);
+  private unhandledEnumMapping(value: never, mapping: string): never {
+    throw new Error(`Unhandled enum mapping (${mapping}): ${String(value)}`);
   }
 }

@@ -7,7 +7,6 @@ export interface TaskProgressNormalizationInput {
   progressPercent: number;
   status: TaskStatus;
   hasStatusOverride: boolean;
-  hasProgressOverride: boolean;
 }
 
 export function normalizeTaskProgressForType(input: TaskProgressNormalizationInput): number {
@@ -19,10 +18,6 @@ export function normalizeTaskProgressForType(input: TaskProgressNormalizationInp
 
   if (input.hasStatusOverride) {
     return input.status === 'DONE' ? 100 : 0;
-  }
-
-  if (input.hasProgressOverride) {
-    return progress >= 100 ? 100 : 0;
   }
 
   return progress >= 100 ? 100 : 0;

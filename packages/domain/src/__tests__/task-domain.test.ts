@@ -139,14 +139,12 @@ test('normalizeTaskProgressForType clamps milestone by status override', () => {
     progressPercent: 10,
     status: 'DONE',
     hasStatusOverride: true,
-    hasProgressOverride: false,
   });
   const notDoneProgress = normalizeTaskProgressForType({
     taskType: 'MILESTONE',
     progressPercent: 100,
     status: 'IN_PROGRESS',
     hasStatusOverride: true,
-    hasProgressOverride: false,
   });
 
   assert.equal(doneProgress, 100);
@@ -159,7 +157,6 @@ test('normalizeTaskProgressForType keeps non-milestone progress', () => {
     progressPercent: 42,
     status: 'IN_PROGRESS',
     hasStatusOverride: false,
-    hasProgressOverride: true,
   });
 
   assert.equal(progress, 42);

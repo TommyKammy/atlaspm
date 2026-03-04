@@ -557,7 +557,6 @@ export class TasksController {
       progress: body.progressPercent ?? 0,
       status: requestedStatus,
       hasStatusOverride: body.status !== undefined,
-      hasProgressOverride: body.progressPercent !== undefined,
     });
     
     const progressAutomation = this.domain.deriveTaskProgressAutomation(progress, requestedStatus, null);
@@ -619,7 +618,6 @@ export class TasksController {
       progress: body.progressPercent ?? task.progressPercent,
       status: requestedStatus,
       hasStatusOverride: body.status !== undefined,
-      hasProgressOverride: body.progressPercent !== undefined,
     });
     
     const progressAutomation =
@@ -1694,7 +1692,6 @@ export class TasksController {
           progress: body.progressPercent ?? task.progressPercent,
           status: requestedStatus,
           hasStatusOverride: body.status !== undefined,
-          hasProgressOverride: body.progressPercent !== undefined,
         });
         const canAutomateProgress = Number.isInteger(progress) && progress >= 0 && progress <= 100;
         const progressAutomation =

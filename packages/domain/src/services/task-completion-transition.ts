@@ -28,7 +28,6 @@ export function deriveTaskCompletionTransition(
     progressPercent: input.done ? 100 : 0,
     status,
     hasStatusOverride: true,
-    hasProgressOverride: true,
   });
 
   return {
