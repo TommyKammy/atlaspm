@@ -347,8 +347,21 @@ function buildSectionTaskTree(tasks: Task[]): TaskTreeNode[] {
     parentNode.children.push(node);
   }
 
+  const compareTasksByDueDate = (left: Task, right: Task) => {
+    const leftDue = toDateInputValue(left.dueAt);
+    const rightDue = toDateInputValue(right.dueAt);
+
+    if (leftDue && rightDue) {
+      if (leftDue !== rightDue) return leftDue.localeCompare(rightDue);
+    } else if (leftDue || rightDue) {
+      return leftDue ? -1 : 1;
+    }
+
+    return left.position - right.position;
+  };
+
   const sortNodes = (nodes: TaskTreeNode[]) => {
-    nodes.sort((a, b) => a.task.position - b.task.position);
+    nodes.sort((a, b) => compareTasksByDueDate(a.task, b.task));
     for (const node of nodes) sortNodes(node.children);
   };
   sortNodes(roots);
