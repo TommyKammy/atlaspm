@@ -22,12 +22,10 @@ test('timeline tab flow: bars render, detail opens, zoom/window persists', async
   const email = `e2e-timeline-user-${now}@example.com`;
 
   await page.goto('/login');
-  await page.evaluate(() => localStorage.setItem('atlaspm:feature:timeline', 'enabled'));
   await page.fill('input[placeholder="OIDC sub"]', sub);
   await page.fill('input[placeholder="Email"]', email);
   await page.click('button:has-text("Dev Login")');
   await page.waitForURL('**/');
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('atlaspm:feature:timeline'))).toBe('enabled');
   const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
   expect(token).toBeTruthy();
 
@@ -66,10 +64,10 @@ test('timeline tab flow: bars render, detail opens, zoom/window persists', async
 
   await page.goto(`/projects/${projectId}`);
   await page.reload();
-  await expect(page.locator('[data-testid="project-view-timeline"]')).toBeVisible();
+  await expect(page.locator('[data-testid="project-view-gantt"]')).toBeVisible();
 
-  await page.click('[data-testid="project-view-timeline"]');
-  await expect(page).toHaveURL(/\/projects\/.*\?view=timeline/);
+  await page.click('[data-testid="project-view-gantt"]');
+  await expect(page).toHaveURL(/\/projects\/.*\?view=gantt/);
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
 
   await expect(page.locator(`[data-testid="timeline-bar-${taskA.id}"]`)).toBeVisible();
