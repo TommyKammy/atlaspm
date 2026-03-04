@@ -50,6 +50,7 @@ pnpm db:seed
 ```
 
 - `pnpm test` expects local Postgres on `localhost:55432` (start with `docker compose -f infra/docker/docker-compose.yml up -d postgres`).
+- `pnpm test` forces `SEARCH_ENABLED=false` by default, so test stability does not depend on live Algolia availability.
 - `pnpm verify:ci` runs lint + type-check + tests + E2E in DoD order.
 - `pnpm e2e` reuses existing Docker images for speed.
 - `pnpm e2e:stability` runs the full E2E suite multiple times (`E2E_STABILITY_RUNS`, default `3`).

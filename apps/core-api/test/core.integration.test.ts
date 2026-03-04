@@ -26,6 +26,7 @@ describe('Core API Integration', () => {
     process.env.COLLAB_JWT_SECRET = 'collab-jwt-secret';
     process.env.COLLAB_SERVICE_TOKEN = 'collab-service-secret';
     process.env.COLLAB_SERVER_URL = 'ws://localhost:18080';
+    process.env.SEARCH_ENABLED = 'false';
     process.env.REMINDER_WORKER_ENABLED = 'false';
     process.env.TASK_RETENTION_WORKER_ENABLED = 'false';
     process.env.TASK_RETENTION_DAYS = '30';
