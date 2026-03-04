@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException, NotFoundException, ConflictException, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, ProjectRole, TaskStatus, UserStatus, WorkspaceRole } from '@prisma/client';
+import { applyTaskProgressAutomation, type TaskStatus as DomainTaskStatus } from '@atlaspm/domain';
 import { templateDefinition } from '../rules/rule-definition';
 import type { AuthUser } from './types';
 
@@ -309,5 +310,32 @@ export class DomainService {
     if (progress === 100) return TaskStatus.DONE;
     if (progress >= 0 && progress < 100) return TaskStatus.IN_PROGRESS;
     return currentStatus;
+  }
+
+  deriveTaskProgressAutomation(progress: number, currentStatus: TaskStatus, completedAt: Date | null, now: Date = new Date()) {
+    const result = applyTaskProgressAutomation({
+      status: this.toDomainTaskStatus(currentStatus),
+      progressPercent: progress,
+      completedAt,
+      now,
+    });
+    return {
+      status: this.fromDomainTaskStatus(result.status),
+      completedAt: result.completedAt,
+    };
+  }
+
+  private toDomainTaskStatus(status: TaskStatus): DomainTaskStatus {
+    if (status === TaskStatus.TODO) return 'TODO';
+    if (status === TaskStatus.IN_PROGRESS) return 'IN_PROGRESS';
+    if (status === TaskStatus.DONE) return 'DONE';
+    return 'BLOCKED';
+  }
+
+  private fromDomainTaskStatus(status: DomainTaskStatus): TaskStatus {
+    if (status === 'TODO') return TaskStatus.TODO;
+    if (status === 'IN_PROGRESS') return TaskStatus.IN_PROGRESS;
+    if (status === 'DONE') return TaskStatus.DONE;
+    return TaskStatus.BLOCKED;
   }
 }
