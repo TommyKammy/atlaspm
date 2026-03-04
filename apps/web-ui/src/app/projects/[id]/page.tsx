@@ -14,7 +14,6 @@ import { parseCustomFieldFilters } from '@/lib/project-filters';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useI18n } from '@/lib/i18n';
-import { useTimelineEnabled } from '@/lib/feature-flags';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
@@ -38,7 +37,6 @@ function parseListParam(raw: string | null): string[] {
 
 export default function ProjectPage() {
   const { t } = useI18n();
-  const { timelineEnabled, timelineFlagHydrated } = useTimelineEnabled();
   const params = useParams<{ id: string }>();
   const pathname = usePathname();
   const router = useRouter();
@@ -55,12 +53,13 @@ export default function ProjectPage() {
   const addSectionInputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
   const viewParam = (resolvedSearchParams.get('view') ?? 'list').toLowerCase();
-  const view: 'list' | 'board' | 'timeline' | 'calendar' | 'files' =
-    viewParam === 'board'
-      || viewParam === 'calendar'
-      || viewParam === 'files'
-      || (timelineEnabled && viewParam === 'timeline')
-      ? (viewParam as 'list' | 'board' | 'timeline' | 'calendar' | 'files')
+  const normalizedViewParam = viewParam === 'timeline' ? 'gantt' : viewParam;
+  const view: 'list' | 'board' | 'gantt' | 'calendar' | 'files' =
+    normalizedViewParam === 'board'
+      || normalizedViewParam === 'calendar'
+      || normalizedViewParam === 'files'
+      || normalizedViewParam === 'gantt'
+      ? (normalizedViewParam as 'list' | 'board' | 'gantt' | 'calendar' | 'files')
       : 'list';
   const trashOpen = resolvedSearchParams.get('trash') === '1';
   const search = resolvedSearchParams.get('q') ?? '';
@@ -233,13 +232,6 @@ export default function ProjectPage() {
       setProjectQueryParam('view', 'list');
     }
   }, [openTaskId, setProjectQueryParam, view]);
-
-  useEffect(() => {
-    if (!timelineFlagHydrated) return;
-    if (!timelineEnabled && viewParam === 'timeline') {
-      setProjectQueryParam('view', 'list');
-    }
-  }, [setProjectQueryParam, timelineEnabled, timelineFlagHydrated, viewParam]);
 
   useEffect(() => {
     if (!showAddSectionInput) return;
@@ -472,7 +464,7 @@ export default function ProjectPage() {
           statusFilter={statusFilter}
           priorityFilter={priorityFilter}
         />
-      ) : view === 'timeline' ? (
+      ) : view === 'gantt' ? (
         <ProjectTimelineView
           projectId={projectId}
           search={search}

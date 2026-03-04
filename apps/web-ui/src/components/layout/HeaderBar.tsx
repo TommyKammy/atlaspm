@@ -17,7 +17,6 @@ import { queryKeys } from '@/lib/query-keys';
 import type { CustomFieldDefinition, Project, ProjectMember, Section, Task } from '@/lib/types';
 import { parseCustomFieldFilters, stringifyCustomFieldFilters, type CustomFieldFilter } from '@/lib/project-filters';
 import { useI18n } from '@/lib/i18n';
-import { useTimelineEnabled } from '@/lib/feature-flags';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { NotificationCenter } from '@/components/notification-center';
@@ -231,7 +230,6 @@ export function HeaderBar({
   onToggleSidebarMode?: () => void;
 }) {
   const { t } = useI18n();
-  const { timelineEnabled } = useTimelineEnabled();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -243,7 +241,7 @@ export function HeaderBar({
   });
   const projectId = useMemo(() => pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null, [pathname]);
   const currentView = (resolvedSearchParams.get('view') ?? 'list').toLowerCase();
-  const resolvedCurrentView = !timelineEnabled && currentView === 'timeline' ? 'list' : currentView;
+  const resolvedCurrentView = currentView === 'timeline' ? 'gantt' : currentView;
   const query = resolvedSearchParams.get('q') ?? '';
   const statusesParam = resolvedSearchParams.get('statuses');
   const assigneesParam = resolvedSearchParams.get('assignees');
@@ -265,11 +263,11 @@ export function HeaderBar({
       [
         { id: 'list', label: t('list') },
         { id: 'board', label: t('board') },
-        ...(timelineEnabled ? [{ id: 'timeline', label: t('timeline') }] : []),
+        { id: 'gantt', label: t('gantt') },
         { id: 'calendar', label: t('calendar') },
         { id: 'files', label: t('files') },
       ] as const,
-    [t, timelineEnabled],
+    [t],
   );
 
   const sectionsQuery = useQuery<Section[]>({

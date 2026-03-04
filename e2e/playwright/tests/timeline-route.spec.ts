@@ -16,7 +16,7 @@ async function api(path: string, token: string, method = 'GET', body?: unknown) 
   return raw ? JSON.parse(raw) : null;
 }
 
-test('timeline route is feature-gated off by default', async ({ page }) => {
+test('legacy timeline route opens the gantt view by default', async ({ page }) => {
   const now = Date.now();
   await page.goto('/login');
   await page.fill('input[placeholder="OIDC sub"]', `e2e-timeline-${now}`);
@@ -37,7 +37,6 @@ test('timeline route is feature-gated off by default', async ({ page }) => {
 
   await page.goto(`/projects/${projectId}?view=timeline`);
 
-  await expect(page.locator('[data-testid="project-view-timeline"]')).toHaveCount(0);
-  await expect(page.locator('[data-testid="project-view-list"]')).toBeVisible();
-  await expect(page.locator('[data-testid="add-new-trigger"]')).toBeVisible();
+  await expect(page.locator('[data-testid="project-view-gantt"]')).toBeVisible();
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
 });
