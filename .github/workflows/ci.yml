@@ -156,7 +156,8 @@ jobs:
       - name: Build web-ui image (cached)
         uses: docker/bake-action@v5
         with:
-          files: infra/docker/docker-compose.yml
+          workdir: infra/docker
+          files: docker-compose.yml
           targets: web-ui
           load: true
           set: |
