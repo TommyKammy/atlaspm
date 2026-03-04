@@ -306,12 +306,6 @@ export class DomainService {
     }
   }
 
-  deriveStatusForProgress(progress: number, currentStatus: TaskStatus) {
-    if (progress === 100) return TaskStatus.DONE;
-    if (progress >= 0 && progress < 100) return TaskStatus.IN_PROGRESS;
-    return currentStatus;
-  }
-
   deriveTaskProgressAutomation(progress: number, currentStatus: TaskStatus, completedAt: Date | null, now: Date = new Date()) {
     const result = applyTaskProgressAutomation({
       status: this.toDomainTaskStatus(currentStatus),
