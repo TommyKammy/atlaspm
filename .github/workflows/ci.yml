@@ -129,7 +129,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
+          key: ${{ runner.os }}-playwright-${{ hashFiles('e2e/playwright/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
 
       - name: Build core-api image (cached)
         uses: docker/build-push-action@v6
@@ -152,22 +154,15 @@ jobs:
           cache-to: type=gha,mode=max,scope=e2e-collab-server
 
       - name: Build web-ui image (cached)
-        uses: docker/build-push-action@v6
+        uses: docker/bake-action@v5
         with:
-          context: .
-          file: apps/web-ui/Dockerfile
-          tags: docker-web-ui:latest
+          files: infra/docker/docker-compose.yml
+          targets: web-ui
           load: true
-          cache-from: type=gha,scope=e2e-web-ui
-          cache-to: type=gha,mode=max,scope=e2e-web-ui
-          build-args: |
-            NEXT_PUBLIC_CORE_API_URL=http://localhost:3001
-            NEXT_PUBLIC_DEV_AUTH_ENABLED=true
-            NEXT_PUBLIC_DEV_TOKEN_ENDPOINT=http://localhost:3001/dev-auth/token
-            NEXT_PUBLIC_COLLAB_ENABLED=true
-            NEXT_PUBLIC_COLLAB_SERVER_URL=ws://localhost:18080
-            NEXT_PUBLIC_COLLAB_DEV_MODE=false
-            NEXT_PUBLIC_TIMELINE_ENABLED=false
+          set: |
+            web-ui.tags=docker-web-ui:latest
+            web-ui.cache-from=type=gha,scope=e2e-web-ui
+            web-ui.cache-to=type=gha,mode=max,scope=e2e-web-ui
 
       - run: pnpm --filter @atlaspm/playwright exec playwright install --with-deps chromium
 
