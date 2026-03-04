@@ -53,13 +53,13 @@ export default function ProjectPage() {
   const addSectionInputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
   const viewParam = (resolvedSearchParams.get('view') ?? 'list').toLowerCase();
-  const normalizedViewParam = viewParam === 'timeline' ? 'gantt' : viewParam;
-  const view: 'list' | 'board' | 'gantt' | 'calendar' | 'files' =
-    normalizedViewParam === 'board'
-      || normalizedViewParam === 'calendar'
-      || normalizedViewParam === 'files'
-      || normalizedViewParam === 'gantt'
-      ? (normalizedViewParam as 'list' | 'board' | 'gantt' | 'calendar' | 'files')
+  const view: 'list' | 'board' | 'timeline' | 'gantt' | 'calendar' | 'files' =
+    viewParam === 'board'
+      || viewParam === 'timeline'
+      || viewParam === 'calendar'
+      || viewParam === 'files'
+      || viewParam === 'gantt'
+      ? (viewParam as 'list' | 'board' | 'timeline' | 'gantt' | 'calendar' | 'files')
       : 'list';
   const trashOpen = resolvedSearchParams.get('trash') === '1';
   const search = resolvedSearchParams.get('q') ?? '';
@@ -201,11 +201,6 @@ export default function ProjectPage() {
   });
 
   if (!projectId) return <div>Loading...</div>;
-
-  useEffect(() => {
-    if (viewParam !== 'timeline') return;
-    setProjectQueryParam('view', 'gantt');
-  }, [setProjectQueryParam, viewParam]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -464,6 +459,13 @@ export default function ProjectPage() {
         />
       ) : view === 'calendar' ? (
         <ProjectCalendarView
+          projectId={projectId}
+          search={search}
+          statusFilter={statusFilter}
+          priorityFilter={priorityFilter}
+        />
+      ) : view === 'timeline' ? (
+        <ProjectTimelineView
           projectId={projectId}
           search={search}
           statusFilter={statusFilter}

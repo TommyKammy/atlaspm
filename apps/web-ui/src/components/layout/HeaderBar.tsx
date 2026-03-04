@@ -241,7 +241,9 @@ export function HeaderBar({
   });
   const projectId = useMemo(() => pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null, [pathname]);
   const currentView = (resolvedSearchParams.get('view') ?? 'list').toLowerCase();
-  const resolvedCurrentView = currentView === 'timeline' ? 'gantt' : currentView;
+  const resolvedCurrentView = ['list', 'board', 'timeline', 'gantt', 'calendar', 'files'].includes(currentView)
+    ? currentView
+    : 'list';
   const query = resolvedSearchParams.get('q') ?? '';
   const statusesParam = resolvedSearchParams.get('statuses');
   const assigneesParam = resolvedSearchParams.get('assignees');
@@ -263,6 +265,7 @@ export function HeaderBar({
       [
         { id: 'list', label: t('list') },
         { id: 'board', label: t('board') },
+        { id: 'timeline', label: t('timeline') },
         { id: 'gantt', label: t('gantt') },
         { id: 'calendar', label: t('calendar') },
         { id: 'files', label: t('files') },
