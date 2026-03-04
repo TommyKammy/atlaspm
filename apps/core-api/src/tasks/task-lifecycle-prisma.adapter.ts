@@ -67,6 +67,10 @@ export class PrismaTaskLifecycleRepository implements TaskLifecycleRepository {
       },
     });
     if (updated.count !== 1) {
+      const existingTask = await this.findActiveById(input.taskId);
+      if (!existingTask) {
+        throw new DomainNotFoundError('Task not found');
+      }
       throw new DomainConflictError('Version conflict', 'VERSION_CONFLICT');
     }
 
@@ -79,6 +83,7 @@ export class PrismaTaskLifecycleRepository implements TaskLifecycleRepository {
 
   private async collectDescendantIds(taskId: string): Promise<string[]> {
     const descendantIds: string[] = [];
+    const visited = new Set<string>([taskId]);
     let frontier: string[] = [taskId];
 
     while (frontier.length > 0) {
@@ -89,7 +94,11 @@ export class PrismaTaskLifecycleRepository implements TaskLifecycleRepository {
         },
         select: { id: true },
       });
-      frontier = children.map((child) => child.id);
+      const nextFrontier = children
+        .map((child) => child.id)
+        .filter((childId) => !visited.has(childId));
+      nextFrontier.forEach((childId) => visited.add(childId));
+      frontier = nextFrontier;
       descendantIds.push(...frontier);
     }
 

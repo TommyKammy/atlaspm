@@ -126,3 +126,60 @@ test('completeTaskLifecycle throws not found for missing task', async () => {
     DomainNotFoundError,
   );
 });
+
+test('completeTaskLifecycle throws version conflict when expectedVersion mismatches', async () => {
+  const repository = new InMemoryTaskLifecycleRepository({
+    id: 'task-3',
+    projectId: 'project-1',
+    type: 'TASK',
+    status: 'IN_PROGRESS',
+    progressPercent: 60,
+    completedAt: null,
+    version: 2,
+  });
+
+  await assert.rejects(
+    completeTaskLifecycle(
+      {
+        taskId: 'task-3',
+        done: true,
+        expectedVersion: 1,
+      },
+      makeUnitOfWork(repository),
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof DomainConflictError);
+      assert.equal(error.code, 'VERSION_CONFLICT');
+      return true;
+    },
+  );
+});
+
+test('completeTaskLifecycle reopens task when done is false', async () => {
+  const now = new Date('2026-03-04T12:30:00.000Z');
+  const repository = new InMemoryTaskLifecycleRepository({
+    id: 'task-4',
+    projectId: 'project-1',
+    type: 'TASK',
+    status: 'DONE',
+    progressPercent: 100,
+    completedAt: now,
+    version: 1,
+  });
+
+  const result = await completeTaskLifecycle(
+    {
+      taskId: 'task-4',
+      done: false,
+      expectedVersion: 1,
+      now,
+    },
+    makeUnitOfWork(repository),
+  );
+
+  assert.equal(result.action, 'task.reopened');
+  assert.equal(result.updated.status, 'IN_PROGRESS');
+  assert.equal(result.updated.progressPercent, 0);
+  assert.equal(result.updated.completedAt, null);
+  assert.equal(result.updated.version, 2);
+});

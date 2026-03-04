@@ -962,7 +962,6 @@ export class TasksController {
   async complete(@Param('id') id: string, @Body() body: CompleteTaskDto, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
-    if (body.version !== task.version) throw new ConflictException('Version conflict');
 
     return this.prisma.$transaction(async (tx) => {
       const unitOfWork = createTaskLifecycleUnitOfWorkFromTx(tx);
@@ -998,7 +997,7 @@ export class TasksController {
         entityType: 'Task',
         entityId: id,
         action: lifecycleResult.action,
-        beforeJson: task,
+        beforeJson: lifecycleResult.previous,
         afterJson: updated,
         correlationId: req.correlationId,
         outboxType: lifecycleResult.action,
