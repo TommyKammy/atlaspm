@@ -989,7 +989,7 @@ export class TasksController {
         }
         throw error;
       });
-      const updated = lifecycleResult.updated;
+      const updated = await tx.task.findUniqueOrThrow({ where: { id } });
 
       await this.domain.appendAuditOutbox({
         tx,
