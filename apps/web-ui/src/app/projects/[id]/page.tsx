@@ -11,6 +11,7 @@ import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { Project, ProjectMember, Section, SectionTaskGroup, Task } from '@/lib/types';
 import { parseCustomFieldFilters } from '@/lib/project-filters';
+import { resolveProjectView } from '@/lib/project-views';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useI18n } from '@/lib/i18n';
@@ -52,15 +53,7 @@ export default function ProjectPage() {
   const [quickAddError, setQuickAddError] = useState<string | null>(null);
   const addSectionInputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
-  const viewParam = (resolvedSearchParams.get('view') ?? 'list').toLowerCase();
-  const view: 'list' | 'board' | 'timeline' | 'gantt' | 'calendar' | 'files' =
-    viewParam === 'board'
-      || viewParam === 'timeline'
-      || viewParam === 'calendar'
-      || viewParam === 'files'
-      || viewParam === 'gantt'
-      ? (viewParam as 'list' | 'board' | 'timeline' | 'gantt' | 'calendar' | 'files')
-      : 'list';
+  const view = resolveProjectView(resolvedSearchParams.get('view'));
   const trashOpen = resolvedSearchParams.get('trash') === '1';
   const search = resolvedSearchParams.get('q') ?? '';
   const statusesParam = resolvedSearchParams.get('statuses');

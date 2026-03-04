@@ -16,6 +16,7 @@ import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { CustomFieldDefinition, Project, ProjectMember, Section, Task } from '@/lib/types';
 import { parseCustomFieldFilters, stringifyCustomFieldFilters, type CustomFieldFilter } from '@/lib/project-filters';
+import { PROJECT_VIEW_IDS, resolveProjectView, type ProjectViewId } from '@/lib/project-views';
 import { useI18n } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -240,10 +241,7 @@ export function HeaderBar({
     queryFn: () => api('/projects'),
   });
   const projectId = useMemo(() => pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null, [pathname]);
-  const currentView = (resolvedSearchParams.get('view') ?? 'list').toLowerCase();
-  const resolvedCurrentView = ['list', 'board', 'timeline', 'gantt', 'calendar', 'files'].includes(currentView)
-    ? currentView
-    : 'list';
+  const resolvedCurrentView = resolveProjectView(resolvedSearchParams.get('view'));
   const query = resolvedSearchParams.get('q') ?? '';
   const statusesParam = resolvedSearchParams.get('statuses');
   const assigneesParam = resolvedSearchParams.get('assignees');
@@ -261,15 +259,21 @@ export function HeaderBar({
     [customFieldFiltersParam],
   );
   const tabs = useMemo(
-    () =>
-      [
-        { id: 'list', label: t('list') },
-        { id: 'board', label: t('board') },
-        { id: 'timeline', label: t('timeline') },
-        { id: 'gantt', label: t('gantt') },
-        { id: 'calendar', label: t('calendar') },
-        { id: 'files', label: t('files') },
-      ] as const,
+    () => PROJECT_VIEW_IDS.map((id) => ({
+      id,
+      label:
+        id === 'list'
+          ? t('list')
+          : id === 'board'
+            ? t('board')
+            : id === 'timeline'
+              ? t('timeline')
+              : id === 'gantt'
+                ? t('gantt')
+                : id === 'calendar'
+                  ? t('calendar')
+                  : t('files'),
+    })) as Array<{ id: ProjectViewId; label: string }>,
     [t],
   );
 

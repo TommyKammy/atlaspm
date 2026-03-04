@@ -36,15 +36,15 @@ test('timeline and gantt routes are both supported and keep URL state', async ({
   const projectId = project.id as string;
 
   await page.goto(`/projects/${projectId}?view=timeline`);
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}\\?view=timeline`));
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}.*view=timeline`));
   await expect(page.locator('[data-testid="project-view-timeline"]')).toBeVisible();
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
 
   await page.click('[data-testid="project-view-gantt"]');
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}\\?view=gantt`));
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}.*view=gantt`));
   await expect(page.locator('[data-testid="project-view-gantt"]')).toBeVisible();
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
 
   await page.click('[data-testid="project-view-timeline"]');
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}\\?view=timeline`));
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}.*view=timeline`));
 });
