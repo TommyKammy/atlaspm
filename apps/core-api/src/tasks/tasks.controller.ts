@@ -621,9 +621,15 @@ export class TasksController {
       hasProgressOverride: body.progressPercent !== undefined,
     });
     
-    const progressAutomation = this.domain.deriveTaskProgressAutomation(progress, task.status, task.completedAt);
-    const status = body.status ?? progressAutomation.status;
-    const completedAt = status === TaskStatus.DONE ? task.completedAt ?? progressAutomation.completedAt ?? new Date() : null;
+    const progressAutomation =
+      body.status === undefined
+        ? this.domain.deriveTaskProgressAutomation(progress, task.status, task.completedAt)
+        : null;
+    const status = body.status ?? progressAutomation?.status ?? task.status;
+    const completedAt =
+      status === TaskStatus.DONE
+        ? task.completedAt ?? progressAutomation?.completedAt ?? new Date()
+        : null;
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.task.update({

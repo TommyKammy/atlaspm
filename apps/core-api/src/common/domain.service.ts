@@ -326,16 +326,36 @@ export class DomainService {
   }
 
   private toDomainTaskStatus(status: TaskStatus): DomainTaskStatus {
-    if (status === TaskStatus.TODO) return 'TODO';
-    if (status === TaskStatus.IN_PROGRESS) return 'IN_PROGRESS';
-    if (status === TaskStatus.DONE) return 'DONE';
-    return 'BLOCKED';
+    switch (status) {
+      case TaskStatus.TODO:
+        return 'TODO';
+      case TaskStatus.IN_PROGRESS:
+        return 'IN_PROGRESS';
+      case TaskStatus.DONE:
+        return 'DONE';
+      case TaskStatus.BLOCKED:
+        return 'BLOCKED';
+      default:
+        return this.unhandledStatus(status as never, 'prisma->domain');
+    }
   }
 
   private fromDomainTaskStatus(status: DomainTaskStatus): TaskStatus {
-    if (status === 'TODO') return TaskStatus.TODO;
-    if (status === 'IN_PROGRESS') return TaskStatus.IN_PROGRESS;
-    if (status === 'DONE') return TaskStatus.DONE;
-    return TaskStatus.BLOCKED;
+    switch (status) {
+      case 'TODO':
+        return TaskStatus.TODO;
+      case 'IN_PROGRESS':
+        return TaskStatus.IN_PROGRESS;
+      case 'DONE':
+        return TaskStatus.DONE;
+      case 'BLOCKED':
+        return TaskStatus.BLOCKED;
+      default:
+        return this.unhandledStatus(status as never, 'domain->prisma');
+    }
+  }
+
+  private unhandledStatus(value: never, direction: string): never {
+    throw new Error(`Unhandled task status mapping (${direction}): ${String(value)}`);
   }
 }
