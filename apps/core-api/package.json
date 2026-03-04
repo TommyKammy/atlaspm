@@ -8,7 +8,7 @@
     "build": "pnpm prisma:generate && nest build",
     "start": "node dist/main.js",
     "lint": "eslint src --ext .ts",
-    "test": "pnpm prisma:generate && DATABASE_URL=${DATABASE_URL:-postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public} pnpm prisma:migrate && DATABASE_URL=${DATABASE_URL:-postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public} vitest run",
+    "test": "pnpm prisma:generate && DATABASE_URL=${DATABASE_URL:-postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public} pnpm prisma:migrate && SEARCH_ENABLED=${SEARCH_ENABLED:-false} DATABASE_URL=${DATABASE_URL:-postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public} vitest run",
     "test:watch": "vitest",
     "type-check": "tsc --noEmit",
     "prisma:generate": "prisma generate",

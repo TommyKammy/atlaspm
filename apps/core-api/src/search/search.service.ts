@@ -33,14 +33,20 @@ export class SearchService implements OnModuleInit {
   private readonly logger = new Logger(SearchService.name);
   private client: Algoliasearch | null = null;
   private readonly indexName = 'tasks';
-  private readonly isEnabled: boolean;
+  private isEnabled: boolean;
 
   constructor() {
-    const appId = process.env.ALGOLIA_APP_ID;
-    const apiKey = process.env.ALGOLIA_API_KEY;
-    
-    this.isEnabled = !!(appId && apiKey);
-    
+    const appId = process.env.ALGOLIA_APP_ID?.trim();
+    const apiKey = process.env.ALGOLIA_API_KEY?.trim();
+    const explicitSearchEnabled = this.parseBooleanEnv(process.env.SEARCH_ENABLED);
+
+    this.isEnabled = explicitSearchEnabled ?? !!(appId && apiKey);
+
+    if (this.isEnabled && !(appId && apiKey)) {
+      this.logger.warn('SEARCH_ENABLED=true but ALGOLIA credentials are missing. Search will be disabled.');
+      this.isEnabled = false;
+    }
+
     if (this.isEnabled) {
       try {
         this.client = algoliasearch(appId!, apiKey!);
@@ -79,7 +85,7 @@ export class SearchService implements OnModuleInit {
       await this.client.setSettings(settings as any);
       this.logger.log('Algolia index configured successfully');
     } catch (error) {
-      this.logger.error('Failed to configure Algolia index:', error);
+      this.disableSearch('Failed to configure Algolia index. Falling back to disabled mode.', error);
     }
   }
 
@@ -117,7 +123,7 @@ export class SearchService implements OnModuleInit {
       });
       this.logger.debug(`Indexed task ${task.id}`);
     } catch (error) {
-      this.logger.error(`Failed to index task ${task.id}:`, error);
+      this.disableSearch(`Failed to index task ${task.id}. Falling back to disabled mode.`, error);
     }
   }
 
@@ -154,7 +160,7 @@ export class SearchService implements OnModuleInit {
       });
       this.logger.debug(`Indexed ${tasks.length} tasks`);
     } catch (error) {
-      this.logger.error('Failed to index tasks batch:', error);
+      this.disableSearch('Failed to index tasks batch. Falling back to disabled mode.', error);
     }
   }
 
@@ -170,7 +176,7 @@ export class SearchService implements OnModuleInit {
       });
       this.logger.debug(`Removed task ${taskId} from index`);
     } catch (error) {
-      this.logger.error(`Failed to remove task ${taskId} from index:`, error);
+      this.disableSearch(`Failed to remove task ${taskId} from index. Falling back to disabled mode.`, error);
     }
   }
 
@@ -192,7 +198,7 @@ export class SearchService implements OnModuleInit {
       });
       this.logger.debug(`Removed ${taskIds.length} tasks from index`);
     } catch (error) {
-      this.logger.error('Failed to remove tasks batch from index:', error);
+      this.disableSearch('Failed to remove tasks batch from index. Falling back to disabled mode.', error);
     }
   }
 
@@ -238,8 +244,17 @@ export class SearchService implements OnModuleInit {
         params: '',
       };
     } catch (error) {
-      this.logger.error('Search failed:', error);
-      throw error;
+      this.disableSearch('Search backend became unavailable. Falling back to disabled mode.', error);
+      return {
+        hits: [],
+        nbHits: 0,
+        page: 0,
+        nbPages: 0,
+        hitsPerPage: 0,
+        processingTimeMS: 0,
+        query,
+        params: '',
+      };
     }
   }
 
@@ -317,8 +332,7 @@ export class SearchService implements OnModuleInit {
       
       this.logger.log('Full reindex complete');
     } catch (error) {
-      this.logger.error('Full reindex failed:', error);
-      throw error;
+      this.disableSearch('Full reindex failed. Falling back to disabled mode.', error);
     }
   }
 
@@ -347,8 +361,25 @@ export class SearchService implements OnModuleInit {
         totalRecords: result?.nbHits,
       };
     } catch (error) {
-      this.logger.error('Failed to get search stats:', error);
-      return { isEnabled: true };
+      this.disableSearch('Failed to get search stats. Falling back to disabled mode.', error);
+      return { isEnabled: false };
     }
+  }
+
+  private disableSearch(message: string, error: unknown) {
+    this.logger.error(message, error);
+    this.isEnabled = false;
+    this.client = null;
+  }
+
+  private parseBooleanEnv(value: string | undefined): boolean | undefined {
+    if (!value) return undefined;
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+    this.logger.warn(
+      `Unrecognized SEARCH_ENABLED value "${value}". Expected "true" or "false". Falling back to auto mode.`,
+    );
+    return undefined;
   }
 }
