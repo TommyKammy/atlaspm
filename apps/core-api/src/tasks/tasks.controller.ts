@@ -40,8 +40,10 @@ import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { assertValidDateRange } from '../common/date-validation';
 import { Prisma, Priority, ProjectRole, TaskStatus, TaskType, DependencyType, CustomFieldType } from '@prisma/client';
+import { completeTaskLifecycle, DomainConflictError, DomainNotFoundError } from '@atlaspm/domain';
 import { SubtaskService } from './subtask.service';
 import { SearchService } from '../search/search.service';
+import { createTaskLifecycleUnitOfWorkFromTx } from './task-lifecycle-prisma.adapter';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { promises as fs } from 'node:fs';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -962,53 +964,44 @@ export class TasksController {
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (body.version !== task.version) throw new ConflictException('Version conflict');
 
-    const transition = this.domain.deriveTaskCompletionTransition({
-      taskType: task.type,
-      done: body.done,
-      completedAt: task.completedAt,
-    });
-
     return this.prisma.$transaction(async (tx) => {
-      if (body.done && !body.force) {
-        const subtreeIds = await this.collectSubtreeIds(tx, id);
-        const subtaskIds = subtreeIds.filter((taskId) => taskId !== id);
-        if (subtaskIds.length > 0) {
-          const openSubtaskCount = await tx.task.count({
-            where: {
-              id: { in: subtaskIds },
-              deletedAt: null,
-              status: { not: TaskStatus.DONE },
-            },
-          });
-          if (openSubtaskCount > 0) {
+      const unitOfWork = createTaskLifecycleUnitOfWorkFromTx(tx);
+      const lifecycleResult = await completeTaskLifecycle(
+        {
+          taskId: id,
+          done: body.done,
+          expectedVersion: body.version,
+          force: body.force,
+        },
+        unitOfWork,
+      ).catch((error: unknown) => {
+        if (error instanceof DomainNotFoundError) {
+          throw new NotFoundException(error.message);
+        }
+        if (error instanceof DomainConflictError) {
+          if (error.code === 'INCOMPLETE_SUBTASKS') {
             throw new ConflictException({
-              message: 'Cannot complete parent task with incomplete subtasks',
-              code: 'INCOMPLETE_SUBTASKS',
-              openSubtaskCount,
+              message: error.message,
+              code: error.code,
+              openSubtaskCount: error.details?.openSubtaskCount,
             });
           }
+          throw new ConflictException('Version conflict');
         }
-      }
-
-      const updated = await tx.task.update({
-        where: { id },
-        data: {
-          status: transition.status,
-          progressPercent: transition.progressPercent,
-          completedAt: transition.completedAt,
-          version: { increment: 1 },
-        },
+        throw error;
       });
+      const updated = lifecycleResult.updated;
+
       await this.domain.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
         entityId: id,
-        action: transition.action,
+        action: lifecycleResult.action,
         beforeJson: task,
         afterJson: updated,
         correlationId: req.correlationId,
-        outboxType: transition.action,
+        outboxType: lifecycleResult.action,
         payload: {
           taskId: id,
           projectId: task.projectId,
