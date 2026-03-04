@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException, NotFoundException, ConflictException, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, ProjectRole, TaskStatus, UserStatus, WorkspaceRole } from '@prisma/client';
+import { applyTaskProgressAutomation, type TaskStatus as DomainTaskStatus } from '@atlaspm/domain';
 import { templateDefinition } from '../rules/rule-definition';
 import type { AuthUser } from './types';
 
@@ -309,5 +310,52 @@ export class DomainService {
     if (progress === 100) return TaskStatus.DONE;
     if (progress >= 0 && progress < 100) return TaskStatus.IN_PROGRESS;
     return currentStatus;
+  }
+
+  deriveTaskProgressAutomation(progress: number, currentStatus: TaskStatus, completedAt: Date | null, now: Date = new Date()) {
+    const result = applyTaskProgressAutomation({
+      status: this.toDomainTaskStatus(currentStatus),
+      progressPercent: progress,
+      completedAt,
+      now,
+    });
+    return {
+      status: this.fromDomainTaskStatus(result.status),
+      completedAt: result.completedAt,
+    };
+  }
+
+  private toDomainTaskStatus(status: TaskStatus): DomainTaskStatus {
+    switch (status) {
+      case TaskStatus.TODO:
+        return 'TODO';
+      case TaskStatus.IN_PROGRESS:
+        return 'IN_PROGRESS';
+      case TaskStatus.DONE:
+        return 'DONE';
+      case TaskStatus.BLOCKED:
+        return 'BLOCKED';
+      default:
+        return this.unhandledStatus(status as never, 'prisma->domain');
+    }
+  }
+
+  private fromDomainTaskStatus(status: DomainTaskStatus): TaskStatus {
+    switch (status) {
+      case 'TODO':
+        return TaskStatus.TODO;
+      case 'IN_PROGRESS':
+        return TaskStatus.IN_PROGRESS;
+      case 'DONE':
+        return TaskStatus.DONE;
+      case 'BLOCKED':
+        return TaskStatus.BLOCKED;
+      default:
+        return this.unhandledStatus(status as never, 'domain->prisma');
+    }
+  }
+
+  private unhandledStatus(value: never, direction: string): never {
+    throw new Error(`Unhandled task status mapping (${direction}): ${String(value)}`);
   }
 }
