@@ -16,7 +16,7 @@ async function api(path: string, token: string, method = 'GET', body?: unknown) 
   return raw ? JSON.parse(raw) : null;
 }
 
-test('legacy timeline route opens the gantt view by default', async ({ page }) => {
+test('timeline and gantt routes are both supported and keep URL state', async ({ page }) => {
   const now = Date.now();
   await page.goto('/login');
   await page.fill('input[placeholder="OIDC sub"]', `e2e-timeline-${now}`);
@@ -36,8 +36,15 @@ test('legacy timeline route opens the gantt view by default', async ({ page }) =
   const projectId = project.id as string;
 
   await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}.*view=timeline`));
+  await expect(page.locator('[data-testid="project-view-timeline"]')).toBeVisible();
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
 
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}\\?view=gantt`));
+  await page.click('[data-testid="project-view-gantt"]');
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}.*view=gantt`));
   await expect(page.locator('[data-testid="project-view-gantt"]')).toBeVisible();
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+
+  await page.click('[data-testid="project-view-timeline"]');
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}.*view=timeline`));
 });
