@@ -85,7 +85,7 @@ export class SearchService implements OnModuleInit {
       await this.client.setSettings(settings as any);
       this.logger.log('Algolia index configured successfully');
     } catch (error) {
-      this.logger.error('Failed to configure Algolia index:', error);
+      this.disableSearch('Failed to configure Algolia index. Falling back to disabled mode.', error);
     }
   }
 
@@ -123,7 +123,7 @@ export class SearchService implements OnModuleInit {
       });
       this.logger.debug(`Indexed task ${task.id}`);
     } catch (error) {
-      this.logger.error(`Failed to index task ${task.id}:`, error);
+      this.disableSearch(`Failed to index task ${task.id}. Falling back to disabled mode.`, error);
     }
   }
 
@@ -160,7 +160,7 @@ export class SearchService implements OnModuleInit {
       });
       this.logger.debug(`Indexed ${tasks.length} tasks`);
     } catch (error) {
-      this.logger.error('Failed to index tasks batch:', error);
+      this.disableSearch('Failed to index tasks batch. Falling back to disabled mode.', error);
     }
   }
 
@@ -176,7 +176,7 @@ export class SearchService implements OnModuleInit {
       });
       this.logger.debug(`Removed task ${taskId} from index`);
     } catch (error) {
-      this.logger.error(`Failed to remove task ${taskId} from index:`, error);
+      this.disableSearch(`Failed to remove task ${taskId} from index. Falling back to disabled mode.`, error);
     }
   }
 
@@ -198,7 +198,7 @@ export class SearchService implements OnModuleInit {
       });
       this.logger.debug(`Removed ${taskIds.length} tasks from index`);
     } catch (error) {
-      this.logger.error('Failed to remove tasks batch from index:', error);
+      this.disableSearch('Failed to remove tasks batch from index. Falling back to disabled mode.', error);
     }
   }
 
@@ -332,8 +332,7 @@ export class SearchService implements OnModuleInit {
       
       this.logger.log('Full reindex complete');
     } catch (error) {
-      this.logger.error('Full reindex failed:', error);
-      throw error;
+      this.disableSearch('Full reindex failed. Falling back to disabled mode.', error);
     }
   }
 
@@ -378,6 +377,9 @@ export class SearchService implements OnModuleInit {
     const normalized = value.trim().toLowerCase();
     if (normalized === 'true') return true;
     if (normalized === 'false') return false;
+    this.logger.warn(
+      `Unrecognized SEARCH_ENABLED value "${value}". Expected "true" or "false". Falling back to auto mode.`,
+    );
     return undefined;
   }
 }
