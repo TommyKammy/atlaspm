@@ -1,7 +1,13 @@
 import { Injectable, ForbiddenException, NotFoundException, ConflictException, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma, ProjectRole, TaskStatus, UserStatus, WorkspaceRole } from '@prisma/client';
-import { applyTaskProgressAutomation, type TaskStatus as DomainTaskStatus } from '@atlaspm/domain';
+import { Prisma, ProjectRole, TaskStatus, TaskType, UserStatus, WorkspaceRole } from '@prisma/client';
+import {
+  applyTaskProgressAutomation,
+  deriveTaskCompletionTransition as deriveTaskCompletionTransitionInDomain,
+  normalizeTaskProgressForType,
+  type TaskStatus as DomainTaskStatus,
+  type TaskType as DomainTaskType,
+} from '@atlaspm/domain';
 import { templateDefinition } from '../rules/rule-definition';
 import type { AuthUser } from './types';
 
@@ -319,6 +325,40 @@ export class DomainService {
     };
   }
 
+  deriveNormalizedTaskProgress(input: {
+    taskType: TaskType;
+    progress: number;
+    status: TaskStatus;
+    hasStatusOverride: boolean;
+  }) {
+    return normalizeTaskProgressForType({
+      taskType: this.toDomainTaskType(input.taskType),
+      progressPercent: input.progress,
+      status: this.toDomainTaskStatus(input.status),
+      hasStatusOverride: input.hasStatusOverride,
+    });
+  }
+
+  deriveTaskCompletionTransition(input: {
+    taskType: TaskType;
+    done: boolean;
+    completedAt: Date | null;
+    now?: Date;
+  }) {
+    const result = deriveTaskCompletionTransitionInDomain({
+      taskType: this.toDomainTaskType(input.taskType),
+      done: input.done,
+      completedAt: input.completedAt,
+      now: input.now,
+    });
+    return {
+      status: this.fromDomainTaskStatus(result.status),
+      progressPercent: result.progressPercent,
+      completedAt: result.completedAt,
+      action: result.action,
+    };
+  }
+
   private toDomainTaskStatus(status: TaskStatus): DomainTaskStatus {
     switch (status) {
       case TaskStatus.TODO:
@@ -330,7 +370,7 @@ export class DomainService {
       case TaskStatus.BLOCKED:
         return 'BLOCKED';
       default:
-        return this.unhandledStatus(status as never, 'prisma->domain');
+        return this.unhandledEnumMapping(status as never, 'task-status prisma->domain');
     }
   }
 
@@ -345,11 +385,24 @@ export class DomainService {
       case 'BLOCKED':
         return TaskStatus.BLOCKED;
       default:
-        return this.unhandledStatus(status as never, 'domain->prisma');
+        return this.unhandledEnumMapping(status as never, 'task-status domain->prisma');
     }
   }
 
-  private unhandledStatus(value: never, direction: string): never {
-    throw new Error(`Unhandled task status mapping (${direction}): ${String(value)}`);
+  private toDomainTaskType(taskType: TaskType): DomainTaskType {
+    switch (taskType) {
+      case TaskType.TASK:
+        return 'TASK';
+      case TaskType.MILESTONE:
+        return 'MILESTONE';
+      case TaskType.APPROVAL:
+        return 'APPROVAL';
+      default:
+        return this.unhandledEnumMapping(taskType as never, 'task-type prisma->domain');
+    }
+  }
+
+  private unhandledEnumMapping(value: never, mapping: string): never {
+    throw new Error(`Unhandled enum mapping (${mapping}): ${String(value)}`);
   }
 }
