@@ -37,6 +37,7 @@ test('legacy timeline route opens the gantt view by default', async ({ page }) =
 
   await page.goto(`/projects/${projectId}?view=timeline`);
 
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}\\?view=gantt`));
   await expect(page.locator('[data-testid="project-view-gantt"]')).toBeVisible();
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
 });

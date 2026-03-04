@@ -203,6 +203,11 @@ export default function ProjectPage() {
   if (!projectId) return <div>Loading...</div>;
 
   useEffect(() => {
+    if (viewParam !== 'timeline') return;
+    setProjectQueryParam('view', 'gantt');
+  }, [setProjectQueryParam, viewParam]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const isInputLike = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable;
