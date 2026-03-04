@@ -552,7 +552,7 @@ export class TasksController {
     const taskType = body.type ?? TaskType.TASK;
     
     const requestedStatus = body.status ?? TaskStatus.TODO;
-    const progress = this.normalizeProgressForTaskType({
+    const progress = this.domain.deriveNormalizedTaskProgress({
       taskType,
       progress: body.progressPercent ?? 0,
       status: requestedStatus,
@@ -614,7 +614,7 @@ export class TasksController {
 
     const newType = body.type ?? task.type;
     const requestedStatus = body.status ?? task.status;
-    const progress = this.normalizeProgressForTaskType({
+    const progress = this.domain.deriveNormalizedTaskProgress({
       taskType: newType,
       progress: body.progressPercent ?? task.progressPercent,
       status: requestedStatus,
@@ -964,16 +964,11 @@ export class TasksController {
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (body.version !== task.version) throw new ConflictException('Version conflict');
 
-    const nextStatus = body.done ? TaskStatus.DONE : TaskStatus.IN_PROGRESS;
-    const nextProgress = this.normalizeProgressForTaskType({
+    const transition = this.domain.deriveTaskCompletionTransition({
       taskType: task.type,
-      progress: body.done ? 100 : 0,
-      status: nextStatus,
-      hasStatusOverride: true,
-      hasProgressOverride: true,
+      done: body.done,
+      completedAt: task.completedAt,
     });
-    const nextCompletedAt = body.done ? task.completedAt ?? new Date() : null;
-    const action = body.done ? 'task.completed' : 'task.reopened';
 
     return this.prisma.$transaction(async (tx) => {
       if (body.done && !body.force) {
@@ -1000,9 +995,9 @@ export class TasksController {
       const updated = await tx.task.update({
         where: { id },
         data: {
-          status: nextStatus,
-          progressPercent: nextProgress,
-          completedAt: nextCompletedAt,
+          status: transition.status,
+          progressPercent: transition.progressPercent,
+          completedAt: transition.completedAt,
           version: { increment: 1 },
         },
       });
@@ -1011,11 +1006,11 @@ export class TasksController {
         actor: req.user.sub,
         entityType: 'Task',
         entityId: id,
-        action,
+        action: transition.action,
         beforeJson: task,
         afterJson: updated,
         correlationId: req.correlationId,
-        outboxType: action,
+        outboxType: transition.action,
         payload: {
           taskId: id,
           projectId: task.projectId,
@@ -1694,7 +1689,7 @@ export class TasksController {
       const updated = [] as unknown[];
       for (const task of tasks) {
         const requestedStatus = body.status ?? task.status;
-        const progress = this.normalizeProgressForTaskType({
+        const progress = this.domain.deriveNormalizedTaskProgress({
           taskType: task.type,
           progress: body.progressPercent ?? task.progressPercent,
           status: requestedStatus,
@@ -1915,20 +1910,6 @@ export class TasksController {
   async getDependencyGraph(@Param('id') projectId: string, @CurrentRequest() req: AppRequest) {
     await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
     return this.subtaskService.getDependencyGraph(projectId);
-  }
-
-  private normalizeProgressForTaskType(input: {
-    taskType: TaskType;
-    progress: number;
-    status: TaskStatus;
-    hasStatusOverride: boolean;
-    hasProgressOverride: boolean;
-  }): number {
-    const { taskType, progress, status, hasStatusOverride, hasProgressOverride } = input;
-    if (taskType !== TaskType.MILESTONE) return progress;
-    if (hasStatusOverride) return status === TaskStatus.DONE ? 100 : 0;
-    if (hasProgressOverride) return progress >= 100 ? 100 : 0;
-    return progress >= 100 ? 100 : 0;
   }
 
   private toTaskCustomFieldFilterWhere(filter: TaskCustomFieldFilter): Prisma.TaskWhereInput {

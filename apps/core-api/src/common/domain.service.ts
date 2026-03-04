@@ -1,7 +1,13 @@
 import { Injectable, ForbiddenException, NotFoundException, ConflictException, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma, ProjectRole, TaskStatus, UserStatus, WorkspaceRole } from '@prisma/client';
-import { applyTaskProgressAutomation, type TaskStatus as DomainTaskStatus } from '@atlaspm/domain';
+import { Prisma, ProjectRole, TaskStatus, TaskType, UserStatus, WorkspaceRole } from '@prisma/client';
+import {
+  applyTaskProgressAutomation,
+  deriveTaskCompletionTransition as deriveTaskCompletionTransitionInDomain,
+  normalizeTaskProgressForType,
+  type TaskStatus as DomainTaskStatus,
+  type TaskType as DomainTaskType,
+} from '@atlaspm/domain';
 import { templateDefinition } from '../rules/rule-definition';
 import type { AuthUser } from './types';
 
@@ -319,6 +325,42 @@ export class DomainService {
     };
   }
 
+  deriveNormalizedTaskProgress(input: {
+    taskType: TaskType;
+    progress: number;
+    status: TaskStatus;
+    hasStatusOverride: boolean;
+    hasProgressOverride: boolean;
+  }) {
+    return normalizeTaskProgressForType({
+      taskType: this.toDomainTaskType(input.taskType),
+      progressPercent: input.progress,
+      status: this.toDomainTaskStatus(input.status),
+      hasStatusOverride: input.hasStatusOverride,
+      hasProgressOverride: input.hasProgressOverride,
+    });
+  }
+
+  deriveTaskCompletionTransition(input: {
+    taskType: TaskType;
+    done: boolean;
+    completedAt: Date | null;
+    now?: Date;
+  }) {
+    const result = deriveTaskCompletionTransitionInDomain({
+      taskType: this.toDomainTaskType(input.taskType),
+      done: input.done,
+      completedAt: input.completedAt,
+      now: input.now,
+    });
+    return {
+      status: this.fromDomainTaskStatus(result.status),
+      progressPercent: result.progressPercent,
+      completedAt: result.completedAt,
+      action: result.action,
+    };
+  }
+
   private toDomainTaskStatus(status: TaskStatus): DomainTaskStatus {
     switch (status) {
       case TaskStatus.TODO:
@@ -346,6 +388,19 @@ export class DomainService {
         return TaskStatus.BLOCKED;
       default:
         return this.unhandledStatus(status as never, 'domain->prisma');
+    }
+  }
+
+  private toDomainTaskType(taskType: TaskType): DomainTaskType {
+    switch (taskType) {
+      case TaskType.TASK:
+        return 'TASK';
+      case TaskType.MILESTONE:
+        return 'MILESTONE';
+      case TaskType.APPROVAL:
+        return 'APPROVAL';
+      default:
+        return this.unhandledStatus(taskType as never, 'prisma-task-type->domain');
     }
   }
 

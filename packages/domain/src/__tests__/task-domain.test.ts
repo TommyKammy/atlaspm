@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Task } from '../entities/task.js';
 import { DomainValidationError } from '../errors/domain-error.js';
+import { deriveTaskCompletionTransition } from '../services/task-completion-transition.js';
 import { applyTaskProgressAutomation } from '../services/task-progress-automation.js';
+import { normalizeTaskProgressForType } from '../services/task-progress-normalization.js';
 
 test('Task.create rejects invalid progress values', () => {
   assert.throws(
@@ -129,4 +131,64 @@ test('applyTaskProgressAutomation derives IN_PROGRESS for non-100 progress', () 
 
   assert.equal(next.status, 'IN_PROGRESS');
   assert.equal(next.completedAt, null);
+});
+
+test('normalizeTaskProgressForType clamps milestone by status override', () => {
+  const doneProgress = normalizeTaskProgressForType({
+    taskType: 'MILESTONE',
+    progressPercent: 10,
+    status: 'DONE',
+    hasStatusOverride: true,
+    hasProgressOverride: false,
+  });
+  const notDoneProgress = normalizeTaskProgressForType({
+    taskType: 'MILESTONE',
+    progressPercent: 100,
+    status: 'IN_PROGRESS',
+    hasStatusOverride: true,
+    hasProgressOverride: false,
+  });
+
+  assert.equal(doneProgress, 100);
+  assert.equal(notDoneProgress, 0);
+});
+
+test('normalizeTaskProgressForType keeps non-milestone progress', () => {
+  const progress = normalizeTaskProgressForType({
+    taskType: 'TASK',
+    progressPercent: 42,
+    status: 'IN_PROGRESS',
+    hasStatusOverride: false,
+    hasProgressOverride: true,
+  });
+
+  assert.equal(progress, 42);
+});
+
+test('deriveTaskCompletionTransition marks done task with progress and completedAt', () => {
+  const now = new Date('2026-03-04T12:00:00.000Z');
+  const next = deriveTaskCompletionTransition({
+    taskType: 'TASK',
+    done: true,
+    completedAt: null,
+    now,
+  });
+
+  assert.equal(next.status, 'DONE');
+  assert.equal(next.progressPercent, 100);
+  assert.equal(next.completedAt?.toISOString(), now.toISOString());
+  assert.equal(next.action, 'task.completed');
+});
+
+test('deriveTaskCompletionTransition reopens task and clears completedAt', () => {
+  const next = deriveTaskCompletionTransition({
+    taskType: 'MILESTONE',
+    done: false,
+    completedAt: new Date('2026-03-04T12:00:00.000Z'),
+  });
+
+  assert.equal(next.status, 'IN_PROGRESS');
+  assert.equal(next.progressPercent, 0);
+  assert.equal(next.completedAt, null);
+  assert.equal(next.action, 'task.reopened');
 });
