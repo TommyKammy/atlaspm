@@ -8,6 +8,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src --ext .ts",
-    "test": "echo 'no tests'"
+    "type-check": "tsc --noEmit -p tsconfig.json",
+    "test": "pnpm build && node --test \"dist/**/*.test.js\""
   }
 }
