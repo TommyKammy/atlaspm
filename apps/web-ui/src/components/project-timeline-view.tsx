@@ -14,7 +14,10 @@ import type { SectionTaskGroup, Task } from '@/lib/types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TASK_NAME_COL_WIDTH = 260;
-const TIMELINE_VIEW_STORAGE_PREFIX = 'atlaspm:timeline-view';
+const VIEW_STORAGE_PREFIX: Record<TimelineMode, string> = {
+  timeline: 'atlaspm:timeline-shell',
+  gantt: 'atlaspm:gantt-shell',
+};
 const SECTION_ROW_HEIGHT = 32;
 const TASK_ROW_HEIGHT = 40;
 const VIRTUALIZE_ROW_THRESHOLD = 120;
@@ -201,7 +204,7 @@ function applyLaneOrder<T extends { id: string }>(lanes: T[], preferredOrder: st
   });
 }
 
-export function ProjectTimelineView({
+export function ProjectScheduleCanvas({
   projectId,
   search,
   statusFilter,
@@ -267,7 +270,7 @@ export function ProjectTimelineView({
   });
 
   const timelineStorageKey = useMemo(
-    () => (meQuery.data?.id ? `${TIMELINE_VIEW_STORAGE_PREFIX}:${meQuery.data.id}:${projectId}:${mode}` : null),
+    () => (meQuery.data?.id ? `${VIEW_STORAGE_PREFIX[mode]}:${meQuery.data.id}:${projectId}` : null),
     [meQuery.data?.id, mode, projectId],
   );
 

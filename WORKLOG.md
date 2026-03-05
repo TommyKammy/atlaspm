@@ -2347,3 +2347,21 @@
   - `pnpm --filter @atlaspm/web-ui build`
 - Risks/known gaps:
   - List/detail date edits still use general `PATCH /tasks/:id` in this wave; drag-based schedule updates now use dedicated reschedule endpoint.
+
+## 2026-03-06 - Issue #195: Split Timeline and Gantt shells
+- What changed:
+  - Split project schedule entry points into dedicated shells:
+    - `apps/web-ui/src/components/project-timeline-shell.tsx`
+    - `apps/web-ui/src/components/project-gantt-shell.tsx`
+  - Renamed shared renderer export in `apps/web-ui/src/components/project-timeline-view.tsx` to `ProjectScheduleCanvas`.
+  - Switched the project page route wiring in `apps/web-ui/src/app/projects/[id]/page.tsx` to use distinct timeline and gantt shells.
+  - Separated persisted view-state storage keys so timeline and gantt preferences are isolated:
+    - `atlaspm:timeline-shell:*`
+    - `atlaspm:gantt-shell:*`
+- Why:
+  - Issue #195 is the foundation for safely diverging Timeline and Gantt behavior without forcing a risky all-at-once extraction of shared scheduling logic.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm --dir e2e/playwright exec playwright test tests/timeline-route.spec.ts tests/timeline-swimlane.spec.ts tests/gantt-risk.spec.ts --reporter=list`
+- Risks/known gaps:
+  - Timeline and Gantt now have separate shell boundaries, but most rendering logic is still shared inside `ProjectScheduleCanvas`; deeper extraction moves to Issue #196.

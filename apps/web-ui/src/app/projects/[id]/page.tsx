@@ -6,7 +6,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Plus } from 'lucide-react';
 import ProjectBoard from '@/components/project-board';
 import { ProjectBoardView, ProjectCalendarView, ProjectFilesView } from '@/components/project-alt-views';
-import { ProjectTimelineView } from '@/components/project-timeline-view';
+import { ProjectGanttShell } from '@/components/project-gantt-shell';
+import { ProjectTimelineShell } from '@/components/project-timeline-shell';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { Project, ProjectMember, Section, SectionTaskGroup, Task } from '@/lib/types';
@@ -458,20 +459,18 @@ export default function ProjectPage() {
           priorityFilter={priorityFilter}
         />
       ) : view === 'timeline' ? (
-        <ProjectTimelineView
+        <ProjectTimelineShell
           projectId={projectId}
           search={search}
           statusFilter={statusFilter}
           priorityFilter={priorityFilter}
-          mode="timeline"
         />
       ) : view === 'gantt' ? (
-        <ProjectTimelineView
+        <ProjectGanttShell
           projectId={projectId}
           search={search}
           statusFilter={statusFilter}
           priorityFilter={priorityFilter}
-          mode="gantt"
         />
       ) : view === 'files' ? (
         <ProjectFilesView
