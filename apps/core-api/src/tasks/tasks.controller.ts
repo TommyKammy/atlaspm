@@ -250,6 +250,39 @@ class RescheduleTaskDto {
   version!: number;
 }
 
+class PutTimelineLaneOrderDto {
+  @IsArray()
+  @IsString({ each: true })
+  laneOrder!: string[];
+}
+
+class TimelineMoveTaskDto {
+  @IsOptional()
+  @Allow()
+  assigneeUserId?: string | null;
+
+  @IsOptional()
+  @IsISO8601()
+  startAt?: string | null;
+
+  @IsOptional()
+  @IsISO8601()
+  dueAt?: string | null;
+
+  @IsOptional()
+  @IsISO8601()
+  dropAt?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  durationDays?: number;
+
+  @IsInt()
+  version!: number;
+}
+
 class CompleteTaskDto {
   @IsBoolean()
   done!: boolean;
@@ -417,6 +450,9 @@ const MAX_DESCRIPTION_TEXT_LENGTH = 20_000;
 const MAX_COMMENT_BODY_LENGTH = 5000;
 const MAX_IMAGE_UPLOAD_BYTES = 5_000_000;
 const IMAGE_MIME_ALLOWLIST = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const TIMELINE_GROUP_BY_VALUES = ['section', 'assignee'] as const;
+
+type TimelineGroupBy = (typeof TIMELINE_GROUP_BY_VALUES)[number];
 
 type TaskCustomFieldValueWithRelations = Prisma.TaskCustomFieldValueGetPayload<{
   include: {
@@ -539,6 +575,77 @@ export class TasksController {
       }));
     }
     return hydratedTasks;
+  }
+
+  @Get('projects/:id/timeline/preferences')
+  async getTimelinePreferences(@Param('id') projectId: string, @CurrentRequest() req: AppRequest) {
+    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+    const preferences = await this.prisma.projectTimelinePreference.findUnique({
+      where: { projectId_userId: { projectId, userId: req.user.sub } },
+    });
+    return {
+      projectId,
+      userId: req.user.sub,
+      laneOrderBySection: preferences?.laneOrderBySection ?? [],
+      laneOrderByAssignee: preferences?.laneOrderByAssignee ?? [],
+    };
+  }
+
+  @Put('projects/:id/timeline/preferences/:groupBy')
+  async putTimelineLaneOrder(
+    @Param('id') projectId: string,
+    @Param('groupBy') rawGroupBy: string,
+    @Body() body: PutTimelineLaneOrderDto,
+    @CurrentRequest() req: AppRequest,
+  ) {
+    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
+    const groupBy = this.parseTimelineGroupBy(rawGroupBy);
+    const normalizedLaneOrder = this.domain.normalizeTimelineLaneOrder(body.laneOrder);
+    const entityId = `${projectId}:${req.user.sub}`;
+
+    return this.prisma.$transaction(async (tx) => {
+      const before = await tx.projectTimelinePreference.findUnique({
+        where: { projectId_userId: { projectId, userId: req.user.sub } },
+      });
+      const updated = await tx.projectTimelinePreference.upsert({
+        where: { projectId_userId: { projectId, userId: req.user.sub } },
+        create: {
+          projectId,
+          userId: req.user.sub,
+          laneOrderBySection: groupBy === 'section' ? normalizedLaneOrder : [],
+          laneOrderByAssignee: groupBy === 'assignee' ? normalizedLaneOrder : [],
+        },
+        update:
+          groupBy === 'section'
+            ? { laneOrderBySection: normalizedLaneOrder }
+            : { laneOrderByAssignee: normalizedLaneOrder },
+      });
+
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'ProjectTimelinePreference',
+        entityId,
+        action: 'project.timeline.preferences.updated',
+        beforeJson: before,
+        afterJson: updated,
+        correlationId: req.correlationId,
+        outboxType: 'project.timeline.preferences.updated',
+        payload: {
+          projectId,
+          userId: req.user.sub,
+          groupBy,
+          laneOrder: normalizedLaneOrder,
+        },
+      });
+
+      return {
+        projectId,
+        userId: req.user.sub,
+        laneOrderBySection: updated.laneOrderBySection,
+        laneOrderByAssignee: updated.laneOrderByAssignee,
+      };
+    });
   }
 
   @Get('tasks/:id')
@@ -833,6 +940,134 @@ export class TasksController {
           version: updated.version,
           startAt: updated.startAt,
           dueAt: updated.dueAt,
+        },
+      });
+      return updated;
+    }).then((updated) => {
+      void this.indexTaskWithCustomFields(updated);
+      return updated;
+    });
+  }
+
+  @Patch('tasks/:id/timeline-move')
+  async moveInTimeline(@Param('id') id: string, @Body() body: TimelineMoveTaskDto, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+
+    const hasSchedulePatch = body.startAt !== undefined || body.dueAt !== undefined;
+    const hasAssigneePatch = body.assigneeUserId !== undefined;
+    const hasDrop = body.dropAt !== undefined;
+    if (!hasSchedulePatch && !hasAssigneePatch && !hasDrop) {
+      throw new BadRequestException('At least one of assigneeUserId, startAt, dueAt, or dropAt must be provided');
+    }
+    if (hasDrop && hasSchedulePatch) {
+      throw new BadRequestException('dropAt cannot be combined with startAt/dueAt');
+    }
+    if (
+      hasAssigneePatch
+      && body.assigneeUserId !== null
+      && (typeof body.assigneeUserId !== 'string' || !body.assigneeUserId.trim())
+    ) {
+      throw new BadRequestException('assigneeUserId must be a non-empty string or null');
+    }
+    if (hasAssigneePatch && typeof body.assigneeUserId === 'string') {
+      await this.domain.requireProjectRole(task.projectId, body.assigneeUserId, ProjectRole.VIEWER);
+    }
+
+    if (body.version !== task.version) {
+      throw new ConflictException({
+        message: 'Version conflict',
+        latest: {
+          version: task.version,
+          assigneeUserId: task.assigneeUserId,
+          startAt: task.startAt,
+          dueAt: task.dueAt,
+        },
+      });
+    }
+
+    let nextStartAt: Date | null = task.startAt;
+    let nextDueAt: Date | null = task.dueAt;
+    if (hasDrop) {
+      const dropSchedule = this.domain.deriveTimelineDropSchedule({
+        dropAt: new Date(body.dropAt as string),
+        currentStartAt: task.startAt,
+        currentDueAt: task.dueAt,
+        durationDays: body.durationDays,
+      });
+      nextStartAt = dropSchedule.startAt;
+      nextDueAt = dropSchedule.dueAt;
+    } else {
+      if (body.startAt !== undefined) {
+        nextStartAt = body.startAt ? new Date(body.startAt) : null;
+      }
+      if (body.dueAt !== undefined) {
+        nextDueAt = body.dueAt ? new Date(body.dueAt) : null;
+      }
+    }
+    this.domain.assertTimelineScheduleRange(nextStartAt, nextDueAt);
+    assertValidDateRange(nextStartAt?.toISOString() ?? null, nextDueAt?.toISOString() ?? null);
+
+    return this.prisma.$transaction(async (tx) => {
+      const updateData: Prisma.TaskUpdateManyMutationInput = {
+        version: { increment: 1 },
+      };
+      if (hasAssigneePatch) {
+        updateData.assigneeUserId = body.assigneeUserId;
+      }
+      if (hasDrop || body.startAt !== undefined) {
+        updateData.startAt = nextStartAt;
+      }
+      if (hasDrop || body.dueAt !== undefined) {
+        updateData.dueAt = nextDueAt;
+      }
+
+      const updatedRows = await tx.task.updateMany({
+        where: { id, deletedAt: null, version: body.version },
+        data: updateData,
+      });
+      if (updatedRows.count === 0) {
+        const latest = await tx.task.findFirstOrThrow({ where: { id, deletedAt: null } });
+        throw new ConflictException({
+          message: 'Version conflict',
+          latest: {
+            version: latest.version,
+            assigneeUserId: latest.assigneeUserId,
+            startAt: latest.startAt,
+            dueAt: latest.dueAt,
+          },
+        });
+      }
+
+      const updated = await tx.task.findFirstOrThrow({ where: { id, deletedAt: null } });
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'Task',
+        entityId: id,
+        action: 'task.timeline.moved',
+        beforeJson: {
+          version: task.version,
+          assigneeUserId: task.assigneeUserId,
+          startAt: task.startAt,
+          dueAt: task.dueAt,
+        },
+        afterJson: {
+          version: updated.version,
+          assigneeUserId: updated.assigneeUserId,
+          startAt: updated.startAt,
+          dueAt: updated.dueAt,
+        },
+        correlationId: req.correlationId,
+        outboxType: 'task.timeline.moved',
+        payload: {
+          taskId: id,
+          projectId: task.projectId,
+          version: updated.version,
+          assigneeUserId: updated.assigneeUserId,
+          startAt: updated.startAt,
+          dueAt: updated.dueAt,
+          movedByDrop: hasDrop,
         },
       });
       return updated;
@@ -2477,6 +2712,13 @@ export class TasksController {
 
       await tx.ruleRun.update({ where: { id: run.id }, data: { finishedAt: new Date() } });
     }
+  }
+
+  private parseTimelineGroupBy(value: string): TimelineGroupBy {
+    if (TIMELINE_GROUP_BY_VALUES.includes(value as TimelineGroupBy)) {
+      return value as TimelineGroupBy;
+    }
+    throw new BadRequestException(`groupBy must be one of: ${TIMELINE_GROUP_BY_VALUES.join(', ')}`);
   }
 
   private resolveRuleDefinition(rule: { definition: unknown; templateKey: string }): RuleDefinition {

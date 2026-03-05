@@ -2658,4 +2658,117 @@ describe('Core API Integration', () => {
       expect((dependencyRemoveOutbox?.payload as any)?.dependsOnId).toBe(taskBId);
     });
   });
+
+  test('timeline preferences and timeline move APIs persist contracts with audit/outbox', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Timeline Interaction Foundation Project' })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const timelineAssigneeId = 'timeline-member-1';
+    await prisma.user.upsert({
+      where: { id: timelineAssigneeId },
+      create: {
+        id: timelineAssigneeId,
+        email: 'timeline-member-1@example.com',
+        displayName: 'Timeline Member 1',
+        status: 'ACTIVE',
+      },
+      update: {},
+    });
+    await prisma.workspaceMembership.upsert({
+      where: { workspaceId_userId: { workspaceId, userId: timelineAssigneeId } },
+      create: { workspaceId, userId: timelineAssigneeId, role: 'WS_MEMBER' },
+      update: {},
+    });
+    await prisma.projectMembership.upsert({
+      where: { projectId_userId: { projectId, userId: timelineAssigneeId } },
+      create: { projectId, userId: timelineAssigneeId, role: 'VIEWER' },
+      update: {},
+    });
+
+    const initialPrefsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/timeline/preferences`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(initialPrefsRes.body.laneOrderBySection).toEqual([]);
+    expect(initialPrefsRes.body.laneOrderByAssignee).toEqual([]);
+
+    const sectionPrefsRes = await request(app.getHttpServer())
+      .put(`/projects/${projectId}/timeline/preferences/section`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ laneOrder: [' section-a ', 'section-b', 'section-a', ''] })
+      .expect(200);
+    expect(sectionPrefsRes.body.laneOrderBySection).toEqual(['section-a', 'section-b']);
+
+    const assigneePrefsRes = await request(app.getHttpServer())
+      .put(`/projects/${projectId}/timeline/preferences/assignee`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ laneOrder: ['unassigned', timelineAssigneeId, timelineAssigneeId] })
+      .expect(200);
+    expect(assigneePrefsRes.body.laneOrderByAssignee).toEqual(['unassigned', timelineAssigneeId]);
+
+    const createdTaskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Timeline move target',
+        assigneeUserId: 'test-user',
+        startAt: '2026-03-12T00:00:00.000Z',
+        dueAt: '2026-03-14T00:00:00.000Z',
+      })
+      .expect(201);
+    const taskId = createdTaskRes.body.id as string;
+
+    const timelineMoveStart = new Date();
+    const movedTaskRes = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/timeline-move`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        assigneeUserId: timelineAssigneeId,
+        dropAt: '2026-03-20T00:00:00.000Z',
+        version: createdTaskRes.body.version,
+      })
+      .expect(200);
+    expect(movedTaskRes.body.assigneeUserId).toBe(timelineAssigneeId);
+    expect(movedTaskRes.body.startAt).toContain('2026-03-20');
+    expect(movedTaskRes.body.dueAt).toContain('2026-03-22');
+
+    const timelineAudit = await prisma.auditEvent.findFirst({
+      where: {
+        entityType: 'Task',
+        entityId: taskId,
+        action: 'task.timeline.moved',
+        createdAt: { gte: timelineMoveStart },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(timelineAudit).toBeTruthy();
+
+    const timelineOutbox = await prisma.outboxEvent.findFirst({
+      where: {
+        type: 'task.timeline.moved',
+        createdAt: { gte: timelineMoveStart },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect((timelineOutbox?.payload as any)?.taskId).toBe(taskId);
+
+    await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/timeline-move`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        assigneeUserId: 'test-user',
+        version: createdTaskRes.body.version,
+      })
+      .expect(409);
+  });
 });
