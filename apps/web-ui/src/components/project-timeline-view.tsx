@@ -290,6 +290,7 @@ export function ProjectTimelineView({
     const taskById = new Map(baseFilteredTasks.map((task) => [task.id, task]));
     const incomingDependenciesByTarget = new Map<string, TimelineTask[]>();
     for (const edge of timeline.dependencyEdges) {
+      if (edge.type === 'RELATES_TO') continue;
       const sourceTask = taskById.get(edge.source);
       const targetTask = taskById.get(edge.target);
       if (!sourceTask || !targetTask) continue;
@@ -1053,36 +1054,40 @@ export function ProjectTimelineView({
 
                   {topSpacer > 0 ? <div style={{ height: `${topSpacer}px` }} /> : null}
 
-	                  {visibleTaskRows.map(({ task }) => {
-	                    const fallbackName = task.title.trim() || t('untitledTask');
-	                    const ganttTaskRisk = mode === 'gantt' ? ganttRiskByTaskId.get(task.id) : null;
-	                    const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
-	                      ? timeline.window.start
-	                      : task.timelineStart;
+                  {visibleTaskRows.map(({ task }) => {
+                    const fallbackName = task.title.trim() || t('untitledTask');
+                    const ganttTaskRisk = mode === 'gantt' ? ganttRiskByTaskId.get(task.id) : null;
+                    const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
+                      ? timeline.window.start
+                      : task.timelineStart;
                     const visibleEnd = task.timelineEnd && task.timelineEnd > timeline.window.end
                       ? timeline.window.end
                       : task.timelineEnd;
                     return (
-	                      <div key={task.id} className="grid h-10 border-b last:border-b-0" style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}>
-	                        <div className="flex h-full items-center gap-2 px-3">
-	                          <button
+                      <div key={task.id} className="grid h-10 border-b last:border-b-0" style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}>
+                        <div className="flex h-full items-center gap-2 px-3">
+                          <button
                             type="button"
                             className="truncate text-left text-sm hover:underline"
                             onClick={() => setSelectedTaskId(task.id)}
                             data-testid={`timeline-task-${task.id}`}
-	                          >
-	                            {fallbackName}
-	                          </button>
+                          >
+                            {fallbackName}
+                          </button>
                           {mode === 'gantt' && ganttTaskRisk?.isAtRisk ? (
                             <Badge
                               variant="destructive"
                               className="h-5 px-1.5 text-[10px]"
                               data-testid={`gantt-risk-badge-${task.id}`}
                             >
-                              {ganttTaskRisk.overdue ? t('ganttRiskOverdue') : t('ganttRiskBlocked')}
+                              {ganttTaskRisk.overdue
+                                ? t('ganttRiskOverdue')
+                                : ganttTaskRisk.blockedByOpen > 0
+                                  ? t('ganttRiskBlocked')
+                                  : t('ganttRiskLateDependency')}
                             </Badge>
                           ) : null}
-	                        </div>
+                        </div>
                         <div className="relative h-full border-l">
                           {task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd ? (
                             <button
