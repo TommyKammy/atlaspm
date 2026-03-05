@@ -27,6 +27,14 @@ type TimelineMode = 'timeline' | 'gantt';
 type TimelineSwimlane = 'section' | 'assignee';
 type TimelineSortMode = 'manual' | 'startAt' | 'dueAt';
 type TimelineScheduleFilter = 'all' | 'scheduled' | 'unscheduled';
+type GanttRiskFilterMode = 'all' | 'risk';
+
+type GanttTaskRisk = {
+  isAtRisk: boolean;
+  overdue: boolean;
+  blockedByOpen: number;
+  blockedByLate: number;
+};
 
 const TIMELINE_ZOOM_CONFIG: Record<TimelineZoom, { beforeDays: number; afterDays: number; stepDays: number; dayColWidth: number }> = {
   day: { beforeDays: 1, afterDays: 5, stepDays: 1, dayColWidth: 64 },
@@ -151,6 +159,8 @@ export function ProjectTimelineView({
   const [swimlane, setSwimlane] = useState<TimelineSwimlane>('section');
   const [sortMode, setSortMode] = useState<TimelineSortMode>('manual');
   const [scheduleFilter, setScheduleFilter] = useState<TimelineScheduleFilter>('all');
+  const [ganttRiskFilterMode, setGanttRiskFilterMode] = useState<GanttRiskFilterMode>('all');
+  const [ganttStrictMode, setGanttStrictMode] = useState(false);
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(() => (typeof window === 'undefined' ? 800 : window.innerHeight));
@@ -192,6 +202,8 @@ export function ProjectTimelineView({
           swimlane?: TimelineSwimlane;
           sortMode?: TimelineSortMode;
           scheduleFilter?: TimelineScheduleFilter;
+          ganttRiskFilterMode?: GanttRiskFilterMode;
+          ganttStrictMode?: boolean;
         };
         if (parsed.zoom && parsed.zoom in TIMELINE_ZOOM_CONFIG) {
           setZoom(parsed.zoom);
@@ -211,6 +223,12 @@ export function ProjectTimelineView({
         if (parsed.scheduleFilter === 'all' || parsed.scheduleFilter === 'scheduled' || parsed.scheduleFilter === 'unscheduled') {
           setScheduleFilter(parsed.scheduleFilter);
         }
+        if (parsed.ganttRiskFilterMode === 'all' || parsed.ganttRiskFilterMode === 'risk') {
+          setGanttRiskFilterMode(parsed.ganttRiskFilterMode);
+        }
+        if (typeof parsed.ganttStrictMode === 'boolean') {
+          setGanttStrictMode(parsed.ganttStrictMode);
+        }
       } catch {
         // Ignore malformed local preference state.
       }
@@ -228,9 +246,11 @@ export function ProjectTimelineView({
         swimlane,
         sortMode,
         scheduleFilter,
+        ganttRiskFilterMode,
+        ganttStrictMode,
       }),
     );
-  }, [anchorDate, preferencesHydrated, scheduleFilter, sortMode, swimlane, timelineStorageKey, zoom]);
+  }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, preferencesHydrated, scheduleFilter, sortMode, swimlane, timelineStorageKey, zoom]);
 
   const zoomConfig = TIMELINE_ZOOM_CONFIG[zoom];
   const effectiveSwimlane: TimelineSwimlane = mode === 'timeline' ? swimlane : 'section';
@@ -255,7 +275,7 @@ export function ProjectTimelineView({
     return list;
   }, [timeline.window.end, timeline.window.start]);
 
-  const filteredTasks = useMemo(() => {
+  const baseFilteredTasks = useMemo(() => {
     return timeline.tasks
       .filter((task) => taskMatchesFilters(task, search, statusFilter, priorityFilter))
       .filter((task) => {
@@ -265,6 +285,52 @@ export function ProjectTimelineView({
       })
       .sort((left, right) => compareTimelineTasks(left, right, effectiveSortMode));
   }, [effectiveScheduleFilter, effectiveSortMode, priorityFilter, search, statusFilter, timeline.tasks]);
+
+  const ganttRiskByTaskId = useMemo(() => {
+    const taskById = new Map(baseFilteredTasks.map((task) => [task.id, task]));
+    const incomingDependenciesByTarget = new Map<string, TimelineTask[]>();
+    for (const edge of timeline.dependencyEdges) {
+      const sourceTask = taskById.get(edge.source);
+      const targetTask = taskById.get(edge.target);
+      if (!sourceTask || !targetTask) continue;
+      const list = incomingDependenciesByTarget.get(edge.target) ?? [];
+      list.push(sourceTask);
+      incomingDependenciesByTarget.set(edge.target, list);
+    }
+
+    const today = startOfDay(new Date());
+    const todayDay = dayNumber(today);
+    const next = new Map<string, GanttTaskRisk>();
+    for (const task of baseFilteredTasks) {
+      const blockers = incomingDependenciesByTarget.get(task.id) ?? [];
+      let blockedByOpen = 0;
+      let blockedByLate = 0;
+      const taskDueDay = task.timelineEnd ? dayNumber(task.timelineEnd) : null;
+      for (const blocker of blockers) {
+        if (blocker.status !== 'DONE') {
+          blockedByOpen += 1;
+        }
+        if (taskDueDay !== null && blocker.timelineEnd && dayNumber(blocker.timelineEnd) > taskDueDay) {
+          blockedByLate += 1;
+        }
+      }
+
+      const overdue = Boolean(task.timelineEnd && dayNumber(task.timelineEnd) < todayDay && task.status !== 'DONE');
+      const isAtRisk = overdue || blockedByOpen > 0 || blockedByLate > 0;
+      next.set(task.id, {
+        isAtRisk,
+        overdue,
+        blockedByOpen,
+        blockedByLate,
+      });
+    }
+    return next;
+  }, [baseFilteredTasks, timeline.dependencyEdges]);
+
+  const filteredTasks = useMemo(() => {
+    if (mode !== 'gantt' || ganttRiskFilterMode === 'all') return baseFilteredTasks;
+    return baseFilteredTasks.filter((task) => ganttRiskByTaskId.get(task.id)?.isAtRisk);
+  }, [baseFilteredTasks, ganttRiskByTaskId, ganttRiskFilterMode, mode]);
 
   const timelineLanes = useMemo(() => {
     if (effectiveSwimlane === 'assignee') {
@@ -319,6 +385,14 @@ export function ProjectTimelineView({
 
   const scheduledTasks = filteredTasks.filter((task) => task.hasSchedule && task.inWindow);
   const unscheduledTasks = filteredTasks.filter((task) => !task.hasSchedule);
+  const ganttRiskTasks = useMemo(
+    () => baseFilteredTasks.filter((task) => ganttRiskByTaskId.get(task.id)?.isAtRisk),
+    [baseFilteredTasks, ganttRiskByTaskId],
+  );
+  const ganttBlockedTasks = useMemo(
+    () => baseFilteredTasks.filter((task) => (ganttRiskByTaskId.get(task.id)?.blockedByOpen ?? 0) > 0),
+    [baseFilteredTasks, ganttRiskByTaskId],
+  );
   const gridWidth = Math.max(1, days.length) * zoomConfig.dayColWidth;
 
   const totalDependencyEdges = useMemo(
@@ -665,6 +739,10 @@ export function ProjectTimelineView({
             <>
               <Badge variant="secondary">{totalDependencyEdges}</Badge>
               <span>{t('timelineDependencies')}</span>
+              <Badge variant={ganttRiskTasks.length ? 'destructive' : 'secondary'}>
+                {ganttRiskTasks.length}
+              </Badge>
+              <span>{t('ganttAtRisk')}</span>
             </>
           ) : null}
         </div>
@@ -772,8 +850,88 @@ export function ProjectTimelineView({
               {t('timelineDragHint')}
             </p>
           </div>
+        ) : mode === 'gantt' ? (
+          <div className="flex flex-wrap items-center gap-3 border-t pt-2">
+            <div className="inline-flex items-center rounded-md border bg-background/60 p-0.5" data-testid="gantt-risk-filter-toggle">
+              <Button
+                type="button"
+                size="sm"
+                variant={ganttRiskFilterMode === 'all' ? 'default' : 'ghost'}
+                className="h-7 px-2 text-xs"
+                data-testid="gantt-filter-all"
+                data-active={ganttRiskFilterMode === 'all' ? 'true' : 'false'}
+                onClick={() => setGanttRiskFilterMode('all')}
+              >
+                {t('ganttAllTasks')}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={ganttRiskFilterMode === 'risk' ? 'default' : 'ghost'}
+                className="h-7 px-2 text-xs"
+                data-testid="gantt-filter-risk"
+                data-active={ganttRiskFilterMode === 'risk' ? 'true' : 'false'}
+                onClick={() => setGanttRiskFilterMode('risk')}
+              >
+                {t('ganttRiskOnly')}
+              </Button>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant={ganttStrictMode ? 'default' : 'outline'}
+              className={`h-7 px-2 text-xs ${ganttStrictMode ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' : ''}`}
+              data-testid="gantt-strict-mode"
+              data-active={ganttStrictMode ? 'true' : 'false'}
+              onClick={() => setGanttStrictMode((current) => !current)}
+            >
+              {t('ganttStrictMode')}
+            </Button>
+            <div className="text-xs text-muted-foreground">
+              {ganttBlockedTasks.length} {t('ganttBlockedTasks')}
+            </div>
+          </div>
         ) : null}
       </div>
+
+      {mode === 'gantt' && ganttStrictMode && ganttRiskTasks.length > 0 ? (
+        <div
+          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-foreground"
+          data-testid="gantt-strict-warning-banner"
+        >
+          {t('ganttStrictWarning')} ({ganttRiskTasks.length})
+        </div>
+      ) : null}
+
+      {mode === 'gantt' && ganttRiskTasks.length > 0 ? (
+        <div className="rounded-lg border bg-card p-3" data-testid="gantt-risk-panel">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('ganttRiskPanelTitle')}</p>
+          <div className="mt-2 space-y-1">
+            {ganttRiskTasks.slice(0, 6).map((task) => {
+              const risk = ganttRiskByTaskId.get(task.id);
+              if (!risk) return null;
+              return (
+                <button
+                  key={task.id}
+                  type="button"
+                  className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs hover:bg-muted/40"
+                  data-testid={`gantt-risk-item-${task.id}`}
+                  onClick={() => setSelectedTaskId(task.id)}
+                >
+                  <span className="truncate pr-2">{task.title || t('untitledTask')}</span>
+                  <span className="text-muted-foreground">
+                    {risk.overdue
+                      ? t('ganttRiskOverdue')
+                      : risk.blockedByOpen > 0
+                        ? `${risk.blockedByOpen} ${t('ganttRiskBlocked')}`
+                        : `${risk.blockedByLate} ${t('ganttRiskLateDependency')}`}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       <div
         ref={scrollContainerRef}
@@ -831,6 +989,7 @@ export function ProjectTimelineView({
                 const from = timelineLayout.barsByTaskId[edge.source];
                 const to = timelineLayout.barsByTaskId[edge.target];
                 if (!from || !to) return null;
+                const targetRisk = ganttRiskByTaskId.get(edge.target);
                 const x1 = from.left + from.width;
                 const y1 = from.y;
                 const x2 = to.left;
@@ -842,10 +1001,10 @@ export function ProjectTimelineView({
                     key={`${edge.source}-${edge.target}-${edge.type}`}
                     d={path}
                     fill="none"
-                    stroke="hsl(var(--primary))"
-                    strokeWidth="1.25"
+                    stroke={targetRisk?.isAtRisk ? 'hsl(var(--destructive))' : 'hsl(var(--primary))'}
+                    strokeWidth={targetRisk?.isAtRisk ? 1.75 : 1.25}
                     markerEnd={`url(#${markerId})`}
-                    opacity={0.7}
+                    opacity={targetRisk?.isAtRisk ? 0.9 : 0.7}
                     data-testid={`timeline-connector-${edge.source}-${edge.target}`}
                   />
                 );
@@ -894,26 +1053,36 @@ export function ProjectTimelineView({
 
                   {topSpacer > 0 ? <div style={{ height: `${topSpacer}px` }} /> : null}
 
-                  {visibleTaskRows.map(({ task }) => {
-                    const fallbackName = task.title.trim() || t('untitledTask');
-                    const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
-                      ? timeline.window.start
-                      : task.timelineStart;
+	                  {visibleTaskRows.map(({ task }) => {
+	                    const fallbackName = task.title.trim() || t('untitledTask');
+	                    const ganttTaskRisk = mode === 'gantt' ? ganttRiskByTaskId.get(task.id) : null;
+	                    const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
+	                      ? timeline.window.start
+	                      : task.timelineStart;
                     const visibleEnd = task.timelineEnd && task.timelineEnd > timeline.window.end
                       ? timeline.window.end
                       : task.timelineEnd;
                     return (
-                      <div key={task.id} className="grid h-10 border-b last:border-b-0" style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}>
-                        <div className="flex h-full items-center gap-2 px-3">
-                          <button
+	                      <div key={task.id} className="grid h-10 border-b last:border-b-0" style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}>
+	                        <div className="flex h-full items-center gap-2 px-3">
+	                          <button
                             type="button"
                             className="truncate text-left text-sm hover:underline"
                             onClick={() => setSelectedTaskId(task.id)}
                             data-testid={`timeline-task-${task.id}`}
-                          >
-                            {fallbackName}
-                          </button>
-                        </div>
+	                          >
+	                            {fallbackName}
+	                          </button>
+                          {mode === 'gantt' && ganttTaskRisk?.isAtRisk ? (
+                            <Badge
+                              variant="destructive"
+                              className="h-5 px-1.5 text-[10px]"
+                              data-testid={`gantt-risk-badge-${task.id}`}
+                            >
+                              {ganttTaskRisk.overdue ? t('ganttRiskOverdue') : t('ganttRiskBlocked')}
+                            </Badge>
+                          ) : null}
+	                        </div>
                         <div className="relative h-full border-l">
                           {task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd ? (
                             <button
