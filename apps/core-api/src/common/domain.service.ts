@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, ProjectRole, TaskStatus, TaskType, UserStatus, WorkspaceRole } from '@prisma/client';
 import {
   applyTaskProgressAutomation,
-  assertTimelineScheduleRange,
+  assertTimelineScheduleRange as assertTimelineScheduleRangeInDomain,
   deriveTaskCompletionTransition as deriveTaskCompletionTransitionInDomain,
   deriveTimelineDropSchedule as deriveTimelineDropScheduleInDomain,
   DomainValidationError,
@@ -392,7 +392,7 @@ export class DomainService {
 
   assertTimelineScheduleRange(startAt: Date | null, dueAt: Date | null): void {
     try {
-      assertTimelineScheduleRange(startAt, dueAt);
+      assertTimelineScheduleRangeInDomain(startAt, dueAt);
     } catch (error) {
       if (error instanceof DomainValidationError) {
         throw new BadRequestException(error.message);

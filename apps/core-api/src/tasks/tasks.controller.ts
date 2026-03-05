@@ -601,7 +601,6 @@ export class TasksController {
     await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
     const groupBy = this.parseTimelineGroupBy(rawGroupBy);
     const normalizedLaneOrder = this.domain.normalizeTimelineLaneOrder(body.laneOrder);
-    const entityId = `${projectId}:${req.user.sub}`;
 
     return this.prisma.$transaction(async (tx) => {
       const before = await tx.projectTimelinePreference.findUnique({
@@ -625,7 +624,7 @@ export class TasksController {
         tx,
         actor: req.user.sub,
         entityType: 'ProjectTimelinePreference',
-        entityId,
+        entityId: updated.id,
         action: 'project.timeline.preferences.updated',
         beforeJson: before,
         afterJson: updated,
@@ -954,14 +953,21 @@ export class TasksController {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
 
+    const rawDropAt = body.dropAt;
     const hasSchedulePatch = body.startAt !== undefined || body.dueAt !== undefined;
     const hasAssigneePatch = body.assigneeUserId !== undefined;
-    const hasDrop = body.dropAt !== undefined;
+    const hasDrop = rawDropAt !== undefined && rawDropAt !== null;
     if (!hasSchedulePatch && !hasAssigneePatch && !hasDrop) {
       throw new BadRequestException('At least one of assigneeUserId, startAt, dueAt, or dropAt must be provided');
     }
+    if (body.durationDays !== undefined && !hasDrop) {
+      throw new BadRequestException('durationDays requires dropAt');
+    }
     if (hasDrop && hasSchedulePatch) {
       throw new BadRequestException('dropAt cannot be combined with startAt/dueAt');
+    }
+    if (hasDrop && (typeof rawDropAt !== 'string' || !rawDropAt.trim())) {
+      throw new BadRequestException('dropAt must be a non-empty ISO datetime string');
     }
     if (
       hasAssigneePatch
@@ -990,7 +996,7 @@ export class TasksController {
     let nextDueAt: Date | null = task.dueAt;
     if (hasDrop) {
       const dropSchedule = this.domain.deriveTimelineDropSchedule({
-        dropAt: new Date(body.dropAt as string),
+        dropAt: new Date(rawDropAt),
         currentStartAt: task.startAt,
         currentDueAt: task.dueAt,
         durationDays: body.durationDays,

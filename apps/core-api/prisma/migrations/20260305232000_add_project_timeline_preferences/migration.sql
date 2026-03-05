@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS "ProjectTimelinePreference" (
   "laneOrderBySection" TEXT[] DEFAULT ARRAY[]::TEXT[],
   "laneOrderByAssignee" TEXT[] DEFAULT ARRAY[]::TEXT[],
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL,
   CONSTRAINT "ProjectTimelinePreference_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "ProjectTimelinePreference_projectId_fkey"
     FOREIGN KEY ("projectId") REFERENCES "Project"("id")

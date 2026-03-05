@@ -39,7 +39,7 @@ export function normalizeTimelineLaneOrder(laneIds: string[], maxLanes: number =
     seen.add(trimmed);
     normalized.push(trimmed);
     if (normalized.length > maxLanes) {
-      throw new DomainValidationError(`laneIds exceeds maximum of ${maxLanes}`);
+      throw new DomainValidationError(`laneIds exceed maximum of ${maxLanes}`);
     }
   }
   return normalized;
