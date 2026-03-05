@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import TaskDetailDrawer from '@/components/task-detail-drawer';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useTimelineData } from '@/hooks/use-timeline-data';
+import { useTimelineData, type TimelineTask } from '@/hooks/use-timeline-data';
 import { api } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { queryKeys } from '@/lib/query-keys';
@@ -20,8 +20,13 @@ const TASK_ROW_HEIGHT = 40;
 const VIRTUALIZE_ROW_THRESHOLD = 120;
 const VIRTUAL_OVERSCAN_PX = 320;
 const DRAG_START_THRESHOLD_PX = 6;
+const UNASSIGNED_LANE_ID = '__unassigned__';
 
 type TimelineZoom = 'day' | 'week' | 'month';
+type TimelineMode = 'timeline' | 'gantt';
+type TimelineSwimlane = 'section' | 'assignee';
+type TimelineSortMode = 'manual' | 'startAt' | 'dueAt';
+type TimelineScheduleFilter = 'all' | 'scheduled' | 'unscheduled';
 
 const TIMELINE_ZOOM_CONFIG: Record<TimelineZoom, { beforeDays: number; afterDays: number; stepDays: number; dayColWidth: number }> = {
   day: { beforeDays: 1, afterDays: 5, stepDays: 1, dayColWidth: 64 },
@@ -53,6 +58,28 @@ function formatDay(date: Date): string {
 
 function formatWeekday(date: Date): string {
   return date.toLocaleDateString(undefined, { weekday: 'short' });
+}
+
+function normalizeTestIdSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
+function compareTimelineTasks(left: TimelineTask, right: TimelineTask, sortMode: TimelineSortMode): number {
+  if (sortMode === 'startAt') {
+    const leftStart = left.timelineStart ? dayNumber(left.timelineStart) : Number.MAX_SAFE_INTEGER;
+    const rightStart = right.timelineStart ? dayNumber(right.timelineStart) : Number.MAX_SAFE_INTEGER;
+    if (leftStart !== rightStart) return leftStart - rightStart;
+  } else if (sortMode === 'dueAt') {
+    const leftDue = left.timelineEnd ? dayNumber(left.timelineEnd) : Number.MAX_SAFE_INTEGER;
+    const rightDue = right.timelineEnd ? dayNumber(right.timelineEnd) : Number.MAX_SAFE_INTEGER;
+    if (leftDue !== rightDue) return leftDue - rightDue;
+  }
+
+  const sectionDelta = left.section.position - right.section.position;
+  if (sectionDelta !== 0) return sectionDelta;
+  const positionDelta = left.position - right.position;
+  if (positionDelta !== 0) return positionDelta;
+  return left.title.localeCompare(right.title);
 }
 
 function taskMatchesFilters(
@@ -104,11 +131,13 @@ export function ProjectTimelineView({
   search,
   statusFilter,
   priorityFilter,
+  mode,
 }: {
   projectId: string;
   search: string;
   statusFilter: 'ALL' | Task['status'];
   priorityFilter: 'ALL' | NonNullable<Task['priority']>;
+  mode: TimelineMode;
 }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
@@ -119,6 +148,9 @@ export function ProjectTimelineView({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [zoom, setZoom] = useState<TimelineZoom>('week');
   const [anchorDate, setAnchorDate] = useState(() => startOfDay(new Date()));
+  const [swimlane, setSwimlane] = useState<TimelineSwimlane>('section');
+  const [sortMode, setSortMode] = useState<TimelineSortMode>('manual');
+  const [scheduleFilter, setScheduleFilter] = useState<TimelineScheduleFilter>('all');
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(() => (typeof window === 'undefined' ? 800 : window.innerHeight));
@@ -144,8 +176,8 @@ export function ProjectTimelineView({
   const markerId = `timeline-arrow-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
   const timelineStorageKey = useMemo(
-    () => (meQuery.data?.id ? `${TIMELINE_VIEW_STORAGE_PREFIX}:${meQuery.data.id}:${projectId}` : null),
-    [meQuery.data?.id, projectId],
+    () => (meQuery.data?.id ? `${TIMELINE_VIEW_STORAGE_PREFIX}:${meQuery.data.id}:${projectId}:${mode}` : null),
+    [meQuery.data?.id, mode, projectId],
   );
 
   useEffect(() => {
@@ -154,7 +186,13 @@ export function ProjectTimelineView({
     const raw = window.localStorage.getItem(timelineStorageKey);
     if (raw) {
       try {
-        const parsed = JSON.parse(raw) as { zoom?: TimelineZoom; anchorDate?: string };
+        const parsed = JSON.parse(raw) as {
+          zoom?: TimelineZoom;
+          anchorDate?: string;
+          swimlane?: TimelineSwimlane;
+          sortMode?: TimelineSortMode;
+          scheduleFilter?: TimelineScheduleFilter;
+        };
         if (parsed.zoom && parsed.zoom in TIMELINE_ZOOM_CONFIG) {
           setZoom(parsed.zoom);
         }
@@ -163,6 +201,15 @@ export function ProjectTimelineView({
           if (!Number.isNaN(parsedDate.valueOf())) {
             setAnchorDate(startOfDay(parsedDate));
           }
+        }
+        if (parsed.swimlane === 'section' || parsed.swimlane === 'assignee') {
+          setSwimlane(parsed.swimlane);
+        }
+        if (parsed.sortMode === 'manual' || parsed.sortMode === 'startAt' || parsed.sortMode === 'dueAt') {
+          setSortMode(parsed.sortMode);
+        }
+        if (parsed.scheduleFilter === 'all' || parsed.scheduleFilter === 'scheduled' || parsed.scheduleFilter === 'unscheduled') {
+          setScheduleFilter(parsed.scheduleFilter);
         }
       } catch {
         // Ignore malformed local preference state.
@@ -178,11 +225,18 @@ export function ProjectTimelineView({
       JSON.stringify({
         zoom,
         anchorDate: anchorDate.toISOString(),
+        swimlane,
+        sortMode,
+        scheduleFilter,
       }),
     );
-  }, [anchorDate, preferencesHydrated, timelineStorageKey, zoom]);
+  }, [anchorDate, preferencesHydrated, scheduleFilter, sortMode, swimlane, timelineStorageKey, zoom]);
 
   const zoomConfig = TIMELINE_ZOOM_CONFIG[zoom];
+  const effectiveSwimlane: TimelineSwimlane = mode === 'timeline' ? swimlane : 'section';
+  const effectiveSortMode: TimelineSortMode = mode === 'timeline' ? sortMode : 'manual';
+  const effectiveScheduleFilter: TimelineScheduleFilter = mode === 'timeline' ? scheduleFilter : 'all';
+  const showDependencyConnectors = mode === 'gantt';
 
   const timelineWindow = useMemo(
     () => ({
@@ -201,26 +255,79 @@ export function ProjectTimelineView({
     return list;
   }, [timeline.window.end, timeline.window.start]);
 
-  const filteredTasks = useMemo(
-    () => timeline.tasks.filter((task) => taskMatchesFilters(task, search, statusFilter, priorityFilter)),
-    [priorityFilter, search, statusFilter, timeline.tasks],
-  );
+  const filteredTasks = useMemo(() => {
+    return timeline.tasks
+      .filter((task) => taskMatchesFilters(task, search, statusFilter, priorityFilter))
+      .filter((task) => {
+        if (effectiveScheduleFilter === 'scheduled') return task.hasSchedule;
+        if (effectiveScheduleFilter === 'unscheduled') return !task.hasSchedule;
+        return true;
+      })
+      .sort((left, right) => compareTimelineTasks(left, right, effectiveSortMode));
+  }, [effectiveScheduleFilter, effectiveSortMode, priorityFilter, search, statusFilter, timeline.tasks]);
+
+  const timelineLanes = useMemo(() => {
+    if (effectiveSwimlane === 'assignee') {
+      const grouped = new Map<string, TimelineTask[]>();
+      for (const task of filteredTasks) {
+        const laneId = task.assigneeUserId ?? UNASSIGNED_LANE_ID;
+        const list = grouped.get(laneId) ?? [];
+        list.push(task);
+        grouped.set(laneId, list);
+      }
+
+      return [...grouped.entries()]
+        .map(([laneId, tasks]) => {
+          const label = laneId === UNASSIGNED_LANE_ID
+            ? t('unassigned')
+            : timeline.membersById[laneId]?.displayName
+              || timeline.membersById[laneId]?.email
+              || laneId;
+          return {
+            id: `assignee:${laneId}`,
+            label,
+            tasks,
+          };
+        })
+        .sort((left, right) => {
+          const leftUnassigned = left.id === `assignee:${UNASSIGNED_LANE_ID}`;
+          const rightUnassigned = right.id === `assignee:${UNASSIGNED_LANE_ID}`;
+          if (leftUnassigned && !rightUnassigned) return 1;
+          if (!leftUnassigned && rightUnassigned) return -1;
+          return left.label.localeCompare(right.label);
+        });
+    }
+
+    const bySection = new Map<string, TimelineTask[]>();
+    for (const task of filteredTasks) {
+      const list = bySection.get(task.sectionId) ?? [];
+      list.push(task);
+      bySection.set(task.sectionId, list);
+    }
+
+    return timeline.sections
+      .map((section) => ({
+        id: `section:${section.id}`,
+        label: section.isDefault ? t('tasks') : section.name,
+        tasks: bySection.get(section.id) ?? [],
+      }))
+      .filter((lane) => lane.tasks.length > 0);
+  }, [effectiveSwimlane, filteredTasks, t, timeline.membersById, timeline.sections]);
 
   const filteredTaskIds = useMemo(() => new Set(filteredTasks.map((task) => task.id)), [filteredTasks]);
   const taskById = useMemo(() => new Map(filteredTasks.map((task) => [task.id, task])), [filteredTasks]);
-  const filteredBySection = useMemo(() => {
-    const next: Record<string, typeof filteredTasks> = {};
-    for (const task of filteredTasks) {
-      const list = next[task.sectionId] ?? [];
-      list.push(task);
-      next[task.sectionId] = list;
-    }
-    return next;
-  }, [filteredTasks]);
 
   const scheduledTasks = filteredTasks.filter((task) => task.hasSchedule && task.inWindow);
   const unscheduledTasks = filteredTasks.filter((task) => !task.hasSchedule);
   const gridWidth = Math.max(1, days.length) * zoomConfig.dayColWidth;
+
+  const totalDependencyEdges = useMemo(
+    () =>
+      timeline.dependencyEdges.filter(
+        (edge) => filteredTaskIds.has(edge.source) && filteredTaskIds.has(edge.target),
+      ).length,
+    [filteredTaskIds, timeline.dependencyEdges],
+  );
 
   const rescheduleTask = useMutation({
     mutationFn: async ({
@@ -291,28 +398,25 @@ export function ProjectTimelineView({
     let cursorY = 0;
     const barsByTaskId: Record<string, { left: number; width: number; y: number }> = {};
     const taskRowsById: Record<string, { top: number; height: number }> = {};
-    const visibleSections = timeline.sections
-      .map((section) => ({ section, tasks: filteredBySection[section.id] ?? [] }))
-      .filter((entry) => entry.tasks.length > 0);
-    const sectionsWithRows: Array<{
-      section: (typeof visibleSections)[number]['section'];
-      tasks: (typeof visibleSections)[number]['tasks'];
+    const lanesWithRows: Array<{
+      lane: (typeof timelineLanes)[number];
+      tasks: (typeof timelineLanes)[number]['tasks'];
       top: number;
       taskRows: Array<{
-        task: (typeof visibleSections)[number]['tasks'][number];
+        task: (typeof timelineLanes)[number]['tasks'][number];
         top: number;
       }>;
     }> = [];
 
-    for (const entry of visibleSections) {
-      const sectionTop = cursorY;
+    for (const lane of timelineLanes) {
+      const laneTop = cursorY;
       cursorY += SECTION_ROW_HEIGHT;
       const taskRows: Array<{
-        task: (typeof entry)['tasks'][number];
+        task: (typeof lane)['tasks'][number];
         top: number;
       }> = [];
 
-      for (const task of entry.tasks) {
+      for (const task of lane.tasks) {
         const rowTop = cursorY;
         taskRowsById[task.id] = { top: rowTop, height: TASK_ROW_HEIGHT };
         const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
@@ -332,23 +436,22 @@ export function ProjectTimelineView({
         taskRows.push({ task, top: rowTop });
         cursorY += TASK_ROW_HEIGHT;
       }
-      sectionsWithRows.push({
-        section: entry.section,
-        tasks: entry.tasks,
-        top: sectionTop,
+      lanesWithRows.push({
+        lane,
+        tasks: lane.tasks,
+        top: laneTop,
         taskRows,
       });
     }
 
     return {
-      visibleSections,
-      sectionsWithRows,
+      lanesWithRows,
       barsByTaskId,
       taskRowsById,
       bodyHeight: cursorY,
-      totalRowCount: visibleSections.length + filteredTasks.length,
+      totalRowCount: timelineLanes.length + filteredTasks.length,
     };
-  }, [filteredBySection, timeline.sections, timeline.window.end, timeline.window.start, zoomConfig.dayColWidth]);
+  }, [filteredTasks.length, timeline.window.end, timeline.window.start, timelineLanes, zoomConfig.dayColWidth]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -391,14 +494,6 @@ export function ProjectTimelineView({
     return next;
   }, [filteredTaskIds, timelineLayout.taskRowsById, visibleRange.end, visibleRange.start, virtualizationEnabled]);
 
-  const totalDependencyEdges = useMemo(
-    () =>
-      timeline.dependencyEdges.filter(
-        (edge) => filteredTaskIds.has(edge.source) && filteredTaskIds.has(edge.target),
-      ).length,
-    [filteredTaskIds, timeline.dependencyEdges],
-  );
-
   const connectorEdges = useMemo(
     () =>
       timeline.dependencyEdges.filter((edge) =>
@@ -414,6 +509,7 @@ export function ProjectTimelineView({
     // Lightweight render-budget signal for timeline tuning under larger datasets.
     console.debug('[timeline:perf]', {
       projectId,
+      mode,
       zoom,
       totalRows: timelineLayout.totalRowCount,
       taskRows: filteredTasks.length,
@@ -424,6 +520,7 @@ export function ProjectTimelineView({
   }, [
     connectorEdges.length,
     filteredTasks.length,
+    mode,
     projectId,
     timeline.dependencyEdges.length,
     timelineLayout.totalRowCount,
@@ -493,7 +590,7 @@ export function ProjectTimelineView({
   }
 
   return (
-    <div className="space-y-4" data-testid="timeline-view">
+    <div className="space-y-4" data-testid="timeline-view" data-view-mode={mode}>
       {rescheduleNotice ? (
         <div
           className={`rounded-md border px-3 py-2 text-xs ${
@@ -510,8 +607,9 @@ export function ProjectTimelineView({
           {rescheduleNotice.message}
         </div>
       ) : null}
-      <div className="flex items-center justify-between rounded-lg border bg-card p-3">
-        <div className="flex items-center gap-2">
+      <div className="space-y-3 rounded-lg border bg-card p-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex items-center rounded-md border bg-background/60 p-0.5">
             {(['day', 'week', 'month'] as TimelineZoom[]).map((zoomOption) => (
               <Button
@@ -563,9 +661,118 @@ export function ProjectTimelineView({
           <span>{t('timelineScheduledTasks')}</span>
           <Badge variant="secondary">{unscheduledTasks.length}</Badge>
           <span>{t('timelineUnscheduled')}</span>
-          <Badge variant="secondary">{totalDependencyEdges}</Badge>
-          <span>{t('timelineDependencies')}</span>
+          {showDependencyConnectors ? (
+            <>
+              <Badge variant="secondary">{totalDependencyEdges}</Badge>
+              <span>{t('timelineDependencies')}</span>
+            </>
+          ) : null}
         </div>
+      </div>
+        {mode === 'timeline' ? (
+          <div className="flex flex-wrap items-center gap-3 border-t pt-2">
+            <div className="inline-flex items-center rounded-md border bg-background/60 p-0.5" data-testid="timeline-swimlane-toggle">
+              <Button
+                type="button"
+                size="sm"
+                variant={effectiveSwimlane === 'section' ? 'default' : 'ghost'}
+                className="h-7 px-2 text-xs"
+                data-testid="timeline-swimlane-section"
+                data-active={effectiveSwimlane === 'section' ? 'true' : 'false'}
+                onClick={() => setSwimlane('section')}
+              >
+                {t('timelineSwimlaneSection')}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={effectiveSwimlane === 'assignee' ? 'default' : 'ghost'}
+                className="h-7 px-2 text-xs"
+                data-testid="timeline-swimlane-assignee"
+                data-active={effectiveSwimlane === 'assignee' ? 'true' : 'false'}
+                onClick={() => setSwimlane('assignee')}
+              >
+                {t('timelineSwimlaneAssignee')}
+              </Button>
+            </div>
+
+            <div className="inline-flex items-center rounded-md border bg-background/60 p-0.5" data-testid="timeline-sort-toggle">
+              <Button
+                type="button"
+                size="sm"
+                variant={effectiveSortMode === 'manual' ? 'default' : 'ghost'}
+                className="h-7 px-2 text-xs"
+                data-testid="timeline-sort-manual"
+                data-active={effectiveSortMode === 'manual' ? 'true' : 'false'}
+                onClick={() => setSortMode('manual')}
+              >
+                {t('timelineSortManual')}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={effectiveSortMode === 'startAt' ? 'default' : 'ghost'}
+                className="h-7 px-2 text-xs"
+                data-testid="timeline-sort-start"
+                data-active={effectiveSortMode === 'startAt' ? 'true' : 'false'}
+                onClick={() => setSortMode('startAt')}
+              >
+                {t('timelineSortStart')}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={effectiveSortMode === 'dueAt' ? 'default' : 'ghost'}
+                className="h-7 px-2 text-xs"
+                data-testid="timeline-sort-due"
+                data-active={effectiveSortMode === 'dueAt' ? 'true' : 'false'}
+                onClick={() => setSortMode('dueAt')}
+              >
+                {t('timelineSortDue')}
+              </Button>
+            </div>
+
+            <div className="inline-flex items-center rounded-md border bg-background/60 p-0.5" data-testid="timeline-schedule-filter-toggle">
+              <Button
+                type="button"
+                size="sm"
+                variant={effectiveScheduleFilter === 'all' ? 'default' : 'ghost'}
+                className="h-7 px-2 text-xs"
+                data-testid="timeline-filter-all"
+                data-active={effectiveScheduleFilter === 'all' ? 'true' : 'false'}
+                onClick={() => setScheduleFilter('all')}
+              >
+                {t('timelineFilterAll')}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={effectiveScheduleFilter === 'scheduled' ? 'default' : 'ghost'}
+                className="h-7 px-2 text-xs"
+                data-testid="timeline-filter-scheduled"
+                data-active={effectiveScheduleFilter === 'scheduled' ? 'true' : 'false'}
+                onClick={() => setScheduleFilter('scheduled')}
+              >
+                {t('timelineFilterScheduled')}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={effectiveScheduleFilter === 'unscheduled' ? 'default' : 'ghost'}
+                className="h-7 px-2 text-xs"
+                data-testid="timeline-filter-unscheduled"
+                data-active={effectiveScheduleFilter === 'unscheduled' ? 'true' : 'false'}
+                onClick={() => setScheduleFilter('unscheduled')}
+              >
+                {t('timelineFilterUnscheduled')}
+              </Button>
+            </div>
+
+            <p className="text-xs text-muted-foreground" data-testid="timeline-drag-hint">
+              {t('timelineDragHint')}
+            </p>
+          </div>
+        ) : null}
       </div>
 
       <div
@@ -600,7 +807,7 @@ export function ProjectTimelineView({
         </div>
 
         <div className="relative">
-          {timelineLayout.bodyHeight > 0 ? (
+          {timelineLayout.bodyHeight > 0 && showDependencyConnectors ? (
             <svg
               aria-hidden="true"
               className="pointer-events-none absolute top-0 z-0"
@@ -647,8 +854,8 @@ export function ProjectTimelineView({
           ) : null}
 
           <div className="relative z-[1]">
-            {timelineLayout.sectionsWithRows.map(({ section, tasks: sectionTasks, top, taskRows }) => {
-              if (!sectionTasks.length) return null;
+            {timelineLayout.lanesWithRows.map(({ lane, tasks: laneTasks, top, taskRows }) => {
+              if (!laneTasks.length) return null;
               const sectionVisible = !virtualizationEnabled
                 || (top + SECTION_ROW_HEIGHT >= visibleRange.start && top <= visibleRange.end);
               const visibleTaskRows = virtualizationEnabled
@@ -667,14 +874,18 @@ export function ProjectTimelineView({
                 : taskRows.length * TASK_ROW_HEIGHT;
 
               return (
-                <div key={section.id} className="border-b last:border-b-0">
+                <div key={lane.id} className="border-b last:border-b-0">
                   {sectionVisible ? (
-                    <div className="grid h-8 border-b bg-muted/20" style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}>
+                    <div
+                      className="grid h-8 border-b bg-muted/20"
+                      style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}
+                      data-testid={`timeline-lane-${normalizeTestIdSegment(lane.id)}`}
+                    >
                       <div className="flex items-center px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        {section.isDefault ? t('tasks') : section.name}
+                        {lane.label}
                       </div>
                       <div className="flex items-center px-2 text-xs text-muted-foreground">
-                        {sectionTasks.length} {t('tasks')}
+                        {laneTasks.length} {t('tasks')}
                       </div>
                     </div>
                   ) : (
