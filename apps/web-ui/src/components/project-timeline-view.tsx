@@ -36,6 +36,13 @@ type GanttTaskRisk = {
   blockedByLate: number;
 };
 
+type TimelinePreferences = {
+  projectId: string;
+  userId: string;
+  laneOrderBySection: string[];
+  laneOrderByAssignee: string[];
+};
+
 const TIMELINE_ZOOM_CONFIG: Record<TimelineZoom, { beforeDays: number; afterDays: number; stepDays: number; dayColWidth: number }> = {
   day: { beforeDays: 1, afterDays: 5, stepDays: 1, dayColWidth: 64 },
   week: { beforeDays: 7, afterDays: 21, stepDays: 7, dayColWidth: 36 },
@@ -139,6 +146,60 @@ function applyTaskScheduleInGroups(
   }));
 }
 
+function applyTaskTimelineMoveInGroups(
+  groups: SectionTaskGroup[],
+  taskId: string,
+  next: { startAt?: string | null; dueAt?: string | null; assigneeUserId?: string | null },
+) {
+  return groups.map((group) => ({
+    ...group,
+    tasks: group.tasks.map((task) => {
+      if (task.id !== taskId) return task;
+      const updatedTask: Task = { ...task };
+      if (next.startAt !== undefined) {
+        updatedTask.startAt = next.startAt;
+      }
+      if (next.dueAt !== undefined) {
+        updatedTask.dueAt = next.dueAt;
+      }
+      if (next.assigneeUserId !== undefined) {
+        updatedTask.assigneeUserId = next.assigneeUserId;
+      }
+      return updatedTask;
+    }),
+  }));
+}
+
+function parseAssigneeLaneId(laneId: string): string | null | undefined {
+  if (!laneId.startsWith('assignee:')) return undefined;
+  const raw = laneId.slice('assignee:'.length);
+  return raw === UNASSIGNED_LANE_ID ? null : raw;
+}
+
+function reorderLaneIds(laneIds: string[], draggingLaneId: string, overLaneId: string): string[] {
+  const fromIndex = laneIds.indexOf(draggingLaneId);
+  const toIndex = laneIds.indexOf(overLaneId);
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return laneIds;
+  const next = [...laneIds];
+  const [moved] = next.splice(fromIndex, 1);
+  if (!moved) return laneIds;
+  next.splice(toIndex, 0, moved);
+  return next;
+}
+
+function applyLaneOrder<T extends { id: string }>(lanes: T[], preferredOrder: string[]): T[] {
+  if (!preferredOrder.length) return lanes;
+  const indexById = new Map(preferredOrder.map((laneId, index) => [laneId, index]));
+  return [...lanes].sort((left, right) => {
+    const leftRank = indexById.get(left.id);
+    const rightRank = indexById.get(right.id);
+    if (leftRank === undefined && rightRank === undefined) return 0;
+    if (leftRank === undefined) return 1;
+    if (rightRank === undefined) return -1;
+    return leftRank - rightRank;
+  });
+}
+
 export function ProjectTimelineView({
   projectId,
   search,
@@ -173,6 +234,9 @@ export function ProjectTimelineView({
     taskId: string;
     pointerId: number;
     originX: number;
+    originY: number;
+    originLaneId: string;
+    dropLaneId: string | null;
     deltaDays: number;
     moved: boolean;
   } | null>(null);
@@ -180,15 +244,24 @@ export function ProjectTimelineView({
     taskId: string;
     pointerId: number;
     originX: number;
+    originY: number;
+    originLaneId: string;
+    dropLaneId: string | null;
     deltaDays: number;
     moved: boolean;
   } | null>(null);
+  const [laneDragState, setLaneDragState] = useState<{ draggingLaneId: string; overLaneId: string | null } | null>(null);
   const suppressClickTaskIdRef = useRef<string | null>(null);
   const [rescheduleNotice, setRescheduleNotice] = useState<{ type: 'conflict' | 'error'; message: string } | null>(null);
   const rescheduleInFlightTaskIdsRef = useRef(new Set<string>());
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollRafRef = useRef<number | null>(null);
   const markerId = `timeline-arrow-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  const timelinePreferencesQuery = useQuery<TimelinePreferences>({
+    queryKey: queryKeys.projectTimelinePreferences(projectId),
+    queryFn: () => api(`/projects/${projectId}/timeline/preferences`) as Promise<TimelinePreferences>,
+    enabled: Boolean(projectId),
+  });
 
   const timelineStorageKey = useMemo(
     () => (meQuery.data?.id ? `${TIMELINE_VIEW_STORAGE_PREFIX}:${meQuery.data.id}:${projectId}:${mode}` : null),
@@ -338,6 +411,14 @@ export function ProjectTimelineView({
     return baseFilteredTasks.filter((task) => ganttRiskByTaskId.get(task.id)?.isAtRisk);
   }, [baseFilteredTasks, ganttRiskByTaskId, ganttRiskFilterMode, mode]);
 
+  const preferredLaneOrder = useMemo(
+    () =>
+      effectiveSwimlane === 'assignee'
+        ? timelinePreferencesQuery.data?.laneOrderByAssignee ?? []
+        : timelinePreferencesQuery.data?.laneOrderBySection ?? [],
+    [effectiveSwimlane, timelinePreferencesQuery.data?.laneOrderByAssignee, timelinePreferencesQuery.data?.laneOrderBySection],
+  );
+
   const timelineLanes = useMemo(() => {
     if (effectiveSwimlane === 'assignee') {
       const grouped = new Map<string, TimelineTask[]>();
@@ -348,7 +429,7 @@ export function ProjectTimelineView({
         grouped.set(laneId, list);
       }
 
-      return [...grouped.entries()]
+      const lanes = [...grouped.entries()]
         .map(([laneId, tasks]) => {
           const label = laneId === UNASSIGNED_LANE_ID
             ? t('unassigned')
@@ -368,6 +449,8 @@ export function ProjectTimelineView({
           if (!leftUnassigned && rightUnassigned) return -1;
           return left.label.localeCompare(right.label);
         });
+
+      return applyLaneOrder(lanes, preferredLaneOrder);
     }
 
     const bySection = new Map<string, TimelineTask[]>();
@@ -377,14 +460,16 @@ export function ProjectTimelineView({
       bySection.set(task.sectionId, list);
     }
 
-    return timeline.sections
+    const lanes = timeline.sections
       .map((section) => ({
         id: `section:${section.id}`,
         label: section.isDefault ? t('tasks') : section.name,
         tasks: bySection.get(section.id) ?? [],
       }))
       .filter((lane) => lane.tasks.length > 0);
-  }, [effectiveSwimlane, filteredTasks, t, timeline.membersById, timeline.sections]);
+
+    return applyLaneOrder(lanes, preferredLaneOrder);
+  }, [effectiveSwimlane, filteredTasks, preferredLaneOrder, t, timeline.membersById, timeline.sections]);
 
   const filteredTaskIds = useMemo(() => new Set(filteredTasks.map((task) => task.id)), [filteredTasks]);
   const taskById = useMemo(() => new Map(filteredTasks.map((task) => [task.id, task])), [filteredTasks]);
@@ -424,6 +509,40 @@ export function ProjectTimelineView({
       ).length,
     [filteredTaskIds, timeline.dependencyEdges],
   );
+
+  const saveLaneOrderMutation = useMutation({
+    mutationFn: async ({
+      groupBy,
+      laneOrder,
+    }: {
+      groupBy: TimelineSwimlane;
+      laneOrder: string[];
+    }) =>
+      (await api(`/projects/${projectId}/timeline/preferences/${groupBy}`, {
+        method: 'PUT',
+        body: { laneOrder },
+      })) as TimelinePreferences,
+    onMutate: async ({ groupBy, laneOrder }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.projectTimelinePreferences(projectId) });
+      const previous = queryClient.getQueryData<TimelinePreferences>(queryKeys.projectTimelinePreferences(projectId));
+      queryClient.setQueryData<TimelinePreferences>(queryKeys.projectTimelinePreferences(projectId), {
+        projectId,
+        userId: previous?.userId ?? meQuery.data?.id ?? '',
+        laneOrderBySection: groupBy === 'section' ? laneOrder : previous?.laneOrderBySection ?? [],
+        laneOrderByAssignee: groupBy === 'assignee' ? laneOrder : previous?.laneOrderByAssignee ?? [],
+      });
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData<TimelinePreferences>(queryKeys.projectTimelinePreferences(projectId), context.previous);
+      }
+      setRescheduleNotice({ type: 'error', message: t('timelineRescheduleFailed') });
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTimelinePreferences(projectId) });
+    },
+  });
 
   const rescheduleTask = useMutation({
     mutationFn: async ({
@@ -484,6 +603,75 @@ export function ProjectTimelineView({
     },
   });
 
+  const timelineMoveTask = useMutation({
+    mutationFn: async ({
+      taskId,
+      assigneeUserId,
+      startAt,
+      dueAt,
+      version,
+    }: {
+      taskId: string;
+      assigneeUserId?: string | null;
+      startAt?: string | null;
+      dueAt?: string | null;
+      version: number;
+    }) =>
+      (await api(`/tasks/${taskId}/timeline-move`, {
+        method: 'PATCH',
+        body: { assigneeUserId, startAt, dueAt, version },
+      })) as Task,
+    onMutate: async ({ taskId, assigneeUserId, startAt, dueAt }) => {
+      setRescheduleNotice(null);
+      await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      await queryClient.cancelQueries({ queryKey: queryKeys.taskDetail(taskId) });
+      const previous = queryClient.getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId));
+      const previousTaskDetail = queryClient.getQueryData<Task>(queryKeys.taskDetail(taskId));
+      if (previous) {
+        const optimisticMove: { startAt?: string | null; dueAt?: string | null; assigneeUserId?: string | null } = {};
+        if (assigneeUserId !== undefined) optimisticMove.assigneeUserId = assigneeUserId;
+        if (startAt !== undefined) optimisticMove.startAt = startAt;
+        if (dueAt !== undefined) optimisticMove.dueAt = dueAt;
+        queryClient.setQueryData<SectionTaskGroup[]>(
+          queryKeys.projectTasksGrouped(projectId),
+          applyTaskTimelineMoveInGroups(previous, taskId, optimisticMove),
+        );
+      }
+      if (previousTaskDetail) {
+        const optimisticTaskDetail: Task = { ...previousTaskDetail };
+        if (assigneeUserId !== undefined) {
+          optimisticTaskDetail.assigneeUserId = assigneeUserId;
+        }
+        if (startAt !== undefined) {
+          optimisticTaskDetail.startAt = startAt;
+        }
+        if (dueAt !== undefined) {
+          optimisticTaskDetail.dueAt = dueAt;
+        }
+        queryClient.setQueryData<Task>(queryKeys.taskDetail(taskId), optimisticTaskDetail);
+      }
+      return { previous, previousTaskDetail };
+    },
+    onError: (error, variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), context.previous);
+      }
+      if (context?.previousTaskDetail) {
+        queryClient.setQueryData<Task>(queryKeys.taskDetail(variables.taskId), context.previousTaskDetail);
+      }
+      if (isApiConflictError(error)) {
+        setRescheduleNotice({ type: 'conflict', message: t('timelineRescheduleConflict') });
+      } else {
+        setRescheduleNotice({ type: 'error', message: t('timelineRescheduleFailed') });
+      }
+    },
+    onSettled: async (_result, _error, variables) => {
+      rescheduleInFlightTaskIdsRef.current.delete(variables.taskId);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(variables.taskId) });
+    },
+  });
+
   useEffect(() => {
     if (!rescheduleNotice) return;
     const timer = window.setTimeout(() => setRescheduleNotice(null), 4000);
@@ -498,6 +686,7 @@ export function ProjectTimelineView({
       lane: (typeof timelineLanes)[number];
       tasks: (typeof timelineLanes)[number]['tasks'];
       top: number;
+      bottom: number;
       taskRows: Array<{
         task: (typeof timelineLanes)[number]['tasks'][number];
         top: number;
@@ -536,6 +725,7 @@ export function ProjectTimelineView({
         lane,
         tasks: lane.tasks,
         top: laneTop,
+        bottom: cursorY,
         taskRows,
       });
     }
@@ -624,30 +814,76 @@ export function ProjectTimelineView({
     zoom,
   ]);
 
-  const commitDragReschedule = (taskId: string, deltaDays: number) => {
+  const resolveLaneIdAtClientY = (clientY: number): string | null => {
+    const container = scrollContainerRef.current;
+    if (!container) return null;
+    const bounds = container.getBoundingClientRect();
+    const relativeY = clientY - bounds.top + container.scrollTop;
+    const lane = timelineLayout.lanesWithRows.find((entry) => relativeY >= entry.top && relativeY < entry.bottom);
+    return lane?.lane.id ?? null;
+  };
+
+  const commitTimelineDrag = (
+    taskId: string,
+    deltaDays: number,
+    originLaneId: string,
+    dropLaneId: string | null,
+  ) => {
     if (rescheduleInFlightTaskIdsRef.current.has(taskId)) return;
-    if (!deltaDays) return;
     const task = taskById.get(taskId);
     if (!task) return;
 
     const startAt = shiftIsoByDays(task.startAt, deltaDays);
     const dueAt = shiftIsoByDays(task.dueAt, deltaDays);
-    if (!startAt && !dueAt) return;
+    const hasScheduleMove = Boolean(deltaDays) && Boolean(startAt || dueAt);
+    const laneChanged = Boolean(dropLaneId && dropLaneId !== originLaneId);
+    if (!hasScheduleMove && !laneChanged) return;
+
+    const assigneeUserId =
+      effectiveSwimlane === 'assignee' && laneChanged && dropLaneId
+        ? parseAssigneeLaneId(dropLaneId)
+        : undefined;
+    const hasAssigneeMove = assigneeUserId !== undefined && assigneeUserId !== task.assigneeUserId;
+    if (!hasScheduleMove && !hasAssigneeMove) return;
 
     rescheduleInFlightTaskIdsRef.current.add(taskId);
-    rescheduleTask.mutate({
-      taskId,
-      startAt,
-      dueAt,
-      version: task.version,
-    });
+    if (hasAssigneeMove) {
+      const timelineMovePayload: {
+        taskId: string;
+        assigneeUserId?: string | null;
+        startAt?: string | null;
+        dueAt?: string | null;
+        version: number;
+      } = {
+        taskId,
+        version: task.version,
+      };
+      if (assigneeUserId !== undefined) timelineMovePayload.assigneeUserId = assigneeUserId;
+      if (hasScheduleMove) {
+        timelineMovePayload.startAt = startAt;
+        timelineMovePayload.dueAt = dueAt;
+      }
+      timelineMoveTask.mutate(timelineMovePayload);
+      return;
+    }
+    if (hasScheduleMove) {
+      rescheduleTask.mutate({
+        taskId,
+        startAt,
+        dueAt,
+        version: task.version,
+      });
+    }
   };
 
-  const beginBarDrag = (taskId: string, pointerId: number, originX: number) => {
+  const beginBarDrag = (taskId: string, pointerId: number, originX: number, originY: number, originLaneId: string) => {
     const next = {
       taskId,
       pointerId,
       originX,
+      originY,
+      originLaneId,
+      dropLaneId: originLaneId,
       deltaDays: 0,
       moved: false,
     };
@@ -655,14 +891,18 @@ export function ProjectTimelineView({
     setDragState(next);
   };
 
-  const updateBarDrag = (pointerId: number, clientX: number) => {
+  const updateBarDrag = (pointerId: number, clientX: number, clientY: number) => {
     const current = dragStateRef.current;
     if (!current || current.pointerId !== pointerId) return;
     const deltaPx = clientX - current.originX;
+    const deltaY = clientY - current.originY;
     const deltaDays = Math.round(deltaPx / zoomConfig.dayColWidth);
-    const moved = current.moved || Math.abs(deltaPx) >= DRAG_START_THRESHOLD_PX;
-    if (deltaDays === current.deltaDays && moved === current.moved) return;
-    const next = { ...current, deltaDays, moved };
+    const moved = current.moved
+      || Math.abs(deltaPx) >= DRAG_START_THRESHOLD_PX
+      || Math.abs(deltaY) >= DRAG_START_THRESHOLD_PX;
+    const dropLaneId = resolveLaneIdAtClientY(clientY) ?? current.dropLaneId;
+    if (deltaDays === current.deltaDays && moved === current.moved && dropLaneId === current.dropLaneId) return;
+    const next = { ...current, deltaDays, moved, dropLaneId };
     dragStateRef.current = next;
     setDragState(next);
   };
@@ -674,7 +914,17 @@ export function ProjectTimelineView({
     setDragState(null);
     if (!current.moved) return;
     suppressClickTaskIdRef.current = current.taskId;
-    commitDragReschedule(current.taskId, current.deltaDays);
+    commitTimelineDrag(current.taskId, current.deltaDays, current.originLaneId, current.dropLaneId);
+  };
+
+  const handleLaneDrop = (draggingLaneId: string, overLaneId: string) => {
+    const laneIds = timelineLanes.map((lane) => lane.id);
+    const nextLaneOrder = reorderLaneIds(laneIds, draggingLaneId, overLaneId);
+    if (nextLaneOrder.join('|') === laneIds.join('|')) return;
+    saveLaneOrderMutation.mutate({
+      groupBy: effectiveSwimlane,
+      laneOrder: nextLaneOrder,
+    });
   };
 
   if (timeline.isLoading) {
@@ -1066,9 +1316,37 @@ export function ProjectTimelineView({
                 <div key={lane.id} className="border-b last:border-b-0">
                   {sectionVisible ? (
                     <div
-                      className="grid h-8 border-b bg-muted/20"
+                      className={`grid h-8 border-b bg-muted/20 ${
+                        laneDragState?.overLaneId === lane.id ? 'ring-1 ring-primary/40' : ''
+                      }`}
                       style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}
                       data-testid={`timeline-lane-${normalizeTestIdSegment(lane.id)}`}
+                      draggable={mode === 'timeline'}
+                      onDragStart={(event) => {
+                        if (mode !== 'timeline') return;
+                        event.dataTransfer.effectAllowed = 'move';
+                        event.dataTransfer.setData('text/plain', lane.id);
+                        setLaneDragState({ draggingLaneId: lane.id, overLaneId: lane.id });
+                      }}
+                      onDragOver={(event) => {
+                        if (mode !== 'timeline' || !laneDragState?.draggingLaneId) return;
+                        event.preventDefault();
+                        if (laneDragState.overLaneId !== lane.id) {
+                          setLaneDragState((current) => (current ? { ...current, overLaneId: lane.id } : current));
+                        }
+                      }}
+                      onDrop={(event) => {
+                        if (mode !== 'timeline') return;
+                        event.preventDefault();
+                        const draggingLaneId = laneDragState?.draggingLaneId ?? event.dataTransfer.getData('text/plain');
+                        if (draggingLaneId) {
+                          handleLaneDrop(draggingLaneId, lane.id);
+                        }
+                        setLaneDragState(null);
+                      }}
+                      onDragEnd={() => {
+                        setLaneDragState(null);
+                      }}
                     >
                       <div className="flex items-center px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         {lane.label}
@@ -1170,11 +1448,11 @@ export function ProjectTimelineView({
                                   if (event.button !== 0) return;
                                   if (rescheduleInFlightTaskIdsRef.current.has(task.id)) return;
                                   event.preventDefault();
-                                  beginBarDrag(task.id, event.pointerId, event.clientX);
+                                  beginBarDrag(task.id, event.pointerId, event.clientX, event.clientY, lane.id);
                                   event.currentTarget.setPointerCapture(event.pointerId);
                                 }}
                                 onPointerMove={(event) => {
-                                  updateBarDrag(event.pointerId, event.clientX);
+                                  updateBarDrag(event.pointerId, event.clientX, event.clientY);
                                 }}
                                 onPointerUp={(event) => {
                                   finishBarDrag(event.pointerId);
