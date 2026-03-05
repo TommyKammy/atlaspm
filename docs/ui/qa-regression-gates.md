@@ -14,6 +14,12 @@ pnpm -r --if-present build
 pnpm e2e
 ```
 
+For Timeline/Gantt split rollout gate, also run:
+
+```bash
+pnpm e2e:timeline-gantt-rollout
+```
+
 Notes:
 - `type-check` may be a no-op in some packages; keep command in the pipeline.
 - If Docker/Colima is down, start it first:
@@ -32,6 +38,9 @@ docker compose -f infra/docker/docker-compose.yml up -d
 - Assignee selection persists after refresh
 - Rule edit persists after refresh
 - Subtask tree create/expand/collapse/delete/navigation
+- Timeline-only controls do not leak into Gantt
+- Gantt-only controls do not leak into Timeline
+- List/rules/admin/collab regressions remain green during Timeline/Gantt changes
 
 ## Manual Smoke Checklist
 
