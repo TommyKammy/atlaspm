@@ -21,6 +21,7 @@ const VIRTUALIZE_ROW_THRESHOLD = 120;
 const VIRTUAL_OVERSCAN_PX = 320;
 const DRAG_START_THRESHOLD_PX = 6;
 const UNASSIGNED_LANE_ID = '__unassigned__';
+const UNSCHEDULED_TASK_DND_TYPE = 'application/x-atlaspm-unscheduled-task';
 
 type TimelineZoom = 'day' | 'week' | 'month';
 type TimelineMode = 'timeline' | 'gantt';
@@ -251,6 +252,7 @@ export function ProjectTimelineView({
     moved: boolean;
   } | null>(null);
   const [laneDragState, setLaneDragState] = useState<{ draggingLaneId: string; overLaneId: string | null } | null>(null);
+  const [unscheduledDragTaskId, setUnscheduledDragTaskId] = useState<string | null>(null);
   const suppressClickTaskIdRef = useRef<string | null>(null);
   const [rescheduleNotice, setRescheduleNotice] = useState<{ type: 'conflict' | 'error'; message: string } | null>(null);
   const rescheduleInFlightTaskIdsRef = useRef(new Set<string>());
@@ -890,6 +892,46 @@ export function ProjectTimelineView({
     }
   };
 
+  const commitUnscheduledDrop = (taskId: string, originLaneId: string, clientX: number, clientY: number) => {
+    if (rescheduleInFlightTaskIdsRef.current.has(taskId)) return;
+    const task = taskById.get(taskId);
+    const container = scrollContainerRef.current;
+    if (!task || !container || !days.length) return;
+
+    const containerBounds = container.getBoundingClientRect();
+    const gridRelativeX = clientX - containerBounds.left + container.scrollLeft - TASK_NAME_COL_WIDTH;
+    const clampedDayIndex = Math.max(0, Math.min(days.length - 1, Math.floor(gridRelativeX / zoomConfig.dayColWidth)));
+    const targetDay = days[clampedDayIndex];
+    if (!targetDay) return;
+
+    const startDate = startOfDay(targetDay);
+    const dropLaneId = resolveLaneIdAtClientY(clientY) ?? originLaneId;
+    const assigneeUserId = effectiveSwimlane === 'assignee' ? parseAssigneeLaneId(dropLaneId) : undefined;
+    const durationDays =
+      task.startAt && task.dueAt
+        ? Math.max(0, dayDiff(startOfDay(new Date(task.startAt)), startOfDay(new Date(task.dueAt))))
+        : 0;
+
+    const timelineMovePayload: {
+      taskId: string;
+      assigneeUserId?: string | null;
+      startAt?: string | null;
+      dueAt?: string | null;
+      version: number;
+    } = {
+      taskId,
+      startAt: startDate.toISOString(),
+      dueAt: addDays(startDate, durationDays).toISOString(),
+      version: task.version,
+    };
+    if (assigneeUserId !== undefined) {
+      timelineMovePayload.assigneeUserId = assigneeUserId;
+    }
+
+    rescheduleInFlightTaskIdsRef.current.add(taskId);
+    timelineMoveTask.mutate(timelineMovePayload);
+  };
+
   const beginBarDrag = (taskId: string, pointerId: number, originX: number, originY: number, originLaneId: string) => {
     const next = {
       taskId,
@@ -1307,7 +1349,26 @@ export function ProjectTimelineView({
             </svg>
           ) : null}
 
-          <div className="relative z-[1]">
+          <div
+            className="relative z-[1]"
+            onDragOver={(event) => {
+              if (!Array.from(event.dataTransfer.types).includes(UNSCHEDULED_TASK_DND_TYPE)) return;
+              event.preventDefault();
+            }}
+            onDrop={(event) => {
+              const raw = event.dataTransfer.getData(UNSCHEDULED_TASK_DND_TYPE);
+              if (!raw) return;
+              event.preventDefault();
+              setUnscheduledDragTaskId(null);
+              try {
+                const parsed = JSON.parse(raw) as { taskId?: string; originLaneId?: string };
+                if (!parsed.taskId || !parsed.originLaneId) return;
+                commitUnscheduledDrop(parsed.taskId, parsed.originLaneId, event.clientX, event.clientY);
+              } catch {
+                // ignore malformed drag payload
+              }
+            }}
+          >
             {timelineLayout.lanesWithRows.map(({ lane, tasks: laneTasks, top, taskRows }) => {
               if (!laneTasks.length) return null;
               const sectionVisible = !virtualizationEnabled
@@ -1494,8 +1555,23 @@ export function ProjectTimelineView({
                           ) : (
                             <button
                               type="button"
-                              className="absolute left-2 top-1/2 -translate-y-1/2 rounded border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40"
+                              className={`absolute left-2 top-1/2 -translate-y-1/2 rounded border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 ${
+                                unscheduledDragTaskId === task.id ? 'opacity-60' : ''
+                              }`}
                               onClick={() => setSelectedTaskId(task.id)}
+                              draggable={mode === 'timeline'}
+                              onDragStart={(event) => {
+                                if (mode !== 'timeline') return;
+                                event.dataTransfer.effectAllowed = 'move';
+                                event.dataTransfer.setData(
+                                  UNSCHEDULED_TASK_DND_TYPE,
+                                  JSON.stringify({ taskId: task.id, originLaneId: lane.id }),
+                                );
+                                setUnscheduledDragTaskId(task.id);
+                              }}
+                              onDragEnd={() => {
+                                setUnscheduledDragTaskId(null);
+                              }}
                               data-testid={`timeline-unscheduled-${task.id}`}
                             >
                               {t('timelineNoDates')}
