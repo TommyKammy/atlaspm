@@ -255,6 +255,7 @@ export function ProjectTimelineView({
   const [rescheduleNotice, setRescheduleNotice] = useState<{ type: 'conflict' | 'error'; message: string } | null>(null);
   const rescheduleInFlightTaskIdsRef = useRef(new Set<string>());
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
   const scrollRafRef = useRef<number | null>(null);
   const markerId = `timeline-arrow-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const timelinePreferencesQuery = useQuery<TimelinePreferences>({
@@ -537,7 +538,7 @@ export function ProjectTimelineView({
       if (context?.previous) {
         queryClient.setQueryData<TimelinePreferences>(queryKeys.projectTimelinePreferences(projectId), context.previous);
       }
-      setRescheduleNotice({ type: 'error', message: t('timelineRescheduleFailed') });
+      setRescheduleNotice({ type: 'error', message: t('timelineLaneOrderSaveFailed') });
     },
     onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.projectTimelinePreferences(projectId) });
@@ -659,10 +660,22 @@ export function ProjectTimelineView({
       if (context?.previousTaskDetail) {
         queryClient.setQueryData<Task>(queryKeys.taskDetail(variables.taskId), context.previousTaskDetail);
       }
+      const isDateChange = variables.startAt !== undefined || variables.dueAt !== undefined;
+      const isAssigneeChange = variables.assigneeUserId !== undefined;
+      const conflictKey = isDateChange && !isAssigneeChange
+        ? 'timelineRescheduleConflict'
+        : isAssigneeChange && !isDateChange
+          ? 'timelineMoveConflict'
+          : 'timelineMoveAndRescheduleConflict';
+      const failedKey = isDateChange && !isAssigneeChange
+        ? 'timelineRescheduleFailed'
+        : isAssigneeChange && !isDateChange
+          ? 'timelineMoveFailed'
+          : 'timelineMoveAndRescheduleFailed';
       if (isApiConflictError(error)) {
-        setRescheduleNotice({ type: 'conflict', message: t('timelineRescheduleConflict') });
+        setRescheduleNotice({ type: 'conflict', message: t(conflictKey) });
       } else {
-        setRescheduleNotice({ type: 'error', message: t('timelineRescheduleFailed') });
+        setRescheduleNotice({ type: 'error', message: t(failedKey) });
       }
     },
     onSettled: async (_result, _error, variables) => {
@@ -817,8 +830,9 @@ export function ProjectTimelineView({
   const resolveLaneIdAtClientY = (clientY: number): string | null => {
     const container = scrollContainerRef.current;
     if (!container) return null;
+    const stickyHeaderHeight = stickyHeaderRef.current?.offsetHeight ?? 0;
     const bounds = container.getBoundingClientRect();
-    const relativeY = clientY - bounds.top + container.scrollTop;
+    const relativeY = clientY - bounds.top + container.scrollTop - stickyHeaderHeight;
     const lane = timelineLayout.lanesWithRows.find((entry) => relativeY >= entry.top && relativeY < entry.bottom);
     return lane?.lane.id ?? null;
   };
@@ -1228,6 +1242,7 @@ export function ProjectTimelineView({
         className="overflow-auto rounded-lg border bg-card"
       >
         <div
+          ref={stickyHeaderRef}
           className="sticky top-0 z-[1] grid border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75"
           style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}
         >

@@ -1,6 +1,7 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 const API = process.env.E2E_CORE_API_URL ?? 'http://localhost:3001';
+const DAY_COLUMN_WIDTH = 64;
 
 async function api(path: string, token: string, method = 'GET', body?: unknown) {
   const res = await fetch(`${API}${path}`, {
@@ -23,16 +24,45 @@ function dayIso(deltaDays: number) {
   return date.toISOString();
 }
 
-test('timeline supports swimlane toggle and due-date sort without affecting gantt route', async ({ page }) => {
-  const now = Date.now();
-  const sub = `e2e-timeline-swimlane-${now}`;
-  const email = `${sub}@example.com`;
-
+async function login(page: Page, sub: string, email: string) {
   await page.goto('/login');
   await page.fill('input[placeholder="OIDC sub"]', sub);
   await page.fill('input[placeholder="Email"]', email);
   await page.click('button:has-text("Dev Login")');
   await page.waitForURL('**/');
+}
+
+async function laneOrder(page: Page) {
+  return page
+    .locator('[data-testid^="timeline-lane-assignee-"]')
+    .evaluateAll((elements) => elements.map((element) => element.getAttribute('data-testid') ?? ''));
+}
+
+async function dragTimelineBarToLane(page: Page, taskId: string, laneTestId: string) {
+  const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
+  const lane = page.locator(`[data-testid="${laneTestId}"]`);
+  await expect(bar).toBeVisible();
+  await expect(lane).toBeVisible();
+  const barBox = await bar.boundingBox();
+  const laneBox = await lane.boundingBox();
+  if (!barBox || !laneBox) throw new Error('Unable to resolve bar/lane bounds');
+
+  const startX = barBox.x + Math.min(Math.max(8, barBox.width / 4), barBox.width - 4);
+  const startY = barBox.y + barBox.height / 2;
+  const targetY = laneBox.y + laneBox.height / 2;
+
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + DAY_COLUMN_WIDTH * 0.1, targetY, { steps: 16 });
+  await page.mouse.up();
+}
+
+test('timeline supports swimlane toggle and due-date sort without affecting gantt route', async ({ page }) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-swimlane-${now}`;
+  const email = `${sub}@example.com`;
+
+  await login(page, sub, email);
 
   const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
   expect(token).toBeTruthy();
@@ -97,4 +127,121 @@ test('timeline supports swimlane toggle and due-date sort without affecting gant
   await expect(page.locator('[data-testid="timeline-swimlane-toggle"]')).toHaveCount(0);
   await expect(page.locator('[data-testid="timeline-sort-toggle"]')).toHaveCount(0);
   await expect(page.locator('[data-testid="timeline-schedule-filter-toggle"]')).toHaveCount(0);
+});
+
+test('timeline assignee swimlane reorder persists after reload', async ({ page }) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-reorder-${now}`;
+  const email = `${sub}@example.com`;
+
+  await login(page, sub, email);
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Lane Reorder ${now}`,
+  });
+  const projectId = project.id as string;
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+
+  await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Assigned ${now}`,
+    assigneeUserId: sub,
+    startAt: dayIso(1),
+    dueAt: dayIso(3),
+  });
+  await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Unassigned ${now}`,
+    startAt: dayIso(1),
+    dueAt: dayIso(3),
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await page.click('[data-testid="timeline-swimlane-assignee"]');
+
+  const initialOrder = await laneOrder(page);
+  expect(initialOrder.length).toBeGreaterThanOrEqual(2);
+  await page.locator(`[data-testid="${initialOrder[1]}"]`).dragTo(page.locator(`[data-testid="${initialOrder[0]}"]`));
+
+  const expectedOrder = [initialOrder[1], initialOrder[0], ...initialOrder.slice(2)];
+  await expect.poll(() => laneOrder(page)).toEqual(expectedOrder);
+
+  await page.reload();
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await page.click('[data-testid="timeline-swimlane-assignee"]');
+  await expect.poll(() => laneOrder(page)).toEqual(expectedOrder);
+});
+
+test('timeline drag can move task across assignee lanes into unassigned', async ({ page }) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-move-${now}`;
+  const email = `${sub}@example.com`;
+
+  await login(page, sub, email);
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Lane Move ${now}`,
+  });
+  const projectId = project.id as string;
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+
+  const movableTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Move To Unassigned ${now}`,
+    assigneeUserId: sub,
+    startAt: dayIso(1),
+    dueAt: dayIso(4),
+  });
+  expect(movableTask.assigneeUserId).toBeTruthy();
+  await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Anchor Assigned ${now}`,
+    assigneeUserId: movableTask.assigneeUserId,
+    startAt: dayIso(2),
+    dueAt: dayIso(5),
+  });
+  await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Anchor Unassigned ${now}`,
+    startAt: dayIso(2),
+    dueAt: dayIso(5),
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await page.click('[data-testid="timeline-zoom-day"]');
+  await page.click('[data-testid="timeline-swimlane-assignee"]');
+
+  const unassignedLaneTestId = 'timeline-lane-assignee-__unassigned__';
+  const initialLaneOrder = await laneOrder(page);
+  const assigneeLaneTestId = initialLaneOrder.find((lane) => lane !== unassignedLaneTestId);
+  if (!assigneeLaneTestId) throw new Error('Expected an assignee lane before reassignment');
+
+  await dragTimelineBarToLane(page, movableTask.id, unassignedLaneTestId);
+
+  await expect
+    .poll(async () => {
+      const latest = await api(`/tasks/${movableTask.id}`, token);
+      return latest.assigneeUserId;
+    })
+    .toBeNull();
+
+  await dragTimelineBarToLane(page, movableTask.id, assigneeLaneTestId);
+  await expect
+    .poll(async () => {
+      const latest = await api(`/tasks/${movableTask.id}`, token);
+      return latest.assigneeUserId;
+    })
+    .toBe(movableTask.assigneeUserId);
 });
