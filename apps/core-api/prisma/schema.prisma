@@ -93,6 +93,7 @@ model User {
   createdForms         Form[]
   taskApprovals        TaskApproval[]
   timeLogs             TaskTimeLog[]
+  timelinePreferences  ProjectTimelinePreference[]
 }
 
 model WorkspaceMembership {
@@ -147,6 +148,7 @@ model Project {
   statusUpdates ProjectStatusUpdate[]
   recurringRules RecurringRule[]
   forms       Form[]
+  timelinePreferences ProjectTimelinePreference[]
 }
 
 model ProjectStatusUpdate {
@@ -170,6 +172,22 @@ model ProjectMembership {
   userId      String
   role        ProjectRole
   createdAt   DateTime    @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+}
+
+model ProjectTimelinePreference {
+  id                  String   @id @default(uuid())
+  projectId           String
+  userId              String
+  laneOrderBySection  String[] @default([])
+  laneOrderByAssignee String[] @default([])
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)

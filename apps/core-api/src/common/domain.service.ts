@@ -1,9 +1,13 @@
-import { Injectable, ForbiddenException, NotFoundException, ConflictException, Inject } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException, ConflictException, Inject, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, ProjectRole, TaskStatus, TaskType, UserStatus, WorkspaceRole } from '@prisma/client';
 import {
   applyTaskProgressAutomation,
+  assertTimelineScheduleRange as assertTimelineScheduleRangeInDomain,
   deriveTaskCompletionTransition as deriveTaskCompletionTransitionInDomain,
+  deriveTimelineDropSchedule as deriveTimelineDropScheduleInDomain,
+  DomainValidationError,
+  normalizeTimelineLaneOrder as normalizeTimelineLaneOrderInDomain,
   normalizeTaskProgressForType,
   type TaskStatus as DomainTaskStatus,
   type TaskType as DomainTaskType,
@@ -357,6 +361,44 @@ export class DomainService {
       completedAt: result.completedAt,
       action: result.action,
     };
+  }
+
+  normalizeTimelineLaneOrder(laneIds: string[]): string[] {
+    try {
+      return normalizeTimelineLaneOrderInDomain(laneIds);
+    } catch (error) {
+      if (error instanceof DomainValidationError) {
+        throw new BadRequestException(error.message);
+      }
+      throw error;
+    }
+  }
+
+  deriveTimelineDropSchedule(input: {
+    dropAt: Date;
+    currentStartAt: Date | null;
+    currentDueAt: Date | null;
+    durationDays?: number | null;
+  }) {
+    try {
+      return deriveTimelineDropScheduleInDomain(input);
+    } catch (error) {
+      if (error instanceof DomainValidationError) {
+        throw new BadRequestException(error.message);
+      }
+      throw error;
+    }
+  }
+
+  assertTimelineScheduleRange(startAt: Date | null, dueAt: Date | null): void {
+    try {
+      assertTimelineScheduleRangeInDomain(startAt, dueAt);
+    } catch (error) {
+      if (error instanceof DomainValidationError) {
+        throw new BadRequestException(error.message);
+      }
+      throw error;
+    }
   }
 
   private toDomainTaskStatus(status: TaskStatus): DomainTaskStatus {
