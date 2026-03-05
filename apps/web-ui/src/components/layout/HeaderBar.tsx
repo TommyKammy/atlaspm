@@ -16,7 +16,6 @@ import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { CustomFieldDefinition, Project, ProjectMember, Section, Task } from '@/lib/types';
 import { parseCustomFieldFilters, stringifyCustomFieldFilters, type CustomFieldFilter } from '@/lib/project-filters';
-import { PROJECT_VIEW_IDS, resolveProjectView, type ProjectViewId } from '@/lib/project-views';
 import { useI18n } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -241,7 +240,8 @@ export function HeaderBar({
     queryFn: () => api('/projects'),
   });
   const projectId = useMemo(() => pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null, [pathname]);
-  const resolvedCurrentView = resolveProjectView(resolvedSearchParams.get('view'));
+  const currentView = (resolvedSearchParams.get('view') ?? 'list').toLowerCase();
+  const resolvedCurrentView = currentView === 'timeline' ? 'gantt' : currentView;
   const query = resolvedSearchParams.get('q') ?? '';
   const statusesParam = resolvedSearchParams.get('statuses');
   const assigneesParam = resolvedSearchParams.get('assignees');
@@ -259,21 +259,14 @@ export function HeaderBar({
     [customFieldFiltersParam],
   );
   const tabs = useMemo(
-    () => PROJECT_VIEW_IDS.map((id) => ({
-      id,
-      label:
-        id === 'list'
-          ? t('list')
-          : id === 'board'
-            ? t('board')
-            : id === 'timeline'
-              ? t('timeline')
-              : id === 'gantt'
-                ? t('gantt')
-                : id === 'calendar'
-                  ? t('calendar')
-                  : t('files'),
-    })) as Array<{ id: ProjectViewId; label: string }>,
+    () =>
+      [
+        { id: 'list', label: t('list') },
+        { id: 'board', label: t('board') },
+        { id: 'gantt', label: t('gantt') },
+        { id: 'calendar', label: t('calendar') },
+        { id: 'files', label: t('files') },
+      ] as const,
     [t],
   );
 
@@ -454,8 +447,8 @@ export function HeaderBar({
   }, [projectFilterStorageKey, projectId, selectedAssignees, selectedCustomFieldFilters, selectedStatuses]);
 
   return (
-    <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:px-6">
-      <div className="flex min-w-0 items-center gap-2">
+    <header className="sticky top-0 z-10 flex h-14 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:px-6">
+      <div className="flex min-w-0 flex-[1_1_24rem] items-center gap-2">
         {onToggleSidebarMode ? (
           <Button
             variant="ghost"
@@ -469,17 +462,22 @@ export function HeaderBar({
           </Button>
         ) : null}
         <MobileNavSheet />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="text-[11px] uppercase tracking-wider text-muted-foreground">AtlasPM</p>
           <div className="flex min-w-0 items-center gap-3">
             <h1 className="truncate text-sm font-medium">{title}</h1>
             {projectId ? (
-              <div className="hidden items-center gap-1 md:flex" data-testid="project-header-tabs">
+              <div
+                className="hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex"
+                data-testid="project-header-tabs"
+              >
                 {tabs.map((tab) => (
                   <button
                     key={tab.id}
                     type="button"
-                    className={tab.id === resolvedCurrentView ? 'border-b-2 border-primary px-1 py-1 text-xs font-medium' : 'px-1 py-1 text-xs text-muted-foreground'}
+                    className={tab.id === resolvedCurrentView
+                      ? 'shrink-0 whitespace-nowrap border-b-2 border-primary px-1 py-1 text-xs font-medium'
+                      : 'shrink-0 whitespace-nowrap px-1 py-1 text-xs text-muted-foreground'}
                     onClick={() => setProjectQueryParam('view', tab.id)}
                     data-testid={`project-view-${tab.id}`}
                   >
@@ -492,7 +490,7 @@ export function HeaderBar({
         </div>
       </div>
 
-      <div className="mx-3 w-full max-w-xl md:ml-auto md:max-w-md">
+      <div className="mx-2 min-w-0 flex-[1_1_18rem] md:min-w-[14rem] md:max-w-2xl">
         {projectId ? (
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -505,7 +503,7 @@ export function HeaderBar({
                 setProjectQueryParam('q', next.trim() ? next : null);
               }}
               placeholder={t('searchTasks')}
-              className="h-10 rounded-full border-transparent bg-muted/25 pl-10 pr-4 shadow-none transition-colors focus-visible:border-border focus-visible:bg-background/90"
+              className="h-10 w-full min-w-0 rounded-full border-transparent bg-muted/25 pl-10 pr-4 shadow-none transition-colors focus-visible:border-border focus-visible:bg-background/90"
               data-testid="project-search-input"
             />
           </div>
@@ -514,7 +512,7 @@ export function HeaderBar({
         )}
       </div>
 
-      <div className="flex items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1 pl-1">
         {projectId ? (
           <>
             <Popover open={sectionsOpen} onOpenChange={setSectionsOpen}>
