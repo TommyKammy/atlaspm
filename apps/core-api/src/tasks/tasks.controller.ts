@@ -161,6 +161,14 @@ class CreateTaskDto {
   dueAt?: string;
 
   @IsOptional()
+  @IsISO8601()
+  baselineStartAt?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  baselineDueAt?: string;
+
+  @IsOptional()
   @IsArray()
   tags?: string[];
 
@@ -207,6 +215,14 @@ class PatchTaskDto {
   @IsOptional()
   @IsISO8601()
   dueAt?: string | null;
+
+  @IsOptional()
+  @IsISO8601()
+  baselineStartAt?: string | null;
+
+  @IsOptional()
+  @IsISO8601()
+  baselineDueAt?: string | null;
 
   @IsOptional()
   @IsArray()
@@ -538,6 +554,10 @@ export class TasksController {
     await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
 
     assertValidDateRange(body.startAt, body.dueAt);
+    assertValidDateRange(body.baselineStartAt, body.baselineDueAt, {
+      startField: 'baselineStartAt',
+      dueField: 'baselineDueAt',
+    });
 
     let sectionId = body.sectionId;
     if (!sectionId) {
@@ -579,6 +599,8 @@ export class TasksController {
           assigneeUserId: body.assigneeUserId,
           startAt: body.startAt ? new Date(body.startAt) : null,
           dueAt: body.dueAt ? new Date(body.dueAt) : null,
+          baselineStartAt: body.baselineStartAt ? new Date(body.baselineStartAt) : null,
+          baselineDueAt: body.baselineDueAt ? new Date(body.baselineDueAt) : null,
           tags: body.tags ?? [],
           completedAt,
           position,
@@ -612,6 +634,18 @@ export class TasksController {
     const effectiveStartAt = body.startAt === undefined ? task.startAt?.toISOString() : body.startAt;
     const effectiveDueAt = body.dueAt === undefined ? task.dueAt?.toISOString() : body.dueAt;
     assertValidDateRange(effectiveStartAt, effectiveDueAt);
+    const effectiveBaselineStartAt =
+      body.baselineStartAt === undefined
+        ? task.baselineStartAt?.toISOString()
+        : body.baselineStartAt;
+    const effectiveBaselineDueAt =
+      body.baselineDueAt === undefined
+        ? task.baselineDueAt?.toISOString()
+        : body.baselineDueAt;
+    assertValidDateRange(effectiveBaselineStartAt, effectiveBaselineDueAt, {
+      startField: 'baselineStartAt',
+      dueField: 'baselineDueAt',
+    });
 
     const newType = body.type ?? task.type;
     const requestedStatus = body.status ?? task.status;
@@ -645,6 +679,18 @@ export class TasksController {
           assigneeUserId: body.assigneeUserId,
           startAt: body.startAt ? new Date(body.startAt) : body.startAt === null ? null : undefined,
           dueAt: body.dueAt ? new Date(body.dueAt) : body.dueAt === null ? null : undefined,
+          baselineStartAt:
+            body.baselineStartAt
+              ? new Date(body.baselineStartAt)
+              : body.baselineStartAt === null
+                ? null
+                : undefined,
+          baselineDueAt:
+            body.baselineDueAt
+              ? new Date(body.baselineDueAt)
+              : body.baselineDueAt === null
+                ? null
+                : undefined,
           tags: body.tags,
           sectionId: body.sectionId,
           completedAt,

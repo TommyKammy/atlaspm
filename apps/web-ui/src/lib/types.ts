@@ -128,6 +128,8 @@ export type Task = {
   assigneeUserId?: string | null;
   dueAt?: string | null;
   startAt?: string | null;
+  baselineDueAt?: string | null;
+  baselineStartAt?: string | null;
   completedAt?: string | null;
   deletedAt?: string | null;
   deletedByUserId?: string | null;
