@@ -48,4 +48,4 @@ cleanup() {
 }
 trap cleanup EXIT
 
-pnpm --filter @atlaspm/playwright e2e
+pnpm --filter @atlaspm/playwright e2e "$@"
