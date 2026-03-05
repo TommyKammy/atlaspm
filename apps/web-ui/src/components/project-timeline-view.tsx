@@ -90,6 +90,11 @@ function compareTimelineTasks(left: TimelineTask, right: TimelineTask, sortMode:
   return left.title.localeCompare(right.title);
 }
 
+function baselineVarianceDays(task: TimelineTask): number | null {
+  if (!task.baselineEnd || !task.timelineEnd) return null;
+  return dayDiff(task.baselineEnd, task.timelineEnd);
+}
+
 function taskMatchesFilters(
   task: Task,
   search: string,
@@ -393,6 +398,22 @@ export function ProjectTimelineView({
   const ganttBlockedTasks = useMemo(
     () => baseFilteredTasks.filter((task) => (ganttRiskByTaskId.get(task.id)?.blockedByOpen ?? 0) > 0),
     [baseFilteredTasks, ganttRiskByTaskId],
+  );
+  const ganttVarianceByTaskId = useMemo(() => {
+    const next = new Map<string, number>();
+    for (const task of baseFilteredTasks) {
+      const variance = baselineVarianceDays(task);
+      if (variance !== null) next.set(task.id, variance);
+    }
+    return next;
+  }, [baseFilteredTasks]);
+  const ganttDelayedTasks = useMemo(
+    () => baseFilteredTasks.filter((task) => (ganttVarianceByTaskId.get(task.id) ?? 0) > 0),
+    [baseFilteredTasks, ganttVarianceByTaskId],
+  );
+  const ganttAheadTasks = useMemo(
+    () => baseFilteredTasks.filter((task) => (ganttVarianceByTaskId.get(task.id) ?? 0) < 0),
+    [baseFilteredTasks, ganttVarianceByTaskId],
   );
   const gridWidth = Math.max(1, days.length) * zoomConfig.dayColWidth;
 
@@ -744,6 +765,14 @@ export function ProjectTimelineView({
                 {ganttRiskTasks.length}
               </Badge>
               <span>{t('ganttAtRisk')}</span>
+              <Badge variant={ganttDelayedTasks.length ? 'destructive' : 'secondary'} data-testid="gantt-delayed-count">
+                {ganttDelayedTasks.length}
+              </Badge>
+              <span>{t('ganttDelayed')}</span>
+              <Badge variant={ganttAheadTasks.length ? 'default' : 'secondary'} data-testid="gantt-ahead-count">
+                {ganttAheadTasks.length}
+              </Badge>
+              <span>{t('ganttAhead')}</span>
             </>
           ) : null}
         </div>
@@ -1057,12 +1086,19 @@ export function ProjectTimelineView({
                   {visibleTaskRows.map(({ task }) => {
                     const fallbackName = task.title.trim() || t('untitledTask');
                     const ganttTaskRisk = mode === 'gantt' ? ganttRiskByTaskId.get(task.id) : null;
+                    const ganttVariance = mode === 'gantt' ? ganttVarianceByTaskId.get(task.id) ?? null : null;
                     const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
                       ? timeline.window.start
                       : task.timelineStart;
                     const visibleEnd = task.timelineEnd && task.timelineEnd > timeline.window.end
                       ? timeline.window.end
                       : task.timelineEnd;
+                    const visibleBaselineStart = task.baselineStart && task.baselineStart < timeline.window.start
+                      ? timeline.window.start
+                      : task.baselineStart;
+                    const visibleBaselineEnd = task.baselineEnd && task.baselineEnd > timeline.window.end
+                      ? timeline.window.end
+                      : task.baselineEnd;
                     return (
                       <div key={task.id} className="grid h-10 border-b last:border-b-0" style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}>
                         <div className="flex h-full items-center gap-2 px-3">
@@ -1074,6 +1110,15 @@ export function ProjectTimelineView({
                           >
                             {fallbackName}
                           </button>
+                          {mode === 'gantt' && ganttVariance !== null ? (
+                            <Badge
+                              variant={ganttVariance > 0 ? 'destructive' : 'secondary'}
+                              className="h-5 px-1.5 text-[10px]"
+                              data-testid={`gantt-variance-${task.id}`}
+                            >
+                              {ganttVariance > 0 ? `+${ganttVariance}d` : `${ganttVariance}d`}
+                            </Badge>
+                          ) : null}
                           {mode === 'gantt' && ganttTaskRisk?.isAtRisk ? (
                             <Badge
                               variant="destructive"
@@ -1090,53 +1135,65 @@ export function ProjectTimelineView({
                         </div>
                         <div className="relative h-full border-l">
                           {task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd ? (
-                            <button
-                              type="button"
-                              className={`absolute top-1/2 h-6 -translate-y-1/2 rounded bg-primary/20 px-2 text-left text-[11px] text-primary hover:bg-primary/25 ${
-                                dragState?.taskId === task.id && dragState.moved ? 'cursor-grabbing opacity-90' : 'cursor-grab'
-                              }`}
-                              style={{
-                                left: `${Math.max(
-                                  0,
-                                  Math.max(0, dayDiff(timeline.window.start, visibleStart ?? task.timelineStart)) * zoomConfig.dayColWidth
-                                    + (dragState?.taskId === task.id ? dragState.deltaDays * zoomConfig.dayColWidth : 0),
-                                )}px`,
-                                width: `${Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1) * zoomConfig.dayColWidth}px`,
-                              }}
-                              onClick={() => {
-                                if (suppressClickTaskIdRef.current === task.id) {
-                                  suppressClickTaskIdRef.current = null;
-                                  return;
-                                }
-                                setSelectedTaskId(task.id);
-                              }}
-                              onPointerDown={(event) => {
-                                if (event.button !== 0) return;
-                                if (rescheduleInFlightTaskIdsRef.current.has(task.id)) return;
-                                event.preventDefault();
-                                beginBarDrag(task.id, event.pointerId, event.clientX);
-                                event.currentTarget.setPointerCapture(event.pointerId);
-                              }}
-                              onPointerMove={(event) => {
-                                updateBarDrag(event.pointerId, event.clientX);
-                              }}
-                              onPointerUp={(event) => {
-                                finishBarDrag(event.pointerId);
-                                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                                  event.currentTarget.releasePointerCapture(event.pointerId);
-                                }
-                              }}
-                              onPointerCancel={(event) => {
-                                finishBarDrag(event.pointerId);
-                                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                                  event.currentTarget.releasePointerCapture(event.pointerId);
-                                }
-                              }}
-                              data-testid={`timeline-bar-${task.id}`}
-                              title={`${task.timelineStart.toLocaleDateString()} - ${task.timelineEnd.toLocaleDateString()}`}
-                            >
-                              <span className="block truncate">{fallbackName}</span>
-                            </button>
+                            <>
+                              {mode === 'gantt' && task.hasBaseline && task.baselineStart && task.baselineEnd ? (
+                                <div
+                                  className="pointer-events-none absolute top-1/2 h-2 -translate-y-1/2 rounded border border-dashed border-muted-foreground/40 bg-muted/50"
+                                  style={{
+                                    left: `${Math.max(0, dayDiff(timeline.window.start, visibleBaselineStart ?? task.baselineStart)) * zoomConfig.dayColWidth}px`,
+                                    width: `${Math.max(1, dayDiff(visibleBaselineStart ?? task.baselineStart, visibleBaselineEnd ?? task.baselineEnd) + 1) * zoomConfig.dayColWidth}px`,
+                                  }}
+                                  data-testid={`gantt-baseline-${task.id}`}
+                                />
+                              ) : null}
+                              <button
+                                type="button"
+                                className={`absolute top-1/2 h-6 -translate-y-1/2 rounded bg-primary/20 px-2 text-left text-[11px] text-primary hover:bg-primary/25 ${
+                                  dragState?.taskId === task.id && dragState.moved ? 'cursor-grabbing opacity-90' : 'cursor-grab'
+                                }`}
+                                style={{
+                                  left: `${Math.max(
+                                    0,
+                                    Math.max(0, dayDiff(timeline.window.start, visibleStart ?? task.timelineStart)) * zoomConfig.dayColWidth
+                                      + (dragState?.taskId === task.id ? dragState.deltaDays * zoomConfig.dayColWidth : 0),
+                                  )}px`,
+                                  width: `${Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1) * zoomConfig.dayColWidth}px`,
+                                }}
+                                onClick={() => {
+                                  if (suppressClickTaskIdRef.current === task.id) {
+                                    suppressClickTaskIdRef.current = null;
+                                    return;
+                                  }
+                                  setSelectedTaskId(task.id);
+                                }}
+                                onPointerDown={(event) => {
+                                  if (event.button !== 0) return;
+                                  if (rescheduleInFlightTaskIdsRef.current.has(task.id)) return;
+                                  event.preventDefault();
+                                  beginBarDrag(task.id, event.pointerId, event.clientX);
+                                  event.currentTarget.setPointerCapture(event.pointerId);
+                                }}
+                                onPointerMove={(event) => {
+                                  updateBarDrag(event.pointerId, event.clientX);
+                                }}
+                                onPointerUp={(event) => {
+                                  finishBarDrag(event.pointerId);
+                                  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                                    event.currentTarget.releasePointerCapture(event.pointerId);
+                                  }
+                                }}
+                                onPointerCancel={(event) => {
+                                  finishBarDrag(event.pointerId);
+                                  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                                    event.currentTarget.releasePointerCapture(event.pointerId);
+                                  }
+                                }}
+                                data-testid={`timeline-bar-${task.id}`}
+                                title={`${task.timelineStart.toLocaleDateString()} - ${task.timelineEnd.toLocaleDateString()}`}
+                              >
+                                <span className="block truncate">{fallbackName}</span>
+                              </button>
+                            </>
                           ) : task.hasSchedule ? (
                             <span className="absolute left-2 top-1/2 -translate-y-1/2 rounded border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground">
                               {t('timelineOutOfWindow')}

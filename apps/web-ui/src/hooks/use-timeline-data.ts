@@ -20,7 +20,10 @@ export type TimelineTask = Task & {
   section: Section;
   timelineStart: Date | null;
   timelineEnd: Date | null;
+  baselineStart: Date | null;
+  baselineEnd: Date | null;
   hasSchedule: boolean;
+  hasBaseline: boolean;
   inWindow: boolean;
 };
 
@@ -61,6 +64,17 @@ function toDateOrNull(value: string | null | undefined): Date | null {
 function taskRange(task: Task): { start: Date | null; end: Date | null } {
   const start = toDateOrNull(task.startAt);
   const due = toDateOrNull(task.dueAt);
+  if (start && due) {
+    return start <= due ? { start, end: due } : { start: due, end: start };
+  }
+  if (start) return { start, end: start };
+  if (due) return { start: due, end: due };
+  return { start: null, end: null };
+}
+
+function dateRange(startRaw: string | null | undefined, dueRaw: string | null | undefined): { start: Date | null; end: Date | null } {
+  const start = toDateOrNull(startRaw);
+  const due = toDateOrNull(dueRaw);
   if (start && due) {
     return start <= due ? { start, end: due } : { start: due, end: start };
   }
@@ -121,12 +135,16 @@ export function useTimelineData(projectId: string, window?: Partial<TimelineWind
           .sort((left, right) => left.position - right.position)
           .map((task) => {
             const range = taskRange(task);
+            const baselineRange = dateRange(task.baselineStartAt, task.baselineDueAt);
             return {
               ...task,
               section: group.section,
               timelineStart: range.start,
               timelineEnd: range.end,
+              baselineStart: baselineRange.start,
+              baselineEnd: baselineRange.end,
               hasSchedule: Boolean(range.start && range.end),
+              hasBaseline: Boolean(baselineRange.start && baselineRange.end),
               inWindow: overlapsWindow(range, normalizedWindow),
             };
           }),

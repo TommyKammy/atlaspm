@@ -211,6 +211,8 @@ model Task {
   assigneeUserId String?
   startAt        DateTime?
   dueAt          DateTime?
+  baselineStartAt DateTime?
+  baselineDueAt   DateTime?
   tags           String[]   @default([])
   completedAt    DateTime?
   deletedAt      DateTime?  @map("deleted_at")
@@ -255,6 +257,8 @@ model Task {
   @@index([projectId, deletedAt, updatedAt])
   @@index([projectId, deletedAt, type])
   @@index([projectId, deletedAt, startAt])
+  @@index([projectId, deletedAt, baselineStartAt])
+  @@index([projectId, deletedAt, baselineDueAt])
   @@index([recurringRuleId])
 }
 
