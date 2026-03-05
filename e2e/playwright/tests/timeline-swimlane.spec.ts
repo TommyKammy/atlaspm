@@ -245,3 +245,47 @@ test('timeline drag can move task across assignee lanes into unassigned', async 
     })
     .toBe(movableTask.assigneeUserId);
 });
+
+test('timeline can schedule unscheduled tasks via drag and drop', async ({ page }) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-unscheduled-${now}`;
+  const email = `${sub}@example.com`;
+
+  await login(page, sub, email);
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Unscheduled DnD ${now}`,
+  });
+  const projectId = project.id as string;
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+
+  const unscheduledTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Unscheduled ${now}`,
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await expect(page.locator(`[data-testid="timeline-unscheduled-${unscheduledTask.id}"]`)).toBeVisible();
+
+  const lane = page.locator('[data-testid^="timeline-lane-section-"]').first();
+  await page
+    .locator(`[data-testid="timeline-unscheduled-${unscheduledTask.id}"]`)
+    .dragTo(lane, { targetPosition: { x: 320, y: 16 } });
+
+  await expect
+    .poll(async () => {
+      const latest = await api(`/tasks/${unscheduledTask.id}`, token);
+      return Boolean(latest.startAt && latest.dueAt);
+    })
+    .toBe(true);
+  await expect(page.locator(`[data-testid="timeline-bar-${unscheduledTask.id}"]`)).toBeVisible();
+
+  const scheduled = await api(`/tasks/${unscheduledTask.id}`, token);
+  expect(String(scheduled.startAt).slice(0, 10)).toBe(String(scheduled.dueAt).slice(0, 10));
+});
