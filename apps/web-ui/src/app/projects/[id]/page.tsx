@@ -463,6 +463,7 @@ export default function ProjectPage() {
           search={search}
           statusFilter={statusFilter}
           priorityFilter={priorityFilter}
+          mode="timeline"
         />
       ) : view === 'gantt' ? (
         <ProjectTimelineView
@@ -470,6 +471,7 @@ export default function ProjectPage() {
           search={search}
           statusFilter={statusFilter}
           priorityFilter={priorityFilter}
+          mode="gantt"
         />
       ) : view === 'files' ? (
         <ProjectFilesView
