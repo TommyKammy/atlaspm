@@ -554,7 +554,10 @@ export class TasksController {
     await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
 
     assertValidDateRange(body.startAt, body.dueAt);
-    assertValidDateRange(body.baselineStartAt, body.baselineDueAt);
+    assertValidDateRange(body.baselineStartAt, body.baselineDueAt, {
+      startField: 'baselineStartAt',
+      dueField: 'baselineDueAt',
+    });
 
     let sectionId = body.sectionId;
     if (!sectionId) {
@@ -639,7 +642,10 @@ export class TasksController {
       body.baselineDueAt === undefined
         ? task.baselineDueAt?.toISOString()
         : body.baselineDueAt;
-    assertValidDateRange(effectiveBaselineStartAt, effectiveBaselineDueAt);
+    assertValidDateRange(effectiveBaselineStartAt, effectiveBaselineDueAt, {
+      startField: 'baselineStartAt',
+      dueField: 'baselineDueAt',
+    });
 
     const newType = body.type ?? task.type;
     const requestedStatus = body.status ?? task.status;

@@ -8,9 +8,15 @@ export interface DateRangeValidationResult {
   };
 }
 
+export interface DateRangeFieldNames {
+  startField: string;
+  dueField: string;
+}
+
 export function validateDateRange(
   startAt: string | null | undefined,
   dueAt: string | null | undefined,
+  fieldNames: DateRangeFieldNames = { startField: 'startAt', dueField: 'dueAt' },
 ): DateRangeValidationResult {
   if (startAt === null || startAt === undefined || dueAt === null || dueAt === undefined) {
     return { valid: true };
@@ -24,7 +30,7 @@ export function validateDateRange(
       valid: false,
       error: {
         code: 'INVALID_DATE_FORMAT',
-        message: 'startAt must be a valid ISO8601 date string',
+        message: `${fieldNames.startField} must be a valid ISO8601 date string`,
       },
     };
   }
@@ -34,7 +40,7 @@ export function validateDateRange(
       valid: false,
       error: {
         code: 'INVALID_DATE_FORMAT',
-        message: 'dueAt must be a valid ISO8601 date string',
+        message: `${fieldNames.dueField} must be a valid ISO8601 date string`,
       },
     };
   }
@@ -44,7 +50,7 @@ export function validateDateRange(
       valid: false,
       error: {
         code: 'INVALID_DATE_RANGE',
-        message: 'startAt must be before or equal to dueAt',
+        message: `${fieldNames.startField} must be before or equal to ${fieldNames.dueField}`,
       },
     };
   }
@@ -55,8 +61,9 @@ export function validateDateRange(
 export function assertValidDateRange(
   startAt: string | null | undefined,
   dueAt: string | null | undefined,
+  fieldNames: DateRangeFieldNames = { startField: 'startAt', dueField: 'dueAt' },
 ): void {
-  const result = validateDateRange(startAt, dueAt);
+  const result = validateDateRange(startAt, dueAt, fieldNames);
   if (!result.valid) {
     throw new BadRequestException({
       code: result.error!.code,

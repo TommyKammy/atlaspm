@@ -61,17 +61,6 @@ function toDateOrNull(value: string | null | undefined): Date | null {
   return Number.isNaN(parsed.valueOf()) ? null : parsed;
 }
 
-function taskRange(task: Task): { start: Date | null; end: Date | null } {
-  const start = toDateOrNull(task.startAt);
-  const due = toDateOrNull(task.dueAt);
-  if (start && due) {
-    return start <= due ? { start, end: due } : { start: due, end: start };
-  }
-  if (start) return { start, end: start };
-  if (due) return { start: due, end: due };
-  return { start: null, end: null };
-}
-
 function dateRange(startRaw: string | null | undefined, dueRaw: string | null | undefined): { start: Date | null; end: Date | null } {
   const start = toDateOrNull(startRaw);
   const due = toDateOrNull(dueRaw);
@@ -81,6 +70,10 @@ function dateRange(startRaw: string | null | undefined, dueRaw: string | null | 
   if (start) return { start, end: start };
   if (due) return { start: due, end: due };
   return { start: null, end: null };
+}
+
+function taskRange(task: Task): { start: Date | null; end: Date | null } {
+  return dateRange(task.startAt, task.dueAt);
 }
 
 function overlapsWindow(range: { start: Date | null; end: Date | null }, window: TimelineWindow): boolean {
