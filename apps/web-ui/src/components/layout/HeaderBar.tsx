@@ -16,6 +16,7 @@ import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { CustomFieldDefinition, Project, ProjectMember, Section, Task } from '@/lib/types';
 import { parseCustomFieldFilters, stringifyCustomFieldFilters, type CustomFieldFilter } from '@/lib/project-filters';
+import { resolveProjectView } from '@/lib/project-views';
 import { useI18n } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -240,7 +241,7 @@ export function HeaderBar({
     queryFn: () => api('/projects'),
   });
   const projectId = useMemo(() => pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null, [pathname]);
-  const resolvedCurrentView = (resolvedSearchParams.get('view') ?? 'list').toLowerCase();
+  const resolvedCurrentView = resolveProjectView(resolvedSearchParams.get('view'));
   const query = resolvedSearchParams.get('q') ?? '';
   const statusesParam = resolvedSearchParams.get('statuses');
   const assigneesParam = resolvedSearchParams.get('assignees');
