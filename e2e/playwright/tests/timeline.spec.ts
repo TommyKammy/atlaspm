@@ -312,6 +312,94 @@ test('timeline multi-select shifts multiple tasks together', async ({ page }) =>
     });
 });
 
+test('timeline marquee selection can shift multiple tasks together immediately', async ({ page }) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-marquee-${now}`;
+  const email = `e2e-timeline-marquee-${now}@example.com`;
+
+  await page.goto('/login');
+  await page.fill('input[placeholder="OIDC sub"]', sub);
+  await page.fill('input[placeholder="Email"]', email);
+  await page.click('button:has-text("Dev Login")');
+  await page.waitForURL('**/');
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Marquee ${now}`,
+  });
+  const projectId = project.id as string;
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+
+  const base = new Date();
+  base.setHours(0, 0, 0, 0);
+  const taskBStart = new Date(base.getTime() + 4 * 24 * 60 * 60 * 1000);
+
+  const taskA = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Timeline Marquee A ${now}`,
+    startAt: new Date(base).toISOString(),
+    dueAt: new Date(base.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+  });
+  const taskB = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Timeline Marquee B ${now}`,
+    startAt: taskBStart.toISOString(),
+    dueAt: new Date(base.getTime() + 6 * 24 * 60 * 60 * 1000).toISOString(),
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+
+  const firstBar = page.locator(`[data-testid="timeline-bar-${taskA.id}"]`);
+  const secondBar = page.locator(`[data-testid="timeline-bar-${taskB.id}"]`);
+  const firstBox = await firstBar.boundingBox();
+  const secondBox = await secondBar.boundingBox();
+  if (!firstBox || !secondBox) {
+    throw new Error('Expected timeline bars to have bounds');
+  }
+
+  const startX = firstBox.x + 8;
+  const startY = Math.max(0, Math.min(firstBox.y, secondBox.y) - 8);
+  const endX = secondBox.x + secondBox.width - 8;
+  const endY = Math.max(firstBox.y + firstBox.height, secondBox.y + secondBox.height) + 8;
+
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(endX, endY, { steps: 12 });
+  await expect(page.locator('[data-testid="timeline-selection-box"]')).toBeVisible();
+  await page.mouse.up();
+  const dragBox = await firstBar.boundingBox();
+  if (!dragBox) {
+    throw new Error('Expected selected first bar bounds after marquee');
+  }
+
+  const deltaX = 72;
+  await page.mouse.move(dragBox.x + dragBox.width / 2, dragBox.y + dragBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(dragBox.x + dragBox.width / 2 + deltaX, dragBox.y + dragBox.height / 2, { steps: 12 });
+  await page.mouse.up();
+
+  await expect
+    .poll(async () => {
+      const [updatedA, updatedB] = await Promise.all([
+        api(`/tasks/${taskA.id}`, token),
+        api(`/tasks/${taskB.id}`, token),
+      ]);
+      return {
+        a: updatedA.startAt as string,
+        b: updatedB.startAt as string,
+      };
+    })
+    .toEqual({
+      a: new Date(base.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+      b: new Date(taskBStart.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+});
+
 test('timeline working-days drag skips weekends and Alt keeps calendar-day placement', async ({ page }) => {
   const now = Date.now();
   const sub = `e2e-timeline-working-days-${now}`;
