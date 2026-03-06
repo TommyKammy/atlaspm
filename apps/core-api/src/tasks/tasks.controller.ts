@@ -497,6 +497,7 @@ const MAX_DESCRIPTION_TEXT_LENGTH = 20_000;
 const MAX_COMMENT_BODY_LENGTH = 5000;
 const MAX_IMAGE_UPLOAD_BYTES = 5_000_000;
 const IMAGE_MIME_ALLOWLIST = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const TIMELINE_LANE_ORDER_BASE_LIMIT = 500;
 const TIMELINE_GROUP_BY_VALUES = ['section', 'assignee'] as const;
 const TIMELINE_VIEW_MODE_VALUES = ['timeline', 'gantt'] as const;
 const TIMELINE_ZOOM_VALUES = ['day', 'week', 'month'] as const;
@@ -3010,7 +3011,7 @@ export class TasksController {
     groupBy: TimelineGroupBy,
   ): Promise<number> {
     if (groupBy === 'section') {
-      return Math.max(1, await tx.section.count({ where: { projectId } }));
+      return Math.max(TIMELINE_LANE_ORDER_BASE_LIMIT, await tx.section.count({ where: { projectId } }));
     }
 
     const [projectMembers, assignedUsers] = await Promise.all([
@@ -3032,7 +3033,7 @@ export class TasksController {
       }
     }
 
-    return Math.max(1, laneIds.size + 1);
+    return Math.max(TIMELINE_LANE_ORDER_BASE_LIMIT, laneIds.size + 1);
   }
 
   private parseTimelineViewMode(value: string): TimelineViewMode {
