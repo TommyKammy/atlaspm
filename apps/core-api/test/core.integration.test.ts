@@ -2764,6 +2764,14 @@ describe('Core API Integration', () => {
       ganttStrictMode: true,
     });
 
+    await request(app.getHttpServer())
+      .put(`/projects/${projectId}/timeline/preferences/view-state/timeline`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        zoom: 'year',
+      })
+      .expect(400);
+
     const persistedPrefsRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/timeline/preferences`)
       .set('Authorization', `Bearer ${token}`)
