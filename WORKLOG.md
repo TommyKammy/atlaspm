@@ -2386,3 +2386,25 @@
   - `pnpm --dir e2e/playwright exec playwright test tests/timeline-route.spec.ts tests/timeline-swimlane.spec.ts tests/gantt-risk.spec.ts --reporter=list`
 - Risks/known gaps:
   - The extracted layout service preserves the current one-row-per-task behavior; compact packing is intentionally deferred to Issue #202.
+
+## 2026-03-06 - Issue #199: Add status swimlane grouping to Timeline
+- What changed:
+  - Extended the shared lane builder in `packages/domain/src/services/timeline-layout.ts` to support `status` swimlanes with fixed workflow ordering.
+  - Added domain coverage in `packages/domain/src/__tests__/timeline-layout.test.ts` for status-lane grouping.
+  - Updated `apps/web-ui/src/components/project-timeline-view.tsx` to:
+    - persist/read `status` as a valid swimlane mode
+    - expose a status swimlane toggle in the Timeline toolbar
+    - pass localized status labels into the domain lane builder
+    - disable lane-order drag persistence for status lanes (fixed order for this wave)
+  - Added localized copy in `apps/web-ui/src/lib/i18n.tsx`.
+  - Extended `e2e/playwright/tests/timeline-swimlane.spec.ts` to verify status swimlane rendering without regressing existing assignee/unscheduled flows.
+- Why:
+  - Issue #199 introduces status swimlanes as a first-class Timeline grouping mode before lane-to-status drag reassignment lands in Issue #200.
+- How tested (exact commands):
+  - `pnpm install`
+  - `pnpm --filter @atlaspm/domain build`
+  - `node --test packages/domain/dist/__tests__/timeline-layout.test.js`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `cd e2e/playwright && E2E_BASE_URL=http://localhost:3100 pnpm exec playwright test tests/timeline-swimlane.spec.ts --reporter=list`
+- Risks/known gaps:
+  - Status swimlanes currently use fixed workflow order only; lane reordering persistence for status stays out of scope until later preference work.

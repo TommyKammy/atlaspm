@@ -29,10 +29,11 @@ const UNSCHEDULED_TASK_DND_TYPE = 'application/x-atlaspm-unscheduled-task';
 
 type TimelineZoom = 'day' | 'week' | 'month';
 type TimelineMode = 'timeline' | 'gantt';
-type TimelineSwimlane = 'section' | 'assignee';
+type TimelineSwimlane = 'section' | 'assignee' | 'status';
 type TimelineSortMode = 'manual' | 'startAt' | 'dueAt';
 type TimelineScheduleFilter = 'all' | 'scheduled' | 'unscheduled';
 type GanttRiskFilterMode = 'all' | 'risk';
+type TimelineLaneOrderGroupBy = Extract<TimelineSwimlane, 'section' | 'assignee'>;
 
 type GanttTaskRisk = {
   isAtRisk: boolean;
@@ -181,6 +182,10 @@ function parseAssigneeLaneId(laneId: string): string | null | undefined {
   return raw === UNASSIGNED_LANE_ID ? null : raw;
 }
 
+function isLaneOrderGroupBy(value: TimelineSwimlane): value is TimelineLaneOrderGroupBy {
+  return value === 'section' || value === 'assignee';
+}
+
 function reorderLaneIds(laneIds: string[], draggingLaneId: string, overLaneId: string): string[] {
   const fromIndex = laneIds.indexOf(draggingLaneId);
   const toIndex = laneIds.indexOf(overLaneId);
@@ -286,7 +291,7 @@ export function ProjectScheduleCanvas({
             setAnchorDate(startOfDay(parsedDate));
           }
         }
-        if (parsed.swimlane === 'section' || parsed.swimlane === 'assignee') {
+        if (parsed.swimlane === 'section' || parsed.swimlane === 'assignee' || parsed.swimlane === 'status') {
           setSwimlane(parsed.swimlane);
         }
         if (parsed.sortMode === 'manual' || parsed.sortMode === 'startAt' || parsed.sortMode === 'dueAt') {
@@ -409,6 +414,8 @@ export function ProjectScheduleCanvas({
     () =>
       effectiveSwimlane === 'assignee'
         ? timelinePreferencesQuery.data?.laneOrderByAssignee ?? []
+        : effectiveSwimlane === 'status'
+          ? []
         : timelinePreferencesQuery.data?.laneOrderBySection ?? [],
     [effectiveSwimlane, timelinePreferencesQuery.data?.laneOrderByAssignee, timelinePreferencesQuery.data?.laneOrderBySection],
   );
@@ -422,6 +429,12 @@ export function ProjectScheduleCanvas({
       preferredLaneOrder,
       defaultSectionLabel: t('tasks'),
       unassignedLabel: t('unassigned'),
+      statusLabels: {
+        TODO: t('statusTodo'),
+        IN_PROGRESS: t('statusInProgress'),
+        BLOCKED: t('statusBlocked'),
+        DONE: t('statusDone'),
+      },
       unassignedLaneId: UNASSIGNED_LANE_ID,
     });
   }, [effectiveSwimlane, filteredTasks, preferredLaneOrder, t, timeline.membersById, timeline.sections]);
@@ -470,7 +483,7 @@ export function ProjectScheduleCanvas({
       groupBy,
       laneOrder,
     }: {
-      groupBy: TimelineSwimlane;
+      groupBy: TimelineLaneOrderGroupBy;
       laneOrder: string[];
     }) =>
       (await api(`/projects/${projectId}/timeline/preferences/${groupBy}`, {
@@ -879,6 +892,7 @@ export function ProjectScheduleCanvas({
     const laneIds = timelineLanes.map((lane) => lane.id);
     const nextLaneOrder = reorderLaneIds(laneIds, draggingLaneId, overLaneId);
     if (nextLaneOrder.join('|') === laneIds.join('|')) return;
+    if (!isLaneOrderGroupBy(effectiveSwimlane)) return;
     saveLaneOrderMutation.mutate({
       groupBy: effectiveSwimlane,
       laneOrder: nextLaneOrder,
@@ -1009,6 +1023,17 @@ export function ProjectScheduleCanvas({
                 onClick={() => setSwimlane('assignee')}
               >
                 {t('timelineSwimlaneAssignee')}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={effectiveSwimlane === 'status' ? 'default' : 'ghost'}
+                className="h-7 px-2 text-xs"
+                data-testid="timeline-swimlane-status"
+                data-active={effectiveSwimlane === 'status' ? 'true' : 'false'}
+                onClick={() => setSwimlane('status')}
+              >
+                {t('timelineSwimlaneStatus')}
               </Button>
             </div>
 
@@ -1299,22 +1324,22 @@ export function ProjectScheduleCanvas({
                       }`}
                       style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}
                       data-testid={`timeline-lane-${normalizeTestIdSegment(lane.id)}`}
-                      draggable={mode === 'timeline'}
+                      draggable={mode === 'timeline' && effectiveSwimlane !== 'status'}
                       onDragStart={(event) => {
-                        if (mode !== 'timeline') return;
+                        if (mode !== 'timeline' || effectiveSwimlane === 'status') return;
                         event.dataTransfer.effectAllowed = 'move';
                         event.dataTransfer.setData('text/plain', lane.id);
                         setLaneDragState({ draggingLaneId: lane.id, overLaneId: lane.id });
                       }}
                       onDragOver={(event) => {
-                        if (mode !== 'timeline' || !laneDragState?.draggingLaneId) return;
+                        if (mode !== 'timeline' || effectiveSwimlane === 'status' || !laneDragState?.draggingLaneId) return;
                         event.preventDefault();
                         if (laneDragState.overLaneId !== lane.id) {
                           setLaneDragState((current) => (current ? { ...current, overLaneId: lane.id } : current));
                         }
                       }}
                       onDrop={(event) => {
-                        if (mode !== 'timeline') return;
+                        if (mode !== 'timeline' || effectiveSwimlane === 'status') return;
                         event.preventDefault();
                         const draggingLaneId = laneDragState?.draggingLaneId ?? event.dataTransfer.getData('text/plain');
                         if (draggingLaneId) {

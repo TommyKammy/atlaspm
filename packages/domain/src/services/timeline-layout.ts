@@ -1,6 +1,8 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export type TimelineSwimlaneMode = 'section' | 'assignee';
+export type TimelineSwimlaneMode = 'section' | 'assignee' | 'status';
+
+export type TimelineStatusLane = 'TODO' | 'IN_PROGRESS' | 'BLOCKED' | 'DONE';
 
 export type TimelineSectionInput = {
   id: string;
@@ -18,6 +20,7 @@ export type TimelineLaneTaskInput = {
   id: string;
   sectionId: string;
   assigneeUserId?: string | null;
+  status: TimelineStatusLane;
 };
 
 export type TimelineLaneTask<TTask extends TimelineLaneTaskInput = TimelineLaneTaskInput> = TTask;
@@ -36,6 +39,8 @@ export type BuildTimelineLanesInput<TTask extends TimelineLaneTaskInput> = {
   preferredLaneOrder?: string[];
   defaultSectionLabel: string;
   unassignedLabel: string;
+  statusLabels?: Record<TimelineStatusLane, string>;
+  statusOrder?: TimelineStatusLane[];
   unassignedLaneId?: string;
 };
 
@@ -136,6 +141,30 @@ export function buildTimelineLanes<TTask extends TimelineLaneTaskInput>(
       });
 
     return applyLaneOrder(lanes, preferredLaneOrder);
+  }
+
+  if (input.swimlane === 'status') {
+    const statusOrder = input.statusOrder ?? ['TODO', 'IN_PROGRESS', 'BLOCKED', 'DONE'];
+    const statusLabels = input.statusLabels ?? {
+      TODO: 'TODO',
+      IN_PROGRESS: 'IN_PROGRESS',
+      BLOCKED: 'BLOCKED',
+      DONE: 'DONE',
+    };
+    const grouped = new Map<TimelineStatusLane, TTask[]>();
+    for (const task of input.tasks) {
+      const next = grouped.get(task.status) ?? [];
+      next.push(task);
+      grouped.set(task.status, next);
+    }
+
+    return statusOrder
+      .map((status) => ({
+        id: `status:${status}`,
+        label: statusLabels[status],
+        tasks: grouped.get(status) ?? [],
+      }))
+      .filter((lane) => lane.tasks.length > 0);
   }
 
   const bySection = new Map<string, TTask[]>();

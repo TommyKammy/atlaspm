@@ -95,6 +95,20 @@ test('timeline supports swimlane toggle and due-date sort without affecting gant
     title: `Task No Date ${now}`,
   });
 
+  await api(`/tasks/${taskLate.id}`, token, 'PATCH', {
+    status: 'IN_PROGRESS',
+    version: taskLate.version,
+  });
+  await api(`/tasks/${taskEarly.id}`, token, 'PATCH', {
+    status: 'BLOCKED',
+    version: taskEarly.version,
+  });
+  await api(`/tasks/${taskNoDate.id}`, token, 'PATCH', {
+    status: 'DONE',
+    progressPercent: 100,
+    version: taskNoDate.version,
+  });
+
   await page.goto(`/projects/${projectId}?view=timeline`);
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
   await expect(page.locator('[data-testid="timeline-swimlane-toggle"]')).toBeVisible();
@@ -115,6 +129,10 @@ test('timeline supports swimlane toggle and due-date sort without affecting gant
   await page.click('[data-testid="timeline-swimlane-assignee"]');
   await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute('data-active', 'true');
   await expect(page.locator('[data-testid^="timeline-lane-assignee-"]')).toHaveCount(2);
+
+  await page.click('[data-testid="timeline-swimlane-status"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid^="timeline-lane-status-"]')).toHaveCount(3);
 
   await page.click('[data-testid="timeline-filter-unscheduled"]');
   await expect(page.locator('[data-testid="timeline-filter-unscheduled"]')).toHaveAttribute('data-active', 'true');

@@ -27,6 +27,7 @@ test('buildTimelineLanes groups assignee lanes with unassigned at the end', () =
       title: 'Assigned',
       sectionId: 'design',
       assigneeUserId: 'user-1',
+      status: 'IN_PROGRESS',
       hasSchedule: true,
       inWindow: true,
       timelineStart: new Date('2026-03-01T00:00:00.000Z'),
@@ -37,6 +38,7 @@ test('buildTimelineLanes groups assignee lanes with unassigned at the end', () =
       title: 'Unassigned',
       sectionId: 'default',
       assigneeUserId: null,
+      status: 'TODO',
       hasSchedule: true,
       inWindow: true,
       timelineStart: new Date('2026-03-01T00:00:00.000Z'),
@@ -71,6 +73,7 @@ test('buildTimelineLanes respects preferred section order', () => {
       title: 'Default task',
       sectionId: 'default',
       assigneeUserId: null,
+      status: 'TODO',
       hasSchedule: false,
       inWindow: false,
       timelineStart: null,
@@ -81,6 +84,7 @@ test('buildTimelineLanes respects preferred section order', () => {
       title: 'Design task',
       sectionId: 'design',
       assigneeUserId: null,
+      status: 'BLOCKED',
       hasSchedule: false,
       inWindow: false,
       timelineStart: null,
@@ -104,6 +108,68 @@ test('buildTimelineLanes respects preferred section order', () => {
   );
 });
 
+test('buildTimelineLanes groups status lanes in fixed workflow order', () => {
+  const tasks: TaskInput[] = [
+    {
+      id: 'task-1',
+      title: 'Blocked task',
+      sectionId: 'default',
+      assigneeUserId: null,
+      status: 'BLOCKED',
+      hasSchedule: false,
+      inWindow: false,
+      timelineStart: null,
+      timelineEnd: null,
+    },
+    {
+      id: 'task-2',
+      title: 'Todo task',
+      sectionId: 'design',
+      assigneeUserId: null,
+      status: 'TODO',
+      hasSchedule: false,
+      inWindow: false,
+      timelineStart: null,
+      timelineEnd: null,
+    },
+    {
+      id: 'task-3',
+      title: 'Done task',
+      sectionId: 'design',
+      assigneeUserId: null,
+      status: 'DONE',
+      hasSchedule: false,
+      inWindow: false,
+      timelineStart: null,
+      timelineEnd: null,
+    },
+  ];
+
+  const lanes = buildTimelineLanes({
+    swimlane: 'status',
+    tasks,
+    sections,
+    membersById: {},
+    preferredLaneOrder: ['status:DONE', 'status:BLOCKED'],
+    defaultSectionLabel: 'Tasks',
+    unassignedLabel: 'Unassigned',
+    statusLabels: {
+      TODO: 'To do',
+      IN_PROGRESS: 'In progress',
+      BLOCKED: 'Blocked',
+      DONE: 'Done',
+    },
+  });
+
+  assert.deepEqual(
+    lanes.map((lane) => lane.id),
+    ['status:TODO', 'status:BLOCKED', 'status:DONE'],
+  );
+  assert.equal(lanes[0]?.label, 'To do');
+  assert.equal(lanes[1]?.label, 'Blocked');
+  assert.equal(lanes[2]?.label, 'Done');
+});
+
 test('buildTimelineLayout calculates row and bar positions', () => {
   const tasks: TaskInput[] = [
     {
@@ -111,6 +177,7 @@ test('buildTimelineLayout calculates row and bar positions', () => {
       title: 'Scheduled',
       sectionId: 'design',
       assigneeUserId: 'user-1',
+      status: 'IN_PROGRESS',
       hasSchedule: true,
       inWindow: true,
       timelineStart: new Date('2026-03-02T00:00:00.000Z'),
