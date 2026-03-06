@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { buildTimelineLanes, buildTimelineLayout } from '@atlaspm/domain';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
@@ -82,6 +82,79 @@ function dayNumber(date: Date): number {
 
 function dayDiff(from: Date, to: Date): number {
   return dayNumber(to) - dayNumber(from);
+}
+
+function colorFromProjectId(projectId: string): { hue: number; saturation: number; lightness: number } {
+  let hash = 0;
+  for (let index = 0; index < projectId.length; index += 1) {
+    hash = (hash * 33 + projectId.charCodeAt(index)) % 360;
+  }
+  return {
+    hue: hash,
+    saturation: 68,
+    lightness: 54,
+  };
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const normalized = hex.trim().replace('#', '');
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return null;
+  return {
+    r: Number.parseInt(normalized.slice(0, 2), 16),
+    g: Number.parseInt(normalized.slice(2, 4), 16),
+    b: Number.parseInt(normalized.slice(4, 6), 16),
+  };
+}
+
+function rgbaFromHex(hex: string, alpha: number): string | null {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return null;
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+}
+
+function resolveTimelineBarStyle(task: TimelineTask, today: Date): CSSProperties {
+  const isDone = task.status === 'DONE';
+  const isOverdue = !isDone && Boolean(task.timelineEnd && dayNumber(task.timelineEnd) < dayNumber(today));
+  const optionColor = task.customFieldValues?.find((value) => value.option?.color)?.option?.color ?? null;
+
+  if (isOverdue) {
+    return {
+      backgroundColor: 'rgba(239, 68, 68, 0.16)',
+      border: '1px solid rgba(239, 68, 68, 0.3)',
+      color: 'rgb(153, 27, 27)',
+    };
+  }
+
+  if (isDone) {
+    return {
+      backgroundColor: 'rgba(34, 197, 94, 0.16)',
+      border: '1px solid rgba(34, 197, 94, 0.3)',
+      color: 'rgb(21, 128, 61)',
+    };
+  }
+
+  if (task.status === 'BLOCKED') {
+    return {
+      backgroundColor: 'rgba(245, 158, 11, 0.16)',
+      border: '1px solid rgba(245, 158, 11, 0.3)',
+      color: 'rgb(180, 83, 9)',
+    };
+  }
+
+  if (optionColor) {
+    return {
+      backgroundColor: rgbaFromHex(optionColor, 0.16) ?? 'rgba(59, 130, 246, 0.16)',
+      border: `1px solid ${rgbaFromHex(optionColor, 0.32) ?? 'rgba(59, 130, 246, 0.32)'}`,
+      color: optionColor,
+    };
+  }
+
+  const projectColor = colorFromProjectId(task.projectId);
+  return {
+    backgroundColor: `hsla(${projectColor.hue}, ${projectColor.saturation}%, ${projectColor.lightness}%, 0.16)`,
+    border: `1px solid hsla(${projectColor.hue}, ${projectColor.saturation}%, ${projectColor.lightness}%, 0.32)`,
+    color: `hsl(${projectColor.hue}, ${projectColor.saturation}%, ${Math.max(28, projectColor.lightness - 16)}%)`,
+  };
 }
 
 function formatDay(date: Date): string {
@@ -270,6 +343,7 @@ export function ProjectScheduleCanvas({
   mode: TimelineMode;
 }) {
   const { t } = useI18n();
+  const today = useMemo(() => startOfDay(new Date()), []);
   const queryClient = useQueryClient();
   const meQuery = useQuery<{ id: string }>({
     queryKey: queryKeys.me,
@@ -1576,6 +1650,7 @@ export function ProjectScheduleCanvas({
                         <div className="relative h-full border-l">
                           {row.tasks.map((task) => {
                             const fallbackTaskName = task.title.trim() || t('untitledTask');
+                            const timelineBarStyle = resolveTimelineBarStyle(task, today);
                             const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
                               ? timeline.window.start
                               : task.timelineStart;
@@ -1603,7 +1678,7 @@ export function ProjectScheduleCanvas({
                                   ) : null}
                                   <button
                                     type="button"
-                                    className={`absolute top-1/2 h-6 -translate-y-1/2 rounded bg-primary/20 px-2 text-left text-[11px] text-primary hover:bg-primary/25 ${
+                                    className={`absolute top-1/2 h-6 -translate-y-1/2 rounded px-2 text-left text-[11px] shadow-sm transition-[background-color,border-color,color,opacity] ${
                                       dragState?.taskId === task.id && dragState.moved ? 'cursor-grabbing opacity-90' : 'cursor-grab'
                                     }`}
                                     style={{
@@ -1613,6 +1688,7 @@ export function ProjectScheduleCanvas({
                                           + (dragState?.taskId === task.id ? dragState.deltaDays * zoomConfig.dayColWidth : 0),
                                       )}px`,
                                       width: `${Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1) * zoomConfig.dayColWidth}px`,
+                                      ...timelineBarStyle,
                                     }}
                                     onClick={() => {
                                       if (suppressClickTaskIdRef.current === task.id) {
