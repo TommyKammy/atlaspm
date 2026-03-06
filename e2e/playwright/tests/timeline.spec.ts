@@ -226,3 +226,89 @@ test('timeline highlights dependency risks without opening task details', async 
   await expect(page.locator(`[data-testid="timeline-bar-${blocked.id}"]`)).toHaveAttribute('data-at-risk', 'true');
   await expect(page.locator(`[data-testid="timeline-bar-${blocked.id}"]`)).toHaveAttribute('data-risk-kind', /open blockers|late blockers|未解決ブロッカー|期限遅延依存/);
 });
+
+test('timeline multi-select shifts multiple tasks together', async ({ page }) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-multi-${now}`;
+  const email = `e2e-timeline-multi-${now}@example.com`;
+
+  await page.goto('/login');
+  await page.fill('input[placeholder="OIDC sub"]', sub);
+  await page.fill('input[placeholder="Email"]', email);
+  await page.click('button:has-text("Dev Login")');
+  await page.waitForURL('**/');
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Multi ${now}`,
+  });
+  const projectId = project.id as string;
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+
+  const base = new Date();
+  base.setHours(0, 0, 0, 0);
+
+  const taskA = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Timeline Multi A ${now}`,
+    startAt: new Date(base).toISOString(),
+    dueAt: new Date(base.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+  });
+  const taskBStart = new Date(base.getTime() + 4 * 24 * 60 * 60 * 1000);
+  const taskBEnd = new Date(base.getTime() + 6 * 24 * 60 * 60 * 1000);
+  const taskB = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Timeline Multi B ${now}`,
+    startAt: taskBStart.toISOString(),
+    dueAt: taskBEnd.toISOString(),
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+
+  const firstBar = page.locator(`[data-testid="timeline-bar-${taskA.id}"]`);
+  const secondBar = page.locator(`[data-testid="timeline-bar-${taskB.id}"]`);
+  const firstBox = await firstBar.boundingBox();
+  const secondBox = await secondBar.boundingBox();
+  if (!firstBox || !secondBox) {
+    throw new Error('Expected timeline bars to have bounds');
+  }
+
+  await firstBar.click({ modifiers: ['Shift'] });
+  await secondBar.click({ modifiers: ['Shift'] });
+
+  await expect(page.locator('[data-testid="timeline-selection-count"]')).toContainText('2');
+  await expect(firstBar).toHaveAttribute('data-selected', 'true');
+  await expect(secondBar).toHaveAttribute('data-selected', 'true');
+
+  const dragStart = await firstBar.boundingBox();
+  if (!dragStart) {
+    throw new Error('Expected selected timeline bar bounds');
+  }
+
+  const deltaX = 72;
+  await page.mouse.move(dragStart.x + dragStart.width / 2, dragStart.y + dragStart.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(dragStart.x + dragStart.width / 2 + deltaX, dragStart.y + dragStart.height / 2, { steps: 12 });
+  await page.mouse.up();
+
+  await expect
+    .poll(async () => {
+      const [updatedA, updatedB] = await Promise.all([
+        api(`/tasks/${taskA.id}`, token),
+        api(`/tasks/${taskB.id}`, token),
+      ]);
+      return {
+        a: updatedA.startAt as string,
+        b: updatedB.startAt as string,
+      };
+    })
+    .toEqual({
+      a: new Date(base.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+      b: new Date(taskBStart.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+});

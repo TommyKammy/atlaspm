@@ -77,6 +77,13 @@ type TimelineDependencyDraft = {
   targetTaskId: string | null;
 };
 
+type TimelineSelectionDraft = {
+  originX: number;
+  originY: number;
+  currentX: number;
+  currentY: number;
+};
+
 function getLegacyTimelineStorageKey(mode: TimelineMode, userId: string, projectId: string): string {
   return `atlaspm:timeline-view:${userId}:${projectId}:${mode}`;
 }
@@ -255,6 +262,25 @@ function applyTaskScheduleInGroups(
           }
         : task,
     ),
+  }));
+}
+
+function applyTaskSchedulesInGroups(
+  groups: SectionTaskGroup[],
+  nextByTaskId: Map<string, { startAt: string | null; dueAt: string | null }>,
+) {
+  return groups.map((group) => ({
+    ...group,
+    tasks: group.tasks.map((task) => {
+      const next = nextByTaskId.get(task.id);
+      return next
+        ? {
+            ...task,
+            startAt: next.startAt,
+            dueAt: next.dueAt,
+          }
+        : task;
+    }),
   }));
 }
 
@@ -488,6 +514,7 @@ export function ProjectScheduleCanvas({
   const [viewportHeight, setViewportHeight] = useState(() => (typeof window === 'undefined' ? 800 : window.innerHeight));
   const [dragState, setDragState] = useState<{
     taskId: string;
+    taskIds: string[];
     pointerId: number;
     originX: number;
     originY: number;
@@ -498,6 +525,7 @@ export function ProjectScheduleCanvas({
   } | null>(null);
   const dragStateRef = useRef<{
     taskId: string;
+    taskIds: string[];
     pointerId: number;
     originX: number;
     originY: number;
@@ -510,6 +538,8 @@ export function ProjectScheduleCanvas({
   const [unscheduledDragTaskId, setUnscheduledDragTaskId] = useState<string | null>(null);
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
   const [dependencyDraft, setDependencyDraft] = useState<TimelineDependencyDraft | null>(null);
+  const [selectedTimelineTaskIds, setSelectedTimelineTaskIds] = useState<string[]>([]);
+  const [selectionDraft, setSelectionDraft] = useState<TimelineSelectionDraft | null>(null);
   const suppressClickTaskIdRef = useRef<string | null>(null);
   const [rescheduleNotice, setRescheduleNotice] = useState<{ type: 'conflict' | 'error'; message: string } | null>(null);
 
@@ -540,6 +570,7 @@ export function ProjectScheduleCanvas({
   const saveViewStateTimerRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
+  const timelineCanvasRef = useRef<HTMLDivElement | null>(null);
   const scrollRafRef = useRef<number | null>(null);
   const markerId = `timeline-arrow-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const timelinePreferencesQuery = useQuery<TimelinePreferences>({
@@ -1047,6 +1078,76 @@ export function ProjectScheduleCanvas({
     },
   });
 
+  const batchRescheduleTasks = useMutation({
+    mutationFn: async ({
+      tasks,
+    }: {
+      tasks: Array<{ taskId: string; startAt: string | null; dueAt: string | null; version: number }>;
+    }) =>
+      Promise.all(tasks.map((task) =>
+        api(`/tasks/${task.taskId}/reschedule`, {
+          method: 'PATCH',
+          body: {
+            startAt: task.startAt,
+            dueAt: task.dueAt,
+            version: task.version,
+          },
+        }) as Promise<Task>)),
+    onMutate: async ({ tasks }) => {
+      setRescheduleNotice(null);
+      await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      await Promise.all(tasks.map((task) => queryClient.cancelQueries({ queryKey: queryKeys.taskDetail(task.taskId) })));
+      const previous = queryClient.getQueryData<SectionTaskGroup[]>(
+        queryKeys.projectTasksGrouped(projectId),
+      );
+      const previousTaskDetails = new Map<string, Task | undefined>(
+        tasks.map((task) => [task.taskId, queryClient.getQueryData<Task>(queryKeys.taskDetail(task.taskId))]),
+      );
+      if (previous) {
+        const nextByTaskId = new Map(tasks.map((task) => [task.taskId, { startAt: task.startAt, dueAt: task.dueAt }]));
+        queryClient.setQueryData<SectionTaskGroup[]>(
+          queryKeys.projectTasksGrouped(projectId),
+          applyTaskSchedulesInGroups(previous, nextByTaskId),
+        );
+      }
+      for (const task of tasks) {
+        const previousTaskDetail = previousTaskDetails.get(task.taskId);
+        if (previousTaskDetail) {
+          queryClient.setQueryData<Task>(queryKeys.taskDetail(task.taskId), {
+            ...previousTaskDetail,
+            startAt: task.startAt,
+            dueAt: task.dueAt,
+          });
+        }
+      }
+      return { previous, previousTaskDetails };
+    },
+    onError: (error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), context.previous);
+      }
+      for (const [taskId, previousTaskDetail] of context?.previousTaskDetails ?? []) {
+        if (previousTaskDetail) {
+          queryClient.setQueryData<Task>(queryKeys.taskDetail(taskId), previousTaskDetail);
+        }
+      }
+      if (isApiConflictError(error)) {
+        setRescheduleNotice({ type: 'conflict', message: t('timelineRescheduleConflict') });
+      } else {
+        setRescheduleNotice({ type: 'error', message: t('timelineRescheduleFailed') });
+      }
+    },
+    onSettled: async (_result, _error, variables) => {
+      for (const task of variables.tasks) {
+        rescheduleInFlightTaskIdsRef.current.delete(task.taskId);
+      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+      await Promise.all(
+        variables.tasks.map((task) => queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(task.taskId) })),
+      );
+    },
+  });
+
   const timelineMoveTask = useMutation({
     mutationFn: async ({
       taskId,
@@ -1231,6 +1332,78 @@ export function ProjectScheduleCanvas({
     };
   }, [createTimelineDependency, dependencyDraft]);
 
+  useEffect(() => {
+    if (!selectionDraft) return;
+
+    const updateSelection = (clientX: number, clientY: number) => {
+      if (!selectionDraft) return;
+      const next = { ...selectionDraft, currentX: clientX, currentY: clientY };
+      selectTimelineTasksInRect({
+        left: Math.min(next.originX, next.currentX),
+        top: Math.min(next.originY, next.currentY),
+        right: Math.max(next.originX, next.currentX),
+        bottom: Math.max(next.originY, next.currentY),
+      });
+      setSelectionDraft(next);
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      updateSelection(event.clientX, event.clientY);
+    };
+
+    const handlePointerUp = () => {
+      setSelectionDraft(null);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [selectionDraft, selectTimelineTasksInRect]);
+
+  const selectionRect = useMemo(() => {
+    if (!selectionDraft) return null;
+    const left = Math.min(selectionDraft.originX, selectionDraft.currentX);
+    const top = Math.min(selectionDraft.originY, selectionDraft.currentY);
+    const right = Math.max(selectionDraft.originX, selectionDraft.currentX);
+    const bottom = Math.max(selectionDraft.originY, selectionDraft.currentY);
+    return {
+      left,
+      top,
+      width: right - left,
+      height: bottom - top,
+      right,
+      bottom,
+    };
+  }, [selectionDraft]);
+
+  function selectTimelineTasksInRect(nextRect: { left: number; top: number; right: number; bottom: number }) {
+    const nodes = Array.from(
+      timelineCanvasRef.current?.querySelectorAll<HTMLElement>('[data-timeline-task-id]') ?? [],
+    );
+    const nextSelected = nodes
+      .filter((node) => {
+        const rect = node.getBoundingClientRect();
+        return !(
+          rect.right < nextRect.left
+          || rect.left > nextRect.right
+          || rect.bottom < nextRect.top
+          || rect.top > nextRect.bottom
+        );
+      })
+      .map((node) => node.dataset.timelineTaskId)
+      .filter((taskId): taskId is string => Boolean(taskId))
+      .sort();
+    setSelectedTimelineTaskIds((current) => {
+      if (current.length === nextSelected.length && current.every((taskId, index) => taskId === nextSelected[index])) {
+        return current;
+      }
+      return nextSelected;
+    });
+  }
+
   const timelineLayout = useMemo(() => {
     return buildTimelineLayout({
       lanes: timelineLanes,
@@ -1342,6 +1515,21 @@ export function ProjectScheduleCanvas({
     zoom,
   ]);
 
+  useEffect(() => {
+    if (mode !== 'timeline') {
+      setSelectedTimelineTaskIds([]);
+      setSelectionDraft(null);
+    }
+  }, [mode, projectId]);
+
+  const toggleTimelineTaskSelection = (taskId: string) => {
+    setSelectedTimelineTaskIds((current) =>
+      current.includes(taskId)
+        ? current.filter((currentTaskId) => currentTaskId !== taskId)
+        : [...current, taskId].sort(),
+    );
+  };
+
   const laneIdFromTestId = (testId: string): string | null => {
     if (testId.startsWith('timeline-lane-section-')) {
       return `section:${testId.slice('timeline-lane-section-'.length)}`;
@@ -1381,17 +1569,41 @@ export function ProjectScheduleCanvas({
 
   const commitTimelineDrag = (
     taskId: string,
+    taskIds: string[],
     deltaDays: number,
     originLaneId: string,
     dropLaneId: string | null,
   ) => {
-    if (rescheduleInFlightTaskIdsRef.current.has(taskId)) return;
     const task = taskById.get(taskId);
     if (!task) return;
+    if (taskIds.some((selectedTaskId) => rescheduleInFlightTaskIdsRef.current.has(selectedTaskId))) return;
 
     const startAt = shiftIsoByDays(task.startAt, deltaDays);
     const dueAt = shiftIsoByDays(task.dueAt, deltaDays);
     const hasScheduleMove = Boolean(deltaDays) && Boolean(startAt || dueAt);
+    if (taskIds.length > 1) {
+      if (!hasScheduleMove) return;
+      const tasksToReschedule = taskIds
+        .map((selectedTaskId) => {
+          const selectedTask = taskById.get(selectedTaskId);
+          if (!selectedTask) return null;
+          return {
+            taskId: selectedTaskId,
+            startAt: shiftIsoByDays(selectedTask.startAt, deltaDays),
+            dueAt: shiftIsoByDays(selectedTask.dueAt, deltaDays),
+            version: selectedTask.version,
+          };
+        })
+        .filter((entry): entry is { taskId: string; startAt: string | null; dueAt: string | null; version: number } =>
+          Boolean(entry && (entry.startAt || entry.dueAt)));
+      if (!tasksToReschedule.length) return;
+      for (const taskToReschedule of tasksToReschedule) {
+        rescheduleInFlightTaskIdsRef.current.add(taskToReschedule.taskId);
+      }
+      batchRescheduleTasks.mutate({ tasks: tasksToReschedule });
+      return;
+    }
+
     const laneChanged = Boolean(dropLaneId && dropLaneId !== originLaneId);
     if (!hasScheduleMove && !laneChanged) return;
 
@@ -1491,8 +1703,13 @@ export function ProjectScheduleCanvas({
   };
 
   const beginBarDrag = (taskId: string, pointerId: number, originX: number, originY: number, originLaneId: string) => {
+    const taskIds =
+      selectedTimelineTaskIds.includes(taskId) && selectedTimelineTaskIds.length > 1
+        ? selectedTimelineTaskIds
+        : [taskId];
     const next = {
       taskId,
+      taskIds,
       pointerId,
       originX,
       originY,
@@ -1538,7 +1755,13 @@ export function ProjectScheduleCanvas({
     setDragState(null);
     if (!current.moved) return;
     suppressClickTaskIdRef.current = current.taskId;
-    commitTimelineDrag(current.taskId, current.deltaDays, current.originLaneId, finalDropLaneId);
+    commitTimelineDrag(
+      current.taskId,
+      current.taskIds,
+      current.deltaDays,
+      current.originLaneId,
+      current.taskIds.length > 1 ? current.originLaneId : finalDropLaneId,
+    );
   };
 
   const handleLaneDrop = (draggingLaneId: string, overLaneId: string) => {
@@ -1765,6 +1988,23 @@ export function ProjectScheduleCanvas({
             <p className="text-xs text-muted-foreground" data-testid="timeline-drag-hint">
               {t('timelineDragHint')}
             </p>
+            {selectedTimelineTaskIds.length > 0 ? (
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" data-testid="timeline-selection-count">
+                  {t('timelineSelectionCount').replace('{count}', String(selectedTimelineTaskIds.length))}
+                </Badge>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => setSelectedTimelineTaskIds([])}
+                  data-testid="timeline-selection-clear"
+                >
+                  {t('clear')}
+                </Button>
+              </div>
+            ) : null}
           </div>
         ) : mode === 'gantt' ? (
           <div className="flex flex-wrap items-center gap-3 border-t pt-2">
@@ -1881,7 +2121,7 @@ export function ProjectScheduleCanvas({
           </div>
         </div>
 
-        <div className="relative">
+        <div className="relative" ref={timelineCanvasRef}>
           {timelineLayout.bodyHeight > 0 && showDependencyConnectors ? (
             <svg
               aria-hidden="true"
@@ -1943,6 +2183,40 @@ export function ProjectScheduleCanvas({
 
           <div
             className="relative z-[1]"
+            onPointerDown={(event) => {
+              if (mode !== 'timeline' || event.button !== 0) return;
+              const target = event.target as HTMLElement | null;
+              if (target?.closest('[data-timeline-task-id], [data-testid^="timeline-dependency-handle-"]')) {
+                return;
+              }
+              const containerBounds = scrollContainerRef.current?.getBoundingClientRect();
+              if (!containerBounds || event.clientX < containerBounds.left + TASK_NAME_COL_WIDTH) {
+                setSelectedTimelineTaskIds([]);
+                return;
+              }
+              setSelectedTaskId(null);
+              setSelectionDraft({
+                originX: event.clientX,
+                originY: event.clientY,
+                currentX: event.clientX,
+                currentY: event.clientY,
+              });
+            }}
+            onPointerMove={(event) => {
+              if (!selectionDraft) return;
+              const next = { ...selectionDraft, currentX: event.clientX, currentY: event.clientY };
+              selectTimelineTasksInRect({
+                left: Math.min(next.originX, next.currentX),
+                top: Math.min(next.originY, next.currentY),
+                right: Math.max(next.originX, next.currentX),
+                bottom: Math.max(next.originY, next.currentY),
+              });
+              setSelectionDraft(next);
+            }}
+            onPointerUp={() => {
+              if (!selectionDraft) return;
+              setSelectionDraft(null);
+            }}
             onDragOver={(event) => {
               if (!Array.from(event.dataTransfer.types).includes(UNSCHEDULED_TASK_DND_TYPE)) return;
               event.preventDefault();
@@ -1964,6 +2238,18 @@ export function ProjectScheduleCanvas({
               }
             }}
           >
+            {mode === 'timeline' && selectionRect ? (
+              <div
+                className="pointer-events-none fixed z-[60] rounded border border-primary/60 bg-primary/10"
+                style={{
+                  left: `${selectionRect.left}px`,
+                  top: `${selectionRect.top}px`,
+                  width: `${selectionRect.width}px`,
+                  height: `${selectionRect.height}px`,
+                }}
+                data-testid="timeline-selection-box"
+              />
+            ) : null}
             {timelineLayout.lanesWithRows.map(({ lane, tasks: laneTasks, top, rows }) => {
               const sectionVisible = !virtualizationEnabled
                 || (top + SECTION_ROW_HEIGHT >= visibleRange.start && top <= visibleRange.end);
@@ -2122,6 +2408,7 @@ export function ProjectScheduleCanvas({
                             const isCompleted = task.status === 'DONE';
                             const taskRisk = ganttRiskByTaskId.get(task.id);
                             const taskRiskLabel = describeTaskRisk(taskRisk);
+                            const isSelectedTimelineTask = selectedTimelineTaskIds.includes(task.id);
                             const barLayout = timelineLayout.barsByTaskId[task.id];
                             const visibleBaselineStart = task.baselineStart && task.baselineStart < timeline.window.start
                               ? timeline.window.start
@@ -2132,12 +2419,16 @@ export function ProjectScheduleCanvas({
                             if (task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd) {
                               if (!barLayout) return null;
                               const taskWidth = barLayout.width;
-                              const taskLeft = Math.max(0, barLayout.left + (dragState?.taskId === task.id ? dragState.deltaDays * zoomConfig.dayColWidth : 0));
+                              const taskLeft = Math.max(
+                                0,
+                                barLayout.left + (dragState?.taskIds.includes(task.id) ? dragState.deltaDays * zoomConfig.dayColWidth : 0),
+                              );
                               const isMilestone = task.type === 'MILESTONE' || dayDiff(task.timelineStart, task.timelineEnd) === 0;
                               const usesExternalLabel = !isMilestone && taskWidth < 88;
                               const clampedProgress = Math.max(0, Math.min(100, task.progressPercent ?? 0));
                               const barBoxShadow = [
                                 mode === 'timeline' && taskRisk?.isAtRisk ? 'inset 3px 0 0 hsl(var(--destructive))' : null,
+                                mode === 'timeline' && isSelectedTimelineTask ? '0 0 0 2px hsl(var(--ring))' : null,
                                 dependencyDraft?.targetTaskId === task.id ? '0 0 0 2px hsl(var(--primary))' : null,
                               ].filter(Boolean).join(', ') || undefined;
                               return (
@@ -2158,7 +2449,7 @@ export function ProjectScheduleCanvas({
                                       isMilestone
                                         ? 'h-3.5 w-3.5 -translate-y-1/2 rotate-45 rounded-[2px]'
                                         : 'h-6 -translate-y-1/2 overflow-hidden rounded px-2'
-                                    } ${dragState?.taskId === task.id && dragState.moved ? 'cursor-grabbing opacity-90' : 'cursor-grab'}`}
+                                    } ${dragState?.taskIds.includes(task.id) && dragState.moved ? 'cursor-grabbing opacity-90' : 'cursor-grab'}`}
                                     style={
                                       isMilestone
                                         ? {
@@ -2177,7 +2468,11 @@ export function ProjectScheduleCanvas({
                                             ...timelineBarStyle,
                                           }
                                     }
-                                    onClick={() => {
+                                    onClick={(event) => {
+                                      if (event.shiftKey) {
+                                        event.preventDefault();
+                                        return;
+                                      }
                                       if (suppressClickTaskIdRef.current === task.id) {
                                         suppressClickTaskIdRef.current = null;
                                         return;
@@ -2186,8 +2481,21 @@ export function ProjectScheduleCanvas({
                                     }}
                                     onPointerDown={(event) => {
                                       if (event.button !== 0) return;
-                                      if (rescheduleInFlightTaskIdsRef.current.has(task.id)) return;
+                                      if (event.shiftKey) {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        toggleTimelineTaskSelection(task.id);
+                                        return;
+                                      }
+                                      if (
+                                        (selectedTimelineTaskIds.includes(task.id) ? selectedTimelineTaskIds : [task.id])
+                                          .some((selectedTaskId) => rescheduleInFlightTaskIdsRef.current.has(selectedTaskId))
+                                      ) return;
                                       event.preventDefault();
+                                      event.stopPropagation();
+                                      if (!selectedTimelineTaskIds.includes(task.id)) {
+                                        setSelectedTimelineTaskIds([task.id]);
+                                      }
                                       beginBarDrag(task.id, event.pointerId, event.clientX, event.clientY, lane.id);
                                       event.currentTarget.setPointerCapture(event.pointerId);
                                     }}
@@ -2210,6 +2518,7 @@ export function ProjectScheduleCanvas({
                                     onMouseLeave={() => setHoveredTaskId((current) => (current === task.id ? null : current))}
                                     data-testid={`timeline-bar-${task.id}`}
                                     data-timeline-task-id={task.id}
+                                    data-selected={isSelectedTimelineTask ? 'true' : 'false'}
                                     data-at-risk={taskRisk?.isAtRisk ? 'true' : 'false'}
                                     data-risk-kind={taskRiskLabel ?? 'none'}
                                     data-connection-target={dependencyDraft?.targetTaskId === task.id ? 'true' : 'false'}
@@ -2261,7 +2570,11 @@ export function ProjectScheduleCanvas({
                                       type="button"
                                       className={`absolute top-1/2 -translate-y-1/2 text-left text-[11px] text-foreground ${isCompleted ? 'line-through opacity-60' : ''}`}
                                       style={{ left: `${Math.max(0, taskLeft + taskWidth + (isMilestone ? -taskWidth / 2 + 10 : 8))}px` }}
-                                      onClick={() => {
+                                      onClick={(event) => {
+                                        if (event.shiftKey) {
+                                          event.preventDefault();
+                                          return;
+                                        }
                                         if (suppressClickTaskIdRef.current === task.id) {
                                           suppressClickTaskIdRef.current = null;
                                           return;
