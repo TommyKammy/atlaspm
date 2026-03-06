@@ -1658,8 +1658,8 @@ export function ProjectScheduleCanvas({
                           event.preventDefault();
                           setUnscheduledDragTaskId(null);
                           try {
-                            const parsed = JSON.parse(raw) as { taskId?: string; originLaneId?: string };
-                            if (!parsed.taskId || !parsed.originLaneId) return;
+                            const parsed = JSON.parse(raw) as { taskId?: string };
+                            if (!parsed.taskId) return;
                             commitUnscheduledDrop(parsed.taskId, lane.id, event.clientX, event.clientY);
                           } catch {
                             // ignore malformed drag payload
