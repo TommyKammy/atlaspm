@@ -68,6 +68,15 @@ type LocalTimelineViewStateSnapshot = {
   ganttStrictMode: boolean;
 };
 
+type TimelineDependencyDraft = {
+  sourceTaskId: string;
+  sourceX: number;
+  sourceY: number;
+  pointerX: number;
+  pointerY: number;
+  targetTaskId: string | null;
+};
+
 function getLegacyTimelineStorageKey(mode: TimelineMode, userId: string, projectId: string): string {
   return `atlaspm:timeline-view:${userId}:${projectId}:${mode}`;
 }
@@ -499,6 +508,8 @@ export function ProjectScheduleCanvas({
   } | null>(null);
   const [laneDragState, setLaneDragState] = useState<{ draggingLaneId: string; overLaneId: string | null } | null>(null);
   const [unscheduledDragTaskId, setUnscheduledDragTaskId] = useState<string | null>(null);
+  const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
+  const [dependencyDraft, setDependencyDraft] = useState<TimelineDependencyDraft | null>(null);
   const suppressClickTaskIdRef = useRef<string | null>(null);
   const [rescheduleNotice, setRescheduleNotice] = useState<{ type: 'conflict' | 'error'; message: string } | null>(null);
 
@@ -1129,11 +1140,89 @@ export function ProjectScheduleCanvas({
     },
   });
 
+  const createTimelineDependency = useMutation({
+    mutationFn: async ({
+      sourceTaskId,
+      targetTaskId,
+    }: {
+      sourceTaskId: string;
+      targetTaskId: string;
+    }) =>
+      api(`/tasks/${targetTaskId}/dependencies`, {
+        method: 'POST',
+        body: { dependsOnId: sourceTaskId, type: 'BLOCKS' },
+      }),
+    onSuccess: async (_result, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.projectDependencyGraph(projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.taskDependencies(variables.targetTaskId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.taskDependents(variables.sourceTaskId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.taskBlocked(variables.targetTaskId) }),
+      ]);
+    },
+    onError: () => {
+      setRescheduleNotice({ type: 'error', message: t('timelineDependencyCreateFailed') });
+    },
+  });
+
   useEffect(() => {
     if (!rescheduleNotice) return;
     const timer = window.setTimeout(() => setRescheduleNotice(null), 4000);
     return () => window.clearTimeout(timer);
   }, [rescheduleNotice]);
+
+  useEffect(() => {
+    if (!dependencyDraft) return;
+
+    const updateDraftTarget = (clientX: number, clientY: number) => {
+      let nextTargetTaskId: string | null = null;
+      if (typeof document !== 'undefined') {
+        const hoveredElements = document.elementsFromPoint(clientX, clientY);
+        for (const element of hoveredElements) {
+          if (!(element instanceof HTMLElement)) continue;
+          const taskHost = element.closest<HTMLElement>('[data-timeline-task-id]');
+          const taskId = taskHost?.dataset.timelineTaskId;
+          if (taskId && taskId !== dependencyDraft.sourceTaskId) {
+            nextTargetTaskId = taskId;
+            break;
+          }
+        }
+      }
+      setDependencyDraft((current) =>
+        current
+          ? {
+              ...current,
+              pointerX: clientX,
+              pointerY: clientY,
+              targetTaskId: nextTargetTaskId,
+            }
+          : current,
+      );
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      updateDraftTarget(event.clientX, event.clientY);
+    };
+
+    const handlePointerUp = () => {
+      setDependencyDraft((current) => {
+        if (current?.targetTaskId) {
+          createTimelineDependency.mutate({
+            sourceTaskId: current.sourceTaskId,
+            targetTaskId: current.targetTaskId,
+          });
+        }
+        return null;
+      });
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [createTimelineDependency, dependencyDraft]);
 
   const timelineLayout = useMemo(() => {
     return buildTimelineLayout({
@@ -1197,6 +1286,30 @@ export function ProjectScheduleCanvas({
         && timelineLayout.barsByTaskId[edge.target]),
     [timeline.dependencyEdges, timelineLayout.barsByTaskId, visibleTaskIds],
   );
+
+  const dependencyDraftPreview = useMemo(() => {
+    if (!dependencyDraft) return null;
+    let targetX = dependencyDraft.pointerX;
+    let targetY = dependencyDraft.pointerY;
+    if (dependencyDraft.targetTaskId && typeof document !== 'undefined') {
+      const targetElement = document.querySelector<HTMLElement>(`[data-testid="timeline-bar-${dependencyDraft.targetTaskId}"]`);
+      const rect = targetElement?.getBoundingClientRect();
+      if (rect) {
+        targetX = rect.left;
+        targetY = rect.top + rect.height / 2;
+      }
+    }
+
+    const x1 = dependencyDraft.sourceX;
+    const y1 = dependencyDraft.sourceY;
+    const x2 = targetX;
+    const y2 = targetY;
+    const cx = x2 >= x1 ? x1 + Math.max(16, (x2 - x1) / 2) : x1 + 16;
+
+    return {
+      path: `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`,
+    };
+  }, [dependencyDraft]);
 
   useEffect(() => {
     if (process.env.NODE_ENV !== 'development') return;
@@ -1808,6 +1921,18 @@ export function ProjectScheduleCanvas({
               })}
             </svg>
           ) : null}
+          {mode === 'timeline' && dependencyDraftPreview ? (
+            <svg aria-hidden="true" className="pointer-events-none fixed inset-0 z-50" data-testid="timeline-dependency-preview">
+              <path
+                d={dependencyDraftPreview.path}
+                fill="none"
+                stroke="hsl(var(--primary))"
+                strokeWidth="1.75"
+                strokeDasharray="4 4"
+                opacity="0.9"
+              />
+            </svg>
+          ) : null}
 
           <div
             className="relative z-[1]"
@@ -1989,7 +2114,7 @@ export function ProjectScheduleCanvas({
                               const usesExternalLabel = !isMilestone && taskWidth < 88;
                               const clampedProgress = Math.max(0, Math.min(100, task.progressPercent ?? 0));
                               return (
-                                <div key={task.id}>
+                                <div key={task.id} className="group/timeline-bar">
                                   {mode === 'gantt' && task.hasBaseline && task.baselineStart && task.baselineEnd ? (
                                     <div
                                       className="pointer-events-none absolute top-1/2 h-2 -translate-y-1/2 rounded border border-dashed border-muted-foreground/40 bg-muted/50"
@@ -2020,6 +2145,10 @@ export function ProjectScheduleCanvas({
                                             left: `${taskLeft}px`,
                                             width: `${taskWidth}px`,
                                             opacity: isCompleted ? 0.56 : 1,
+                                            boxShadow:
+                                              dependencyDraft?.targetTaskId === task.id
+                                                ? '0 0 0 2px hsl(var(--primary))'
+                                                : undefined,
                                             ...timelineBarStyle,
                                           }
                                     }
@@ -2052,7 +2181,11 @@ export function ProjectScheduleCanvas({
                                         event.currentTarget.releasePointerCapture(event.pointerId);
                                       }
                                     }}
+                                    onMouseEnter={() => setHoveredTaskId(task.id)}
+                                    onMouseLeave={() => setHoveredTaskId((current) => (current === task.id ? null : current))}
                                     data-testid={`timeline-bar-${task.id}`}
+                                    data-timeline-task-id={task.id}
+                                    data-connection-target={dependencyDraft?.targetTaskId === task.id ? 'true' : 'false'}
                                     title={`${task.timelineStart.toLocaleDateString()} - ${task.timelineEnd.toLocaleDateString()}`}
                                   >
                                     {!isMilestone ? (
@@ -2068,6 +2201,34 @@ export function ProjectScheduleCanvas({
                                       </span>
                                     ) : null}
                                   </button>
+                                  {mode === 'timeline' ? (
+                                    <button
+                                      type="button"
+                                      className={`absolute top-1/2 z-[2] h-3.5 w-3.5 -translate-y-1/2 rounded-full border border-primary/50 bg-background shadow-sm transition ${
+                                        hoveredTaskId === task.id || dependencyDraft?.sourceTaskId === task.id
+                                          ? 'opacity-100'
+                                          : 'opacity-0 group-hover/timeline-bar:opacity-100'
+                                      }`}
+                                      style={{ left: `${Math.max(0, taskLeft + taskWidth - 7)}px` }}
+                                      onPointerDown={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        const rect = event.currentTarget.getBoundingClientRect();
+                                        setDependencyDraft({
+                                          sourceTaskId: task.id,
+                                          sourceX: rect.left + rect.width / 2,
+                                          sourceY: rect.top + rect.height / 2,
+                                          pointerX: event.clientX,
+                                          pointerY: event.clientY,
+                                          targetTaskId: null,
+                                        });
+                                      }}
+                                      data-testid={`timeline-dependency-handle-${task.id}`}
+                                      title={t('addDependency')}
+                                    >
+                                      <span className="block h-full w-full rounded-full bg-primary/20" />
+                                    </button>
+                                  ) : null}
                                   {isMilestone || usesExternalLabel ? (
                                     <button
                                       type="button"
