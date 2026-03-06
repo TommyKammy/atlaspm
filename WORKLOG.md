@@ -2365,3 +2365,24 @@
   - `pnpm --dir e2e/playwright exec playwright test tests/timeline-route.spec.ts tests/timeline-swimlane.spec.ts tests/gantt-risk.spec.ts --reporter=list`
 - Risks/known gaps:
   - Timeline and Gantt now have separate shell boundaries, but most rendering logic is still shared inside `ProjectScheduleCanvas`; deeper extraction moves to Issue #196.
+
+## 2026-03-06 - Issue #196: Extract timeline lane and layout domain model
+- What changed:
+  - Added pure timeline lane/layout services in `packages/domain/src/services/timeline-layout.ts`.
+  - Added coverage in `packages/domain/src/__tests__/timeline-layout.test.ts` for:
+    - assignee lane grouping
+    - preferred section order application
+    - bar/row position calculation
+  - Exported the new service from `packages/domain/src/index.ts`.
+  - Added `@atlaspm/domain` as a `web-ui` dependency and switched `apps/web-ui/src/components/project-timeline-view.tsx` to use the domain service for:
+    - swimlane construction
+    - bar and row layout computation
+- Why:
+  - Issue #196 requires the lane and layout model to be testable outside React before more invasive timeline behavior changes land.
+- How tested (exact commands):
+  - `pnpm exec tsc -p packages/domain/tsconfig.json`
+  - `node --test packages/domain/dist/__tests__/timeline-layout.test.js`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm --dir e2e/playwright exec playwright test tests/timeline-route.spec.ts tests/timeline-swimlane.spec.ts tests/gantt-risk.spec.ts --reporter=list`
+- Risks/known gaps:
+  - The extracted layout service preserves the current one-row-per-task behavior; compact packing is intentionally deferred to Issue #202.

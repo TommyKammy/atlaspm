@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { buildTimelineLanes, buildTimelineLayout } from '@atlaspm/domain';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import TaskDetailDrawer from '@/components/task-detail-drawer';
@@ -189,19 +190,6 @@ function reorderLaneIds(laneIds: string[], draggingLaneId: string, overLaneId: s
   if (!moved) return laneIds;
   next.splice(toIndex, 0, moved);
   return next;
-}
-
-function applyLaneOrder<T extends { id: string }>(lanes: T[], preferredOrder: string[]): T[] {
-  if (!preferredOrder.length) return lanes;
-  const indexById = new Map(preferredOrder.map((laneId, index) => [laneId, index]));
-  return [...lanes].sort((left, right) => {
-    const leftRank = indexById.get(left.id);
-    const rightRank = indexById.get(right.id);
-    if (leftRank === undefined && rightRank === undefined) return 0;
-    if (leftRank === undefined) return 1;
-    if (rightRank === undefined) return -1;
-    return leftRank - rightRank;
-  });
 }
 
 export function ProjectScheduleCanvas({
@@ -426,55 +414,16 @@ export function ProjectScheduleCanvas({
   );
 
   const timelineLanes = useMemo(() => {
-    if (effectiveSwimlane === 'assignee') {
-      const grouped = new Map<string, TimelineTask[]>();
-      for (const task of filteredTasks) {
-        const laneId = task.assigneeUserId ?? UNASSIGNED_LANE_ID;
-        const list = grouped.get(laneId) ?? [];
-        list.push(task);
-        grouped.set(laneId, list);
-      }
-
-      const lanes = [...grouped.entries()]
-        .map(([laneId, tasks]) => {
-          const label = laneId === UNASSIGNED_LANE_ID
-            ? t('unassigned')
-            : timeline.membersById[laneId]?.displayName
-              || timeline.membersById[laneId]?.email
-              || laneId;
-          return {
-            id: `assignee:${laneId}`,
-            label,
-            tasks,
-          };
-        })
-        .sort((left, right) => {
-          const leftUnassigned = left.id === `assignee:${UNASSIGNED_LANE_ID}`;
-          const rightUnassigned = right.id === `assignee:${UNASSIGNED_LANE_ID}`;
-          if (leftUnassigned && !rightUnassigned) return 1;
-          if (!leftUnassigned && rightUnassigned) return -1;
-          return left.label.localeCompare(right.label);
-        });
-
-      return applyLaneOrder(lanes, preferredLaneOrder);
-    }
-
-    const bySection = new Map<string, TimelineTask[]>();
-    for (const task of filteredTasks) {
-      const list = bySection.get(task.sectionId) ?? [];
-      list.push(task);
-      bySection.set(task.sectionId, list);
-    }
-
-    const lanes = timeline.sections
-      .map((section) => ({
-        id: `section:${section.id}`,
-        label: section.isDefault ? t('tasks') : section.name,
-        tasks: bySection.get(section.id) ?? [],
-      }))
-      .filter((lane) => lane.tasks.length > 0);
-
-    return applyLaneOrder(lanes, preferredLaneOrder);
+    return buildTimelineLanes({
+      swimlane: effectiveSwimlane,
+      tasks: filteredTasks,
+      sections: timeline.sections,
+      membersById: timeline.membersById,
+      preferredLaneOrder,
+      defaultSectionLabel: t('tasks'),
+      unassignedLabel: t('unassigned'),
+      unassignedLaneId: UNASSIGNED_LANE_ID,
+    });
   }, [effectiveSwimlane, filteredTasks, preferredLaneOrder, t, timeline.membersById, timeline.sections]);
 
   const filteredTaskIds = useMemo(() => new Set(filteredTasks.map((task) => task.id)), [filteredTasks]);
@@ -697,65 +646,15 @@ export function ProjectScheduleCanvas({
   }, [rescheduleNotice]);
 
   const timelineLayout = useMemo(() => {
-    let cursorY = 0;
-    const barsByTaskId: Record<string, { left: number; width: number; y: number }> = {};
-    const taskRowsById: Record<string, { top: number; height: number }> = {};
-    const lanesWithRows: Array<{
-      lane: (typeof timelineLanes)[number];
-      tasks: (typeof timelineLanes)[number]['tasks'];
-      top: number;
-      bottom: number;
-      taskRows: Array<{
-        task: (typeof timelineLanes)[number]['tasks'][number];
-        top: number;
-      }>;
-    }> = [];
-
-    for (const lane of timelineLanes) {
-      const laneTop = cursorY;
-      cursorY += SECTION_ROW_HEIGHT;
-      const taskRows: Array<{
-        task: (typeof lane)['tasks'][number];
-        top: number;
-      }> = [];
-
-      for (const task of lane.tasks) {
-        const rowTop = cursorY;
-        taskRowsById[task.id] = { top: rowTop, height: TASK_ROW_HEIGHT };
-        const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
-          ? timeline.window.start
-          : task.timelineStart;
-        const visibleEnd = task.timelineEnd && task.timelineEnd > timeline.window.end
-          ? timeline.window.end
-          : task.timelineEnd;
-
-        if (task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd) {
-          barsByTaskId[task.id] = {
-            left: Math.max(0, dayDiff(timeline.window.start, visibleStart ?? task.timelineStart)) * zoomConfig.dayColWidth,
-            width: Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1) * zoomConfig.dayColWidth,
-            y: cursorY + TASK_ROW_HEIGHT / 2,
-          };
-        }
-        taskRows.push({ task, top: rowTop });
-        cursorY += TASK_ROW_HEIGHT;
-      }
-      lanesWithRows.push({
-        lane,
-        tasks: lane.tasks,
-        top: laneTop,
-        bottom: cursorY,
-        taskRows,
-      });
-    }
-
-    return {
-      lanesWithRows,
-      barsByTaskId,
-      taskRowsById,
-      bodyHeight: cursorY,
-      totalRowCount: timelineLanes.length + filteredTasks.length,
-    };
-  }, [filteredTasks.length, timeline.window.end, timeline.window.start, timelineLanes, zoomConfig.dayColWidth]);
+    return buildTimelineLayout({
+      lanes: timelineLanes,
+      windowStart: timeline.window.start,
+      windowEnd: timeline.window.end,
+      dayColumnWidth: zoomConfig.dayColWidth,
+      sectionRowHeight: SECTION_ROW_HEIGHT,
+      taskRowHeight: TASK_ROW_HEIGHT,
+    });
+  }, [timeline.window.end, timeline.window.start, timelineLanes, zoomConfig.dayColWidth]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
