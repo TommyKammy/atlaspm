@@ -42,18 +42,39 @@ function laneHeaderTestId(laneTestId: string) {
   return laneTestId.replace('timeline-lane-', 'timeline-lane-header-');
 }
 
+async function dragTimelineLaneHeaderToLane(page: Page, draggingLaneTestId: string, overLaneTestId: string) {
+  const draggingHeaderTestId = laneHeaderTestId(draggingLaneTestId);
+  const overHeaderTestId = laneHeaderTestId(overLaneTestId);
+  await expect(page.locator(`[data-testid="${draggingHeaderTestId}"]`)).toBeVisible();
+  await expect(page.locator(`[data-testid="${overHeaderTestId}"]`)).toBeVisible();
+  await page.evaluate(({ draggingHeaderTestId, overHeaderTestId }) => {
+    const draggingHeader = document.querySelector<HTMLElement>(`[data-testid="${draggingHeaderTestId}"]`);
+    const overHeader = document.querySelector<HTMLElement>(`[data-testid="${overHeaderTestId}"]`);
+    if (!draggingHeader || !overHeader) {
+      throw new Error('Unable to resolve lane headers for drag and drop');
+    }
+    const dataTransfer = new DataTransfer();
+    draggingHeader.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+    overHeader.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer }));
+    overHeader.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }));
+    overHeader.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
+    draggingHeader.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
+  }, { draggingHeaderTestId, overHeaderTestId });
+}
+
 async function dragTimelineBarToLane(page: Page, taskId: string, laneTestId: string) {
   const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
   const lane = page.locator(`[data-testid="${laneTestId}"]`);
   await expect(bar).toBeVisible();
   await expect(lane).toBeVisible();
+  await page.waitForTimeout(100);
   const barBox = await bar.boundingBox();
   const laneBox = await lane.boundingBox();
   if (!barBox || !laneBox) throw new Error('Unable to resolve bar/lane bounds');
 
   const startX = barBox.x + Math.min(Math.max(8, barBox.width / 4), barBox.width - 4);
   const startY = barBox.y + barBox.height / 2;
-  const targetY = laneBox.y + Math.min(Math.max(20, laneBox.height * 0.2), laneBox.height - 12);
+  const targetY = laneBox.y + Math.min(Math.max(16, laneBox.height * 0.75), laneBox.height - 12);
 
   await page.mouse.move(startX, startY);
   await page.mouse.down();
@@ -186,12 +207,11 @@ test('timeline assignee swimlane reorder persists after reload', async ({ page }
   await page.goto(`/projects/${projectId}?view=timeline`);
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
   await page.click('[data-testid="timeline-swimlane-assignee"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute('data-active', 'true');
 
   const initialOrder = await laneOrder(page);
   expect(initialOrder.length).toBeGreaterThanOrEqual(2);
-  await page
-    .locator(`[data-testid="${laneHeaderTestId(initialOrder[1]!)}"]`)
-    .dragTo(page.locator(`[data-testid="${laneHeaderTestId(initialOrder[0]!)}"]`));
+  await dragTimelineLaneHeaderToLane(page, initialOrder[1]!, initialOrder[0]!);
 
   const expectedOrder = [initialOrder[1], initialOrder[0], ...initialOrder.slice(2)];
   await expect.poll(() => laneOrder(page)).toEqual(expectedOrder);
@@ -245,7 +265,9 @@ test('timeline drag can move task across assignee lanes into unassigned', async 
   await page.goto(`/projects/${projectId}?view=timeline`);
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
   await page.click('[data-testid="timeline-zoom-day"]');
+  await expect(page.locator('[data-testid="timeline-zoom-day"]')).toHaveAttribute('data-active', 'true');
   await page.click('[data-testid="timeline-swimlane-assignee"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute('data-active', 'true');
 
   const unassignedLaneTestId = 'timeline-lane-assignee-__unassigned__';
   const initialLaneOrder = await laneOrder(page);
@@ -312,6 +334,7 @@ test('timeline drag can move task across section and status lanes', async ({ pag
   await page.goto(`/projects/${projectId}?view=timeline`);
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
   await page.click('[data-testid="timeline-zoom-day"]');
+  await expect(page.locator('[data-testid="timeline-zoom-day"]')).toHaveAttribute('data-active', 'true');
 
   await dragTimelineBarToLane(page, movableTask.id, `timeline-lane-section-${sectionB.id}`);
   await expect

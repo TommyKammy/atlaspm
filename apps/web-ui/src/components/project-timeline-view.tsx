@@ -579,6 +579,7 @@ export function ProjectScheduleCanvas({
     moved: boolean;
   } | null>(null);
   const [laneDragState, setLaneDragState] = useState<{ draggingLaneId: string; overLaneId: string | null } | null>(null);
+  const laneDragStateRef = useRef<{ draggingLaneId: string; overLaneId: string | null } | null>(null);
   const [unscheduledDragTaskId, setUnscheduledDragTaskId] = useState<string | null>(null);
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
   const [dependencyDraft, setDependencyDraft] = useState<TimelineDependencyDraft | null>(null);
@@ -1564,6 +1565,11 @@ export function ProjectScheduleCanvas({
     setSelectedTimelineTaskIds(nextSelectedTaskIds);
   };
 
+  const replaceLaneDragState = (nextLaneDragState: { draggingLaneId: string; overLaneId: string | null } | null) => {
+    laneDragStateRef.current = nextLaneDragState;
+    setLaneDragState(nextLaneDragState);
+  };
+
   const replaceSelectionDraft = (nextSelectionDraft: TimelineSelectionDraft | null) => {
     selectionDraftRef.current = nextSelectionDraft;
     setSelectionDraft(nextSelectionDraft);
@@ -1604,6 +1610,9 @@ export function ProjectScheduleCanvas({
   };
 
   const laneIdFromTestId = (testId: string): string | null => {
+    if (testId.startsWith('timeline-lane-header-')) {
+      return laneIdFromTestId(testId.replace('timeline-lane-header-', 'timeline-lane-'));
+    }
     if (testId.startsWith('timeline-lane-section-')) {
       return `section:${testId.slice('timeline-lane-section-'.length)}`;
     }
@@ -1618,6 +1627,14 @@ export function ProjectScheduleCanvas({
 
   const resolveLaneIdAtClientPosition = (clientX: number, clientY: number): string | null => {
     if (typeof document !== 'undefined') {
+      const laneElements = Array.from(document.querySelectorAll<HTMLElement>('[data-timeline-lane-id]'));
+      for (const laneElement of laneElements) {
+        const rect = laneElement.getBoundingClientRect();
+        if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
+          const explicitLaneId = laneElement.dataset.timelineLaneId;
+          if (explicitLaneId) return explicitLaneId;
+        }
+      }
       const hoveredElements = document.elementsFromPoint(clientX, clientY);
       for (const element of hoveredElements) {
         if (!(element instanceof HTMLElement)) continue;
@@ -1851,6 +1868,29 @@ export function ProjectScheduleCanvas({
       current.taskIds.length > 1 ? current.originLaneId : finalDropLaneId,
     );
   };
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      updateBarDrag(event.pointerId, event.clientX, event.clientY, event.altKey);
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      finishBarDrag(event.pointerId, event.clientX, event.clientY, event.altKey);
+    };
+
+    const handlePointerCancel = (event: PointerEvent) => {
+      finishBarDrag(event.pointerId, event.clientX, event.clientY, event.altKey);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerCancel);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerCancel);
+    };
+  }, [finishBarDrag, updateBarDrag]);
 
   const handleLaneDrop = (draggingLaneId: string, overLaneId: string) => {
     const laneIds = timelineLanes.map((lane) => lane.id);
@@ -2406,19 +2446,19 @@ export function ProjectScheduleCanvas({
                         if (mode !== 'timeline' || effectiveSwimlane === 'status') return;
                         event.dataTransfer.effectAllowed = 'move';
                         event.dataTransfer.setData('text/plain', lane.id);
-                        setLaneDragState({ draggingLaneId: lane.id, overLaneId: lane.id });
+                        replaceLaneDragState({ draggingLaneId: lane.id, overLaneId: lane.id });
                       }}
                       onDragOver={(event) => {
                         const dragTypes = Array.from(event.dataTransfer.types);
                         const isUnscheduledDrop = dragTypes.includes(UNSCHEDULED_TASK_DND_TYPE);
-                        const isLaneReorderDrop = dragTypes.includes('text/plain');
+                        const isLaneReorderDrop = dragTypes.includes('text/plain') || Boolean(laneDragStateRef.current?.draggingLaneId);
                         if (!isUnscheduledDrop && (mode !== 'timeline' || effectiveSwimlane === 'status' || !isLaneReorderDrop)) {
                           return;
                         }
                         event.preventDefault();
                         if (isUnscheduledDrop) return;
                         if (laneDragState?.overLaneId !== lane.id) {
-                          setLaneDragState((current) => (current ? { ...current, overLaneId: lane.id } : current));
+                          replaceLaneDragState(laneDragStateRef.current ? { ...laneDragStateRef.current, overLaneId: lane.id } : laneDragStateRef.current);
                         }
                       }}
                       onDrop={(event) => {
@@ -2438,14 +2478,14 @@ export function ProjectScheduleCanvas({
                         }
                         if (mode !== 'timeline' || effectiveSwimlane === 'status') return;
                         event.preventDefault();
-                        const draggingLaneId = laneDragState?.draggingLaneId ?? event.dataTransfer.getData('text/plain');
+                        const draggingLaneId = laneDragStateRef.current?.draggingLaneId ?? event.dataTransfer.getData('text/plain');
                         if (draggingLaneId) {
                           handleLaneDrop(draggingLaneId, lane.id);
                         }
-                        setLaneDragState(null);
+                        replaceLaneDragState(null);
                       }}
                       onDragEnd={() => {
-                        setLaneDragState(null);
+                        replaceLaneDragState(null);
                       }}
                     >
                       <div className="flex items-center px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -2622,26 +2662,10 @@ export function ProjectScheduleCanvas({
                                       ) return;
                                       event.preventDefault();
                                       event.stopPropagation();
-                                      if (!selectedTimelineTaskIdsRef.current.includes(task.id)) {
-                                        replaceSelectedTimelineTaskIds([task.id]);
-                                      }
-                                      beginBarDrag(task.id, event.pointerId, event.clientX, event.clientY, lane.id, event.altKey);
-                                      event.currentTarget.setPointerCapture(event.pointerId);
-                                    }}
-                                    onPointerMove={(event) => {
-                                      updateBarDrag(event.pointerId, event.clientX, event.clientY, event.altKey);
-                                    }}
-                                    onPointerUp={(event) => {
-                                      finishBarDrag(event.pointerId, event.clientX, event.clientY, event.altKey);
-                                      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                                        event.currentTarget.releasePointerCapture(event.pointerId);
-                                      }
-                                    }}
-                                    onPointerCancel={(event) => {
-                                      finishBarDrag(event.pointerId, event.clientX, event.clientY, event.altKey);
-                                      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                                        event.currentTarget.releasePointerCapture(event.pointerId);
-                                      }
+                                    if (!selectedTimelineTaskIdsRef.current.includes(task.id)) {
+                                      replaceSelectedTimelineTaskIds([task.id]);
+                                    }
+                                    beginBarDrag(task.id, event.pointerId, event.clientX, event.clientY, lane.id, event.altKey);
                                     }}
                                     onMouseEnter={() => setHoveredTaskId(task.id)}
                                     onMouseLeave={() => setHoveredTaskId((current) => (current === task.id ? null : current))}
