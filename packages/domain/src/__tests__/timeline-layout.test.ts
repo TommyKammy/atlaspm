@@ -208,7 +208,6 @@ test('buildTimelineLayout calculates row and bar positions', () => {
     taskRowHeight: 40,
   });
 
-  const designLane = layout.lanesWithRows.find((lane) => lane.lane.id === 'section:design');
   assert.equal(layout.bodyHeight, 104);
   assert.equal(layout.totalRowCount, 3);
   assert.deepEqual(layout.taskRowsById['task-1'], { top: 64, height: 40 });
