@@ -38,6 +38,10 @@ async function laneOrder(page: Page) {
     .evaluateAll((elements) => elements.map((element) => element.getAttribute('data-testid') ?? ''));
 }
 
+function laneHeaderTestId(laneTestId: string) {
+  return laneTestId.replace('timeline-lane-', 'timeline-lane-header-');
+}
+
 async function dragTimelineBarToLane(page: Page, taskId: string, laneTestId: string) {
   const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
   const lane = page.locator(`[data-testid="${laneTestId}"]`);
@@ -185,7 +189,9 @@ test('timeline assignee swimlane reorder persists after reload', async ({ page }
 
   const initialOrder = await laneOrder(page);
   expect(initialOrder.length).toBeGreaterThanOrEqual(2);
-  await page.locator(`[data-testid="${initialOrder[1]}"]`).dragTo(page.locator(`[data-testid="${initialOrder[0]}"]`));
+  await page
+    .locator(`[data-testid="${laneHeaderTestId(initialOrder[1]!)}"]`)
+    .dragTo(page.locator(`[data-testid="${laneHeaderTestId(initialOrder[0]!)}"]`));
 
   const expectedOrder = [initialOrder[1], initialOrder[0], ...initialOrder.slice(2)];
   await expect.poll(() => laneOrder(page)).toEqual(expectedOrder);

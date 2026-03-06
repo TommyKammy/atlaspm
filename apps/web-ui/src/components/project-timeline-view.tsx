@@ -16,6 +16,7 @@ import type { SectionTaskGroup, Task } from '@/lib/types';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TASK_NAME_COL_WIDTH = 260;
 const TIMELINE_VIEW_STORAGE_PREFIX = 'atlaspm:timeline-view';
+const TIMELINE_LANE_ORDER_STORAGE_PREFIX = 'atlaspm:timeline-lane-order';
 const SECTION_ROW_HEIGHT = 32;
 const TASK_ROW_HEIGHT = 40;
 const VIRTUALIZE_ROW_THRESHOLD = 120;
@@ -405,6 +406,42 @@ function areTimelineViewStatesEqual(left: TimelineViewState | null | undefined, 
   });
 }
 
+function getTimelineLaneOrderStorageKey(projectId: string, groupBy: TimelineLaneOrderGroupBy, userId?: string | null): string {
+  return userId
+    ? `${TIMELINE_LANE_ORDER_STORAGE_PREFIX}:${projectId}:${groupBy}:${userId}`
+    : `${TIMELINE_LANE_ORDER_STORAGE_PREFIX}:${projectId}:${groupBy}`;
+}
+
+function readStoredTimelineLaneOrder(keys: Array<string | null | undefined>): string[] {
+  if (typeof window === 'undefined') return [];
+  for (const key of keys) {
+    if (!key) continue;
+    const raw = window.localStorage.getItem(key);
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+      }
+    } catch {
+      // Ignore malformed local lane-order state.
+    }
+  }
+  return [];
+}
+
+function persistTimelineLaneOrder(
+  laneOrder: string[],
+  keys: Array<string | null | undefined>,
+) {
+  if (typeof window === 'undefined') return;
+  const payload = JSON.stringify(laneOrder);
+  for (const key of keys) {
+    if (!key) continue;
+    window.localStorage.setItem(key, payload);
+  }
+}
+
 export function ProjectScheduleCanvas({
   projectId,
   search,
@@ -503,6 +540,19 @@ export function ProjectScheduleCanvas({
   const timelineStorageUserKey = useMemo(
     () => (meQuery.data?.id && timelineStorageBaseKey ? `${timelineStorageBaseKey}:${meQuery.data.id}` : null),
     [meQuery.data?.id, timelineStorageBaseKey],
+  );
+  const laneOrderGroupBy = mode === 'timeline' && isLaneOrderGroupBy(swimlane) ? swimlane : null;
+  const laneOrderStorageBaseKey = useMemo(
+    () => (projectId && laneOrderGroupBy ? getTimelineLaneOrderStorageKey(projectId, laneOrderGroupBy) : null),
+    [laneOrderGroupBy, projectId],
+  );
+  const laneOrderStorageUserKey = useMemo(
+    () => (
+      projectId && meQuery.data?.id && laneOrderGroupBy
+        ? getTimelineLaneOrderStorageKey(projectId, laneOrderGroupBy, meQuery.data.id)
+        : null
+    ),
+    [laneOrderGroupBy, meQuery.data?.id, projectId],
   );
   const hasRestoredTimelinePreferences = useRef(false);
 
@@ -776,15 +826,27 @@ export function ProjectScheduleCanvas({
 
   const preferredLaneOrder = useMemo(
     () => {
+      const storedLaneOrder = readStoredTimelineLaneOrder([
+        laneOrderStorageUserKey,
+        laneOrderStorageBaseKey,
+      ]);
       if (effectiveSwimlane === 'assignee') {
-        return timelinePreferencesQuery.data?.laneOrderByAssignee ?? [];
+        const serverOrder = timelinePreferencesQuery.data?.laneOrderByAssignee ?? [];
+        return serverOrder.length > 0 ? serverOrder : storedLaneOrder;
       }
       if (effectiveSwimlane === 'status') {
         return [];
       }
-      return timelinePreferencesQuery.data?.laneOrderBySection ?? [];
+      const serverOrder = timelinePreferencesQuery.data?.laneOrderBySection ?? [];
+      return serverOrder.length > 0 ? serverOrder : storedLaneOrder;
     },
-    [effectiveSwimlane, timelinePreferencesQuery.data?.laneOrderByAssignee, timelinePreferencesQuery.data?.laneOrderBySection],
+    [
+      effectiveSwimlane,
+      laneOrderStorageBaseKey,
+      laneOrderStorageUserKey,
+      timelinePreferencesQuery.data?.laneOrderByAssignee,
+      timelinePreferencesQuery.data?.laneOrderBySection,
+    ],
   );
 
   const timelineLanes = useMemo(() => {
@@ -862,6 +924,12 @@ export function ProjectScheduleCanvas({
     onMutate: async ({ groupBy, laneOrder }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.projectTimelinePreferences(projectId) });
       const previous = queryClient.getQueryData<TimelinePreferences>(queryKeys.projectTimelinePreferences(projectId));
+      const storageKeys = [
+        getTimelineLaneOrderStorageKey(projectId, groupBy, meQuery.data?.id),
+        getTimelineLaneOrderStorageKey(projectId, groupBy),
+      ];
+      const previousStoredLaneOrder = readStoredTimelineLaneOrder(storageKeys);
+      persistTimelineLaneOrder(laneOrder, storageKeys);
       queryClient.setQueryData<TimelinePreferences>(queryKeys.projectTimelinePreferences(projectId), {
         projectId,
         userId: previous?.userId ?? meQuery.data?.id ?? '',
@@ -870,13 +938,24 @@ export function ProjectScheduleCanvas({
         timelineViewState: previous?.timelineViewState ?? null,
         ganttViewState: previous?.ganttViewState ?? null,
       });
-      return { previous };
+      return { previous, previousStoredLaneOrder, storageKeys };
     },
     onError: (_error, _variables, context) => {
       if (context?.previous) {
         queryClient.setQueryData<TimelinePreferences>(queryKeys.projectTimelinePreferences(projectId), context.previous);
       }
+      if (context?.storageKeys) {
+        persistTimelineLaneOrder(context.previousStoredLaneOrder ?? [], context.storageKeys);
+      }
       setRescheduleNotice({ type: 'error', message: t('timelineLaneOrderSaveFailed') });
+    },
+    onSuccess: (result, variables) => {
+      const confirmedLaneOrder =
+        variables.groupBy === 'assignee' ? result.laneOrderByAssignee : result.laneOrderBySection;
+      persistTimelineLaneOrder(confirmedLaneOrder, [
+        getTimelineLaneOrderStorageKey(projectId, variables.groupBy, meQuery.data?.id),
+        getTimelineLaneOrderStorageKey(projectId, variables.groupBy),
+      ]);
     },
     onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.projectTimelinePreferences(projectId) });
@@ -1771,6 +1850,7 @@ export function ProjectScheduleCanvas({
                         laneDragState?.overLaneId === lane.id ? 'ring-1 ring-primary/40' : ''
                       }`}
                       style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}
+                      data-testid={`timeline-lane-header-${normalizeTestIdSegment(lane.id)}`}
                       draggable={mode === 'timeline' && effectiveSwimlane !== 'status'}
                       onDragStart={(event) => {
                         if (mode !== 'timeline' || effectiveSwimlane === 'status') return;
@@ -1779,11 +1859,14 @@ export function ProjectScheduleCanvas({
                         setLaneDragState({ draggingLaneId: lane.id, overLaneId: lane.id });
                       }}
                       onDragOver={(event) => {
-                        if (!Array.from(event.dataTransfer.types).includes(UNSCHEDULED_TASK_DND_TYPE)) {
-                          if (mode !== 'timeline' || effectiveSwimlane === 'status' || !laneDragState?.draggingLaneId) return;
+                        const dragTypes = Array.from(event.dataTransfer.types);
+                        const isUnscheduledDrop = dragTypes.includes(UNSCHEDULED_TASK_DND_TYPE);
+                        const isLaneReorderDrop = dragTypes.includes('text/plain');
+                        if (!isUnscheduledDrop && (mode !== 'timeline' || effectiveSwimlane === 'status' || !isLaneReorderDrop)) {
+                          return;
                         }
                         event.preventDefault();
-                        if (Array.from(event.dataTransfer.types).includes(UNSCHEDULED_TASK_DND_TYPE)) return;
+                        if (isUnscheduledDrop) return;
                         if (laneDragState?.overLaneId !== lane.id) {
                           setLaneDragState((current) => (current ? { ...current, overLaneId: lane.id } : current));
                         }
