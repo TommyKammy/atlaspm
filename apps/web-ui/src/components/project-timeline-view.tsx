@@ -44,6 +44,16 @@ type TimelinePreferences = {
   laneOrderByAssignee: string[];
 };
 
+type TimelineViewStateSnapshot = {
+  zoom: TimelineZoom;
+  anchorDate: string;
+  swimlane: TimelineSwimlane;
+  sortMode: TimelineSortMode;
+  scheduleFilter: TimelineScheduleFilter;
+  ganttRiskFilterMode: GanttRiskFilterMode;
+  ganttStrictMode: boolean;
+};
+
 const TIMELINE_ZOOM_CONFIG: Record<TimelineZoom, { beforeDays: number; afterDays: number; stepDays: number; dayColWidth: number }> = {
   day: { beforeDays: 1, afterDays: 5, stepDays: 1, dayColWidth: 64 },
   week: { beforeDays: 7, afterDays: 21, stepDays: 7, dayColWidth: 36 },
@@ -254,6 +264,15 @@ export function ProjectTimelineView({
   const [laneDragState, setLaneDragState] = useState<{ draggingLaneId: string; overLaneId: string | null } | null>(null);
   const [unscheduledDragTaskId, setUnscheduledDragTaskId] = useState<string | null>(null);
   const suppressClickTaskIdRef = useRef<string | null>(null);
+  const timelineViewStateRef = useRef<TimelineViewStateSnapshot>({
+    zoom: 'week',
+    anchorDate: startOfDay(new Date()).toISOString(),
+    swimlane: 'section',
+    sortMode: 'manual',
+    scheduleFilter: 'all',
+    ganttRiskFilterMode: 'all',
+    ganttStrictMode: false,
+  });
   const [rescheduleNotice, setRescheduleNotice] = useState<{ type: 'conflict' | 'error'; message: string } | null>(null);
   const rescheduleInFlightTaskIdsRef = useRef(new Set<string>());
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -319,19 +338,31 @@ export function ProjectTimelineView({
 
   useEffect(() => {
     if (!timelineStorageKey || !preferencesHydrated || typeof window === 'undefined') return;
-    window.localStorage.setItem(
-      timelineStorageKey,
-      JSON.stringify({
-        zoom,
-        anchorDate: anchorDate.toISOString(),
-        swimlane,
-        sortMode,
-        scheduleFilter,
-        ganttRiskFilterMode,
-        ganttStrictMode,
-      }),
-    );
+    const nextState: TimelineViewStateSnapshot = {
+      zoom,
+      anchorDate: anchorDate.toISOString(),
+      swimlane,
+      sortMode,
+      scheduleFilter,
+      ganttRiskFilterMode,
+      ganttStrictMode,
+    };
+    timelineViewStateRef.current = nextState;
+    window.localStorage.setItem(timelineStorageKey, JSON.stringify(nextState));
   }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, preferencesHydrated, scheduleFilter, sortMode, swimlane, timelineStorageKey, zoom]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onBeforeUnload = () => {
+      if (!timelineStorageKey) return;
+      const state = timelineViewStateRef.current;
+      if (!state) return;
+      window.localStorage.setItem(timelineStorageKey, JSON.stringify(state));
+    };
+
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [timelineStorageKey]);
 
   const zoomConfig = TIMELINE_ZOOM_CONFIG[zoom];
   const effectiveSwimlane: TimelineSwimlane = mode === 'timeline' ? swimlane : 'section';
