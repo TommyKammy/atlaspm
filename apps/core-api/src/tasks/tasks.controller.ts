@@ -286,6 +286,14 @@ class PutTimelineViewStateDto {
   ganttStrictMode?: boolean;
 }
 
+class PatchTaskCustomFieldValueDto {
+  @IsUUID()
+  fieldId!: string;
+
+  @Allow()
+  value?: unknown;
+}
+
 class TimelineMoveTaskDto {
   @IsOptional()
   @Allow()
@@ -336,14 +344,6 @@ class CompleteTaskDto {
   @IsOptional()
   @IsBoolean()
   force?: boolean;
-}
-
-class PatchTaskCustomFieldValueDto {
-  @IsUUID()
-  fieldId!: string;
-
-  @Allow()
-  value?: unknown;
 }
 
 class PatchTaskCustomFieldsDto {
