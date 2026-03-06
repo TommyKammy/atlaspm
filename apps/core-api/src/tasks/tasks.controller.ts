@@ -1153,10 +1153,9 @@ export class TasksController {
       }>;
       parsed: ParsedCustomFieldValue | null;
     } | null = null;
-    let serializedBeforeCustomFieldValues: SerializedTaskCustomFieldValue[] = [];
     if (hasCustomFieldPatch) {
       if (!body.customFieldMove || !Object.prototype.hasOwnProperty.call(body.customFieldMove, 'value')) {
-        throw new ConflictException('customFieldMove.value is required');
+        throw new BadRequestException('customFieldMove.value is required');
       }
       const definition = await this.prisma.customFieldDefinition.findFirst({
         where: {
@@ -1190,18 +1189,6 @@ export class TasksController {
         throw new ConflictException(`Required custom field cannot be empty: ${definition.name}`);
       }
       parsedCustomFieldMove = { definition, parsed };
-      const beforeValues = await this.prisma.taskCustomFieldValue.findMany({
-        where: {
-          taskId: id,
-          field: { archivedAt: null },
-        },
-        include: {
-          field: { select: { id: true, name: true, type: true, required: true, archivedAt: true, position: true } },
-          option: { select: { id: true, label: true, value: true, color: true, archivedAt: true } },
-        },
-        orderBy: { createdAt: 'asc' },
-      });
-      serializedBeforeCustomFieldValues = beforeValues.map((value) => this.serializeTaskCustomFieldValue(value));
     }
 
     const nextStatus =
@@ -1225,6 +1212,22 @@ export class TasksController {
         : task.completedAt;
 
     return this.prisma.$transaction(async (tx) => {
+      let serializedBeforeCustomFieldValues: SerializedTaskCustomFieldValue[] = [];
+      if (parsedCustomFieldMove) {
+        const beforeValues = await tx.taskCustomFieldValue.findMany({
+          where: {
+            taskId: id,
+            field: { archivedAt: null },
+          },
+          include: {
+            field: { select: { id: true, name: true, type: true, required: true, archivedAt: true, position: true } },
+            option: { select: { id: true, label: true, value: true, color: true, archivedAt: true } },
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+        serializedBeforeCustomFieldValues = beforeValues.map((value) => this.serializeTaskCustomFieldValue(value));
+      }
+
       const updateData: Prisma.TaskUncheckedUpdateManyInput = {
         version: { increment: 1 },
       };

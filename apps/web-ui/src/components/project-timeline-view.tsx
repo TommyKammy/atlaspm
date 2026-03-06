@@ -284,16 +284,9 @@ function applyTaskTimelineMoveInGroups(
 
   if (!movedTask) return groups;
   const finalizedTask: Task = movedTask;
-  if (next.sectionId === undefined || next.sectionId === finalizedTask.sectionId) {
-    return withoutTask.map((group) =>
-      group.section.id === finalizedTask.sectionId
-        ? { ...group, tasks: [...group.tasks, finalizedTask] }
-        : group,
-    );
-  }
-
+  const targetSectionId = next.sectionId ?? finalizedTask.sectionId;
   return withoutTask.map((group) =>
-    group.section.id === next.sectionId
+    group.section.id === targetSectionId
       ? { ...group, tasks: [...group.tasks, finalizedTask] }
       : group,
   );
@@ -1314,7 +1307,13 @@ export function ProjectScheduleCanvas({
     const moved = current.moved
       || Math.abs(deltaPx) >= DRAG_START_THRESHOLD_PX
       || Math.abs(deltaY) >= DRAG_START_THRESHOLD_PX;
-    const dropLaneId = resolveLaneIdAtClientPosition(clientX, clientY) ?? current.dropLaneId;
+    let dropLaneId = current.dropLaneId;
+    if (moved) {
+      const resolvedLaneId = resolveLaneIdAtClientPosition(clientX, clientY);
+      if (resolvedLaneId) {
+        dropLaneId = resolvedLaneId;
+      }
+    }
     if (deltaDays === current.deltaDays && moved === current.moved && dropLaneId === current.dropLaneId) return;
     const next = { ...current, deltaDays, moved, dropLaneId };
     dragStateRef.current = next;
