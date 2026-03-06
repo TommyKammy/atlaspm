@@ -35,31 +35,52 @@ async function login(page: Page, sub: string, email: string) {
 async function laneOrder(page: Page) {
   return page
     .locator('[data-testid^="timeline-lane-assignee-"]')
-    .evaluateAll((elements) => elements.map((element) => element.getAttribute('data-testid') ?? ''));
+    .evaluateAll((elements) =>
+      elements.map((element) => element.getAttribute('data-testid') ?? ''),
+    );
 }
 
 function laneHeaderTestId(laneTestId: string) {
   return laneTestId.replace('timeline-lane-', 'timeline-lane-header-');
 }
 
-async function dragTimelineLaneHeaderToLane(page: Page, draggingLaneTestId: string, overLaneTestId: string) {
+async function dragTimelineLaneHeaderToLane(
+  page: Page,
+  draggingLaneTestId: string,
+  overLaneTestId: string,
+) {
   const draggingHeaderTestId = laneHeaderTestId(draggingLaneTestId);
   const overHeaderTestId = laneHeaderTestId(overLaneTestId);
   await expect(page.locator(`[data-testid="${draggingHeaderTestId}"]`)).toBeVisible();
   await expect(page.locator(`[data-testid="${overHeaderTestId}"]`)).toBeVisible();
-  await page.evaluate(({ draggingHeaderTestId, overHeaderTestId }) => {
-    const draggingHeader = document.querySelector<HTMLElement>(`[data-testid="${draggingHeaderTestId}"]`);
-    const overHeader = document.querySelector<HTMLElement>(`[data-testid="${overHeaderTestId}"]`);
-    if (!draggingHeader || !overHeader) {
-      throw new Error('Unable to resolve lane headers for drag and drop');
-    }
-    const dataTransfer = new DataTransfer();
-    draggingHeader.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
-    overHeader.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer }));
-    overHeader.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }));
-    overHeader.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
-    draggingHeader.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
-  }, { draggingHeaderTestId, overHeaderTestId });
+  await page.evaluate(
+    ({ draggingHeaderTestId, overHeaderTestId }) => {
+      const draggingHeader = document.querySelector<HTMLElement>(
+        `[data-testid="${draggingHeaderTestId}"]`,
+      );
+      const overHeader = document.querySelector<HTMLElement>(`[data-testid="${overHeaderTestId}"]`);
+      if (!draggingHeader || !overHeader) {
+        throw new Error('Unable to resolve lane headers for drag and drop');
+      }
+      const dataTransfer = new DataTransfer();
+      draggingHeader.dispatchEvent(
+        new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }),
+      );
+      overHeader.dispatchEvent(
+        new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer }),
+      );
+      overHeader.dispatchEvent(
+        new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }),
+      );
+      overHeader.dispatchEvent(
+        new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }),
+      );
+      draggingHeader.dispatchEvent(
+        new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }),
+      );
+    },
+    { draggingHeaderTestId, overHeaderTestId },
+  );
 }
 
 async function dragTimelineBarToLane(page: Page, taskId: string, laneTestId: string) {
@@ -82,7 +103,17 @@ async function dragTimelineBarToLane(page: Page, taskId: string, laneTestId: str
   await page.mouse.up();
 }
 
-test('timeline supports swimlane toggle and due-date sort without affecting gantt route', async ({ page }) => {
+async function timelineBarTop(page: Page, taskId: string) {
+  const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
+  await expect(bar).toBeVisible();
+  const box = await bar.boundingBox();
+  if (!box) throw new Error(`Unable to resolve timeline bar bounds for ${taskId}`);
+  return box.y;
+}
+
+test('timeline supports swimlane toggle and due-date sort without affecting gantt route', async ({
+  page,
+}) => {
   const now = Date.now();
   const sub = `e2e-timeline-swimlane-${now}`;
   const email = `${sub}@example.com`;
@@ -99,7 +130,9 @@ test('timeline supports swimlane toggle and due-date sort without affecting gant
     name: `Timeline Swimlane ${now}`,
   });
   const projectId = project.id as string;
-  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Timeline Section',
+  });
 
   const taskLate = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
@@ -139,28 +172,55 @@ test('timeline supports swimlane toggle and due-date sort without affecting gant
   await expect(page.locator('[data-testid="timeline-swimlane-toggle"]')).toBeVisible();
   await expect(page.locator('[data-testid="timeline-sort-toggle"]')).toBeVisible();
   await expect(page.locator('[data-testid="timeline-schedule-filter-toggle"]')).toBeVisible();
+  await expect(page.locator('[data-testid^="timeline-task-"]')).toHaveCount(0);
 
   await expect(page.locator('[data-testid^="timeline-lane-section-"]')).toHaveCount(2);
 
   await page.click('[data-testid="timeline-sort-due"]');
-  await expect(page.locator('[data-testid="timeline-sort-due"]')).toHaveAttribute('data-active', 'true');
-  const orderedTaskIds = await page
-    .locator('[data-testid^="timeline-task-"]')
-    .evaluateAll((elements) => elements.map((element) => element.getAttribute('data-testid')));
-  expect(orderedTaskIds.indexOf(`timeline-task-${taskEarly.id}`)).toBeLessThan(
-    orderedTaskIds.indexOf(`timeline-task-${taskLate.id}`),
+  await expect(page.locator('[data-testid="timeline-sort-due"]')).toHaveAttribute(
+    'data-active',
+    'true',
   );
+  await expect
+    .poll(async () => {
+      const [earlyTop, lateTop] = await Promise.all([
+        timelineBarTop(page, taskEarly.id),
+        timelineBarTop(page, taskLate.id),
+      ]);
+      return earlyTop < lateTop;
+    })
+    .toBe(true);
+
+  const sectionToggle = page
+    .locator(`[data-testid="timeline-lane-section-${section.id}"]`)
+    .locator('[data-testid^="timeline-lane-toggle-"]');
+  await expect(sectionToggle).toBeVisible();
+  await sectionToggle.click();
+  await expect(page.locator(`[data-testid="timeline-bar-${taskEarly.id}"]`)).toHaveCount(0);
+  await expect(page.locator(`[data-testid="timeline-bar-${taskLate.id}"]`)).toHaveCount(0);
+  await sectionToggle.click();
+  await expect(page.locator(`[data-testid="timeline-bar-${taskEarly.id}"]`)).toBeVisible();
+  await expect(page.locator(`[data-testid="timeline-bar-${taskLate.id}"]`)).toBeVisible();
 
   await page.click('[data-testid="timeline-swimlane-assignee"]');
-  await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
   await expect(page.locator('[data-testid^="timeline-lane-assignee-"]')).toHaveCount(1);
 
   await page.click('[data-testid="timeline-swimlane-status"]');
-  await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
   await expect(page.locator('[data-testid^="timeline-lane-status-"]')).toHaveCount(2);
 
   await page.click('[data-testid="timeline-filter-unscheduled"]');
-  await expect(page.locator('[data-testid="timeline-filter-unscheduled"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid="timeline-filter-unscheduled"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
   await expect(page.locator(`[data-testid="timeline-unscheduled-${taskNoDate.id}"]`)).toBeVisible();
   await expect(page.locator(`[data-testid="timeline-bar-${taskEarly.id}"]`)).toHaveCount(0);
   await expect(page.locator(`[data-testid="timeline-bar-${taskLate.id}"]`)).toHaveCount(0);
@@ -188,7 +248,9 @@ test('timeline assignee swimlane reorder persists after reload', async ({ page }
     name: `Timeline Lane Reorder ${now}`,
   });
   const projectId = project.id as string;
-  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Timeline Section',
+  });
 
   await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
@@ -207,7 +269,10 @@ test('timeline assignee swimlane reorder persists after reload', async ({ page }
   await page.goto(`/projects/${projectId}?view=timeline`);
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
   await page.click('[data-testid="timeline-swimlane-assignee"]');
-  await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
 
   const initialOrder = await laneOrder(page);
   expect(initialOrder.length).toBeGreaterThanOrEqual(2);
@@ -238,7 +303,9 @@ test('timeline drag can move task across assignee lanes into unassigned', async 
     name: `Timeline Lane Move ${now}`,
   });
   const projectId = project.id as string;
-  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Timeline Section',
+  });
 
   const movableTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
@@ -265,9 +332,15 @@ test('timeline drag can move task across assignee lanes into unassigned', async 
   await page.goto(`/projects/${projectId}?view=timeline`);
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
   await page.click('[data-testid="timeline-zoom-day"]');
-  await expect(page.locator('[data-testid="timeline-zoom-day"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid="timeline-zoom-day"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
   await page.click('[data-testid="timeline-swimlane-assignee"]');
-  await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
 
   const unassignedLaneTestId = 'timeline-lane-assignee-__unassigned__';
   const initialLaneOrder = await laneOrder(page);
@@ -308,8 +381,12 @@ test('timeline drag can move task across section and status lanes', async ({ pag
     name: `Timeline Lane Attributes ${now}`,
   });
   const projectId = project.id as string;
-  const sectionA = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Section A' });
-  const sectionB = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Section B' });
+  const sectionA = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Section A',
+  });
+  const sectionB = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Section B',
+  });
 
   const movableTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: sectionA.id,
@@ -334,7 +411,10 @@ test('timeline drag can move task across section and status lanes', async ({ pag
   await page.goto(`/projects/${projectId}?view=timeline`);
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
   await page.click('[data-testid="timeline-zoom-day"]');
-  await expect(page.locator('[data-testid="timeline-zoom-day"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid="timeline-zoom-day"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
 
   await dragTimelineBarToLane(page, movableTask.id, `timeline-lane-section-${sectionB.id}`);
   await expect
@@ -345,7 +425,10 @@ test('timeline drag can move task across section and status lanes', async ({ pag
     .toBe(sectionB.id);
 
   await page.click('[data-testid="timeline-swimlane-status"]');
-  await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
   await dragTimelineBarToLane(page, movableTask.id, 'timeline-lane-status-IN_PROGRESS');
   await expect
     .poll(async () => {
@@ -371,7 +454,9 @@ test('timeline can schedule unscheduled tasks via drag and drop', async ({ page 
     name: `Timeline Unscheduled DnD ${now}`,
   });
   const projectId = project.id as string;
-  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Timeline Section',
+  });
 
   const unscheduledTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
@@ -380,7 +465,9 @@ test('timeline can schedule unscheduled tasks via drag and drop', async ({ page 
 
   await page.goto(`/projects/${projectId}?view=timeline`);
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
-  await expect(page.locator(`[data-testid="timeline-unscheduled-${unscheduledTask.id}"]`)).toBeVisible();
+  await expect(
+    page.locator(`[data-testid="timeline-unscheduled-${unscheduledTask.id}"]`),
+  ).toBeVisible();
 
   const lane = page.locator('[data-testid^="timeline-lane-section-"]').first();
   await page
@@ -415,7 +502,9 @@ test('timeline compacts non-overlapping tasks into shared rows', async ({ page }
     name: `Timeline Packed Rows ${now}`,
   });
   const projectId = project.id as string;
-  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Packed Lane' });
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Packed Lane',
+  });
 
   await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
