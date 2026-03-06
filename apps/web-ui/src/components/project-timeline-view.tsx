@@ -423,6 +423,7 @@ export function ProjectScheduleCanvas({
   const [rescheduleNotice, setRescheduleNotice] = useState<{ type: 'conflict' | 'error'; message: string } | null>(null);
   const rescheduleInFlightTaskIdsRef = useRef(new Set<string>());
   const lastHydratedViewStateRef = useRef<TimelineViewState | null>(null);
+  const timelineViewStateRef = useRef<TimelineViewState | null>(null);
   const saveViewStateTimerRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
@@ -452,11 +453,29 @@ export function ProjectScheduleCanvas({
     if (hasRestoredTimelinePreferences.current) return;
     if (!timelineStorageBaseKey || !timelinePreferencesQuery.isFetched) return;
     setPreferencesHydrated(false);
+    let restoredLocalState: TimelineViewState | null = null;
+    if (typeof window !== 'undefined') {
+      const preferenceKeys = [timelineStorageUserKey, timelineStorageBaseKey].filter((value): value is string => Boolean(value));
+      for (const key of preferenceKeys) {
+        const raw = window.localStorage.getItem(key);
+        if (!raw) continue;
+        try {
+          const parsedLocalState = JSON.parse(raw) as TimelineViewState;
+          restoredLocalState = parsedLocalState;
+          break;
+        } catch {
+          // Ignore malformed local preference state.
+        }
+      }
+    }
 
     const serverViewState =
       mode === 'timeline' ? timelinePreferencesQuery.data?.timelineViewState : timelinePreferencesQuery.data?.ganttViewState;
-    if (serverViewState && Object.keys(serverViewState).length > 0) {
-      applyTimelineViewState(serverViewState, {
+    const preferredViewState =
+      restoredLocalState ?? (serverViewState && Object.keys(serverViewState).length > 0 ? serverViewState : null);
+
+    if (preferredViewState) {
+      applyTimelineViewState(preferredViewState, {
         setZoom,
         setAnchorDate,
         setSwimlane,
@@ -465,34 +484,7 @@ export function ProjectScheduleCanvas({
         setGanttRiskFilterMode,
         setGanttStrictMode,
       });
-      lastHydratedViewStateRef.current = serverViewState;
-      hasRestoredTimelinePreferences.current = true;
-      setPreferencesHydrated(true);
-      return;
-    }
-
-    if (typeof window !== 'undefined') {
-      const preferenceKeys = [timelineStorageUserKey, timelineStorageBaseKey].filter((value): value is string => Boolean(value));
-      for (const key of preferenceKeys) {
-        const raw = window.localStorage.getItem(key);
-        if (!raw) continue;
-        try {
-          const parsedLocalState = JSON.parse(raw) as TimelineViewState;
-          applyTimelineViewState(parsedLocalState, {
-            setZoom,
-            setAnchorDate,
-            setSwimlane,
-            setSortMode,
-            setScheduleFilter,
-            setGanttRiskFilterMode,
-            setGanttStrictMode,
-          });
-          lastHydratedViewStateRef.current = parsedLocalState;
-          break;
-        } catch {
-          // Ignore malformed local preference state.
-        }
-      }
+      lastHydratedViewStateRef.current = preferredViewState;
     }
 
     hasRestoredTimelinePreferences.current = true;
@@ -507,22 +499,45 @@ export function ProjectScheduleCanvas({
     timelineStorageUserKey,
   ]);
 
+  timelineViewStateRef.current = {
+    zoom,
+    anchorDate: anchorDate.toISOString(),
+    swimlane,
+    sortMode,
+    scheduleFilter,
+    ganttRiskFilterMode,
+    ganttStrictMode,
+  };
+
   useEffect(() => {
-    if (!timelineStorageBaseKey || typeof window === 'undefined') return;
-    const nextState: TimelineViewState = {
-      zoom,
-      anchorDate: anchorDate.toISOString(),
-      swimlane,
-      sortMode,
-      scheduleFilter,
-      ganttRiskFilterMode,
-      ganttStrictMode,
-    };
+    if (!preferencesHydrated || !timelineStorageBaseKey || typeof window === 'undefined') return;
+    const nextState = timelineViewStateRef.current;
+    if (!nextState) return;
     window.localStorage.setItem(timelineStorageBaseKey, JSON.stringify(nextState));
     if (timelineStorageUserKey) {
       window.localStorage.setItem(timelineStorageUserKey, JSON.stringify(nextState));
     }
-  }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, scheduleFilter, sortMode, swimlane, timelineStorageBaseKey, timelineStorageUserKey, zoom]);
+  }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, preferencesHydrated, scheduleFilter, sortMode, swimlane, timelineStorageBaseKey, timelineStorageUserKey, zoom]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const persistLatestViewState = () => {
+      if (!preferencesHydrated || !timelineStorageBaseKey) return;
+      const nextState = timelineViewStateRef.current;
+      if (!nextState) return;
+      window.localStorage.setItem(timelineStorageBaseKey, JSON.stringify(nextState));
+      if (timelineStorageUserKey) {
+        window.localStorage.setItem(timelineStorageUserKey, JSON.stringify(nextState));
+      }
+    };
+
+    window.addEventListener('beforeunload', persistLatestViewState);
+    window.addEventListener('pagehide', persistLatestViewState);
+    return () => {
+      window.removeEventListener('beforeunload', persistLatestViewState);
+      window.removeEventListener('pagehide', persistLatestViewState);
+    };
+  }, [preferencesHydrated, timelineStorageBaseKey, timelineStorageUserKey]);
 
   const saveViewStateMutation = useMutation({
     mutationFn: async ({
