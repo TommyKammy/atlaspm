@@ -2701,6 +2701,8 @@ describe('Core API Integration', () => {
       .expect(200);
     expect(initialPrefsRes.body.laneOrderBySection).toEqual([]);
     expect(initialPrefsRes.body.laneOrderByAssignee).toEqual([]);
+    expect(initialPrefsRes.body.timelineViewState).toBeNull();
+    expect(initialPrefsRes.body.ganttViewState).toBeNull();
 
     const sectionPrefsRes = await request(app.getHttpServer())
       .put(`/projects/${projectId}/timeline/preferences/section`)
@@ -2715,6 +2717,70 @@ describe('Core API Integration', () => {
       .send({ laneOrder: ['unassigned', timelineAssigneeId, timelineAssigneeId] })
       .expect(200);
     expect(assigneePrefsRes.body.laneOrderByAssignee).toEqual(['unassigned', timelineAssigneeId]);
+
+    const timelineViewStateRes = await request(app.getHttpServer())
+      .put(`/projects/${projectId}/timeline/preferences/view-state/timeline`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        zoom: 'month',
+        anchorDate: '2026-03-18T00:00:00.000Z',
+        swimlane: 'status',
+        sortMode: 'dueAt',
+        scheduleFilter: 'scheduled',
+        ganttStrictMode: true,
+      })
+      .expect(200);
+    expect(timelineViewStateRes.body.timelineViewState).toEqual({
+      zoom: 'month',
+      anchorDate: '2026-03-18T00:00:00.000Z',
+      swimlane: 'status',
+      sortMode: 'dueAt',
+      scheduleFilter: 'scheduled',
+    });
+    expect(timelineViewStateRes.body.ganttViewState).toBeNull();
+
+    const ganttViewStateRes = await request(app.getHttpServer())
+      .put(`/projects/${projectId}/timeline/preferences/view-state/gantt`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        zoom: 'day',
+        anchorDate: '2026-03-21T00:00:00.000Z',
+        ganttRiskFilterMode: 'risk',
+        ganttStrictMode: true,
+        swimlane: 'assignee',
+      })
+      .expect(200);
+    expect(ganttViewStateRes.body.timelineViewState).toEqual({
+      zoom: 'month',
+      anchorDate: '2026-03-18T00:00:00.000Z',
+      swimlane: 'status',
+      sortMode: 'dueAt',
+      scheduleFilter: 'scheduled',
+    });
+    expect(ganttViewStateRes.body.ganttViewState).toEqual({
+      zoom: 'day',
+      anchorDate: '2026-03-21T00:00:00.000Z',
+      ganttRiskFilterMode: 'risk',
+      ganttStrictMode: true,
+    });
+
+    const persistedPrefsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/timeline/preferences`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(persistedPrefsRes.body.timelineViewState).toEqual({
+      zoom: 'month',
+      anchorDate: '2026-03-18T00:00:00.000Z',
+      swimlane: 'status',
+      sortMode: 'dueAt',
+      scheduleFilter: 'scheduled',
+    });
+    expect(persistedPrefsRes.body.ganttViewState).toEqual({
+      zoom: 'day',
+      anchorDate: '2026-03-21T00:00:00.000Z',
+      ganttRiskFilterMode: 'risk',
+      ganttStrictMode: true,
+    });
 
     const createdTaskRes = await request(app.getHttpServer())
       .post(`/projects/${projectId}/tasks`)

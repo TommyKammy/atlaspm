@@ -34,6 +34,15 @@ type TimelineSortMode = 'manual' | 'startAt' | 'dueAt';
 type TimelineScheduleFilter = 'all' | 'scheduled' | 'unscheduled';
 type GanttRiskFilterMode = 'all' | 'risk';
 type TimelineLaneOrderGroupBy = Extract<TimelineSwimlane, 'section' | 'assignee'>;
+type TimelineViewState = {
+  zoom?: TimelineZoom;
+  anchorDate?: string;
+  swimlane?: TimelineSwimlane;
+  sortMode?: TimelineSortMode;
+  scheduleFilter?: TimelineScheduleFilter;
+  ganttRiskFilterMode?: GanttRiskFilterMode;
+  ganttStrictMode?: boolean;
+};
 
 type GanttTaskRisk = {
   isAtRisk: boolean;
@@ -47,6 +56,8 @@ type TimelinePreferences = {
   userId: string;
   laneOrderBySection: string[];
   laneOrderByAssignee: string[];
+  timelineViewState: TimelineViewState | null;
+  ganttViewState: TimelineViewState | null;
 };
 
 const TIMELINE_ZOOM_CONFIG: Record<TimelineZoom, { beforeDays: number; afterDays: number; stepDays: number; dayColWidth: number }> = {
@@ -207,6 +218,44 @@ function reorderLaneIds(laneIds: string[], draggingLaneId: string, overLaneId: s
   return next;
 }
 
+function applyTimelineViewState(
+  parsed: TimelineViewState,
+  setters: {
+    setZoom: (value: TimelineZoom) => void;
+    setAnchorDate: (value: Date) => void;
+    setSwimlane: (value: TimelineSwimlane) => void;
+    setSortMode: (value: TimelineSortMode) => void;
+    setScheduleFilter: (value: TimelineScheduleFilter) => void;
+    setGanttRiskFilterMode: (value: GanttRiskFilterMode) => void;
+    setGanttStrictMode: (value: boolean) => void;
+  },
+) {
+  if (parsed.zoom && parsed.zoom in TIMELINE_ZOOM_CONFIG) {
+    setters.setZoom(parsed.zoom);
+  }
+  if (parsed.anchorDate) {
+    const parsedDate = new Date(parsed.anchorDate);
+    if (!Number.isNaN(parsedDate.valueOf())) {
+      setters.setAnchorDate(startOfDay(parsedDate));
+    }
+  }
+  if (parsed.swimlane === 'section' || parsed.swimlane === 'assignee' || parsed.swimlane === 'status') {
+    setters.setSwimlane(parsed.swimlane);
+  }
+  if (parsed.sortMode === 'manual' || parsed.sortMode === 'startAt' || parsed.sortMode === 'dueAt') {
+    setters.setSortMode(parsed.sortMode);
+  }
+  if (parsed.scheduleFilter === 'all' || parsed.scheduleFilter === 'scheduled' || parsed.scheduleFilter === 'unscheduled') {
+    setters.setScheduleFilter(parsed.scheduleFilter);
+  }
+  if (parsed.ganttRiskFilterMode === 'all' || parsed.ganttRiskFilterMode === 'risk') {
+    setters.setGanttRiskFilterMode(parsed.ganttRiskFilterMode);
+  }
+  if (typeof parsed.ganttStrictMode === 'boolean') {
+    setters.setGanttStrictMode(parsed.ganttStrictMode);
+  }
+}
+
 export function ProjectScheduleCanvas({
   projectId,
   search,
@@ -262,6 +311,8 @@ export function ProjectScheduleCanvas({
   const suppressClickTaskIdRef = useRef<string | null>(null);
   const [rescheduleNotice, setRescheduleNotice] = useState<{ type: 'conflict' | 'error'; message: string } | null>(null);
   const rescheduleInFlightTaskIdsRef = useRef(new Set<string>());
+  const hydratedPreferenceKeyRef = useRef<string | null>(null);
+  const saveViewStateTimerRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
   const scrollRafRef = useRef<number | null>(null);
@@ -279,49 +330,51 @@ export function ProjectScheduleCanvas({
 
   useEffect(() => {
     setPreferencesHydrated(false);
-    if (!timelineStorageKey || typeof window === 'undefined') return;
-    const raw = window.localStorage.getItem(timelineStorageKey);
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as {
-          zoom?: TimelineZoom;
-          anchorDate?: string;
-          swimlane?: TimelineSwimlane;
-          sortMode?: TimelineSortMode;
-          scheduleFilter?: TimelineScheduleFilter;
-          ganttRiskFilterMode?: GanttRiskFilterMode;
-          ganttStrictMode?: boolean;
-        };
-        if (parsed.zoom && parsed.zoom in TIMELINE_ZOOM_CONFIG) {
-          setZoom(parsed.zoom);
+    hydratedPreferenceKeyRef.current = null;
+  }, [timelineStorageKey]);
+
+  useEffect(() => {
+    if (!timelineStorageKey || hydratedPreferenceKeyRef.current === timelineStorageKey) return;
+    if (!timelinePreferencesQuery.isFetched) return;
+
+    const serverViewState = mode === 'timeline' ? timelinePreferencesQuery.data?.timelineViewState : timelinePreferencesQuery.data?.ganttViewState;
+    if (serverViewState && Object.keys(serverViewState).length > 0) {
+      applyTimelineViewState(serverViewState, {
+        setZoom,
+        setAnchorDate,
+        setSwimlane,
+        setSortMode,
+        setScheduleFilter,
+        setGanttRiskFilterMode,
+        setGanttStrictMode,
+      });
+      hydratedPreferenceKeyRef.current = timelineStorageKey;
+      setPreferencesHydrated(true);
+      return;
+    }
+
+    if (typeof window !== 'undefined') {
+      const raw = window.localStorage.getItem(timelineStorageKey);
+      if (raw) {
+        try {
+          applyTimelineViewState(JSON.parse(raw) as TimelineViewState, {
+            setZoom,
+            setAnchorDate,
+            setSwimlane,
+            setSortMode,
+            setScheduleFilter,
+            setGanttRiskFilterMode,
+            setGanttStrictMode,
+          });
+        } catch {
+          // Ignore malformed local preference state.
         }
-        if (parsed.anchorDate) {
-          const parsedDate = new Date(parsed.anchorDate);
-          if (!Number.isNaN(parsedDate.valueOf())) {
-            setAnchorDate(startOfDay(parsedDate));
-          }
-        }
-        if (parsed.swimlane === 'section' || parsed.swimlane === 'assignee' || parsed.swimlane === 'status') {
-          setSwimlane(parsed.swimlane);
-        }
-        if (parsed.sortMode === 'manual' || parsed.sortMode === 'startAt' || parsed.sortMode === 'dueAt') {
-          setSortMode(parsed.sortMode);
-        }
-        if (parsed.scheduleFilter === 'all' || parsed.scheduleFilter === 'scheduled' || parsed.scheduleFilter === 'unscheduled') {
-          setScheduleFilter(parsed.scheduleFilter);
-        }
-        if (parsed.ganttRiskFilterMode === 'all' || parsed.ganttRiskFilterMode === 'risk') {
-          setGanttRiskFilterMode(parsed.ganttRiskFilterMode);
-        }
-        if (typeof parsed.ganttStrictMode === 'boolean') {
-          setGanttStrictMode(parsed.ganttStrictMode);
-        }
-      } catch {
-        // Ignore malformed local preference state.
       }
     }
+
+    hydratedPreferenceKeyRef.current = timelineStorageKey;
     setPreferencesHydrated(true);
-  }, [timelineStorageKey]);
+  }, [mode, timelinePreferencesQuery.data?.ganttViewState, timelinePreferencesQuery.data?.timelineViewState, timelinePreferencesQuery.isFetched, timelineStorageKey]);
 
   useEffect(() => {
     if (!timelineStorageKey || !preferencesHydrated || typeof window === 'undefined') return;
@@ -338,6 +391,75 @@ export function ProjectScheduleCanvas({
       }),
     );
   }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, preferencesHydrated, scheduleFilter, sortMode, swimlane, timelineStorageKey, zoom]);
+
+  const saveViewStateMutation = useMutation({
+    mutationFn: async ({
+      nextMode,
+      viewState,
+    }: {
+      nextMode: TimelineMode;
+      viewState: TimelineViewState;
+    }) =>
+      (await api(`/projects/${projectId}/timeline/preferences/view-state/${nextMode}`, {
+        method: 'PUT',
+        body: viewState,
+      })) as TimelinePreferences,
+    onMutate: async ({ nextMode, viewState }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.projectTimelinePreferences(projectId) });
+      const previous = queryClient.getQueryData<TimelinePreferences>(queryKeys.projectTimelinePreferences(projectId));
+      queryClient.setQueryData<TimelinePreferences>(queryKeys.projectTimelinePreferences(projectId), {
+        projectId,
+        userId: previous?.userId ?? meQuery.data?.id ?? '',
+        laneOrderBySection: previous?.laneOrderBySection ?? [],
+        laneOrderByAssignee: previous?.laneOrderByAssignee ?? [],
+        timelineViewState: nextMode === 'timeline' ? viewState : previous?.timelineViewState ?? null,
+        ganttViewState: nextMode === 'gantt' ? viewState : previous?.ganttViewState ?? null,
+      });
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData<TimelinePreferences>(queryKeys.projectTimelinePreferences(projectId), context.previous);
+      }
+      setRescheduleNotice({ type: 'error', message: t('timelineViewStateSaveFailed') });
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTimelinePreferences(projectId) });
+    },
+  });
+
+  useEffect(() => {
+    if (!preferencesHydrated) return;
+    if (saveViewStateTimerRef.current !== null) {
+      window.clearTimeout(saveViewStateTimerRef.current);
+    }
+    saveViewStateTimerRef.current = window.setTimeout(() => {
+      saveViewStateMutation.mutate({
+        nextMode: mode,
+        viewState:
+          mode === 'timeline'
+            ? {
+                zoom,
+                anchorDate: anchorDate.toISOString(),
+                swimlane,
+                sortMode,
+                scheduleFilter,
+              }
+            : {
+                zoom,
+                anchorDate: anchorDate.toISOString(),
+                ganttRiskFilterMode,
+                ganttStrictMode,
+              },
+      });
+    }, 300);
+    return () => {
+      if (saveViewStateTimerRef.current !== null) {
+        window.clearTimeout(saveViewStateTimerRef.current);
+        saveViewStateTimerRef.current = null;
+      }
+    };
+  }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, mode, preferencesHydrated, queryClient, projectId, saveViewStateMutation, scheduleFilter, sortMode, swimlane, t, zoom]);
 
   const zoomConfig = TIMELINE_ZOOM_CONFIG[zoom];
   const effectiveSwimlane: TimelineSwimlane = mode === 'timeline' ? swimlane : 'section';
@@ -521,6 +643,8 @@ export function ProjectScheduleCanvas({
         userId: previous?.userId ?? meQuery.data?.id ?? '',
         laneOrderBySection: groupBy === 'section' ? laneOrder : previous?.laneOrderBySection ?? [],
         laneOrderByAssignee: groupBy === 'assignee' ? laneOrder : previous?.laneOrderByAssignee ?? [],
+        timelineViewState: previous?.timelineViewState ?? null,
+        ganttViewState: previous?.ganttViewState ?? null,
       });
       return { previous };
     },

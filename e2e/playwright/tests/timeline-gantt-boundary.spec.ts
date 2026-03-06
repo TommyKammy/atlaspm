@@ -74,6 +74,10 @@ test('timeline and gantt controls stay isolated while list ordering remains stab
   await expect(page.locator('[data-testid="timeline-schedule-filter-toggle"]')).toBeVisible();
   await expect(page.locator('[data-testid="gantt-risk-filter-toggle"]')).toHaveCount(0);
   await expect(page.locator('[data-testid="gantt-strict-mode"]')).toHaveCount(0);
+  await page.click('[data-testid="timeline-swimlane-status"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute('data-active', 'true');
+  await page.click('[data-testid="timeline-zoom-month"]');
+  await expect(page.locator('[data-testid="timeline-zoom-month"]')).toHaveAttribute('data-active', 'true');
 
   await page.click('[data-testid="project-view-gantt"]');
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}.*view=gantt`));
@@ -82,6 +86,18 @@ test('timeline and gantt controls stay isolated while list ordering remains stab
   await expect(page.locator('[data-testid="gantt-strict-mode"]')).toBeVisible();
   await expect(page.locator('[data-testid="timeline-swimlane-toggle"]')).toHaveCount(0);
   await expect(page.locator('[data-testid="timeline-sort-toggle"]')).toHaveCount(0);
+  await page.click('[data-testid="gantt-filter-risk"]');
+  await expect(page.locator('[data-testid="gantt-filter-risk"]')).toHaveAttribute('data-active', 'true');
+  await page.click('[data-testid="gantt-strict-mode"]');
+  await expect(page.locator('[data-testid="gantt-strict-mode"]')).toHaveAttribute('data-active', 'true');
+
+  await page.reload();
+  await expect(page.locator('[data-testid="gantt-filter-risk"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid="gantt-strict-mode"]')).toHaveAttribute('data-active', 'true');
+
+  await page.click('[data-testid="project-view-timeline"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid="timeline-zoom-month"]')).toHaveAttribute('data-active', 'true');
 
   await page.click('[data-testid="project-view-list"]');
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}.*view=list`));

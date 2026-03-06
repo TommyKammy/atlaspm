@@ -2439,3 +2439,23 @@
   - `cd e2e/playwright && E2E_BASE_URL=http://localhost:3101 pnpm exec playwright test tests/timeline-swimlane.spec.ts --reporter=list`
 - Risks/known gaps:
   - Timeline compact packing currently uses interval overlap only; dependency-aware auto-layout and more advanced packing heuristics remain for later issues.
+
+## 2026-03-06 - Issue #203: Persist Timeline and Gantt view-state independently
+- What changed:
+  - Extended `ProjectTimelinePreference` in `apps/core-api/prisma/schema.prisma` with `timelineViewState` and `ganttViewState` JSON fields, plus a migration in `apps/core-api/prisma/migrations/20260306094000_add_timeline_view_state/`.
+  - Added `PUT /projects/:id/timeline/preferences/view-state/:mode` to `apps/core-api/src/tasks/tasks.controller.ts` and expanded `GET /projects/:id/timeline/preferences` to return both mode-specific view-state payloads alongside lane order.
+  - Added integration coverage in `apps/core-api/test/core.integration.test.ts` for timeline/gantt view-state persistence without cross-mode overwrite.
+  - Updated `apps/web-ui/src/components/project-timeline-view.tsx` to hydrate from server-stored view-state first, fall back to legacy localStorage when server state is empty, and debounce-save mode-specific view-state back to the API.
+  - Preserved lane-order optimistic updates without dropping server-cached view-state and added a dedicated save-failure notice in `apps/web-ui/src/lib/i18n.tsx`.
+  - Extended `e2e/playwright/tests/timeline-gantt-boundary.spec.ts` so Timeline and Gantt controls are verified to persist independently across reloads.
+- Why:
+  - Issue #203 requires Timeline and Gantt to stop sharing a single local preference bucket so each surface can evolve independently without state bleed.
+- How tested (exact commands):
+  - `pnpm install`
+  - `cd apps/core-api && DATABASE_URL='postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public' pnpm exec prisma migrate deploy`
+  - `pnpm --filter @atlaspm/domain build`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `cd apps/core-api && SEARCH_ENABLED=false DATABASE_URL='postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public' pnpm exec vitest run test/core.integration.test.ts -t "timeline preferences and timeline move APIs persist contracts with audit/outbox"`
+  - `cd e2e/playwright && E2E_BASE_URL=http://localhost:3102 pnpm exec playwright test tests/timeline-gantt-boundary.spec.ts tests/timeline.spec.ts --reporter=line --workers=1`
+- Risks/known gaps:
+  - View-state persistence is currently debounced per change and server-first; explicit offline sync or retry queues remain out of scope for this wave.

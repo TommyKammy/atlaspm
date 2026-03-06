@@ -256,6 +256,36 @@ class PutTimelineLaneOrderDto {
   laneOrder!: string[];
 }
 
+class PutTimelineViewStateDto {
+  @IsOptional()
+  @IsString()
+  zoom?: 'day' | 'week' | 'month';
+
+  @IsOptional()
+  @IsISO8601()
+  anchorDate?: string;
+
+  @IsOptional()
+  @IsString()
+  swimlane?: 'section' | 'assignee' | 'status';
+
+  @IsOptional()
+  @IsString()
+  sortMode?: 'manual' | 'startAt' | 'dueAt';
+
+  @IsOptional()
+  @IsString()
+  scheduleFilter?: 'all' | 'scheduled' | 'unscheduled';
+
+  @IsOptional()
+  @IsString()
+  ganttRiskFilterMode?: 'all' | 'risk';
+
+  @IsOptional()
+  @IsBoolean()
+  ganttStrictMode?: boolean;
+}
+
 class TimelineMoveTaskDto {
   @IsOptional()
   @Allow()
@@ -451,8 +481,15 @@ const MAX_COMMENT_BODY_LENGTH = 5000;
 const MAX_IMAGE_UPLOAD_BYTES = 5_000_000;
 const IMAGE_MIME_ALLOWLIST = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const TIMELINE_GROUP_BY_VALUES = ['section', 'assignee'] as const;
+const TIMELINE_VIEW_MODE_VALUES = ['timeline', 'gantt'] as const;
+const TIMELINE_ZOOM_VALUES = ['day', 'week', 'month'] as const;
+const TIMELINE_SWIMLANE_VALUES = ['section', 'assignee', 'status'] as const;
+const TIMELINE_SORT_MODE_VALUES = ['manual', 'startAt', 'dueAt'] as const;
+const TIMELINE_SCHEDULE_FILTER_VALUES = ['all', 'scheduled', 'unscheduled'] as const;
+const GANTT_RISK_FILTER_MODE_VALUES = ['all', 'risk'] as const;
 
 type TimelineGroupBy = (typeof TIMELINE_GROUP_BY_VALUES)[number];
+type TimelineViewMode = (typeof TIMELINE_VIEW_MODE_VALUES)[number];
 
 type TaskCustomFieldValueWithRelations = Prisma.TaskCustomFieldValueGetPayload<{
   include: {
@@ -588,6 +625,8 @@ export class TasksController {
       userId: req.user.sub,
       laneOrderBySection: preferences?.laneOrderBySection ?? [],
       laneOrderByAssignee: preferences?.laneOrderByAssignee ?? [],
+      timelineViewState: preferences?.timelineViewState ?? null,
+      ganttViewState: preferences?.ganttViewState ?? null,
     };
   }
 
@@ -643,6 +682,66 @@ export class TasksController {
         userId: req.user.sub,
         laneOrderBySection: updated.laneOrderBySection,
         laneOrderByAssignee: updated.laneOrderByAssignee,
+        timelineViewState: updated.timelineViewState ?? null,
+        ganttViewState: updated.ganttViewState ?? null,
+      };
+    });
+  }
+
+  @Put('projects/:id/timeline/preferences/view-state/:mode')
+  async putTimelineViewState(
+    @Param('id') projectId: string,
+    @Param('mode') rawMode: string,
+    @Body() body: PutTimelineViewStateDto,
+    @CurrentRequest() req: AppRequest,
+  ) {
+    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+    const mode = this.parseTimelineViewMode(rawMode);
+    const normalizedViewState = this.normalizeTimelineViewState(mode, body);
+
+    return this.prisma.$transaction(async (tx) => {
+      const before = await tx.projectTimelinePreference.findUnique({
+        where: { projectId_userId: { projectId, userId: req.user.sub } },
+      });
+      const updated = await tx.projectTimelinePreference.upsert({
+        where: { projectId_userId: { projectId, userId: req.user.sub } },
+        create: {
+          projectId,
+          userId: req.user.sub,
+          timelineViewState: mode === 'timeline' ? normalizedViewState : null,
+          ganttViewState: mode === 'gantt' ? normalizedViewState : null,
+        },
+        update:
+          mode === 'timeline'
+            ? { timelineViewState: normalizedViewState }
+            : { ganttViewState: normalizedViewState },
+      });
+
+      await this.domain.appendAuditOutbox({
+        tx,
+        actor: req.user.sub,
+        entityType: 'ProjectTimelinePreference',
+        entityId: updated.id,
+        action: 'project.timeline.view_state.updated',
+        beforeJson: before,
+        afterJson: updated,
+        correlationId: req.correlationId,
+        outboxType: 'project.timeline.view_state.updated',
+        payload: {
+          projectId,
+          userId: req.user.sub,
+          mode,
+          viewState: normalizedViewState,
+        },
+      });
+
+      return {
+        projectId,
+        userId: req.user.sub,
+        laneOrderBySection: updated.laneOrderBySection,
+        laneOrderByAssignee: updated.laneOrderByAssignee,
+        timelineViewState: updated.timelineViewState ?? null,
+        ganttViewState: updated.ganttViewState ?? null,
       };
     });
   }
@@ -2725,6 +2824,58 @@ export class TasksController {
       return value as TimelineGroupBy;
     }
     throw new BadRequestException(`groupBy must be one of: ${TIMELINE_GROUP_BY_VALUES.join(', ')}`);
+  }
+
+  private parseTimelineViewMode(value: string): TimelineViewMode {
+    if (TIMELINE_VIEW_MODE_VALUES.includes(value as TimelineViewMode)) {
+      return value as TimelineViewMode;
+    }
+    throw new BadRequestException(`mode must be one of: ${TIMELINE_VIEW_MODE_VALUES.join(', ')}`);
+  }
+
+  private normalizeTimelineViewState(mode: TimelineViewMode, body: PutTimelineViewStateDto): Prisma.JsonObject {
+    const normalized: Record<string, boolean | string> = {};
+
+    if (body.zoom && TIMELINE_ZOOM_VALUES.includes(body.zoom as (typeof TIMELINE_ZOOM_VALUES)[number])) {
+      normalized.zoom = body.zoom;
+    }
+    if (body.anchorDate) {
+      const parsed = new Date(body.anchorDate);
+      if (!Number.isNaN(parsed.valueOf())) {
+        normalized.anchorDate = parsed.toISOString();
+      }
+    }
+
+    if (mode === 'timeline') {
+      if (body.swimlane && TIMELINE_SWIMLANE_VALUES.includes(body.swimlane as (typeof TIMELINE_SWIMLANE_VALUES)[number])) {
+        normalized.swimlane = body.swimlane;
+      }
+      if (body.sortMode && TIMELINE_SORT_MODE_VALUES.includes(body.sortMode as (typeof TIMELINE_SORT_MODE_VALUES)[number])) {
+        normalized.sortMode = body.sortMode;
+      }
+      if (
+        body.scheduleFilter &&
+        TIMELINE_SCHEDULE_FILTER_VALUES.includes(body.scheduleFilter as (typeof TIMELINE_SCHEDULE_FILTER_VALUES)[number])
+      ) {
+        normalized.scheduleFilter = body.scheduleFilter;
+      }
+    }
+
+    if (mode === 'gantt') {
+      if (
+        body.ganttRiskFilterMode &&
+        GANTT_RISK_FILTER_MODE_VALUES.includes(
+          body.ganttRiskFilterMode as (typeof GANTT_RISK_FILTER_MODE_VALUES)[number],
+        )
+      ) {
+        normalized.ganttRiskFilterMode = body.ganttRiskFilterMode;
+      }
+      if (typeof body.ganttStrictMode === 'boolean') {
+        normalized.ganttStrictMode = body.ganttStrictMode;
+      }
+    }
+
+    return normalized;
   }
 
   private resolveRuleDefinition(rule: { definition: unknown; templateKey: string }): RuleDefinition {
