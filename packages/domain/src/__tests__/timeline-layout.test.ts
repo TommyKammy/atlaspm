@@ -208,10 +208,13 @@ test('buildTimelineLayout calculates row and bar positions', () => {
     taskRowHeight: 40,
   });
 
+  const designLane = layout.lanesWithRows.find((lane) => lane.lane.id === 'section:design');
+
   assert.equal(layout.bodyHeight, 104);
   assert.equal(layout.totalRowCount, 3);
   assert.deepEqual(layout.taskRowsById['task-1'], { top: 64, height: 40 });
   assert.deepEqual(layout.barsByTaskId['task-1'], { left: 20, width: 60, y: 84 });
+  assert.equal(designLane?.rows.length, 1);
 });
 
 test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () => {
@@ -271,9 +274,7 @@ test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () =
     compactRows: true,
   });
 
-  const designLane = layout.lanesWithRows.find(
-    (lane) => lane.lane.id === 'section:design',
-  );
+  const designLane = layout.lanesWithRows.find((lane) => lane.lane.id === 'section:design');
 
   assert.equal(layout.bodyHeight, 144);
   assert.equal(layout.totalRowCount, 4);

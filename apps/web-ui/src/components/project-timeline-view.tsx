@@ -486,7 +486,6 @@ export function ProjectScheduleCanvas({
       });
       lastHydratedViewStateRef.current = preferredViewState;
     }
-
     hasRestoredTimelinePreferences.current = true;
     setPreferencesHydrated(true);
   }, [
