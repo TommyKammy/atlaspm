@@ -2819,14 +2819,14 @@ describe('Core API Integration', () => {
     });
     expect(timelineAudit).toBeTruthy();
 
-    const timelineOutbox = await prisma.outboxEvent.findFirst({
+    const matchingTimelineOutbox = await prisma.outboxEvent.findMany({
       where: {
         type: 'task.timeline.moved',
         createdAt: { gte: timelineMoveStart },
       },
       orderBy: { createdAt: 'desc' },
     });
-    expect((timelineOutbox?.payload as any)?.taskId).toBe(taskId);
+    expect(matchingTimelineOutbox.find((event) => (event.payload as any)?.taskId === taskId)).toBeTruthy();
 
     await request(app.getHttpServer())
       .patch(`/tasks/${taskId}/timeline-move`)
@@ -2945,17 +2945,19 @@ describe('Core API Integration', () => {
       status: 'IN_PROGRESS',
     });
 
-    const timelineOutbox = await prisma.outboxEvent.findFirst({
+    const matchingTimelineOutbox = await prisma.outboxEvent.findMany({
       where: {
         type: 'task.timeline.moved',
         createdAt: { gte: moveStart },
       },
       orderBy: { createdAt: 'desc' },
     });
-    expect((timelineOutbox?.payload as any)?.taskId).toBe(taskId);
-    expect((timelineOutbox?.payload as any)?.sectionId).toBe(laneSectionRes.body.id);
-    expect((timelineOutbox?.payload as any)?.status).toBe('IN_PROGRESS');
-    expect((timelineOutbox?.payload as any)?.customFieldMove).toEqual({
+    const timelineOutboxPayload = matchingTimelineOutbox.find((event) => (event.payload as any)?.taskId === taskId)?.payload as any;
+    expect(timelineOutboxPayload).toBeTruthy();
+    expect(timelineOutboxPayload?.taskId).toBe(taskId);
+    expect(timelineOutboxPayload?.sectionId).toBe(laneSectionRes.body.id);
+    expect(timelineOutboxPayload?.status).toBe('IN_PROGRESS');
+    expect(timelineOutboxPayload?.customFieldMove).toEqual({
       fieldId: laneFieldRes.body.id,
       value: laneFieldRes.body.options[1].id,
     });
@@ -2989,7 +2991,11 @@ describe('Core API Integration', () => {
         sectionId: '2bc8bcf5-11d3-4ea8-b67f-bf2d8f2d1a99',
         version: taskRes.body.version,
       })
-      .expect(404);
+      .expect(404)
+      .expect((res) => {
+        expect(res.body.statusCode).toBe(404);
+        expect(res.body.message).toBe('Section not found');
+      });
 
     await request(app.getHttpServer())
       .patch(`/tasks/${taskId}/timeline-move`)
@@ -3001,7 +3007,11 @@ describe('Core API Integration', () => {
         },
         version: taskRes.body.version,
       })
-      .expect(409);
+      .expect(409)
+      .expect((res) => {
+        expect(res.body).toBeDefined();
+        expect(res.body.message).toContain('Unknown or archived custom field definition');
+      });
   });
 
   test('timeline move conflict payload includes section and status server truth', async () => {
@@ -3023,6 +3033,7 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     const defaultSection = sectionsRes.body.find((section: any) => section.isDefault);
+    expect(defaultSection).toBeDefined();
 
     const taskRes = await request(app.getHttpServer())
       .post(`/projects/${projectId}/tasks`)
@@ -3054,6 +3065,8 @@ describe('Core API Integration', () => {
       .expect(409);
 
     expect(firstMove.body.status).toBe('BLOCKED');
+    expect(conflictRes.body.statusCode).toBe(409);
+    expect(conflictRes.body.message).toBe('Version conflict');
     expect(conflictRes.body.latest).toMatchObject({
       version: firstMove.body.version,
       sectionId: defaultSection.id,
