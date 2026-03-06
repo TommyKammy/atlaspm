@@ -182,6 +182,16 @@ function parseAssigneeLaneId(laneId: string): string | null | undefined {
   return raw === UNASSIGNED_LANE_ID ? null : raw;
 }
 
+function deriveLaneIdForTask(task: TimelineTask, swimlane: TimelineSwimlane): string {
+  if (swimlane === 'assignee') {
+    return `assignee:${task.assigneeUserId ?? UNASSIGNED_LANE_ID}`;
+  }
+  if (swimlane === 'status') {
+    return `status:${task.status}`;
+  }
+  return `section:${task.sectionId}`;
+}
+
 function isLaneOrderGroupBy(value: TimelineSwimlane): value is TimelineLaneOrderGroupBy {
   return value === 'section' || value === 'assignee';
 }
@@ -421,9 +431,10 @@ export function ProjectScheduleCanvas({
   );
 
   const timelineLanes = useMemo(() => {
-    return buildTimelineLanes({
+    const scheduledTimelineTasks = filteredTasks.filter((task) => task.hasSchedule);
+    const lanes = buildTimelineLanes({
       swimlane: effectiveSwimlane,
-      tasks: filteredTasks,
+      tasks: scheduledTimelineTasks,
       sections: timeline.sections,
       membersById: timeline.membersById,
       preferredLaneOrder,
@@ -437,6 +448,18 @@ export function ProjectScheduleCanvas({
       },
       unassignedLaneId: UNASSIGNED_LANE_ID,
     });
+    if (effectiveSwimlane !== 'section') {
+      return lanes;
+    }
+    const existingLaneIds = new Set(lanes.map((lane) => lane.id));
+    const emptySectionLanes = timeline.sections
+      .filter((section) => !existingLaneIds.has(`section:${section.id}`))
+      .map((section) => ({
+        id: `section:${section.id}`,
+        label: section.isDefault ? t('tasks') : section.name,
+        tasks: [] as TimelineTask[],
+      }));
+    return [...lanes, ...emptySectionLanes];
   }, [effectiveSwimlane, filteredTasks, preferredLaneOrder, t, timeline.membersById, timeline.sections]);
 
   const filteredTaskIds = useMemo(() => new Set(filteredTasks.map((task) => task.id)), [filteredTasks]);
@@ -1297,7 +1320,6 @@ export function ProjectScheduleCanvas({
             }}
           >
             {timelineLayout.lanesWithRows.map(({ lane, tasks: laneTasks, top, taskRows }) => {
-              if (!laneTasks.length) return null;
               const sectionVisible = !virtualizationEnabled
                 || (top + SECTION_ROW_HEIGHT >= visibleRange.start && top <= visibleRange.end);
               const visibleTaskRows = virtualizationEnabled
@@ -1332,13 +1354,30 @@ export function ProjectScheduleCanvas({
                         setLaneDragState({ draggingLaneId: lane.id, overLaneId: lane.id });
                       }}
                       onDragOver={(event) => {
-                        if (mode !== 'timeline' || effectiveSwimlane === 'status' || !laneDragState?.draggingLaneId) return;
+                        if (!Array.from(event.dataTransfer.types).includes(UNSCHEDULED_TASK_DND_TYPE)) {
+                          if (mode !== 'timeline' || effectiveSwimlane === 'status' || !laneDragState?.draggingLaneId) return;
+                        }
                         event.preventDefault();
+                        if (Array.from(event.dataTransfer.types).includes(UNSCHEDULED_TASK_DND_TYPE)) return;
                         if (laneDragState.overLaneId !== lane.id) {
                           setLaneDragState((current) => (current ? { ...current, overLaneId: lane.id } : current));
                         }
                       }}
                       onDrop={(event) => {
+                        if (Array.from(event.dataTransfer.types).includes(UNSCHEDULED_TASK_DND_TYPE)) {
+                          const raw = event.dataTransfer.getData(UNSCHEDULED_TASK_DND_TYPE);
+                          if (!raw) return;
+                          event.preventDefault();
+                          setUnscheduledDragTaskId(null);
+                          try {
+                            const parsed = JSON.parse(raw) as { taskId?: string; originLaneId?: string };
+                            if (!parsed.taskId || !parsed.originLaneId) return;
+                            commitUnscheduledDrop(parsed.taskId, lane.id, event.clientX, event.clientY);
+                          } catch {
+                            // ignore malformed drag payload
+                          }
+                          return;
+                        }
                         if (mode !== 'timeline' || effectiveSwimlane === 'status') return;
                         event.preventDefault();
                         const draggingLaneId = laneDragState?.draggingLaneId ?? event.dataTransfer.getData('text/plain');
@@ -1479,31 +1518,7 @@ export function ProjectScheduleCanvas({
                             <span className="absolute left-2 top-1/2 -translate-y-1/2 rounded border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground">
                               {t('timelineOutOfWindow')}
                             </span>
-                          ) : (
-                            <button
-                              type="button"
-                              className={`absolute left-2 top-1/2 -translate-y-1/2 rounded border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 ${
-                                unscheduledDragTaskId === task.id ? 'opacity-60' : ''
-                              }`}
-                              onClick={() => setSelectedTaskId(task.id)}
-                              draggable={mode === 'timeline'}
-                              onDragStart={(event) => {
-                                if (mode !== 'timeline') return;
-                                event.dataTransfer.effectAllowed = 'move';
-                                event.dataTransfer.setData(
-                                  UNSCHEDULED_TASK_DND_TYPE,
-                                  JSON.stringify({ taskId: task.id, originLaneId: lane.id }),
-                                );
-                                setUnscheduledDragTaskId(task.id);
-                              }}
-                              onDragEnd={() => {
-                                setUnscheduledDragTaskId(null);
-                              }}
-                              data-testid={`timeline-unscheduled-${task.id}`}
-                            >
-                              {t('timelineNoDates')}
-                            </button>
-                          )}
+                          ) : null}
                         </div>
                       </div>
                     );
@@ -1529,6 +1544,50 @@ export function ProjectScheduleCanvas({
         }}
         projectId={projectId}
       />
+
+      {unscheduledTasks.length ? (
+        <div className="rounded-lg border border-dashed bg-card/70 p-3" data-testid="timeline-unscheduled-tray">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium">{t('timelineUnscheduled')}</p>
+              <p className="text-xs text-muted-foreground">{t('timelineUnscheduledTrayHint')}</p>
+            </div>
+            <Badge variant="secondary">{unscheduledTasks.length}</Badge>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {unscheduledTasks.map((task) => (
+              <button
+                key={task.id}
+                type="button"
+                className={`rounded-md border border-dashed px-3 py-2 text-left text-xs text-muted-foreground transition hover:border-primary/40 hover:bg-muted/40 hover:text-foreground ${
+                  unscheduledDragTaskId === task.id ? 'opacity-60' : ''
+                }`}
+                onClick={() => setSelectedTaskId(task.id)}
+                draggable={mode === 'timeline'}
+                onDragStart={(event) => {
+                  if (mode !== 'timeline') return;
+                  event.dataTransfer.effectAllowed = 'move';
+                  event.dataTransfer.setData(
+                    UNSCHEDULED_TASK_DND_TYPE,
+                    JSON.stringify({
+                      taskId: task.id,
+                      originLaneId: deriveLaneIdForTask(task, effectiveSwimlane),
+                    }),
+                  );
+                  setUnscheduledDragTaskId(task.id);
+                }}
+                onDragEnd={() => {
+                  setUnscheduledDragTaskId(null);
+                }}
+                data-testid={`timeline-unscheduled-${task.id}`}
+              >
+                <span className="block truncate text-foreground">{task.title.trim() || t('untitledTask')}</span>
+                <span className="mt-1 block">{t('timelineNoDates')}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

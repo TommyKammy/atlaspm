@@ -115,7 +115,7 @@ test('timeline supports swimlane toggle and due-date sort without affecting gant
   await expect(page.locator('[data-testid="timeline-sort-toggle"]')).toBeVisible();
   await expect(page.locator('[data-testid="timeline-schedule-filter-toggle"]')).toBeVisible();
 
-  await expect(page.locator('[data-testid^="timeline-lane-section-"]')).toHaveCount(1);
+  await expect(page.locator('[data-testid^="timeline-lane-section-"]')).toHaveCount(2);
 
   await page.click('[data-testid="timeline-sort-due"]');
   await expect(page.locator('[data-testid="timeline-sort-due"]')).toHaveAttribute('data-active', 'true');
@@ -128,11 +128,11 @@ test('timeline supports swimlane toggle and due-date sort without affecting gant
 
   await page.click('[data-testid="timeline-swimlane-assignee"]');
   await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute('data-active', 'true');
-  await expect(page.locator('[data-testid^="timeline-lane-assignee-"]')).toHaveCount(2);
+  await expect(page.locator('[data-testid^="timeline-lane-assignee-"]')).toHaveCount(1);
 
   await page.click('[data-testid="timeline-swimlane-status"]');
   await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute('data-active', 'true');
-  await expect(page.locator('[data-testid^="timeline-lane-status-"]')).toHaveCount(3);
+  await expect(page.locator('[data-testid^="timeline-lane-status-"]')).toHaveCount(2);
 
   await page.click('[data-testid="timeline-filter-unscheduled"]');
   await expect(page.locator('[data-testid="timeline-filter-unscheduled"]')).toHaveAttribute('data-active', 'true');

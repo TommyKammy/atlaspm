@@ -2408,3 +2408,18 @@
   - `cd e2e/playwright && E2E_BASE_URL=http://localhost:3100 pnpm exec playwright test tests/timeline-swimlane.spec.ts --reporter=list`
 - Risks/known gaps:
   - Status swimlanes currently use fixed workflow order only; lane reordering persistence for status stays out of scope until later preference work.
+
+## 2026-03-06 - Issue #201: Move unscheduled tasks into a dedicated Timeline tray
+- What changed:
+  - Updated `apps/web-ui/src/components/project-timeline-view.tsx` so Timeline lanes are built from scheduled tasks only, while unscheduled tasks render in a dedicated tray below the canvas.
+  - Added a tray-specific drag affordance for unscheduled tasks and preserved direct task-detail opening from the tray chips.
+  - Ensured section swimlanes still render empty lanes as valid drop targets, including header-drop handling for unscheduled drag payloads.
+  - Updated `e2e/playwright/tests/timeline-swimlane.spec.ts` to reflect the new empty-lane and unscheduled-tray behavior.
+  - Added localized tray helper copy in `apps/web-ui/src/lib/i18n.tsx`.
+- Why:
+  - Issue #201 requires unscheduled tasks to move out of inline swimlane rows and into a dedicated planning tray, while preserving drag-to-schedule behavior.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `cd e2e/playwright && E2E_BASE_URL=http://localhost:3100 pnpm exec playwright test tests/timeline-swimlane.spec.ts --reporter=list`
+- Risks/known gaps:
+  - Empty placeholder lanes are only rendered for section swimlanes in this wave; assignee/status empty-lane UX remains deferred until later timeline planning iterations.
