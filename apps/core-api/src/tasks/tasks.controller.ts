@@ -20,6 +20,7 @@ import {
 import {
   Allow,
   IsBoolean,
+  IsIn,
   IsArray,
   IsEnum,
   IsInt,
@@ -258,7 +259,7 @@ class PutTimelineLaneOrderDto {
 
 class PutTimelineViewStateDto {
   @IsOptional()
-  @IsString()
+  @IsIn(['day', 'week', 'month'])
   zoom?: 'day' | 'week' | 'month';
 
   @IsOptional()
@@ -266,19 +267,19 @@ class PutTimelineViewStateDto {
   anchorDate?: string;
 
   @IsOptional()
-  @IsString()
+  @IsIn(['section', 'assignee', 'status'])
   swimlane?: 'section' | 'assignee' | 'status';
 
   @IsOptional()
-  @IsString()
+  @IsIn(['manual', 'startAt', 'dueAt'])
   sortMode?: 'manual' | 'startAt' | 'dueAt';
 
   @IsOptional()
-  @IsString()
+  @IsIn(['all', 'scheduled', 'unscheduled'])
   scheduleFilter?: 'all' | 'scheduled' | 'unscheduled';
 
   @IsOptional()
-  @IsString()
+  @IsIn(['all', 'risk'])
   ganttRiskFilterMode?: 'all' | 'risk';
 
   @IsOptional()
@@ -3008,7 +3009,10 @@ export class TasksController {
   private normalizeTimelineViewState(mode: TimelineViewMode, body: PutTimelineViewStateDto): Prisma.JsonObject {
     const normalized: Record<string, boolean | string> = {};
 
-    if (body.zoom && TIMELINE_ZOOM_VALUES.includes(body.zoom as (typeof TIMELINE_ZOOM_VALUES)[number])) {
+    if (body.zoom !== undefined) {
+      if (!TIMELINE_ZOOM_VALUES.includes(body.zoom as (typeof TIMELINE_ZOOM_VALUES)[number])) {
+        throw new BadRequestException(`zoom must be one of: ${TIMELINE_ZOOM_VALUES.join(', ')}`);
+      }
       normalized.zoom = body.zoom;
     }
     if (body.anchorDate) {
@@ -3019,27 +3023,41 @@ export class TasksController {
     }
 
     if (mode === 'timeline') {
-      if (body.swimlane && TIMELINE_SWIMLANE_VALUES.includes(body.swimlane as (typeof TIMELINE_SWIMLANE_VALUES)[number])) {
+      if (body.swimlane !== undefined) {
+        if (!TIMELINE_SWIMLANE_VALUES.includes(body.swimlane as (typeof TIMELINE_SWIMLANE_VALUES)[number])) {
+          throw new BadRequestException(`swimlane must be one of: ${TIMELINE_SWIMLANE_VALUES.join(', ')}`);
+        }
         normalized.swimlane = body.swimlane;
       }
-      if (body.sortMode && TIMELINE_SORT_MODE_VALUES.includes(body.sortMode as (typeof TIMELINE_SORT_MODE_VALUES)[number])) {
+      if (body.sortMode !== undefined) {
+        if (!TIMELINE_SORT_MODE_VALUES.includes(body.sortMode as (typeof TIMELINE_SORT_MODE_VALUES)[number])) {
+          throw new BadRequestException(`sortMode must be one of: ${TIMELINE_SORT_MODE_VALUES.join(', ')}`);
+        }
         normalized.sortMode = body.sortMode;
       }
-      if (
-        body.scheduleFilter &&
-        TIMELINE_SCHEDULE_FILTER_VALUES.includes(body.scheduleFilter as (typeof TIMELINE_SCHEDULE_FILTER_VALUES)[number])
-      ) {
+      if (body.scheduleFilter !== undefined) {
+        if (
+          !TIMELINE_SCHEDULE_FILTER_VALUES.includes(
+            body.scheduleFilter as (typeof TIMELINE_SCHEDULE_FILTER_VALUES)[number],
+          )
+        ) {
+          throw new BadRequestException(`scheduleFilter must be one of: ${TIMELINE_SCHEDULE_FILTER_VALUES.join(', ')}`);
+        }
         normalized.scheduleFilter = body.scheduleFilter;
       }
     }
 
     if (mode === 'gantt') {
-      if (
-        body.ganttRiskFilterMode &&
-        GANTT_RISK_FILTER_MODE_VALUES.includes(
-          body.ganttRiskFilterMode as (typeof GANTT_RISK_FILTER_MODE_VALUES)[number],
-        )
-      ) {
+      if (body.ganttRiskFilterMode !== undefined) {
+        if (
+          !GANTT_RISK_FILTER_MODE_VALUES.includes(
+            body.ganttRiskFilterMode as (typeof GANTT_RISK_FILTER_MODE_VALUES)[number],
+          )
+        ) {
+          throw new BadRequestException(
+            `ganttRiskFilterMode must be one of: ${GANTT_RISK_FILTER_MODE_VALUES.join(', ')}`,
+          );
+        }
         normalized.ganttRiskFilterMode = body.ganttRiskFilterMode;
       }
       if (typeof body.ganttStrictMode === 'boolean') {

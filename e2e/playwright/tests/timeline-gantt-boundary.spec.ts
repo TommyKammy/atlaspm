@@ -90,6 +90,12 @@ test('timeline and gantt controls stay isolated while list ordering remains stab
   await expect(page.locator('[data-testid="gantt-filter-risk"]')).toHaveAttribute('data-active', 'true');
   await page.click('[data-testid="gantt-strict-mode"]');
   await expect(page.locator('[data-testid="gantt-strict-mode"]')).toHaveAttribute('data-active', 'true');
+  await page.waitForResponse((response) =>
+    response.url().includes(`/projects/${projectId}/timeline/preferences/view-state/gantt`)
+    && response.request().method() === 'PUT'
+    && response.ok(),
+  );
+  await page.evaluate((key) => window.localStorage.removeItem(key), `atlaspm:gantt-shell:${sub}:${projectId}`);
 
   await page.reload();
   await expect(page.locator('[data-testid="gantt-filter-risk"]')).toHaveAttribute('data-active', 'true');
