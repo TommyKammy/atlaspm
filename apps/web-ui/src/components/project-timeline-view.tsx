@@ -1105,7 +1105,7 @@ export function ProjectScheduleCanvas({
     }
   };
 
-  const commitUnscheduledDrop = (taskId: string, originLaneId: string, clientX: number, clientY: number) => {
+  const commitUnscheduledDrop = (taskId: string, fallbackLaneId: string, clientX: number, clientY: number) => {
     if (rescheduleInFlightTaskIdsRef.current.has(taskId)) return;
     const task = taskById.get(taskId);
     const container = scrollContainerRef.current;
@@ -1118,7 +1118,7 @@ export function ProjectScheduleCanvas({
     if (!targetDay) return;
 
     const startDate = startOfDay(targetDay);
-    const dropLaneId = resolveLaneIdAtClientY(clientY) ?? originLaneId;
+    const dropLaneId = resolveLaneIdAtClientY(clientY) ?? fallbackLaneId;
     const assigneeUserId = effectiveSwimlane === 'assignee' ? parseAssigneeLaneId(dropLaneId) : undefined;
     const durationDays =
       task.startAt && task.dueAt
@@ -1586,9 +1586,12 @@ export function ProjectScheduleCanvas({
               event.preventDefault();
               setUnscheduledDragTaskId(null);
               try {
-                const parsed = JSON.parse(raw) as { taskId?: string; originLaneId?: string };
-                if (!parsed.taskId || !parsed.originLaneId) return;
-                commitUnscheduledDrop(parsed.taskId, parsed.originLaneId, event.clientX, event.clientY);
+                const parsed = JSON.parse(raw) as { taskId?: string };
+                if (!parsed.taskId) return;
+                const fallbackTask = taskById.get(parsed.taskId);
+                if (!fallbackTask) return;
+                const fallbackLaneId = deriveLaneIdForTask(fallbackTask, effectiveSwimlane);
+                commitUnscheduledDrop(parsed.taskId, fallbackLaneId, event.clientX, event.clientY);
               } catch {
                 // ignore malformed drag payload
               }
@@ -1728,6 +1731,7 @@ export function ProjectScheduleCanvas({
                             const fallbackTaskName = task.title.trim() || t('untitledTask');
                             const timelineBarStyle = resolveTimelineBarStyle(task, today);
                             const isCompleted = task.status === 'DONE';
+                            const barLayout = timelineLayout.barsByTaskId[task.id];
                             const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
                               ? timeline.window.start
                               : task.timelineStart;
@@ -1741,13 +1745,9 @@ export function ProjectScheduleCanvas({
                               ? timeline.window.end
                               : task.baselineEnd;
                             if (task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd) {
-                              const taskWidth = Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1)
-                                * zoomConfig.dayColWidth;
-                              const taskLeft = Math.max(
-                                0,
-                                Math.max(0, dayDiff(timeline.window.start, visibleStart ?? task.timelineStart)) * zoomConfig.dayColWidth
-                                  + (dragState?.taskId === task.id ? dragState.deltaDays * zoomConfig.dayColWidth : 0),
-                              );
+                              if (!barLayout) return null;
+                              const taskWidth = barLayout.width;
+                              const taskLeft = Math.max(0, barLayout.left + (dragState?.taskId === task.id ? dragState.deltaDays * zoomConfig.dayColWidth : 0));
                               const isMilestone = task.type === 'MILESTONE' || dayDiff(task.timelineStart, task.timelineEnd) === 0;
                               return (
                                 <div key={task.id}>
@@ -1904,7 +1904,6 @@ export function ProjectScheduleCanvas({
                     UNSCHEDULED_TASK_DND_TYPE,
                     JSON.stringify({
                       taskId: task.id,
-                      originLaneId: deriveLaneIdForTask(task, effectiveSwimlane),
                     }),
                   );
                   setUnscheduledDragTaskId(task.id);

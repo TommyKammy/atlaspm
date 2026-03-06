@@ -695,7 +695,7 @@ export class TasksController {
     @Body() body: PutTimelineViewStateDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
     const mode = this.parseTimelineViewMode(rawMode);
     const normalizedViewState = this.normalizeTimelineViewState(mode, body);
 
@@ -708,8 +708,8 @@ export class TasksController {
         create: {
           projectId,
           userId: req.user.sub,
-          timelineViewState: mode === 'timeline' ? normalizedViewState : null,
-          ganttViewState: mode === 'gantt' ? normalizedViewState : null,
+          ...(mode === 'timeline' ? { timelineViewState: normalizedViewState } : {}),
+          ...(mode === 'gantt' ? { ganttViewState: normalizedViewState } : {}),
         },
         update:
           mode === 'timeline'

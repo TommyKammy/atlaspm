@@ -2474,3 +2474,18 @@
   - `pnpm --filter @atlaspm/web-ui type-check`
 - Risks/known gaps:
   - AtlasPM still lacks a persisted `project.color`, so default bar colors are derived from `projectId` until a first-class project color field exists.
+
+## 2026-03-06 - Issue #205: Render milestone and completed Timeline states
+- What changed:
+  - Updated `/Users/tomoakikawada/Dev/atlaspm-worktrees/timeline-p2-2/apps/web-ui/src/components/project-timeline-view.tsx` so milestone tasks render as diamonds and completed tasks fade/strike through in Timeline mode.
+  - Switched bar positioning to reuse `/Users/tomoakikawada/Dev/atlaspm-worktrees/timeline-p2-2/apps/web-ui/src/components/project-timeline-view.tsx` layout coordinates from `timelineLayout.barsByTaskId`, preventing visual drift between bars and dependency overlays.
+  - Simplified unscheduled drag payloads to carry only `taskId`, with lane fallback derived locally at drop time.
+  - Tightened `/Users/tomoakikawada/Dev/atlaspm-worktrees/timeline-p2-2/apps/core-api/src/tasks/tasks.controller.ts` so timeline view-state writes require `ProjectRole.MEMBER`, matching other preference writes.
+- Why:
+  - Issue #205 is about milestone/completed visual states, and the review surfaced adjacent correctness gaps around drag payload semantics and write authorization that should not ship.
+- How tested (exact commands):
+  - `pnpm install --frozen-lockfile`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+- Risks/known gaps:
+  - Milestone rendering is still view-only; milestone-specific interaction affordances remain deferred to later Timeline waves.
