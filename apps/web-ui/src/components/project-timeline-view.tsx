@@ -2792,6 +2792,7 @@ export function ProjectScheduleCanvas({
               if (!sectionVisible && visibleRows.length === 0) return null;
               const isLaneCollapsed = collapsedLaneIds.has(lane.id);
               const laneTaskCount = laneTaskCountById.get(lane.id) ?? 0;
+              const laneContentId = `timeline-lane-content-${normalizeTestIdSegment(lane.id)}`;
               const laneRowsTop = top + SECTION_ROW_HEIGHT;
               const topSpacer = visibleRows.length
                 ? Math.max(0, visibleRows[0]!.top - laneRowsTop)
@@ -2900,6 +2901,8 @@ export function ProjectScheduleCanvas({
                         aria-label={
                           isLaneCollapsed ? t('timelineExpandGroup') : t('timelineCollapseGroup')
                         }
+                        aria-controls={laneContentId}
+                        aria-expanded={!isLaneCollapsed}
                         data-testid={`timeline-lane-toggle-${normalizeTestIdSegment(lane.id)}`}
                       >
                         {isLaneCollapsed ? (
@@ -2917,7 +2920,7 @@ export function ProjectScheduleCanvas({
                     </div>
                   </div>
 
-                  <div className="min-w-0">
+                  <div id={laneContentId} className="min-w-0">
                     {sectionVisible ? (
                       <div
                         className={`h-8 border-b bg-muted/20 ${laneDragState?.overLaneId === lane.id ? 'ring-1 ring-inset ring-primary/40' : ''}`}
