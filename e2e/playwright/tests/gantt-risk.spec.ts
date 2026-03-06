@@ -23,7 +23,9 @@ function dayIso(deltaDays: number) {
   return date.toISOString();
 }
 
-test('gantt highlights dependency risk and supports strict/risk-only controls', async ({ page }) => {
+test('gantt highlights dependency risk and supports strict/risk-only controls', async ({
+  page,
+}) => {
   const now = Date.now();
   const sub = `e2e-gantt-risk-${now}`;
   const email = `${sub}@example.com`;
@@ -44,7 +46,9 @@ test('gantt highlights dependency risk and supports strict/risk-only controls', 
     name: `Gantt Risk ${now}`,
   });
   const projectId = project.id as string;
-  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Gantt Section' });
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Gantt Section',
+  });
 
   const blockerTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
@@ -72,11 +76,17 @@ test('gantt highlights dependency risk and supports strict/risk-only controls', 
   await expect(page.locator('[data-testid="gantt-risk-panel"]')).toBeVisible();
 
   await page.click('[data-testid="gantt-strict-mode"]');
-  await expect(page.locator('[data-testid="gantt-strict-mode"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid="gantt-strict-mode"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
   await expect(page.locator('[data-testid="gantt-strict-warning-banner"]')).toBeVisible();
 
   await page.click('[data-testid="gantt-filter-risk"]');
-  await expect(page.locator('[data-testid="gantt-filter-risk"]')).toHaveAttribute('data-active', 'true');
-  await expect(page.locator(`[data-testid="timeline-task-${blockedTask.id}"]`)).toBeVisible();
-  await expect(page.locator(`[data-testid="timeline-task-${blockerTask.id}"]`)).toHaveCount(0);
+  await expect(page.locator('[data-testid="gantt-filter-risk"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await expect(page.locator(`[data-testid="timeline-bar-${blockedTask.id}"]`)).toBeVisible();
+  await expect(page.locator(`[data-testid="timeline-bar-${blockerTask.id}"]`)).toHaveCount(0);
 });

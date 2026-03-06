@@ -37,7 +37,9 @@ test('timeline tab flow: bars render, detail opens, zoom/window persists', async
   });
   const projectId = project.id as string;
 
-  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Timeline Section',
+  });
 
   const start = new Date();
   start.setDate(start.getDate() - 1);
@@ -55,7 +57,7 @@ test('timeline tab flow: bars render, detail opens, zoom/window persists', async
     sectionId: section.id,
     title: `Timeline Task B ${now}`,
     startAt: end.toISOString(),
-    dueAt: new Date(end.getTime() + (2 * 24 * 60 * 60 * 1000)).toISOString(),
+    dueAt: new Date(end.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
   });
   await api(`/tasks/${taskB.id}/dependencies`, token, 'POST', {
     dependsOnId: taskA.id,
@@ -73,26 +75,38 @@ test('timeline tab flow: bars render, detail opens, zoom/window persists', async
   await expect(page.locator(`[data-testid="timeline-bar-${taskA.id}"]`)).toBeVisible();
   await expect(page.locator(`[data-testid="timeline-bar-${taskB.id}"]`)).toBeVisible();
   await expect(page.locator('[data-testid="timeline-dependency-layer"]')).toBeVisible();
-  await expect(page.locator(`[data-testid="timeline-connector-${taskA.id}-${taskB.id}"]`)).toBeVisible();
+  await expect(
+    page.locator(`[data-testid="timeline-connector-${taskA.id}-${taskB.id}"]`),
+  ).toBeVisible();
 
-  await page.click(`[data-testid="timeline-task-${taskB.id}"]`);
-  await expect(page.locator('[data-testid="task-detail-title-input"]')).toHaveValue(`Timeline Task B ${now}`);
+  await page.click(`[data-testid="timeline-bar-${taskB.id}"]`);
+  await expect(page.locator('[data-testid="task-detail-title-input"]')).toHaveValue(
+    `Timeline Task B ${now}`,
+  );
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-testid="task-detail-title-input"]')).toHaveCount(0);
 
   await page.click(`[data-testid="timeline-bar-${taskA.id}"]`);
-  await expect(page.locator('[data-testid="task-detail-title-input"]')).toHaveValue(`Timeline Task A ${now}`);
+  await expect(page.locator('[data-testid="task-detail-title-input"]')).toHaveValue(
+    `Timeline Task A ${now}`,
+  );
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-testid="task-detail-title-input"]')).toHaveCount(0);
 
   await page.click('[data-testid="timeline-zoom-month"]');
-  await expect(page.locator('[data-testid="timeline-zoom-month"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid="timeline-zoom-month"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
   await page.click('[data-testid="timeline-next-window"]');
   const windowLabel = await page.locator('[data-testid="timeline-window-label"]').textContent();
 
   await page.reload();
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
-  await expect(page.locator('[data-testid="timeline-zoom-month"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid="timeline-zoom-month"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
   await expect(page.locator('[data-testid="timeline-window-label"]')).toHaveText(windowLabel ?? '');
 });
 
@@ -116,7 +130,9 @@ test('timeline can create dependency from connector handle drag', async ({ page 
     name: `Timeline Connect ${now}`,
   });
   const projectId = project.id as string;
-  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Timeline Section',
+  });
 
   const start = new Date();
   start.setDate(start.getDate());
@@ -133,8 +149,8 @@ test('timeline can create dependency from connector handle drag', async ({ page 
   const taskB = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
     title: `Timeline Target ${now}`,
-    startAt: new Date(end.getTime() + (1 * 24 * 60 * 60 * 1000)).toISOString(),
-    dueAt: new Date(end.getTime() + (3 * 24 * 60 * 60 * 1000)).toISOString(),
+    startAt: new Date(end.getTime() + 1 * 24 * 60 * 60 * 1000).toISOString(),
+    dueAt: new Date(end.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString(),
   });
 
   await page.goto(`/projects/${projectId}?view=timeline`);
@@ -154,7 +170,9 @@ test('timeline can create dependency from connector handle drag', async ({ page 
 
   await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
   await page.mouse.down();
-  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 16 });
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, {
+    steps: 16,
+  });
   await expect(page.locator('[data-testid="timeline-dependency-preview"]')).toBeVisible();
   await expect(targetBar).toHaveAttribute('data-connection-target', 'true');
   await page.mouse.up();
@@ -163,7 +181,9 @@ test('timeline can create dependency from connector handle drag', async ({ page 
 
   await expect
     .poll(async () => {
-      const dependencies = (await api(`/tasks/${taskB.id}/dependencies`, token)) as Array<{ dependsOnId: string }>;
+      const dependencies = (await api(`/tasks/${taskB.id}/dependencies`, token)) as Array<{
+        dependsOnId: string;
+      }>;
       return dependencies.some((dependency) => dependency.dependsOnId === taskA.id);
     })
     .toBe(true);
@@ -189,7 +209,9 @@ test('timeline highlights dependency risks without opening task details', async 
     name: `Timeline Risk ${now}`,
   });
   const projectId = project.id as string;
-  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Timeline Section',
+  });
 
   const blockerStart = new Date();
   blockerStart.setHours(0, 0, 0, 0);
@@ -222,9 +244,14 @@ test('timeline highlights dependency risks without opening task details', async 
 
   await page.goto(`/projects/${projectId}?view=timeline`);
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
-  await expect(page.locator(`[data-testid="timeline-risk-badge-${blocked.id}"]`)).toBeVisible();
-  await expect(page.locator(`[data-testid="timeline-bar-${blocked.id}"]`)).toHaveAttribute('data-at-risk', 'true');
-  await expect(page.locator(`[data-testid="timeline-bar-${blocked.id}"]`)).toHaveAttribute('data-risk-kind', /open blockers|late blockers|未解決ブロッカー|期限遅延依存/);
+  await expect(page.locator(`[data-testid="timeline-bar-${blocked.id}"]`)).toHaveAttribute(
+    'data-at-risk',
+    'true',
+  );
+  await expect(page.locator(`[data-testid="timeline-bar-${blocked.id}"]`)).toHaveAttribute(
+    'data-risk-kind',
+    /open blockers|late blockers|未解決ブロッカー|期限遅延依存/,
+  );
 });
 
 test('timeline multi-select shifts multiple tasks together', async ({ page }) => {
@@ -247,7 +274,9 @@ test('timeline multi-select shifts multiple tasks together', async ({ page }) =>
     name: `Timeline Multi ${now}`,
   });
   const projectId = project.id as string;
-  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Timeline Section',
+  });
 
   const base = new Date();
   base.setHours(0, 0, 0, 0);
@@ -292,7 +321,11 @@ test('timeline multi-select shifts multiple tasks together', async ({ page }) =>
   const deltaX = 72;
   await page.mouse.move(dragStart.x + dragStart.width / 2, dragStart.y + dragStart.height / 2);
   await page.mouse.down();
-  await page.mouse.move(dragStart.x + dragStart.width / 2 + deltaX, dragStart.y + dragStart.height / 2, { steps: 12 });
+  await page.mouse.move(
+    dragStart.x + dragStart.width / 2 + deltaX,
+    dragStart.y + dragStart.height / 2,
+    { steps: 12 },
+  );
   await page.mouse.up();
 
   await expect
@@ -312,7 +345,9 @@ test('timeline multi-select shifts multiple tasks together', async ({ page }) =>
     });
 });
 
-test('timeline marquee selection can shift multiple tasks together immediately', async ({ page }) => {
+test('timeline marquee selection can shift multiple tasks together immediately', async ({
+  page,
+}) => {
   const now = Date.now();
   const sub = `e2e-timeline-marquee-${now}`;
   const email = `e2e-timeline-marquee-${now}@example.com`;
@@ -332,7 +367,9 @@ test('timeline marquee selection can shift multiple tasks together immediately',
     name: `Timeline Marquee ${now}`,
   });
   const projectId = project.id as string;
-  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Timeline Section',
+  });
 
   const base = new Date();
   base.setHours(0, 0, 0, 0);
@@ -380,7 +417,9 @@ test('timeline marquee selection can shift multiple tasks together immediately',
   const deltaX = 72;
   await page.mouse.move(dragBox.x + dragBox.width / 2, dragBox.y + dragBox.height / 2);
   await page.mouse.down();
-  await page.mouse.move(dragBox.x + dragBox.width / 2 + deltaX, dragBox.y + dragBox.height / 2, { steps: 12 });
+  await page.mouse.move(dragBox.x + dragBox.width / 2 + deltaX, dragBox.y + dragBox.height / 2, {
+    steps: 12,
+  });
   await page.mouse.up();
 
   await expect
@@ -400,7 +439,9 @@ test('timeline marquee selection can shift multiple tasks together immediately',
     });
 });
 
-test('timeline working-days drag skips weekends and Alt keeps calendar-day placement', async ({ page }) => {
+test('timeline working-days drag skips weekends and Alt keeps calendar-day placement', async ({
+  page,
+}) => {
   const now = Date.now();
   const sub = `e2e-timeline-working-days-${now}`;
   const email = `e2e-timeline-working-days-${now}@example.com`;
@@ -420,7 +461,9 @@ test('timeline working-days drag skips weekends and Alt keeps calendar-day place
     name: `Timeline Working Days ${now}`,
   });
   const projectId = project.id as string;
-  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Timeline Section',
+  });
 
   const friday = new Date('2026-03-06T00:00:00.000Z');
   const saturday = new Date('2026-03-07T00:00:00.000Z');
@@ -450,8 +493,14 @@ test('timeline working-days drag skips weekends and Alt keeps calendar-day place
 
   await page.goto(`/projects/${projectId}?view=timeline`);
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
-  await expect(page.locator('[data-testid="timeline-working-days-toggle"]')).toHaveAttribute('data-active', 'true');
-  await expect(page.locator('[data-testid="timeline-zoom-day"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid="timeline-working-days-toggle"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await expect(page.locator('[data-testid="timeline-zoom-day"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
 
   const firstBar = page.locator(`[data-testid="timeline-bar-${taskA.id}"]`);
   const secondBar = page.locator(`[data-testid="timeline-bar-${taskB.id}"]`);
@@ -464,7 +513,11 @@ test('timeline working-days drag skips weekends and Alt keeps calendar-day place
 
   await page.mouse.move(firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2);
   await page.mouse.down();
-  await page.mouse.move(firstBox.x + firstBox.width / 2 + deltaX, firstBox.y + firstBox.height / 2, { steps: 10 });
+  await page.mouse.move(
+    firstBox.x + firstBox.width / 2 + deltaX,
+    firstBox.y + firstBox.height / 2,
+    { steps: 10 },
+  );
   await page.mouse.up();
 
   await expect
@@ -482,7 +535,11 @@ test('timeline working-days drag skips weekends and Alt keeps calendar-day place
   await page.keyboard.down('Alt');
   await page.mouse.move(secondBox.x + secondBox.width / 2, secondBox.y + secondBox.height / 2);
   await page.mouse.down();
-  await page.mouse.move(secondBox.x + secondBox.width / 2 + deltaX, secondBox.y + secondBox.height / 2, { steps: 10 });
+  await page.mouse.move(
+    secondBox.x + secondBox.width / 2 + deltaX,
+    secondBox.y + secondBox.height / 2,
+    { steps: 10 },
+  );
   await page.mouse.up();
   await page.keyboard.up('Alt');
 
@@ -494,7 +551,9 @@ test('timeline working-days drag skips weekends and Alt keeps calendar-day place
     .toBe(saturday.toISOString());
 });
 
-test('timeline align toggle repacks dependency chains ahead of unrelated blockers', async ({ page }) => {
+test('timeline align toggle repacks dependency chains ahead of unrelated blockers', async ({
+  page,
+}) => {
   const now = Date.now();
   const sub = `e2e-timeline-align-${now}`;
   const email = `e2e-timeline-align-${now}@example.com`;
@@ -514,7 +573,9 @@ test('timeline align toggle repacks dependency chains ahead of unrelated blocker
     name: `Timeline Align ${now}`,
   });
   const projectId = project.id as string;
-  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Timeline Section',
+  });
 
   const blocker = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
@@ -554,7 +615,10 @@ test('timeline align toggle repacks dependency chains ahead of unrelated blocker
   expect(beforeChainABox.y).toBeGreaterThan(beforeBlockerBox.y);
 
   await page.click('[data-testid="timeline-align-toggle"]');
-  await expect(page.locator('[data-testid="timeline-align-toggle"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid="timeline-align-toggle"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
 
   await expect
     .poll(async () => {
