@@ -363,9 +363,9 @@ export class DomainService {
     };
   }
 
-  normalizeTimelineLaneOrder(laneIds: string[]): string[] {
+  normalizeTimelineLaneOrder(laneIds: string[], maxLanes?: number): string[] {
     try {
-      return normalizeTimelineLaneOrderInDomain(laneIds);
+      return normalizeTimelineLaneOrderInDomain(laneIds, maxLanes);
     } catch (error) {
       if (error instanceof DomainValidationError) {
         throw new BadRequestException(error.message);

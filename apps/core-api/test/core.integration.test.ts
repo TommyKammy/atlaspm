@@ -2718,6 +2718,47 @@ describe('Core API Integration', () => {
       .expect(200);
     expect(assigneePrefsRes.body.laneOrderByAssignee).toEqual(['unassigned', timelineAssigneeId]);
 
+    const extraMemberIds = Array.from({ length: 501 }, (_, index) => `timeline-member-extra-${index + 1}`);
+    await prisma.user.createMany({
+      data: extraMemberIds.map((userId) => ({
+        id: userId,
+        email: `${userId}@example.com`,
+        displayName: userId,
+        status: 'ACTIVE',
+      })),
+    });
+    await prisma.workspaceMembership.createMany({
+      data: extraMemberIds.map((userId) => ({
+        workspaceId,
+        userId,
+        role: 'WS_MEMBER',
+      })),
+    });
+    await prisma.projectMembership.createMany({
+      data: extraMemberIds.map((userId) => ({
+        projectId,
+        userId,
+        role: 'VIEWER',
+      })),
+    });
+
+    const membersRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/members`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const largeAssigneeLaneOrder = [
+      'assignee:__unassigned__',
+      ...membersRes.body.map((member: { userId: string }) => `assignee:${member.userId}`),
+    ];
+    expect(largeAssigneeLaneOrder.length).toBeGreaterThan(500);
+
+    const largeAssigneePrefsRes = await request(app.getHttpServer())
+      .put(`/projects/${projectId}/timeline/preferences/assignee`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ laneOrder: largeAssigneeLaneOrder })
+      .expect(200);
+    expect(largeAssigneePrefsRes.body.laneOrderByAssignee).toEqual(largeAssigneeLaneOrder);
+
     const timelineViewStateRes = await request(app.getHttpServer())
       .put(`/projects/${projectId}/timeline/preferences/view-state/timeline`)
       .set('Authorization', `Bearer ${token}`)
