@@ -1,8 +1,8 @@
+import { TASK_STATUSES, type TaskStatus } from '../value-objects/task-status.js';
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type TimelineSwimlaneMode = 'section' | 'assignee' | 'status';
-
-export type TimelineStatusLane = 'TODO' | 'IN_PROGRESS' | 'BLOCKED' | 'DONE';
 
 export type TimelineSectionInput = {
   id: string;
@@ -20,7 +20,7 @@ export type TimelineLaneTaskInput = {
   id: string;
   sectionId: string;
   assigneeUserId?: string | null;
-  status: TimelineStatusLane;
+  status: TaskStatus;
 };
 
 export type TimelineLaneTask<TTask extends TimelineLaneTaskInput = TimelineLaneTaskInput> = TTask;
@@ -39,8 +39,8 @@ export type BuildTimelineLanesInput<TTask extends TimelineLaneTaskInput> = {
   preferredLaneOrder?: string[];
   defaultSectionLabel: string;
   unassignedLabel: string;
-  statusLabels?: Record<TimelineStatusLane, string>;
-  statusOrder?: TimelineStatusLane[];
+  statusLabels?: Record<TaskStatus, string>;
+  statusOrder?: TaskStatus[];
   unassignedLaneId?: string;
 };
 
@@ -85,7 +85,7 @@ export type BuildTimelineLayoutInput<TTask extends TimelineLayoutTaskInput> = {
 const DEFAULT_UNASSIGNED_LANE_ID = '__unassigned__';
 
 function dayNumber(date: Date): number {
-  return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / DAY_MS);
+  return Math.floor(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) / DAY_MS);
 }
 
 function dayDiff(from: Date, to: Date): number {
@@ -144,14 +144,14 @@ export function buildTimelineLanes<TTask extends TimelineLaneTaskInput>(
   }
 
   if (input.swimlane === 'status') {
-    const statusOrder = input.statusOrder ?? ['TODO', 'IN_PROGRESS', 'BLOCKED', 'DONE'];
+    const statusOrder = input.statusOrder ?? [...TASK_STATUSES];
     const statusLabels = input.statusLabels ?? {
       TODO: 'TODO',
       IN_PROGRESS: 'IN_PROGRESS',
-      BLOCKED: 'BLOCKED',
       DONE: 'DONE',
+      BLOCKED: 'BLOCKED',
     };
-    const grouped = new Map<TimelineStatusLane, TTask[]>();
+    const grouped = new Map<TaskStatus, TTask[]>();
     for (const task of input.tasks) {
       const next = grouped.get(task.status) ?? [];
       next.push(task);

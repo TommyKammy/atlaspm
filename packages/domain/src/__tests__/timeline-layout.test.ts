@@ -20,6 +20,10 @@ const sections: TimelineSectionInput[] = [
   { id: 'design', name: 'Design', position: 2000, isDefault: false },
 ];
 
+function utcDate(value: string): Date {
+  return new Date(`${value}T00:00:00.000Z`);
+}
+
 test('buildTimelineLanes groups assignee lanes with unassigned at the end', () => {
   const tasks: TaskInput[] = [
     {
@@ -30,8 +34,8 @@ test('buildTimelineLanes groups assignee lanes with unassigned at the end', () =
       status: 'IN_PROGRESS',
       hasSchedule: true,
       inWindow: true,
-      timelineStart: new Date('2026-03-01T00:00:00.000Z'),
-      timelineEnd: new Date('2026-03-03T00:00:00.000Z'),
+      timelineStart: utcDate('2026-03-01'),
+      timelineEnd: utcDate('2026-03-03'),
     },
     {
       id: 'task-2',
@@ -41,8 +45,8 @@ test('buildTimelineLanes groups assignee lanes with unassigned at the end', () =
       status: 'TODO',
       hasSchedule: true,
       inWindow: true,
-      timelineStart: new Date('2026-03-01T00:00:00.000Z'),
-      timelineEnd: new Date('2026-03-02T00:00:00.000Z'),
+      timelineStart: utcDate('2026-03-01'),
+      timelineEnd: utcDate('2026-03-02'),
     },
   ];
 
@@ -163,11 +167,11 @@ test('buildTimelineLanes groups status lanes in fixed workflow order', () => {
 
   assert.deepEqual(
     lanes.map((lane) => lane.id),
-    ['status:TODO', 'status:BLOCKED', 'status:DONE'],
+    ['status:TODO', 'status:DONE', 'status:BLOCKED'],
   );
   assert.equal(lanes[0]?.label, 'To do');
-  assert.equal(lanes[1]?.label, 'Blocked');
-  assert.equal(lanes[2]?.label, 'Done');
+  assert.equal(lanes[1]?.label, 'Done');
+  assert.equal(lanes[2]?.label, 'Blocked');
 });
 
 test('buildTimelineLayout calculates row and bar positions', () => {
@@ -180,8 +184,8 @@ test('buildTimelineLayout calculates row and bar positions', () => {
       status: 'IN_PROGRESS',
       hasSchedule: true,
       inWindow: true,
-      timelineStart: new Date('2026-03-02T00:00:00.000Z'),
-      timelineEnd: new Date('2026-03-04T00:00:00.000Z'),
+      timelineStart: utcDate('2026-03-02'),
+      timelineEnd: utcDate('2026-03-04'),
     },
   ];
 
@@ -197,8 +201,8 @@ test('buildTimelineLayout calculates row and bar positions', () => {
 
   const layout = buildTimelineLayout({
     lanes,
-    windowStart: new Date('2026-03-01T00:00:00.000Z'),
-    windowEnd: new Date('2026-03-10T00:00:00.000Z'),
+    windowStart: utcDate('2026-03-01'),
+    windowEnd: utcDate('2026-03-10'),
     dayColumnWidth: 20,
     sectionRowHeight: 32,
     taskRowHeight: 40,
