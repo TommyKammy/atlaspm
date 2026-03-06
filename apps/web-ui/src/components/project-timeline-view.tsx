@@ -2791,6 +2791,7 @@ export function ProjectScheduleCanvas({
                 : rows;
               if (!sectionVisible && visibleRows.length === 0) return null;
               const isLaneCollapsed = collapsedLaneIds.has(lane.id);
+              const showHeaderOnlyLaneRail = effectiveSwimlane !== 'section';
               const laneTaskCount = laneTaskCountById.get(lane.id) ?? 0;
               const laneContentId = `timeline-lane-content-${normalizeTestIdSegment(lane.id)}`;
               const laneRowsTop = top + SECTION_ROW_HEIGHT;
@@ -2815,108 +2816,118 @@ export function ProjectScheduleCanvas({
                   data-testid={`timeline-lane-${normalizeTestIdSegment(lane.id)}`}
                   data-timeline-lane-id={lane.id}
                 >
-                  <div className="border-r bg-muted/10">
+                  <div
+                    className={
+                      showHeaderOnlyLaneRail ? 'relative self-start' : 'border-r bg-muted/10'
+                    }
+                  >
                     <div
-                      className={`flex h-8 items-center gap-2 border-b px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground ${
-                        laneDragState?.overLaneId === lane.id
-                          ? 'ring-1 ring-inset ring-primary/40'
-                          : ''
-                      }`}
-                      data-testid={`timeline-lane-header-${normalizeTestIdSegment(lane.id)}`}
-                      draggable={mode === 'timeline' && effectiveSwimlane !== 'status'}
-                      onDragStart={(event) => {
-                        if (mode !== 'timeline' || effectiveSwimlane === 'status') return;
-                        event.dataTransfer.effectAllowed = 'move';
-                        event.dataTransfer.setData('text/plain', lane.id);
-                        replaceLaneDragState({ draggingLaneId: lane.id, overLaneId: lane.id });
-                      }}
-                      onDragOver={(event) => {
-                        const dragTypes = Array.from(event.dataTransfer.types);
-                        const isUnscheduledDrop = dragTypes.includes(UNSCHEDULED_TASK_DND_TYPE);
-                        const isLaneReorderDrop =
-                          dragTypes.includes('text/plain') ||
-                          Boolean(laneDragStateRef.current?.draggingLaneId);
-                        if (
-                          !isUnscheduledDrop &&
-                          (mode !== 'timeline' ||
-                            effectiveSwimlane === 'status' ||
-                            !isLaneReorderDrop)
-                        ) {
-                          return;
-                        }
-                        event.preventDefault();
-                        if (isUnscheduledDrop) return;
-                        if (laneDragState?.overLaneId !== lane.id) {
-                          replaceLaneDragState(
-                            laneDragStateRef.current
-                              ? { ...laneDragStateRef.current, overLaneId: lane.id }
-                              : laneDragStateRef.current,
-                          );
-                        }
-                      }}
-                      onDrop={(event) => {
-                        if (
-                          Array.from(event.dataTransfer.types).includes(UNSCHEDULED_TASK_DND_TYPE)
-                        ) {
-                          const raw = event.dataTransfer.getData(UNSCHEDULED_TASK_DND_TYPE);
-                          if (!raw) return;
-                          event.preventDefault();
-                          setUnscheduledDragTaskId(null);
-                          try {
-                            const parsed = JSON.parse(raw) as { taskId?: string };
-                            if (!parsed.taskId) return;
-                            commitUnscheduledDrop(
-                              parsed.taskId,
-                              lane.id,
-                              event.clientX,
-                              event.clientY,
-                            );
-                          } catch {
-                            // ignore malformed drag payload
-                          }
-                          return;
-                        }
-                        if (mode !== 'timeline' || effectiveSwimlane === 'status') return;
-                        event.preventDefault();
-                        const draggingLaneId =
-                          laneDragStateRef.current?.draggingLaneId ??
-                          event.dataTransfer.getData('text/plain');
-                        if (draggingLaneId) {
-                          handleLaneDrop(draggingLaneId, lane.id);
-                        }
-                        replaceLaneDragState(null);
-                      }}
-                      onDragEnd={() => {
-                        replaceLaneDragState(null);
-                      }}
+                      className={showHeaderOnlyLaneRail ? 'w-full border-r bg-muted/10' : undefined}
+                      data-testid={`timeline-lane-rail-${normalizeTestIdSegment(lane.id)}`}
+                      data-header-only={showHeaderOnlyLaneRail ? 'true' : 'false'}
                     >
-                      <button
-                        type="button"
-                        className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          toggleLaneCollapsed(lane.id);
+                      <div
+                        className={`flex h-8 items-center gap-2 border-b px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground ${
+                          laneDragState?.overLaneId === lane.id
+                            ? 'ring-1 ring-inset ring-primary/40'
+                            : ''
+                        }`}
+                        data-testid={`timeline-lane-header-${normalizeTestIdSegment(lane.id)}`}
+                        draggable={mode === 'timeline' && effectiveSwimlane !== 'status'}
+                        onDragStart={(event) => {
+                          if (mode !== 'timeline' || effectiveSwimlane === 'status') return;
+                          event.dataTransfer.effectAllowed = 'move';
+                          event.dataTransfer.setData('text/plain', lane.id);
+                          replaceLaneDragState({ draggingLaneId: lane.id, overLaneId: lane.id });
                         }}
-                        aria-label={
-                          isLaneCollapsed ? t('timelineExpandGroup') : t('timelineCollapseGroup')
-                        }
-                        aria-controls={laneContentId}
-                        aria-expanded={!isLaneCollapsed}
-                        data-testid={`timeline-lane-toggle-${normalizeTestIdSegment(lane.id)}`}
+                        onDragOver={(event) => {
+                          const dragTypes = Array.from(event.dataTransfer.types);
+                          const isUnscheduledDrop = dragTypes.includes(UNSCHEDULED_TASK_DND_TYPE);
+                          const isLaneReorderDrop =
+                            dragTypes.includes('text/plain') ||
+                            Boolean(laneDragStateRef.current?.draggingLaneId);
+                          if (
+                            !isUnscheduledDrop &&
+                            (mode !== 'timeline' ||
+                              effectiveSwimlane === 'status' ||
+                              !isLaneReorderDrop)
+                          ) {
+                            return;
+                          }
+                          event.preventDefault();
+                          if (isUnscheduledDrop) return;
+                          if (laneDragState?.overLaneId !== lane.id) {
+                            replaceLaneDragState(
+                              laneDragStateRef.current
+                                ? { ...laneDragStateRef.current, overLaneId: lane.id }
+                                : laneDragStateRef.current,
+                            );
+                          }
+                        }}
+                        onDrop={(event) => {
+                          if (
+                            Array.from(event.dataTransfer.types).includes(UNSCHEDULED_TASK_DND_TYPE)
+                          ) {
+                            const raw = event.dataTransfer.getData(UNSCHEDULED_TASK_DND_TYPE);
+                            if (!raw) return;
+                            event.preventDefault();
+                            setUnscheduledDragTaskId(null);
+                            try {
+                              const parsed = JSON.parse(raw) as { taskId?: string };
+                              if (!parsed.taskId) return;
+                              commitUnscheduledDrop(
+                                parsed.taskId,
+                                lane.id,
+                                event.clientX,
+                                event.clientY,
+                              );
+                            } catch {
+                              // ignore malformed drag payload
+                            }
+                            return;
+                          }
+                          if (mode !== 'timeline' || effectiveSwimlane === 'status') return;
+                          event.preventDefault();
+                          const draggingLaneId =
+                            laneDragStateRef.current?.draggingLaneId ??
+                            event.dataTransfer.getData('text/plain');
+                          if (draggingLaneId) {
+                            handleLaneDrop(draggingLaneId, lane.id);
+                          }
+                          replaceLaneDragState(null);
+                        }}
+                        onDragEnd={() => {
+                          replaceLaneDragState(null);
+                        }}
                       >
-                        {isLaneCollapsed ? (
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        ) : (
-                          <ChevronDown className="h-3.5 w-3.5" />
-                        )}
-                      </button>
-                      <div className="min-w-0 flex-1 truncate">{lane.label}</div>
-                      {laneTaskCount > 0 ? (
-                        <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                          {laneTaskCount}
-                        </Badge>
-                      ) : null}
+                        <button
+                          type="button"
+                          className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggleLaneCollapsed(lane.id);
+                          }}
+                          aria-label={
+                            isLaneCollapsed ? t('timelineExpandGroup') : t('timelineCollapseGroup')
+                          }
+                          aria-controls={laneContentId}
+                          aria-expanded={!isLaneCollapsed}
+                          data-testid={`timeline-lane-toggle-${normalizeTestIdSegment(lane.id)}`}
+                        >
+                          {isLaneCollapsed ? (
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          ) : (
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                        <div className="min-w-0 flex-1 truncate">{lane.label}</div>
+                        {laneTaskCount > 0 ? (
+                          <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                            {laneTaskCount}
+                          </Badge>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
 

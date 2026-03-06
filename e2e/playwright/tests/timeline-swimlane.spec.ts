@@ -44,6 +44,30 @@ function laneHeaderTestId(laneTestId: string) {
   return laneTestId.replace('timeline-lane-', 'timeline-lane-header-');
 }
 
+function laneRailTestId(laneTestId: string) {
+  return laneTestId.replace('timeline-lane-', 'timeline-lane-rail-');
+}
+
+async function expectHeaderOnlyRail(page: Page, laneTestId: string, forbiddenTaskTitles: string[]) {
+  const laneHeader = page.locator(`[data-testid="${laneHeaderTestId(laneTestId)}"]`);
+  const laneRail = page.locator(`[data-testid="${laneRailTestId(laneTestId)}"]`);
+  await expect(laneHeader).toBeVisible();
+  await expect(laneRail).toHaveAttribute('data-header-only', 'true');
+  for (const taskTitle of forbiddenTaskTitles) {
+    await expect(laneRail).not.toContainText(taskTitle);
+  }
+
+  const [headerBox, railBox, childElementCount] = await Promise.all([
+    laneHeader.boundingBox(),
+    laneRail.boundingBox(),
+    laneRail.evaluate((element) => element.childElementCount),
+  ]);
+  expect(headerBox).toBeTruthy();
+  expect(railBox).toBeTruthy();
+  expect(childElementCount).toBe(1);
+  expect(Math.abs((railBox?.height ?? 0) - (headerBox?.height ?? 0))).toBeLessThanOrEqual(1);
+}
+
 async function dragTimelineLaneHeaderToLane(
   page: Page,
   draggingLaneTestId: string,
@@ -207,7 +231,9 @@ test('timeline supports swimlane toggle and due-date sort without affecting gant
     'data-active',
     'true',
   );
+  const assigneeLaneTestId = `timeline-lane-assignee-${sub}`;
   await expect(page.locator('[data-testid^="timeline-lane-assignee-"]')).toHaveCount(1);
+  await expectHeaderOnlyRail(page, assigneeLaneTestId, [taskLate.title, taskEarly.title]);
 
   await page.click('[data-testid="timeline-swimlane-status"]');
   await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute(
@@ -215,6 +241,9 @@ test('timeline supports swimlane toggle and due-date sort without affecting gant
     'true',
   );
   await expect(page.locator('[data-testid^="timeline-lane-status-"]')).toHaveCount(2);
+  for (const laneTestId of ['timeline-lane-status-IN_PROGRESS', 'timeline-lane-status-BLOCKED']) {
+    await expectHeaderOnlyRail(page, laneTestId, [taskLate.title, taskEarly.title]);
+  }
 
   await page.click('[data-testid="timeline-filter-unscheduled"]');
   await expect(page.locator('[data-testid="timeline-filter-unscheduled"]')).toHaveAttribute(
