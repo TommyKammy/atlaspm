@@ -2815,7 +2815,10 @@ export function ProjectScheduleCanvas({
                   data-testid={`timeline-lane-${normalizeTestIdSegment(lane.id)}`}
                   data-timeline-lane-id={lane.id}
                 >
-                  <div className="border-r bg-muted/10">
+                  <div
+                    className="border-r bg-muted/10"
+                    data-testid={`timeline-lane-rail-${normalizeTestIdSegment(lane.id)}`}
+                  >
                     <div
                       className={`flex h-8 items-center gap-2 border-b px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground ${
                         laneDragState?.overLaneId === lane.id

@@ -44,6 +44,10 @@ function laneHeaderTestId(laneTestId: string) {
   return laneTestId.replace('timeline-lane-', 'timeline-lane-header-');
 }
 
+function laneRailTestId(laneTestId: string) {
+  return laneTestId.replace('timeline-lane-', 'timeline-lane-rail-');
+}
+
 async function dragTimelineLaneHeaderToLane(
   page: Page,
   draggingLaneTestId: string,
@@ -207,7 +211,12 @@ test('timeline supports swimlane toggle and due-date sort without affecting gant
     'data-active',
     'true',
   );
+  const assigneeLaneTestId = `timeline-lane-assignee-${sub}`;
   await expect(page.locator('[data-testid^="timeline-lane-assignee-"]')).toHaveCount(1);
+  await expect(page.locator(`[data-testid="${laneHeaderTestId(assigneeLaneTestId)}"]`)).toBeVisible();
+  const assigneeRail = page.locator(`[data-testid="${laneRailTestId(assigneeLaneTestId)}"]`);
+  await expect(assigneeRail).not.toContainText(taskLate.title);
+  await expect(assigneeRail).not.toContainText(taskEarly.title);
 
   await page.click('[data-testid="timeline-swimlane-status"]');
   await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute(
@@ -215,6 +224,12 @@ test('timeline supports swimlane toggle and due-date sort without affecting gant
     'true',
   );
   await expect(page.locator('[data-testid^="timeline-lane-status-"]')).toHaveCount(2);
+  for (const laneTestId of ['timeline-lane-status-IN_PROGRESS', 'timeline-lane-status-BLOCKED']) {
+    await expect(page.locator(`[data-testid="${laneHeaderTestId(laneTestId)}"]`)).toBeVisible();
+    const laneRail = page.locator(`[data-testid="${laneRailTestId(laneTestId)}"]`);
+    await expect(laneRail).not.toContainText(taskLate.title);
+    await expect(laneRail).not.toContainText(taskEarly.title);
+  }
 
   await page.click('[data-testid="timeline-filter-unscheduled"]');
   await expect(page.locator('[data-testid="timeline-filter-unscheduled"]')).toHaveAttribute(
