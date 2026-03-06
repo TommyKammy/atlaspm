@@ -23,6 +23,14 @@ function dayIso(deltaDays: number) {
   return date.toISOString();
 }
 
+async function login(page: Page, sub: string, email: string) {
+  await page.goto('/login');
+  await page.fill('input[placeholder="OIDC sub"]', sub);
+  await page.fill('input[placeholder="Email"]', email);
+  await page.click('button:has-text("Dev Login")');
+  await page.waitForURL('**/');
+}
+
 async function clearTimelineViewState(
   page: Page,
   projectId: string,
@@ -45,16 +53,15 @@ async function clearTimelineViewState(
   );
 }
 
-test('timeline and gantt controls stay isolated while list ordering remains stable', async ({ page }) => {
+test('timeline and gantt controls stay isolated while list ordering remains stable', async ({
+  browser,
+  page,
+}) => {
   const now = Date.now();
   const sub = `e2e-tl-gt-boundary-${now}`;
   const email = `${sub}@example.com`;
 
-  await page.goto('/login');
-  await page.fill('input[placeholder="OIDC sub"]', sub);
-  await page.fill('input[placeholder="Email"]', email);
-  await page.click('button:has-text("Dev Login")');
-  await page.waitForURL('**/');
+  await login(page, sub, email);
 
   const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
   expect(token).toBeTruthy();
@@ -120,11 +127,21 @@ test('timeline and gantt controls stay isolated while list ordering remains stab
   );
   await page.click('[data-testid="timeline-save-default"]');
   await saveResponse;
-  await clearTimelineViewState(page, projectId, sub, 'gantt');
 
-  await page.reload();
-  await expect(page.locator('[data-testid="gantt-filter-risk"]')).toHaveAttribute('data-active', 'true');
-  await expect(page.locator('[data-testid="gantt-strict-mode"]')).toHaveAttribute('data-active', 'true');
+  const savedDefaultContext = await browser.newContext();
+  const savedDefaultPage = await savedDefaultContext.newPage();
+  await login(savedDefaultPage, sub, email);
+  await clearTimelineViewState(savedDefaultPage, projectId, sub, 'gantt');
+  await savedDefaultPage.goto(`/projects/${projectId}?view=gantt`);
+  await expect(savedDefaultPage.locator('[data-testid="gantt-filter-risk"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await expect(savedDefaultPage.locator('[data-testid="gantt-strict-mode"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await savedDefaultContext.close();
 
   await page.click('[data-testid="project-view-timeline"]');
   await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute('data-active', 'true');

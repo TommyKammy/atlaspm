@@ -134,7 +134,7 @@ const dictionaries: Record<Locale, Dictionary> = {
     timelineLaneOrderSaveFailed: 'Could not save lane order. Reverted to the latest order.',
     timelineDependencyCreateFailed: 'Could not create dependency from the timeline.',
     timelineViewStateSaveFailed:
-      'Could not save the default timeline view. Your current view is still kept locally.',
+      'Could not save the default view. Your current view is still kept locally.',
     timelineSaveDefault: 'Save default',
     timelineScheduledTasks: 'Scheduled',
     timelineUnscheduled: 'Unscheduled',
@@ -622,7 +622,7 @@ const dictionaries: Record<Locale, Dictionary> = {
     timelineLaneOrderSaveFailed: 'レーン順の保存に失敗しました。最新の順序に戻しました。',
     timelineDependencyCreateFailed: 'タイムラインから依存関係を作成できませんでした。',
     timelineViewStateSaveFailed:
-      '既定のタイムライン表示の保存に失敗しました。現在の表示はローカルに保持されています。',
+      '既定の表示の保存に失敗しました。現在の表示はローカルに保持されています。',
     timelineSaveDefault: '既定として保存',
     timelineScheduledTasks: '予定あり',
     timelineUnscheduled: '未設定',
