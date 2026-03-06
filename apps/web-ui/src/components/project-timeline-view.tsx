@@ -1691,16 +1691,16 @@ export function ProjectScheduleCanvas({
 
                   {topSpacer > 0 ? <div style={{ height: `${topSpacer}px` }} /> : null}
 
-                  {visibleRows.map((row, rowIndex) => {
+                  {visibleRows.map((row) => {
                     const primaryTask = row.tasks[0];
                     if (!primaryTask) return null;
                     const fallbackName = primaryTask.title.trim() || t('untitledTask');
                     return (
                       <div
-                        key={`${lane.id}-row-${rowIndex}-${row.top}`}
+                        key={`${lane.id}-row-${row.top}`}
                         className="grid h-10 border-b last:border-b-0"
                         style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}
-                        data-testid={`timeline-row-${normalizeTestIdSegment(lane.id)}-${rowIndex}`}
+                        data-testid={`timeline-row-${normalizeTestIdSegment(lane.id)}-${row.index}`}
                       >
                         <div className="flex h-full items-center gap-2 px-3">
                           <button

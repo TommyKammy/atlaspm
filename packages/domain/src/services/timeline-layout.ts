@@ -58,6 +58,7 @@ export type TimelineTaskRow<TTask extends TimelineLayoutTaskInput = TimelineLayo
 };
 
 export type TimelinePackedRow<TTask extends TimelineLayoutTaskInput = TimelineLayoutTaskInput> = {
+  index: number;
   top: number;
   tasks: TTask[];
 };
@@ -97,6 +98,38 @@ function dayNumber(date: Date): number {
 
 function dayDiff(from: Date, to: Date): number {
   return dayNumber(to) - dayNumber(from);
+}
+
+function pushHeap<T>(heap: T[], value: T, compare: (left: T, right: T) => number): void {
+  heap.push(value);
+  let index = heap.length - 1;
+  while (index > 0) {
+    const parent = Math.floor((index - 1) / 2);
+    if (compare(heap[index]!, heap[parent]!) >= 0) break;
+    [heap[index], heap[parent]] = [heap[parent]!, heap[index]!];
+    index = parent;
+  }
+}
+
+function popHeap<T>(heap: T[], compare: (left: T, right: T) => number): T | undefined {
+  if (!heap.length) return undefined;
+  const first = heap[0]!;
+  const last = heap.pop();
+  if (heap.length && last !== undefined) {
+    heap[0] = last;
+    let index = 0;
+    while (true) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      let smallest = index;
+      if (left < heap.length && compare(heap[left]!, heap[smallest]!) < 0) smallest = left;
+      if (right < heap.length && compare(heap[right]!, heap[smallest]!) < 0) smallest = right;
+      if (smallest === index) break;
+      [heap[index], heap[smallest]] = [heap[smallest]!, heap[index]!];
+      index = smallest;
+    }
+  }
+  return first;
 }
 
 function applyLaneOrder<TLane extends { id: string }>(lanes: TLane[], preferredOrder: string[]): TLane[] {
@@ -204,37 +237,51 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
     cursorY += input.sectionRowHeight;
     const taskRows: Array<TimelineTaskRow<TTask>> = [];
     const rows: Array<TimelinePackedRow<TTask>> = [];
-    const rowEndByIndex: number[] = [];
+    const rowIndexByTaskId: Record<string, number> = {};
 
-    const tasks = input.compactRows
-      ? [...lane.tasks].sort((left, right) => {
-          const leftStart = left.timelineStart ? dayNumber(left.timelineStart) : Number.MAX_SAFE_INTEGER;
-          const rightStart = right.timelineStart ? dayNumber(right.timelineStart) : Number.MAX_SAFE_INTEGER;
-          if (leftStart !== rightStart) return leftStart - rightStart;
-          const leftEnd = left.timelineEnd ? dayNumber(left.timelineEnd) : Number.MAX_SAFE_INTEGER;
-          const rightEnd = right.timelineEnd ? dayNumber(right.timelineEnd) : Number.MAX_SAFE_INTEGER;
-          if (leftEnd !== rightEnd) return leftEnd - rightEnd;
-          return left.id.localeCompare(right.id);
-        })
-      : lane.tasks;
+    if (input.compactRows) {
+      const tasksForPacking = [...lane.tasks].sort((left, right) => {
+        const leftStart = left.timelineStart ? dayNumber(left.timelineStart) : Number.MAX_SAFE_INTEGER;
+        const rightStart = right.timelineStart ? dayNumber(right.timelineStart) : Number.MAX_SAFE_INTEGER;
+        if (leftStart !== rightStart) return leftStart - rightStart;
+        const leftEnd = left.timelineEnd ? dayNumber(left.timelineEnd) : Number.MAX_SAFE_INTEGER;
+        const rightEnd = right.timelineEnd ? dayNumber(right.timelineEnd) : Number.MAX_SAFE_INTEGER;
+        if (leftEnd !== rightEnd) return leftEnd - rightEnd;
+        return left.id.localeCompare(right.id);
+      });
 
-    for (const task of tasks) {
-      let rowIndex = rows.length;
-      if (input.compactRows && task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd) {
-        const taskStartDay = dayNumber(task.timelineStart);
-        const taskEndDay = dayNumber(task.timelineEnd);
-        const candidateIndex = rowEndByIndex.findIndex((endDay) => endDay < taskStartDay);
-        if (candidateIndex >= 0) {
-          rowIndex = candidateIndex;
-          rowEndByIndex[candidateIndex] = taskEndDay;
+      const activeRows: Array<{ rowIndex: number; endDay: number }> = [];
+      const availableRowIndexes: number[] = [];
+      let nextRowIndex = 0;
+
+      for (const task of tasksForPacking) {
+        let rowIndex: number;
+        if (task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd) {
+          const taskStartDay = dayNumber(task.timelineStart);
+          const taskEndDay = dayNumber(task.timelineEnd);
+
+          while (activeRows.length && activeRows[0]!.endDay < taskStartDay) {
+            const released = popHeap(activeRows, (left, right) => left.endDay - right.endDay || left.rowIndex - right.rowIndex);
+            if (released) {
+              pushHeap(availableRowIndexes, released.rowIndex, (left, right) => left - right);
+            }
+          }
+
+          rowIndex = popHeap(availableRowIndexes, (left, right) => left - right) ?? nextRowIndex++;
+          pushHeap(activeRows, { rowIndex, endDay: taskEndDay }, (left, right) => left.endDay - right.endDay || left.rowIndex - right.rowIndex);
         } else {
-          rowEndByIndex.push(taskEndDay);
+          rowIndex = nextRowIndex++;
         }
-      } else {
-        rowEndByIndex.push(Number.MAX_SAFE_INTEGER);
+
+        rowIndexByTaskId[task.id] = rowIndex;
       }
+    }
+
+    for (const task of lane.tasks) {
+      const rowIndex = input.compactRows ? (rowIndexByTaskId[task.id] ?? rows.length) : rows.length;
       if (!rows[rowIndex]) {
         rows[rowIndex] = {
+          index: rowIndex,
           top: cursorY + rowIndex * input.taskRowHeight,
           tasks: [],
         };

@@ -282,3 +282,42 @@ test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () =
   assert.deepEqual(layout.taskRowsById['task-2'], { top: 64, height: 40 });
   assert.deepEqual(layout.taskRowsById['task-3'], { top: 104, height: 40 });
 });
+
+test('buildTimelineLayout keeps input order inside compact rows', () => {
+  const tasks: TaskInput[] = [
+    {
+      id: 'task-due-later',
+      title: 'Due later',
+      sectionId: 'design',
+      assigneeUserId: 'user-1',
+      status: 'TODO',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-05'),
+      timelineEnd: utcDate('2026-03-06'),
+    },
+    {
+      id: 'task-due-earlier',
+      title: 'Due earlier',
+      sectionId: 'design',
+      assigneeUserId: 'user-1',
+      status: 'DONE',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-02'),
+      timelineEnd: utcDate('2026-03-03'),
+    },
+  ];
+
+  const layout = buildTimelineLayout({
+    lanes: [{ id: 'section:design', label: 'Design', tasks }],
+    windowStart: utcDate('2026-03-01'),
+    windowEnd: utcDate('2026-03-10'),
+    dayColumnWidth: 20,
+    sectionRowHeight: 32,
+    taskRowHeight: 40,
+    compactRows: true,
+  });
+
+  assert.deepEqual(layout.lanesWithRows[0]?.rows[0]?.tasks.map((task) => task.id), ['task-due-later', 'task-due-earlier']);
+});
