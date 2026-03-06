@@ -84,7 +84,8 @@ function addDays(base: Date, delta: number): Date {
 }
 
 function dayNumber(date: Date): number {
-  return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / DAY_MS);
+  const localMidnight = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  return Math.floor(localMidnight.getTime() / DAY_MS);
 }
 
 function dayDiff(from: Date, to: Date): number {
@@ -380,13 +381,13 @@ export function ProjectScheduleCanvas({
   mode: TimelineMode;
 }) {
   const { t } = useI18n();
-  const today = useMemo(() => startOfDay(new Date()), []);
   const queryClient = useQueryClient();
   const meQuery = useQuery<{ id: string }>({
     queryKey: queryKeys.me,
     queryFn: () => api('/me'),
   });
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [today, setToday] = useState(() => startOfDay(new Date()));
   const [zoom, setZoom] = useState<TimelineZoom>('week');
   const [anchorDate, setAnchorDate] = useState(() => startOfDay(new Date()));
   const [swimlane, setSwimlane] = useState<TimelineSwimlane>('section');
@@ -421,6 +422,28 @@ export function ProjectScheduleCanvas({
   const [unscheduledDragTaskId, setUnscheduledDragTaskId] = useState<string | null>(null);
   const suppressClickTaskIdRef = useRef<string | null>(null);
   const [rescheduleNotice, setRescheduleNotice] = useState<{ type: 'conflict' | 'error'; message: string } | null>(null);
+
+  useEffect(() => {
+    let timeoutId: number | undefined;
+
+    const scheduleNextMidnightUpdate = () => {
+      const now = new Date();
+      const nextMidnight = startOfDay(addDays(now, 1));
+      const msUntilNextMidnight = Math.max(1000, nextMidnight.getTime() - now.getTime());
+      timeoutId = window.setTimeout(() => {
+        setToday(startOfDay(new Date()));
+        scheduleNextMidnightUpdate();
+      }, msUntilNextMidnight);
+    };
+
+    scheduleNextMidnightUpdate();
+
+    return () => {
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, []);
   const rescheduleInFlightTaskIdsRef = useRef(new Set<string>());
   const lastHydratedViewStateRef = useRef<TimelineViewState | null>(null);
   const timelineViewStateRef = useRef<TimelineViewState | null>(null);
@@ -517,7 +540,6 @@ export function ProjectScheduleCanvas({
       window.localStorage.setItem(timelineStorageUserKey, JSON.stringify(nextState));
     }
   }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, preferencesHydrated, scheduleFilter, sortMode, swimlane, timelineStorageBaseKey, timelineStorageUserKey, zoom]);
-
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const persistLatestViewState = () => {
@@ -1690,16 +1712,16 @@ export function ProjectScheduleCanvas({
 
                   {topSpacer > 0 ? <div style={{ height: `${topSpacer}px` }} /> : null}
 
-                  {visibleRows.map((row, rowIndex) => {
+                  {visibleRows.map((row) => {
                     const primaryTask = row.tasks[0];
                     if (!primaryTask) return null;
                     const fallbackName = primaryTask.title.trim() || t('untitledTask');
                     return (
                       <div
-                        key={`${lane.id}-row-${rowIndex}-${row.top}`}
+                        key={`${lane.id}-row-${row.top}`}
                         className="grid h-10 border-b last:border-b-0"
                         style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}
-                        data-testid={`timeline-row-${normalizeTestIdSegment(lane.id)}-${rowIndex}`}
+                        data-testid={`timeline-row-${normalizeTestIdSegment(lane.id)}-${row.index}`}
                       >
                         <div className="flex h-full items-center gap-2 px-3">
                           <button
@@ -1757,6 +1779,8 @@ export function ProjectScheduleCanvas({
                               const taskWidth = barLayout.width;
                               const taskLeft = Math.max(0, barLayout.left + (dragState?.taskId === task.id ? dragState.deltaDays * zoomConfig.dayColWidth : 0));
                               const isMilestone = task.type === 'MILESTONE' || dayDiff(task.timelineStart, task.timelineEnd) === 0;
+                              const usesExternalLabel = !isMilestone && taskWidth < 88;
+                              const clampedProgress = Math.max(0, Math.min(100, task.progressPercent ?? 0));
                               return (
                                 <div key={task.id}>
                                   {mode === 'gantt' && task.hasBaseline && task.baselineStart && task.baselineEnd ? (
@@ -1774,7 +1798,7 @@ export function ProjectScheduleCanvas({
                                     className={`absolute top-1/2 text-left text-[11px] shadow-sm transition-[background-color,border-color,color,opacity] ${
                                       isMilestone
                                         ? 'h-3.5 w-3.5 -translate-y-1/2 rotate-45 rounded-[2px]'
-                                        : 'h-6 -translate-y-1/2 rounded px-2'
+                                        : 'h-6 -translate-y-1/2 overflow-hidden rounded px-2'
                                     } ${dragState?.taskId === task.id && dragState.moved ? 'cursor-grabbing opacity-90' : 'cursor-grab'}`}
                                     style={
                                       isMilestone
@@ -1824,16 +1848,24 @@ export function ProjectScheduleCanvas({
                                     data-testid={`timeline-bar-${task.id}`}
                                     title={`${task.timelineStart.toLocaleDateString()} - ${task.timelineEnd.toLocaleDateString()}`}
                                   >
+                                    {!isMilestone ? (
+                                      <span
+                                        className="pointer-events-none absolute inset-y-0 left-0 rounded-l bg-current opacity-15"
+                                        style={{ width: `${clampedProgress}%` }}
+                                      />
+                                    ) : null}
                                     {isMilestone ? <span className="sr-only">{fallbackTaskName}</span> : null}
                                     {!isMilestone ? (
-                                      <span className={`block truncate ${isCompleted ? 'line-through' : ''}`}>{fallbackTaskName}</span>
+                                      <span className={`relative z-[1] block truncate ${usesExternalLabel ? 'sr-only' : ''} ${isCompleted ? 'line-through' : ''}`}>
+                                        {fallbackTaskName}
+                                      </span>
                                     ) : null}
                                   </button>
-                                  {isMilestone ? (
+                                  {isMilestone || usesExternalLabel ? (
                                     <button
                                       type="button"
                                       className={`absolute top-1/2 -translate-y-1/2 text-left text-[11px] text-foreground ${isCompleted ? 'line-through opacity-60' : ''}`}
-                                      style={{ left: `${Math.max(0, taskLeft + taskWidth / 2 + 10)}px` }}
+                                      style={{ left: `${Math.max(0, taskLeft + taskWidth + (isMilestone ? -taskWidth / 2 + 10 : 8))}px` }}
                                       onClick={() => {
                                         if (suppressClickTaskIdRef.current === task.id) {
                                           suppressClickTaskIdRef.current = null;
@@ -1886,7 +1918,7 @@ export function ProjectScheduleCanvas({
         projectId={projectId}
       />
 
-      {unscheduledTasks.length ? (
+      {mode === 'timeline' && unscheduledTasks.length ? (
         <div className="rounded-lg border border-dashed bg-card/70 p-3" data-testid="timeline-unscheduled-tray">
           <div className="mb-2 flex items-center justify-between gap-2">
             <div>

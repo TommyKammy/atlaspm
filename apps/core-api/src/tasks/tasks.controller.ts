@@ -2875,6 +2875,10 @@ export class TasksController {
       }
     }
 
+    if (Object.keys(normalized).length === 0) {
+      throw new BadRequestException('At least one valid timeline view state field must be provided');
+    }
+
     return normalized;
   }
 

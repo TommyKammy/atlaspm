@@ -2474,7 +2474,6 @@
   - `pnpm --filter @atlaspm/web-ui type-check`
 - Risks/known gaps:
   - AtlasPM still lacks a persisted `project.color`, so default bar colors are derived from `projectId` until a first-class project color field exists.
-
 ## 2026-03-06 - Issue #205: Render milestone and completed Timeline states
 - What changed:
   - Updated `/Users/tomoakikawada/Dev/atlaspm-worktrees/timeline-p2-2/apps/web-ui/src/components/project-timeline-view.tsx` so milestone tasks render as diamonds and completed tasks fade/strike through in Timeline mode.
@@ -2489,3 +2488,20 @@
   - `pnpm --filter @atlaspm/web-ui type-check`
 - Risks/known gaps:
   - Milestone rendering is still view-only; milestone-specific interaction affordances remain deferred to later Timeline waves.
+
+## 2026-03-06 - Issue #206: Add progress fill and short-bar label behavior
+- What changed:
+  - Updated `/Users/tomoakikawada/Dev/atlaspm-worktrees/timeline-p2-3/apps/web-ui/src/components/project-timeline-view.tsx` so scheduled bars render an inline progress fill and move labels outside the bar when the visible width is too narrow.
+  - Added a midnight rollover effect so overdue/completed styling stays current without forcing a reload.
+  - Hid the unscheduled-task tray outside Timeline mode so Gantt keeps its stricter planning surface.
+  - Aligned `/Users/tomoakikawada/Dev/atlaspm-worktrees/timeline-p2-3/packages/domain/src/services/timeline-layout.ts` day numbering with the local-day semantics used by the Timeline header and updated domain tests to use local dates explicitly.
+- Why:
+  - Issue #206 is about keeping dense Timeline bars readable while preserving visual correctness across timezones and long-lived browser sessions.
+- How tested (exact commands):
+  - `pnpm install --frozen-lockfile`
+  - `cd apps/core-api && pnpm exec prisma generate`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/domain build`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+- Risks/known gaps:
+  - Progress fill remains visual-only in Timeline; editing progress inline from the bar itself is still deferred to later interaction-focused issues.
