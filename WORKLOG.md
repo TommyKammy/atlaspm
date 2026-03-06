@@ -2525,3 +2525,20 @@
   - `pnpm --filter @atlaspm/web-ui type-check`
 - Risks/known gaps:
   - Progress fill remains visual-only in Timeline; editing progress inline from the bar itself is still deferred to later interaction-focused issues.
+
+## 2026-03-06 - Issue #198: Add lane-reassignment integration coverage
+- What changed:
+  - Expanded `apps/core-api/test/core.integration.test.ts` coverage for `PATCH /tasks/:id/timeline-move` to include:
+    - section + status + custom-field lane reassignment happy path
+    - rejection of unknown section targets
+    - rejection of unknown custom field targets
+    - conflict payload assertions for latest `sectionId` and `status`
+- Why:
+  - Issue #198 locks the lane-move API contract before Timeline swimlane UI starts relying on section/status/custom-field lane drag behavior.
+- How tested (exact commands):
+  - `pnpm install`
+  - `pnpm --filter @atlaspm/domain build`
+  - `pnpm --filter @atlaspm/core-api prisma:generate`
+  - `cd apps/core-api && SEARCH_ENABLED=false DATABASE_URL='postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public' pnpm exec vitest run test/core.integration.test.ts -t "timeline"`
+- Risks/known gaps:
+  - This wave strengthens backend contracts only; Timeline UI still needs dedicated swimlane group-by and drag wiring in later issues.

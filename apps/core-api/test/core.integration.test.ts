@@ -2960,4 +2960,104 @@ describe('Core API Integration', () => {
       value: laneFieldRes.body.options[1].id,
     });
   });
+
+  test('timeline move rejects unknown section and unknown custom field lane targets', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Timeline Lane Validation Project' })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Timeline lane validation target' })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+
+    await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/timeline-move`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        sectionId: '2bc8bcf5-11d3-4ea8-b67f-bf2d8f2d1a99',
+        version: taskRes.body.version,
+      })
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/timeline-move`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        customFieldMove: {
+          fieldId: 'dc8c55d5-8606-404d-bfaf-5efad17900f8',
+          value: 'anything',
+        },
+        version: taskRes.body.version,
+      })
+      .expect(409);
+  });
+
+  test('timeline move conflict payload includes section and status server truth', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Timeline Conflict Payload Project' })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSection = sectionsRes.body.find((section: any) => section.isDefault);
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Timeline conflict payload target',
+        sectionId: defaultSection.id,
+        status: 'TODO',
+      })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+
+    const firstMove = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/timeline-move`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        status: 'BLOCKED',
+        version: taskRes.body.version,
+      })
+      .expect(200);
+
+    const conflictRes = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/timeline-move`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        status: 'DONE',
+        version: taskRes.body.version,
+      })
+      .expect(409);
+
+    expect(firstMove.body.status).toBe('BLOCKED');
+    expect(conflictRes.body.latest).toMatchObject({
+      version: firstMove.body.version,
+      sectionId: defaultSection.id,
+      status: 'BLOCKED',
+    });
+  });
 });
