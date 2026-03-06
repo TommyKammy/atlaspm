@@ -95,13 +95,27 @@ test('timeline supports swimlane toggle and due-date sort without affecting gant
     title: `Task No Date ${now}`,
   });
 
+  await api(`/tasks/${taskLate.id}`, token, 'PATCH', {
+    status: 'IN_PROGRESS',
+    version: taskLate.version,
+  });
+  await api(`/tasks/${taskEarly.id}`, token, 'PATCH', {
+    status: 'BLOCKED',
+    version: taskEarly.version,
+  });
+  await api(`/tasks/${taskNoDate.id}`, token, 'PATCH', {
+    status: 'DONE',
+    progressPercent: 100,
+    version: taskNoDate.version,
+  });
+
   await page.goto(`/projects/${projectId}?view=timeline`);
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
   await expect(page.locator('[data-testid="timeline-swimlane-toggle"]')).toBeVisible();
   await expect(page.locator('[data-testid="timeline-sort-toggle"]')).toBeVisible();
   await expect(page.locator('[data-testid="timeline-schedule-filter-toggle"]')).toBeVisible();
 
-  await expect(page.locator('[data-testid^="timeline-lane-section-"]')).toHaveCount(1);
+  await expect(page.locator('[data-testid^="timeline-lane-section-"]')).toHaveCount(2);
 
   await page.click('[data-testid="timeline-sort-due"]');
   await expect(page.locator('[data-testid="timeline-sort-due"]')).toHaveAttribute('data-active', 'true');
@@ -114,7 +128,11 @@ test('timeline supports swimlane toggle and due-date sort without affecting gant
 
   await page.click('[data-testid="timeline-swimlane-assignee"]');
   await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute('data-active', 'true');
-  await expect(page.locator('[data-testid^="timeline-lane-assignee-"]')).toHaveCount(2);
+  await expect(page.locator('[data-testid^="timeline-lane-assignee-"]')).toHaveCount(1);
+
+  await page.click('[data-testid="timeline-swimlane-status"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid^="timeline-lane-status-"]')).toHaveCount(2);
 
   await page.click('[data-testid="timeline-filter-unscheduled"]');
   await expect(page.locator('[data-testid="timeline-filter-unscheduled"]')).toHaveAttribute('data-active', 'true');
@@ -288,4 +306,47 @@ test('timeline can schedule unscheduled tasks via drag and drop', async ({ page 
 
   const scheduled = await api(`/tasks/${unscheduledTask.id}`, token);
   expect(String(scheduled.startAt).slice(0, 10)).toBe(String(scheduled.dueAt).slice(0, 10));
+});
+
+test('timeline compacts non-overlapping tasks into shared rows', async ({ page }) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-packed-${now}`;
+  const email = `${sub}@example.com`;
+
+  await login(page, sub, email);
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Packed Rows ${now}`,
+  });
+  const projectId = project.id as string;
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Packed Lane' });
+
+  await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Packed A ${now}`,
+    startAt: dayIso(1),
+    dueAt: dayIso(2),
+  });
+  await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Packed B ${now}`,
+    startAt: dayIso(4),
+    dueAt: dayIso(5),
+  });
+  await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Packed C ${now}`,
+    startAt: dayIso(2),
+    dueAt: dayIso(4),
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await expect(page.locator(`[data-testid="timeline-lane-section-${section.id}"]`)).toBeVisible();
+  await expect(page.locator(`[data-testid^="timeline-row-section-${section.id}-"]`)).toHaveCount(2);
 });

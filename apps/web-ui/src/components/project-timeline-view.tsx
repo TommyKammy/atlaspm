@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { buildTimelineLanes, buildTimelineLayout } from '@atlaspm/domain';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import TaskDetailDrawer from '@/components/task-detail-drawer';
@@ -25,10 +26,20 @@ const UNSCHEDULED_TASK_DND_TYPE = 'application/x-atlaspm-unscheduled-task';
 
 type TimelineZoom = 'day' | 'week' | 'month';
 type TimelineMode = 'timeline' | 'gantt';
-type TimelineSwimlane = 'section' | 'assignee';
+type TimelineSwimlane = 'section' | 'assignee' | 'status';
 type TimelineSortMode = 'manual' | 'startAt' | 'dueAt';
 type TimelineScheduleFilter = 'all' | 'scheduled' | 'unscheduled';
 type GanttRiskFilterMode = 'all' | 'risk';
+type TimelineLaneOrderGroupBy = Extract<TimelineSwimlane, 'section' | 'assignee'>;
+type TimelineViewState = {
+  zoom?: TimelineZoom;
+  anchorDate?: string;
+  swimlane?: TimelineSwimlane;
+  sortMode?: TimelineSortMode;
+  scheduleFilter?: TimelineScheduleFilter;
+  ganttRiskFilterMode?: GanttRiskFilterMode;
+  ganttStrictMode?: boolean;
+};
 
 type GanttTaskRisk = {
   isAtRisk: boolean;
@@ -42,6 +53,18 @@ type TimelinePreferences = {
   userId: string;
   laneOrderBySection: string[];
   laneOrderByAssignee: string[];
+  timelineViewState: TimelineViewState | null;
+  ganttViewState: TimelineViewState | null;
+};
+
+type LocalTimelineViewStateSnapshot = {
+  zoom: TimelineZoom;
+  anchorDate: Date;
+  swimlane: TimelineSwimlane;
+  sortMode: TimelineSortMode;
+  scheduleFilter: TimelineScheduleFilter;
+  ganttRiskFilterMode: GanttRiskFilterMode;
+  ganttStrictMode: boolean;
 };
 
 const TIMELINE_ZOOM_CONFIG: Record<TimelineZoom, { beforeDays: number; afterDays: number; stepDays: number; dayColWidth: number }> = {
@@ -66,6 +89,79 @@ function dayNumber(date: Date): number {
 
 function dayDiff(from: Date, to: Date): number {
   return dayNumber(to) - dayNumber(from);
+}
+
+function colorFromProjectId(projectId: string): { hue: number; saturation: number; lightness: number } {
+  let hash = 0;
+  for (let index = 0; index < projectId.length; index += 1) {
+    hash = (hash * 33 + projectId.charCodeAt(index)) % 360;
+  }
+  return {
+    hue: hash,
+    saturation: 68,
+    lightness: 54,
+  };
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const normalized = hex.trim().replace('#', '');
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return null;
+  return {
+    r: Number.parseInt(normalized.slice(0, 2), 16),
+    g: Number.parseInt(normalized.slice(2, 4), 16),
+    b: Number.parseInt(normalized.slice(4, 6), 16),
+  };
+}
+
+function rgbaFromHex(hex: string, alpha: number): string | null {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return null;
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+}
+
+function resolveTimelineBarStyle(task: TimelineTask, today: Date): CSSProperties {
+  const isDone = task.status === 'DONE';
+  const isOverdue = !isDone && Boolean(task.timelineEnd && dayNumber(task.timelineEnd) < dayNumber(today));
+  const optionColor = task.customFieldValues?.find((value) => value.option?.color)?.option?.color ?? null;
+
+  if (isOverdue) {
+    return {
+      backgroundColor: 'rgba(239, 68, 68, 0.16)',
+      border: '1px solid rgba(239, 68, 68, 0.3)',
+      color: 'rgb(153, 27, 27)',
+    };
+  }
+
+  if (isDone) {
+    return {
+      backgroundColor: 'rgba(34, 197, 94, 0.16)',
+      border: '1px solid rgba(34, 197, 94, 0.3)',
+      color: 'rgb(21, 128, 61)',
+    };
+  }
+
+  if (task.status === 'BLOCKED') {
+    return {
+      backgroundColor: 'rgba(245, 158, 11, 0.16)',
+      border: '1px solid rgba(245, 158, 11, 0.3)',
+      color: 'rgb(180, 83, 9)',
+    };
+  }
+
+  if (optionColor) {
+    return {
+      backgroundColor: rgbaFromHex(optionColor, 0.16) ?? 'rgba(59, 130, 246, 0.16)',
+      border: `1px solid ${rgbaFromHex(optionColor, 0.32) ?? 'rgba(59, 130, 246, 0.32)'}`,
+      color: optionColor,
+    };
+  }
+
+  const projectColor = colorFromProjectId(task.projectId);
+  return {
+    backgroundColor: `hsla(${projectColor.hue}, ${projectColor.saturation}%, ${projectColor.lightness}%, 0.16)`,
+    border: `1px solid hsla(${projectColor.hue}, ${projectColor.saturation}%, ${projectColor.lightness}%, 0.32)`,
+    color: `hsl(${projectColor.hue}, ${projectColor.saturation}%, ${Math.max(28, projectColor.lightness - 16)}%)`,
+  };
 }
 
 function formatDay(date: Date): string {
@@ -177,6 +273,20 @@ function parseAssigneeLaneId(laneId: string): string | null | undefined {
   return raw === UNASSIGNED_LANE_ID ? null : raw;
 }
 
+function deriveLaneIdForTask(task: TimelineTask, swimlane: TimelineSwimlane): string {
+  if (swimlane === 'assignee') {
+    return `assignee:${task.assigneeUserId ?? UNASSIGNED_LANE_ID}`;
+  }
+  if (swimlane === 'status') {
+    return `status:${task.status}`;
+  }
+  return `section:${task.sectionId}`;
+}
+
+function isLaneOrderGroupBy(value: TimelineSwimlane): value is TimelineLaneOrderGroupBy {
+  return value === 'section' || value === 'assignee';
+}
+
 function reorderLaneIds(laneIds: string[], draggingLaneId: string, overLaneId: string): string[] {
   const fromIndex = laneIds.indexOf(draggingLaneId);
   const toIndex = laneIds.indexOf(overLaneId);
@@ -188,20 +298,75 @@ function reorderLaneIds(laneIds: string[], draggingLaneId: string, overLaneId: s
   return next;
 }
 
-function applyLaneOrder<T extends { id: string }>(lanes: T[], preferredOrder: string[]): T[] {
-  if (!preferredOrder.length) return lanes;
-  const indexById = new Map(preferredOrder.map((laneId, index) => [laneId, index]));
-  return [...lanes].sort((left, right) => {
-    const leftRank = indexById.get(left.id);
-    const rightRank = indexById.get(right.id);
-    if (leftRank === undefined && rightRank === undefined) return 0;
-    if (leftRank === undefined) return 1;
-    if (rightRank === undefined) return -1;
-    return leftRank - rightRank;
+function applyTimelineViewState(
+  parsed: TimelineViewState,
+  setters: {
+    setZoom: (value: TimelineZoom) => void;
+    setAnchorDate: (value: Date) => void;
+    setSwimlane: (value: TimelineSwimlane) => void;
+    setSortMode: (value: TimelineSortMode) => void;
+    setScheduleFilter: (value: TimelineScheduleFilter) => void;
+    setGanttRiskFilterMode: (value: GanttRiskFilterMode) => void;
+    setGanttStrictMode: (value: boolean) => void;
+  },
+) {
+  if (parsed.zoom && parsed.zoom in TIMELINE_ZOOM_CONFIG) {
+    setters.setZoom(parsed.zoom);
+  }
+  if (parsed.anchorDate) {
+    const parsedDate = new Date(parsed.anchorDate);
+    if (!Number.isNaN(parsedDate.valueOf())) {
+      setters.setAnchorDate(startOfDay(parsedDate));
+    }
+  }
+  if (parsed.swimlane === 'section' || parsed.swimlane === 'assignee' || parsed.swimlane === 'status') {
+    setters.setSwimlane(parsed.swimlane);
+  }
+  if (parsed.sortMode === 'manual' || parsed.sortMode === 'startAt' || parsed.sortMode === 'dueAt') {
+    setters.setSortMode(parsed.sortMode);
+  }
+  if (parsed.scheduleFilter === 'all' || parsed.scheduleFilter === 'scheduled' || parsed.scheduleFilter === 'unscheduled') {
+    setters.setScheduleFilter(parsed.scheduleFilter);
+  }
+  if (parsed.ganttRiskFilterMode === 'all' || parsed.ganttRiskFilterMode === 'risk') {
+    setters.setGanttRiskFilterMode(parsed.ganttRiskFilterMode);
+  }
+  if (typeof parsed.ganttStrictMode === 'boolean') {
+    setters.setGanttStrictMode(parsed.ganttStrictMode);
+  }
+}
+
+function buildViewStateForMode(
+  mode: TimelineMode,
+  snapshot: LocalTimelineViewStateSnapshot,
+): TimelineViewState {
+  return mode === 'timeline'
+    ? {
+        zoom: snapshot.zoom,
+        anchorDate: snapshot.anchorDate.toISOString(),
+        swimlane: snapshot.swimlane,
+        sortMode: snapshot.sortMode,
+        scheduleFilter: snapshot.scheduleFilter,
+      }
+    : {
+        zoom: snapshot.zoom,
+        anchorDate: snapshot.anchorDate.toISOString(),
+        ganttRiskFilterMode: snapshot.ganttRiskFilterMode,
+        ganttStrictMode: snapshot.ganttStrictMode,
+      };
+}
+
+function areTimelineViewStatesEqual(left: TimelineViewState | null | undefined, right: TimelineViewState): boolean {
+  const leftKeys = Object.keys(left ?? {}).sort();
+  const rightKeys = Object.keys(right).sort();
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key, index) => {
+    if (rightKeys[index] !== key) return false;
+    return (left as Record<string, unknown> | null | undefined)?.[key] === (right as Record<string, unknown>)[key];
   });
 }
 
-export function ProjectTimelineView({
+export function ProjectScheduleCanvas({
   projectId,
   search,
   statusFilter,
@@ -215,6 +380,7 @@ export function ProjectTimelineView({
   mode: TimelineMode;
 }) {
   const { t } = useI18n();
+  const today = useMemo(() => startOfDay(new Date()), []);
   const queryClient = useQueryClient();
   const meQuery = useQuery<{ id: string }>({
     queryKey: queryKeys.me,
@@ -256,6 +422,9 @@ export function ProjectTimelineView({
   const suppressClickTaskIdRef = useRef<string | null>(null);
   const [rescheduleNotice, setRescheduleNotice] = useState<{ type: 'conflict' | 'error'; message: string } | null>(null);
   const rescheduleInFlightTaskIdsRef = useRef(new Set<string>());
+  const lastHydratedViewStateRef = useRef<TimelineViewState | null>(null);
+  const timelineViewStateRef = useRef<TimelineViewState | null>(null);
+  const saveViewStateTimerRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
   const scrollRafRef = useRef<number | null>(null);
@@ -266,72 +435,204 @@ export function ProjectTimelineView({
     enabled: Boolean(projectId),
   });
 
-  const timelineStorageKey = useMemo(
-    () => (meQuery.data?.id ? `${TIMELINE_VIEW_STORAGE_PREFIX}:${meQuery.data.id}:${projectId}:${mode}` : null),
-    [meQuery.data?.id, mode, projectId],
+  const timelineStorageBaseKey = useMemo(
+    () => (projectId ? `${TIMELINE_VIEW_STORAGE_PREFIX}:${projectId}:${mode}` : null),
+    [mode, projectId],
   );
+  const timelineStorageUserKey = useMemo(
+    () => (meQuery.data?.id && timelineStorageBaseKey ? `${timelineStorageBaseKey}:${meQuery.data.id}` : null),
+    [meQuery.data?.id, timelineStorageBaseKey],
+  );
+  const hasRestoredTimelinePreferences = useRef(false);
 
   useEffect(() => {
+    hasRestoredTimelinePreferences.current = false;
+  }, [timelineStorageBaseKey]);
+
+  useEffect(() => {
+    if (hasRestoredTimelinePreferences.current) return;
+    if (!timelineStorageBaseKey || !timelinePreferencesQuery.isFetched) return;
     setPreferencesHydrated(false);
-    if (!timelineStorageKey || typeof window === 'undefined') return;
-    const raw = window.localStorage.getItem(timelineStorageKey);
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as {
-          zoom?: TimelineZoom;
-          anchorDate?: string;
-          swimlane?: TimelineSwimlane;
-          sortMode?: TimelineSortMode;
-          scheduleFilter?: TimelineScheduleFilter;
-          ganttRiskFilterMode?: GanttRiskFilterMode;
-          ganttStrictMode?: boolean;
-        };
-        if (parsed.zoom && parsed.zoom in TIMELINE_ZOOM_CONFIG) {
-          setZoom(parsed.zoom);
+    let restoredLocalState: TimelineViewState | null = null;
+    if (typeof window !== 'undefined') {
+      const preferenceKeys = [timelineStorageUserKey, timelineStorageBaseKey].filter((value): value is string => Boolean(value));
+      for (const key of preferenceKeys) {
+        const raw = window.localStorage.getItem(key);
+        if (!raw) continue;
+        try {
+          const parsedLocalState = JSON.parse(raw) as TimelineViewState;
+          restoredLocalState = parsedLocalState;
+          break;
+        } catch {
+          // Ignore malformed local preference state.
         }
-        if (parsed.anchorDate) {
-          const parsedDate = new Date(parsed.anchorDate);
-          if (!Number.isNaN(parsedDate.valueOf())) {
-            setAnchorDate(startOfDay(parsedDate));
-          }
-        }
-        if (parsed.swimlane === 'section' || parsed.swimlane === 'assignee') {
-          setSwimlane(parsed.swimlane);
-        }
-        if (parsed.sortMode === 'manual' || parsed.sortMode === 'startAt' || parsed.sortMode === 'dueAt') {
-          setSortMode(parsed.sortMode);
-        }
-        if (parsed.scheduleFilter === 'all' || parsed.scheduleFilter === 'scheduled' || parsed.scheduleFilter === 'unscheduled') {
-          setScheduleFilter(parsed.scheduleFilter);
-        }
-        if (parsed.ganttRiskFilterMode === 'all' || parsed.ganttRiskFilterMode === 'risk') {
-          setGanttRiskFilterMode(parsed.ganttRiskFilterMode);
-        }
-        if (typeof parsed.ganttStrictMode === 'boolean') {
-          setGanttStrictMode(parsed.ganttStrictMode);
-        }
-      } catch {
-        // Ignore malformed local preference state.
       }
     }
+
+    const serverViewState =
+      mode === 'timeline' ? timelinePreferencesQuery.data?.timelineViewState : timelinePreferencesQuery.data?.ganttViewState;
+    const preferredViewState =
+      restoredLocalState ?? (serverViewState && Object.keys(serverViewState).length > 0 ? serverViewState : null);
+
+    if (preferredViewState) {
+      applyTimelineViewState(preferredViewState, {
+        setZoom,
+        setAnchorDate,
+        setSwimlane,
+        setSortMode,
+        setScheduleFilter,
+        setGanttRiskFilterMode,
+        setGanttStrictMode,
+      });
+      lastHydratedViewStateRef.current = preferredViewState;
+    }
+
+    hasRestoredTimelinePreferences.current = true;
     setPreferencesHydrated(true);
-  }, [timelineStorageKey]);
+  }, [
+    mode,
+    projectId,
+    timelinePreferencesQuery.data?.ganttViewState,
+    timelinePreferencesQuery.data?.timelineViewState,
+    timelinePreferencesQuery.isFetched,
+    timelineStorageBaseKey,
+    timelineStorageUserKey,
+  ]);
+
+  timelineViewStateRef.current = {
+    zoom,
+    anchorDate: anchorDate.toISOString(),
+    swimlane,
+    sortMode,
+    scheduleFilter,
+    ganttRiskFilterMode,
+    ganttStrictMode,
+  };
 
   useEffect(() => {
-    if (!timelineStorageKey || !preferencesHydrated || typeof window === 'undefined') return;
-    window.localStorage.setItem(
-      timelineStorageKey,
-      JSON.stringify({
+    if (!preferencesHydrated || !timelineStorageBaseKey || typeof window === 'undefined') return;
+    const nextState = timelineViewStateRef.current;
+    if (!nextState) return;
+    window.localStorage.setItem(timelineStorageBaseKey, JSON.stringify(nextState));
+    if (timelineStorageUserKey) {
+      window.localStorage.setItem(timelineStorageUserKey, JSON.stringify(nextState));
+    }
+  }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, preferencesHydrated, scheduleFilter, sortMode, swimlane, timelineStorageBaseKey, timelineStorageUserKey, zoom]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const persistLatestViewState = () => {
+      if (!preferencesHydrated || !timelineStorageBaseKey) return;
+      const nextState = timelineViewStateRef.current;
+      if (!nextState) return;
+      window.localStorage.setItem(timelineStorageBaseKey, JSON.stringify(nextState));
+      if (timelineStorageUserKey) {
+        window.localStorage.setItem(timelineStorageUserKey, JSON.stringify(nextState));
+      }
+    };
+
+    window.addEventListener('beforeunload', persistLatestViewState);
+    window.addEventListener('pagehide', persistLatestViewState);
+    return () => {
+      window.removeEventListener('beforeunload', persistLatestViewState);
+      window.removeEventListener('pagehide', persistLatestViewState);
+    };
+  }, [preferencesHydrated, timelineStorageBaseKey, timelineStorageUserKey]);
+
+  const saveViewStateMutation = useMutation({
+    mutationFn: async ({
+      nextMode,
+      viewState,
+    }: {
+      nextMode: TimelineMode;
+      viewState: TimelineViewState;
+    }) =>
+      (await api(`/projects/${projectId}/timeline/preferences/view-state/${nextMode}`, {
+        method: 'PUT',
+        body: viewState,
+      })) as TimelinePreferences,
+    onMutate: async ({ nextMode, viewState }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.projectTimelinePreferences(projectId) });
+      const previous = queryClient.getQueryData<TimelinePreferences>(queryKeys.projectTimelinePreferences(projectId));
+      const previousLocalState: LocalTimelineViewStateSnapshot = {
         zoom,
-        anchorDate: anchorDate.toISOString(),
+        anchorDate,
         swimlane,
         sortMode,
         scheduleFilter,
         ganttRiskFilterMode,
         ganttStrictMode,
-      }),
-    );
-  }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, preferencesHydrated, scheduleFilter, sortMode, swimlane, timelineStorageKey, zoom]);
+      };
+      queryClient.setQueryData<TimelinePreferences>(queryKeys.projectTimelinePreferences(projectId), {
+        projectId,
+        userId: previous?.userId ?? meQuery.data?.id ?? '',
+        laneOrderBySection: previous?.laneOrderBySection ?? [],
+        laneOrderByAssignee: previous?.laneOrderByAssignee ?? [],
+        timelineViewState: nextMode === 'timeline' ? viewState : previous?.timelineViewState ?? null,
+        ganttViewState: nextMode === 'gantt' ? viewState : previous?.ganttViewState ?? null,
+      });
+      return { previous, previousLocalState };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData<TimelinePreferences>(queryKeys.projectTimelinePreferences(projectId), context.previous);
+      }
+      if (context?.previousLocalState) {
+        setZoom(context.previousLocalState.zoom);
+        setAnchorDate(context.previousLocalState.anchorDate);
+        setSwimlane(context.previousLocalState.swimlane);
+        setSortMode(context.previousLocalState.sortMode);
+        setScheduleFilter(context.previousLocalState.scheduleFilter);
+        setGanttRiskFilterMode(context.previousLocalState.ganttRiskFilterMode);
+        setGanttStrictMode(context.previousLocalState.ganttStrictMode);
+      }
+      lastHydratedViewStateRef.current =
+        mode === 'timeline'
+          ? context?.previous?.timelineViewState ?? null
+          : context?.previous?.ganttViewState ?? null;
+      setRescheduleNotice({ type: 'error', message: t('timelineViewStateSaveFailed') });
+    },
+    onSuccess: (result, variables) => {
+      lastHydratedViewStateRef.current =
+        variables.nextMode === 'timeline'
+          ? result.timelineViewState ?? null
+          : result.ganttViewState ?? null;
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTimelinePreferences(projectId) });
+    },
+  });
+
+  useEffect(() => {
+    if (!preferencesHydrated) return;
+    const nextViewState = buildViewStateForMode(mode, {
+      zoom,
+      anchorDate,
+      swimlane,
+      sortMode,
+      scheduleFilter,
+      ganttRiskFilterMode,
+      ganttStrictMode,
+    });
+    if (areTimelineViewStatesEqual(lastHydratedViewStateRef.current, nextViewState)) {
+      return;
+    }
+    if (saveViewStateTimerRef.current !== null) {
+      window.clearTimeout(saveViewStateTimerRef.current);
+    }
+    saveViewStateTimerRef.current = window.setTimeout(() => {
+      saveViewStateMutation.mutate({
+        nextMode: mode,
+        viewState: nextViewState,
+      });
+    }, 300);
+    return () => {
+      if (saveViewStateTimerRef.current !== null) {
+        window.clearTimeout(saveViewStateTimerRef.current);
+        saveViewStateTimerRef.current = null;
+      }
+    };
+  }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, mode, preferencesHydrated, scheduleFilter, sortMode, swimlane, zoom]);
 
   const zoomConfig = TIMELINE_ZOOM_CONFIG[zoom];
   const effectiveSwimlane: TimelineSwimlane = mode === 'timeline' ? swimlane : 'section';
@@ -415,63 +716,37 @@ export function ProjectTimelineView({
   }, [baseFilteredTasks, ganttRiskByTaskId, ganttRiskFilterMode, mode]);
 
   const preferredLaneOrder = useMemo(
-    () =>
-      effectiveSwimlane === 'assignee'
-        ? timelinePreferencesQuery.data?.laneOrderByAssignee ?? []
-        : timelinePreferencesQuery.data?.laneOrderBySection ?? [],
+    () => {
+      if (effectiveSwimlane === 'assignee') {
+        return timelinePreferencesQuery.data?.laneOrderByAssignee ?? [];
+      }
+      if (effectiveSwimlane === 'status') {
+        return [];
+      }
+      return timelinePreferencesQuery.data?.laneOrderBySection ?? [];
+    },
     [effectiveSwimlane, timelinePreferencesQuery.data?.laneOrderByAssignee, timelinePreferencesQuery.data?.laneOrderBySection],
   );
 
   const timelineLanes = useMemo(() => {
-    if (effectiveSwimlane === 'assignee') {
-      const grouped = new Map<string, TimelineTask[]>();
-      for (const task of filteredTasks) {
-        const laneId = task.assigneeUserId ?? UNASSIGNED_LANE_ID;
-        const list = grouped.get(laneId) ?? [];
-        list.push(task);
-        grouped.set(laneId, list);
-      }
-
-      const lanes = [...grouped.entries()]
-        .map(([laneId, tasks]) => {
-          const label = laneId === UNASSIGNED_LANE_ID
-            ? t('unassigned')
-            : timeline.membersById[laneId]?.displayName
-              || timeline.membersById[laneId]?.email
-              || laneId;
-          return {
-            id: `assignee:${laneId}`,
-            label,
-            tasks,
-          };
-        })
-        .sort((left, right) => {
-          const leftUnassigned = left.id === `assignee:${UNASSIGNED_LANE_ID}`;
-          const rightUnassigned = right.id === `assignee:${UNASSIGNED_LANE_ID}`;
-          if (leftUnassigned && !rightUnassigned) return 1;
-          if (!leftUnassigned && rightUnassigned) return -1;
-          return left.label.localeCompare(right.label);
-        });
-
-      return applyLaneOrder(lanes, preferredLaneOrder);
-    }
-
-    const bySection = new Map<string, TimelineTask[]>();
-    for (const task of filteredTasks) {
-      const list = bySection.get(task.sectionId) ?? [];
-      list.push(task);
-      bySection.set(task.sectionId, list);
-    }
-
-    const lanes = timeline.sections
-      .map((section) => ({
-        id: `section:${section.id}`,
-        label: section.isDefault ? t('tasks') : section.name,
-        tasks: bySection.get(section.id) ?? [],
-      }))
-      .filter((lane) => lane.tasks.length > 0);
-
-    return applyLaneOrder(lanes, preferredLaneOrder);
+    const scheduledTimelineTasks = filteredTasks.filter((task) => task.hasSchedule);
+    const lanes = buildTimelineLanes({
+      swimlane: effectiveSwimlane,
+      tasks: scheduledTimelineTasks,
+      sections: timeline.sections,
+      membersById: timeline.membersById,
+      preferredLaneOrder,
+      defaultSectionLabel: t('tasks'),
+      unassignedLabel: t('unassigned'),
+      statusLabels: {
+        TODO: t('statusTodo'),
+        IN_PROGRESS: t('statusInProgress'),
+        BLOCKED: t('statusBlocked'),
+        DONE: t('statusDone'),
+      },
+      unassignedLaneId: UNASSIGNED_LANE_ID,
+    });
+    return lanes;
   }, [effectiveSwimlane, filteredTasks, preferredLaneOrder, t, timeline.membersById, timeline.sections]);
 
   const filteredTaskIds = useMemo(() => new Set(filteredTasks.map((task) => task.id)), [filteredTasks]);
@@ -518,7 +793,7 @@ export function ProjectTimelineView({
       groupBy,
       laneOrder,
     }: {
-      groupBy: TimelineSwimlane;
+      groupBy: TimelineLaneOrderGroupBy;
       laneOrder: string[];
     }) =>
       (await api(`/projects/${projectId}/timeline/preferences/${groupBy}`, {
@@ -533,6 +808,8 @@ export function ProjectTimelineView({
         userId: previous?.userId ?? meQuery.data?.id ?? '',
         laneOrderBySection: groupBy === 'section' ? laneOrder : previous?.laneOrderBySection ?? [],
         laneOrderByAssignee: groupBy === 'assignee' ? laneOrder : previous?.laneOrderByAssignee ?? [],
+        timelineViewState: previous?.timelineViewState ?? null,
+        ganttViewState: previous?.ganttViewState ?? null,
       });
       return { previous };
     },
@@ -694,65 +971,16 @@ export function ProjectTimelineView({
   }, [rescheduleNotice]);
 
   const timelineLayout = useMemo(() => {
-    let cursorY = 0;
-    const barsByTaskId: Record<string, { left: number; width: number; y: number }> = {};
-    const taskRowsById: Record<string, { top: number; height: number }> = {};
-    const lanesWithRows: Array<{
-      lane: (typeof timelineLanes)[number];
-      tasks: (typeof timelineLanes)[number]['tasks'];
-      top: number;
-      bottom: number;
-      taskRows: Array<{
-        task: (typeof timelineLanes)[number]['tasks'][number];
-        top: number;
-      }>;
-    }> = [];
-
-    for (const lane of timelineLanes) {
-      const laneTop = cursorY;
-      cursorY += SECTION_ROW_HEIGHT;
-      const taskRows: Array<{
-        task: (typeof lane)['tasks'][number];
-        top: number;
-      }> = [];
-
-      for (const task of lane.tasks) {
-        const rowTop = cursorY;
-        taskRowsById[task.id] = { top: rowTop, height: TASK_ROW_HEIGHT };
-        const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
-          ? timeline.window.start
-          : task.timelineStart;
-        const visibleEnd = task.timelineEnd && task.timelineEnd > timeline.window.end
-          ? timeline.window.end
-          : task.timelineEnd;
-
-        if (task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd) {
-          barsByTaskId[task.id] = {
-            left: Math.max(0, dayDiff(timeline.window.start, visibleStart ?? task.timelineStart)) * zoomConfig.dayColWidth,
-            width: Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1) * zoomConfig.dayColWidth,
-            y: cursorY + TASK_ROW_HEIGHT / 2,
-          };
-        }
-        taskRows.push({ task, top: rowTop });
-        cursorY += TASK_ROW_HEIGHT;
-      }
-      lanesWithRows.push({
-        lane,
-        tasks: lane.tasks,
-        top: laneTop,
-        bottom: cursorY,
-        taskRows,
-      });
-    }
-
-    return {
-      lanesWithRows,
-      barsByTaskId,
-      taskRowsById,
-      bodyHeight: cursorY,
-      totalRowCount: timelineLanes.length + filteredTasks.length,
-    };
-  }, [filteredTasks.length, timeline.window.end, timeline.window.start, timelineLanes, zoomConfig.dayColWidth]);
+    return buildTimelineLayout({
+      lanes: timelineLanes,
+      windowStart: timeline.window.start,
+      windowEnd: timeline.window.end,
+      dayColumnWidth: zoomConfig.dayColWidth,
+      sectionRowHeight: SECTION_ROW_HEIGHT,
+      taskRowHeight: TASK_ROW_HEIGHT,
+      compactRows: mode === 'timeline',
+    });
+  }, [mode, timeline.window.end, timeline.window.start, timelineLanes, zoomConfig.dayColWidth]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -892,7 +1120,7 @@ export function ProjectTimelineView({
     }
   };
 
-  const commitUnscheduledDrop = (taskId: string, originLaneId: string, clientX: number, clientY: number) => {
+  const commitUnscheduledDrop = (taskId: string, fallbackLaneId: string, clientX: number, clientY: number) => {
     if (rescheduleInFlightTaskIdsRef.current.has(taskId)) return;
     const task = taskById.get(taskId);
     const container = scrollContainerRef.current;
@@ -905,7 +1133,7 @@ export function ProjectTimelineView({
     if (!targetDay) return;
 
     const startDate = startOfDay(targetDay);
-    const dropLaneId = resolveLaneIdAtClientY(clientY) ?? originLaneId;
+    const dropLaneId = resolveLaneIdAtClientY(clientY) ?? fallbackLaneId;
     const assigneeUserId = effectiveSwimlane === 'assignee' ? parseAssigneeLaneId(dropLaneId) : undefined;
     const durationDays =
       task.startAt && task.dueAt
@@ -977,6 +1205,7 @@ export function ProjectTimelineView({
     const laneIds = timelineLanes.map((lane) => lane.id);
     const nextLaneOrder = reorderLaneIds(laneIds, draggingLaneId, overLaneId);
     if (nextLaneOrder.join('|') === laneIds.join('|')) return;
+    if (!isLaneOrderGroupBy(effectiveSwimlane)) return;
     saveLaneOrderMutation.mutate({
       groupBy: effectiveSwimlane,
       laneOrder: nextLaneOrder,
@@ -1107,6 +1336,17 @@ export function ProjectTimelineView({
                 onClick={() => setSwimlane('assignee')}
               >
                 {t('timelineSwimlaneAssignee')}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={effectiveSwimlane === 'status' ? 'default' : 'ghost'}
+                className="h-7 px-2 text-xs"
+                data-testid="timeline-swimlane-status"
+                data-active={effectiveSwimlane === 'status' ? 'true' : 'false'}
+                onClick={() => setSwimlane('status')}
+              >
+                {t('timelineSwimlaneStatus')}
               </Button>
             </div>
 
@@ -1361,32 +1601,29 @@ export function ProjectTimelineView({
               event.preventDefault();
               setUnscheduledDragTaskId(null);
               try {
-                const parsed = JSON.parse(raw) as { taskId?: string; originLaneId?: string };
-                if (!parsed.taskId || !parsed.originLaneId) return;
-                commitUnscheduledDrop(parsed.taskId, parsed.originLaneId, event.clientX, event.clientY);
+                const parsed = JSON.parse(raw) as { taskId?: string };
+                if (!parsed.taskId) return;
+                const fallbackTask = taskById.get(parsed.taskId);
+                if (!fallbackTask) return;
+                const fallbackLaneId = deriveLaneIdForTask(fallbackTask, effectiveSwimlane);
+                commitUnscheduledDrop(parsed.taskId, fallbackLaneId, event.clientX, event.clientY);
               } catch {
                 // ignore malformed drag payload
               }
             }}
           >
-            {timelineLayout.lanesWithRows.map(({ lane, tasks: laneTasks, top, taskRows }) => {
-              if (!laneTasks.length) return null;
+            {timelineLayout.lanesWithRows.map(({ lane, tasks: laneTasks, top, rows }) => {
               const sectionVisible = !virtualizationEnabled
                 || (top + SECTION_ROW_HEIGHT >= visibleRange.start && top <= visibleRange.end);
-              const visibleTaskRows = virtualizationEnabled
-                ? taskRows.filter((entry) => entry.top + TASK_ROW_HEIGHT >= visibleRange.start && entry.top <= visibleRange.end)
-                : taskRows;
-              if (!sectionVisible && visibleTaskRows.length === 0) return null;
-              const firstVisibleIndex = visibleTaskRows.length
-                ? taskRows.findIndex((entry) => entry.task.id === visibleTaskRows[0]?.task.id)
-                : -1;
-              const lastVisibleIndex = visibleTaskRows.length
-                ? taskRows.findIndex((entry) => entry.task.id === visibleTaskRows[visibleTaskRows.length - 1]?.task.id)
-                : -1;
-              const topSpacer = firstVisibleIndex > 0 ? firstVisibleIndex * TASK_ROW_HEIGHT : 0;
-              const bottomSpacer = lastVisibleIndex >= 0
-                ? Math.max(0, (taskRows.length - lastVisibleIndex - 1) * TASK_ROW_HEIGHT)
-                : taskRows.length * TASK_ROW_HEIGHT;
+              const visibleRows = virtualizationEnabled
+                ? rows.filter((entry) => entry.top + TASK_ROW_HEIGHT >= visibleRange.start && entry.top <= visibleRange.end)
+                : rows;
+              if (!sectionVisible && visibleRows.length === 0) return null;
+              const laneRowsTop = top + SECTION_ROW_HEIGHT;
+              const topSpacer = visibleRows.length ? Math.max(0, visibleRows[0]!.top - laneRowsTop) : 0;
+              const bottomSpacer = visibleRows.length
+                ? Math.max(0, (top + SECTION_ROW_HEIGHT + rows.length * TASK_ROW_HEIGHT) - (visibleRows[visibleRows.length - 1]!.top + TASK_ROW_HEIGHT))
+                : rows.length * TASK_ROW_HEIGHT;
 
               return (
                 <div key={lane.id} className="border-b last:border-b-0">
@@ -1397,22 +1634,39 @@ export function ProjectTimelineView({
                       }`}
                       style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}
                       data-testid={`timeline-lane-${normalizeTestIdSegment(lane.id)}`}
-                      draggable={mode === 'timeline'}
+                      draggable={mode === 'timeline' && effectiveSwimlane !== 'status'}
                       onDragStart={(event) => {
-                        if (mode !== 'timeline') return;
+                        if (mode !== 'timeline' || effectiveSwimlane === 'status') return;
                         event.dataTransfer.effectAllowed = 'move';
                         event.dataTransfer.setData('text/plain', lane.id);
                         setLaneDragState({ draggingLaneId: lane.id, overLaneId: lane.id });
                       }}
                       onDragOver={(event) => {
-                        if (mode !== 'timeline' || !laneDragState?.draggingLaneId) return;
+                        if (!Array.from(event.dataTransfer.types).includes(UNSCHEDULED_TASK_DND_TYPE)) {
+                          if (mode !== 'timeline' || effectiveSwimlane === 'status' || !laneDragState?.draggingLaneId) return;
+                        }
                         event.preventDefault();
-                        if (laneDragState.overLaneId !== lane.id) {
+                        if (Array.from(event.dataTransfer.types).includes(UNSCHEDULED_TASK_DND_TYPE)) return;
+                        if (laneDragState?.overLaneId !== lane.id) {
                           setLaneDragState((current) => (current ? { ...current, overLaneId: lane.id } : current));
                         }
                       }}
                       onDrop={(event) => {
-                        if (mode !== 'timeline') return;
+                        if (Array.from(event.dataTransfer.types).includes(UNSCHEDULED_TASK_DND_TYPE)) {
+                          const raw = event.dataTransfer.getData(UNSCHEDULED_TASK_DND_TYPE);
+                          if (!raw) return;
+                          event.preventDefault();
+                          setUnscheduledDragTaskId(null);
+                          try {
+                            const parsed = JSON.parse(raw) as { taskId?: string };
+                            if (!parsed.taskId) return;
+                            commitUnscheduledDrop(parsed.taskId, lane.id, event.clientX, event.clientY);
+                          } catch {
+                            // ignore malformed drag payload
+                          }
+                          return;
+                        }
+                        if (mode !== 'timeline' || effectiveSwimlane === 'status') return;
                         event.preventDefault();
                         const draggingLaneId = laneDragState?.draggingLaneId ?? event.dataTransfer.getData('text/plain');
                         if (draggingLaneId) {
@@ -1437,146 +1691,176 @@ export function ProjectTimelineView({
 
                   {topSpacer > 0 ? <div style={{ height: `${topSpacer}px` }} /> : null}
 
-                  {visibleTaskRows.map(({ task }) => {
-                    const fallbackName = task.title.trim() || t('untitledTask');
-                    const ganttTaskRisk = mode === 'gantt' ? ganttRiskByTaskId.get(task.id) : null;
-                    const ganttVariance = mode === 'gantt' ? ganttVarianceByTaskId.get(task.id) ?? null : null;
-                    const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
-                      ? timeline.window.start
-                      : task.timelineStart;
-                    const visibleEnd = task.timelineEnd && task.timelineEnd > timeline.window.end
-                      ? timeline.window.end
-                      : task.timelineEnd;
-                    const visibleBaselineStart = task.baselineStart && task.baselineStart < timeline.window.start
-                      ? timeline.window.start
-                      : task.baselineStart;
-                    const visibleBaselineEnd = task.baselineEnd && task.baselineEnd > timeline.window.end
-                      ? timeline.window.end
-                      : task.baselineEnd;
+                  {visibleRows.map((row, rowIndex) => {
+                    const primaryTask = row.tasks[0];
+                    if (!primaryTask) return null;
+                    const fallbackName = primaryTask.title.trim() || t('untitledTask');
                     return (
-                      <div key={task.id} className="grid h-10 border-b last:border-b-0" style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}>
+                      <div
+                        key={`${lane.id}-row-${rowIndex}-${row.top}`}
+                        className="grid h-10 border-b last:border-b-0"
+                        style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}
+                        data-testid={`timeline-row-${normalizeTestIdSegment(lane.id)}-${rowIndex}`}
+                      >
                         <div className="flex h-full items-center gap-2 px-3">
                           <button
                             type="button"
                             className="truncate text-left text-sm hover:underline"
-                            onClick={() => setSelectedTaskId(task.id)}
-                            data-testid={`timeline-task-${task.id}`}
+                            onClick={() => setSelectedTaskId(primaryTask.id)}
+                            data-testid={`timeline-task-${primaryTask.id}`}
                           >
                             {fallbackName}
                           </button>
-                          {mode === 'gantt' && ganttVariance !== null ? (
-                            <Badge
-                              variant={ganttVariance > 0 ? 'destructive' : 'secondary'}
-                              className="h-5 px-1.5 text-[10px]"
-                              data-testid={`gantt-variance-${task.id}`}
-                            >
-                              {ganttVariance > 0 ? `+${ganttVariance}d` : `${ganttVariance}d`}
+                          {mode === 'timeline' && row.tasks.length > 1 ? (
+                            <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                              +{row.tasks.length - 1}
                             </Badge>
                           ) : null}
-                          {mode === 'gantt' && ganttTaskRisk?.isAtRisk ? (
+                          {mode === 'gantt' && row.tasks.length === 1 && (ganttVarianceByTaskId.get(primaryTask.id) ?? null) !== null ? (
+                            <Badge
+                              variant={(ganttVarianceByTaskId.get(primaryTask.id) ?? 0) > 0 ? 'destructive' : 'secondary'}
+                              className="h-5 px-1.5 text-[10px]"
+                              data-testid={`gantt-variance-${primaryTask.id}`}
+                            >
+                              {(ganttVarianceByTaskId.get(primaryTask.id) ?? 0) > 0
+                                ? `+${ganttVarianceByTaskId.get(primaryTask.id)}d`
+                                : `${ganttVarianceByTaskId.get(primaryTask.id)}d`}
+                            </Badge>
+                          ) : null}
+                          {mode === 'gantt' && row.tasks.length === 1 && ganttRiskByTaskId.get(primaryTask.id)?.isAtRisk ? (
                             <Badge
                               variant="destructive"
                               className="h-5 px-1.5 text-[10px]"
-                              data-testid={`gantt-risk-badge-${task.id}`}
+                              data-testid={`gantt-risk-badge-${primaryTask.id}`}
                             >
-                              {ganttTaskRisk.overdue
+                              {ganttRiskByTaskId.get(primaryTask.id)?.overdue
                                 ? t('ganttRiskOverdue')
-                                : ganttTaskRisk.blockedByOpen > 0
+                                : (ganttRiskByTaskId.get(primaryTask.id)?.blockedByOpen ?? 0) > 0
                                   ? t('ganttRiskBlocked')
                                   : t('ganttRiskLateDependency')}
                             </Badge>
                           ) : null}
                         </div>
                         <div className="relative h-full border-l">
-                          {task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd ? (
-                            <>
-                              {mode === 'gantt' && task.hasBaseline && task.baselineStart && task.baselineEnd ? (
-                                <div
-                                  className="pointer-events-none absolute top-1/2 h-2 -translate-y-1/2 rounded border border-dashed border-muted-foreground/40 bg-muted/50"
-                                  style={{
-                                    left: `${Math.max(0, dayDiff(timeline.window.start, visibleBaselineStart ?? task.baselineStart)) * zoomConfig.dayColWidth}px`,
-                                    width: `${Math.max(1, dayDiff(visibleBaselineStart ?? task.baselineStart, visibleBaselineEnd ?? task.baselineEnd) + 1) * zoomConfig.dayColWidth}px`,
-                                  }}
-                                  data-testid={`gantt-baseline-${task.id}`}
-                                />
-                              ) : null}
-                              <button
-                                type="button"
-                                className={`absolute top-1/2 h-6 -translate-y-1/2 rounded bg-primary/20 px-2 text-left text-[11px] text-primary hover:bg-primary/25 ${
-                                  dragState?.taskId === task.id && dragState.moved ? 'cursor-grabbing opacity-90' : 'cursor-grab'
-                                }`}
-                                style={{
-                                  left: `${Math.max(
-                                    0,
-                                    Math.max(0, dayDiff(timeline.window.start, visibleStart ?? task.timelineStart)) * zoomConfig.dayColWidth
-                                      + (dragState?.taskId === task.id ? dragState.deltaDays * zoomConfig.dayColWidth : 0),
-                                  )}px`,
-                                  width: `${Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1) * zoomConfig.dayColWidth}px`,
-                                }}
-                                onClick={() => {
-                                  if (suppressClickTaskIdRef.current === task.id) {
-                                    suppressClickTaskIdRef.current = null;
-                                    return;
-                                  }
-                                  setSelectedTaskId(task.id);
-                                }}
-                                onPointerDown={(event) => {
-                                  if (event.button !== 0) return;
-                                  if (rescheduleInFlightTaskIdsRef.current.has(task.id)) return;
-                                  event.preventDefault();
-                                  beginBarDrag(task.id, event.pointerId, event.clientX, event.clientY, lane.id);
-                                  event.currentTarget.setPointerCapture(event.pointerId);
-                                }}
-                                onPointerMove={(event) => {
-                                  updateBarDrag(event.pointerId, event.clientX, event.clientY);
-                                }}
-                                onPointerUp={(event) => {
-                                  finishBarDrag(event.pointerId);
-                                  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                                    event.currentTarget.releasePointerCapture(event.pointerId);
-                                  }
-                                }}
-                                onPointerCancel={(event) => {
-                                  finishBarDrag(event.pointerId);
-                                  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                                    event.currentTarget.releasePointerCapture(event.pointerId);
-                                  }
-                                }}
-                                data-testid={`timeline-bar-${task.id}`}
-                                title={`${task.timelineStart.toLocaleDateString()} - ${task.timelineEnd.toLocaleDateString()}`}
-                              >
-                                <span className="block truncate">{fallbackName}</span>
-                              </button>
-                            </>
-                          ) : task.hasSchedule ? (
-                            <span className="absolute left-2 top-1/2 -translate-y-1/2 rounded border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground">
-                              {t('timelineOutOfWindow')}
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              className={`absolute left-2 top-1/2 -translate-y-1/2 rounded border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 ${
-                                unscheduledDragTaskId === task.id ? 'opacity-60' : ''
-                              }`}
-                              onClick={() => setSelectedTaskId(task.id)}
-                              draggable={mode === 'timeline'}
-                              onDragStart={(event) => {
-                                if (mode !== 'timeline') return;
-                                event.dataTransfer.effectAllowed = 'move';
-                                event.dataTransfer.setData(
-                                  UNSCHEDULED_TASK_DND_TYPE,
-                                  JSON.stringify({ taskId: task.id, originLaneId: lane.id }),
-                                );
-                                setUnscheduledDragTaskId(task.id);
-                              }}
-                              onDragEnd={() => {
-                                setUnscheduledDragTaskId(null);
-                              }}
-                              data-testid={`timeline-unscheduled-${task.id}`}
-                            >
-                              {t('timelineNoDates')}
-                            </button>
-                          )}
+                          {row.tasks.map((task) => {
+                            const fallbackTaskName = task.title.trim() || t('untitledTask');
+                            const timelineBarStyle = resolveTimelineBarStyle(task, today);
+                            const isCompleted = task.status === 'DONE';
+                            const barLayout = timelineLayout.barsByTaskId[task.id];
+                            const visibleBaselineStart = task.baselineStart && task.baselineStart < timeline.window.start
+                              ? timeline.window.start
+                              : task.baselineStart;
+                            const visibleBaselineEnd = task.baselineEnd && task.baselineEnd > timeline.window.end
+                              ? timeline.window.end
+                              : task.baselineEnd;
+                            if (task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd) {
+                              if (!barLayout) return null;
+                              const taskWidth = barLayout.width;
+                              const taskLeft = Math.max(0, barLayout.left + (dragState?.taskId === task.id ? dragState.deltaDays * zoomConfig.dayColWidth : 0));
+                              const isMilestone = task.type === 'MILESTONE' || dayDiff(task.timelineStart, task.timelineEnd) === 0;
+                              return (
+                                <div key={task.id}>
+                                  {mode === 'gantt' && task.hasBaseline && task.baselineStart && task.baselineEnd ? (
+                                    <div
+                                      className="pointer-events-none absolute top-1/2 h-2 -translate-y-1/2 rounded border border-dashed border-muted-foreground/40 bg-muted/50"
+                                      style={{
+                                        left: `${Math.max(0, dayDiff(timeline.window.start, visibleBaselineStart ?? task.baselineStart)) * zoomConfig.dayColWidth}px`,
+                                        width: `${Math.max(1, dayDiff(visibleBaselineStart ?? task.baselineStart, visibleBaselineEnd ?? task.baselineEnd) + 1) * zoomConfig.dayColWidth}px`,
+                                      }}
+                                      data-testid={`gantt-baseline-${task.id}`}
+                                    />
+                                  ) : null}
+                                  <button
+                                    type="button"
+                                    className={`absolute top-1/2 text-left text-[11px] shadow-sm transition-[background-color,border-color,color,opacity] ${
+                                      isMilestone
+                                        ? 'h-3.5 w-3.5 -translate-y-1/2 rotate-45 rounded-[2px]'
+                                        : 'h-6 -translate-y-1/2 rounded px-2'
+                                    } ${dragState?.taskId === task.id && dragState.moved ? 'cursor-grabbing opacity-90' : 'cursor-grab'}`}
+                                    style={
+                                      isMilestone
+                                        ? {
+                                            left: `${Math.max(0, taskLeft + taskWidth / 2 - 7)}px`,
+                                            width: '14px',
+                                            height: '14px',
+                                            opacity: isCompleted ? 0.56 : 1,
+                                            ...timelineBarStyle,
+                                          }
+                                        : {
+                                            left: `${taskLeft}px`,
+                                            width: `${taskWidth}px`,
+                                            opacity: isCompleted ? 0.56 : 1,
+                                            ...timelineBarStyle,
+                                          }
+                                    }
+                                    onClick={() => {
+                                      if (suppressClickTaskIdRef.current === task.id) {
+                                        suppressClickTaskIdRef.current = null;
+                                        return;
+                                      }
+                                      setSelectedTaskId(task.id);
+                                    }}
+                                    onPointerDown={(event) => {
+                                      if (event.button !== 0) return;
+                                      if (rescheduleInFlightTaskIdsRef.current.has(task.id)) return;
+                                      event.preventDefault();
+                                      beginBarDrag(task.id, event.pointerId, event.clientX, event.clientY, lane.id);
+                                      event.currentTarget.setPointerCapture(event.pointerId);
+                                    }}
+                                    onPointerMove={(event) => {
+                                      updateBarDrag(event.pointerId, event.clientX, event.clientY);
+                                    }}
+                                    onPointerUp={(event) => {
+                                      finishBarDrag(event.pointerId);
+                                      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                                        event.currentTarget.releasePointerCapture(event.pointerId);
+                                      }
+                                    }}
+                                    onPointerCancel={(event) => {
+                                      finishBarDrag(event.pointerId);
+                                      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                                        event.currentTarget.releasePointerCapture(event.pointerId);
+                                      }
+                                    }}
+                                    data-testid={`timeline-bar-${task.id}`}
+                                    title={`${task.timelineStart.toLocaleDateString()} - ${task.timelineEnd.toLocaleDateString()}`}
+                                  >
+                                    {isMilestone ? <span className="sr-only">{fallbackTaskName}</span> : null}
+                                    {!isMilestone ? (
+                                      <span className={`block truncate ${isCompleted ? 'line-through' : ''}`}>{fallbackTaskName}</span>
+                                    ) : null}
+                                  </button>
+                                  {isMilestone ? (
+                                    <button
+                                      type="button"
+                                      className={`absolute top-1/2 -translate-y-1/2 text-left text-[11px] text-foreground ${isCompleted ? 'line-through opacity-60' : ''}`}
+                                      style={{ left: `${Math.max(0, taskLeft + taskWidth / 2 + 10)}px` }}
+                                      onClick={() => {
+                                        if (suppressClickTaskIdRef.current === task.id) {
+                                          suppressClickTaskIdRef.current = null;
+                                          return;
+                                        }
+                                        setSelectedTaskId(task.id);
+                                      }}
+                                    >
+                                      {fallbackTaskName}
+                                    </button>
+                                  ) : null}
+                                </div>
+                              );
+                            }
+                            if (task.hasSchedule) {
+                              return (
+                                <span
+                                  key={task.id}
+                                  className="absolute left-2 top-1/2 -translate-y-1/2 rounded border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground"
+                                >
+                                  {t('timelineOutOfWindow')}
+                                </span>
+                              );
+                            }
+                            return null;
+                          })}
                         </div>
                       </div>
                     );
@@ -1602,6 +1886,49 @@ export function ProjectTimelineView({
         }}
         projectId={projectId}
       />
+
+      {unscheduledTasks.length ? (
+        <div className="rounded-lg border border-dashed bg-card/70 p-3" data-testid="timeline-unscheduled-tray">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium">{t('timelineUnscheduled')}</p>
+              <p className="text-xs text-muted-foreground">{t('timelineUnscheduledTrayHint')}</p>
+            </div>
+            <Badge variant="secondary">{unscheduledTasks.length}</Badge>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {unscheduledTasks.map((task) => (
+              <button
+                key={task.id}
+                type="button"
+                className={`rounded-md border border-dashed px-3 py-2 text-left text-xs text-muted-foreground transition hover:border-primary/40 hover:bg-muted/40 hover:text-foreground ${
+                  unscheduledDragTaskId === task.id ? 'opacity-60' : ''
+                }`}
+                onClick={() => setSelectedTaskId(task.id)}
+                draggable={mode === 'timeline'}
+                onDragStart={(event) => {
+                  if (mode !== 'timeline') return;
+                  event.dataTransfer.effectAllowed = 'move';
+                  event.dataTransfer.setData(
+                    UNSCHEDULED_TASK_DND_TYPE,
+                    JSON.stringify({
+                      taskId: task.id,
+                    }),
+                  );
+                  setUnscheduledDragTaskId(task.id);
+                }}
+                onDragEnd={() => {
+                  setUnscheduledDragTaskId(null);
+                }}
+                data-testid={`timeline-unscheduled-${task.id}`}
+              >
+                <span className="block truncate text-foreground">{task.title.trim() || t('untitledTask')}</span>
+                <span className="mt-1 block">{t('timelineNoDates')}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -2347,3 +2347,145 @@
   - `pnpm --filter @atlaspm/web-ui build`
 - Risks/known gaps:
   - List/detail date edits still use general `PATCH /tasks/:id` in this wave; drag-based schedule updates now use dedicated reschedule endpoint.
+
+## 2026-03-06 - Issue #195: Split Timeline and Gantt shells
+- What changed:
+  - Split project schedule entry points into dedicated shells:
+    - `apps/web-ui/src/components/project-timeline-shell.tsx`
+    - `apps/web-ui/src/components/project-gantt-shell.tsx`
+  - Renamed shared renderer export in `apps/web-ui/src/components/project-timeline-view.tsx` to `ProjectScheduleCanvas`.
+  - Switched the project page route wiring in `apps/web-ui/src/app/projects/[id]/page.tsx` to use distinct timeline and gantt shells.
+  - Separated persisted view-state storage keys so timeline and gantt preferences are isolated:
+    - `atlaspm:timeline-shell:*`
+    - `atlaspm:gantt-shell:*`
+- Why:
+  - Issue #195 is the foundation for safely diverging Timeline and Gantt behavior without forcing a risky all-at-once extraction of shared scheduling logic.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm --dir e2e/playwright exec playwright test tests/timeline-route.spec.ts tests/timeline-swimlane.spec.ts tests/gantt-risk.spec.ts --reporter=list`
+- Risks/known gaps:
+  - Timeline and Gantt now have separate shell boundaries, but most rendering logic is still shared inside `ProjectScheduleCanvas`; deeper extraction moves to Issue #196.
+
+## 2026-03-06 - Issue #196: Extract timeline lane and layout domain model
+- What changed:
+  - Added pure timeline lane/layout services in `packages/domain/src/services/timeline-layout.ts`.
+  - Added coverage in `packages/domain/src/__tests__/timeline-layout.test.ts` for:
+    - assignee lane grouping
+    - preferred section order application
+    - bar/row position calculation
+  - Exported the new service from `packages/domain/src/index.ts`.
+  - Added `@atlaspm/domain` as a `web-ui` dependency and switched `apps/web-ui/src/components/project-timeline-view.tsx` to use the domain service for:
+    - swimlane construction
+    - bar and row layout computation
+- Why:
+  - Issue #196 requires the lane and layout model to be testable outside React before more invasive timeline behavior changes land.
+- How tested (exact commands):
+  - `pnpm exec tsc -p packages/domain/tsconfig.json`
+  - `node --test packages/domain/dist/__tests__/timeline-layout.test.js`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm --dir e2e/playwright exec playwright test tests/timeline-route.spec.ts tests/timeline-swimlane.spec.ts tests/gantt-risk.spec.ts --reporter=list`
+- Risks/known gaps:
+  - The extracted layout service preserves the current one-row-per-task behavior; compact packing is intentionally deferred to Issue #202.
+
+## 2026-03-06 - Issue #199: Add status swimlane grouping to Timeline
+- What changed:
+  - Extended the shared lane builder in `packages/domain/src/services/timeline-layout.ts` to support `status` swimlanes with fixed workflow ordering.
+  - Added domain coverage in `packages/domain/src/__tests__/timeline-layout.test.ts` for status-lane grouping.
+  - Updated `apps/web-ui/src/components/project-timeline-view.tsx` to:
+    - persist/read `status` as a valid swimlane mode
+    - expose a status swimlane toggle in the Timeline toolbar
+    - pass localized status labels into the domain lane builder
+    - disable lane-order drag persistence for status lanes (fixed order for this wave)
+  - Added localized copy in `apps/web-ui/src/lib/i18n.tsx`.
+  - Extended `e2e/playwright/tests/timeline-swimlane.spec.ts` to verify status swimlane rendering without regressing existing assignee/unscheduled flows.
+- Why:
+  - Issue #199 introduces status swimlanes as a first-class Timeline grouping mode before lane-to-status drag reassignment lands in Issue #200.
+- How tested (exact commands):
+  - `pnpm install`
+  - `pnpm --filter @atlaspm/domain build`
+  - `node --test packages/domain/dist/__tests__/timeline-layout.test.js`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `cd e2e/playwright && E2E_BASE_URL=http://localhost:3100 pnpm exec playwright test tests/timeline-swimlane.spec.ts --reporter=list`
+- Risks/known gaps:
+  - Status swimlanes currently use fixed workflow order only; lane reordering persistence for status stays out of scope until later preference work.
+
+## 2026-03-06 - Issue #201: Move unscheduled tasks into a dedicated Timeline tray
+- What changed:
+  - Updated `apps/web-ui/src/components/project-timeline-view.tsx` so Timeline lanes are built from scheduled tasks only, while unscheduled tasks render in a dedicated tray below the canvas.
+  - Added a tray-specific drag affordance for unscheduled tasks and preserved direct task-detail opening from the tray chips.
+  - Ensured section swimlanes still render empty lanes as valid drop targets, including header-drop handling for unscheduled drag payloads.
+  - Updated `e2e/playwright/tests/timeline-swimlane.spec.ts` to reflect the new empty-lane and unscheduled-tray behavior.
+  - Added localized tray helper copy in `apps/web-ui/src/lib/i18n.tsx`.
+- Why:
+  - Issue #201 requires unscheduled tasks to move out of inline swimlane rows and into a dedicated planning tray, while preserving drag-to-schedule behavior.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `cd e2e/playwright && E2E_BASE_URL=http://localhost:3100 pnpm exec playwright test tests/timeline-swimlane.spec.ts --reporter=list`
+- Risks/known gaps:
+  - Empty placeholder lanes are only rendered for section swimlanes in this wave; assignee/status empty-lane UX remains deferred until later timeline planning iterations.
+
+## 2026-03-06 - Issue #202: Compact non-overlapping Timeline rows within a swimlane
+- What changed:
+  - Extended `packages/domain/src/services/timeline-layout.ts` with compact-row packing support so non-overlapping scheduled tasks can share a single row when Timeline mode is active.
+  - Added packed-row metadata to the domain layout result and kept Gantt on strict one-row-per-task behavior by only enabling compact rows in Timeline mode.
+  - Updated `apps/web-ui/src/components/project-timeline-view.tsx` to render packed rows, keep dependency positioning stable, and expose row-level test ids.
+  - Added domain coverage for compact packing and Playwright coverage that verifies three tasks collapse into two rows when their schedules do not overlap.
+- Why:
+  - Issue #202 requires Timeline to move away from one-row-per-task rendering so lanes stay compact and closer to Asana's bird's-eye planning layout.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/domain build`
+  - `node --test packages/domain/dist/__tests__/timeline-layout.test.js`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `cd e2e/playwright && E2E_BASE_URL=http://localhost:3101 pnpm exec playwright test tests/timeline-swimlane.spec.ts --reporter=list`
+- Risks/known gaps:
+  - Timeline compact packing currently uses interval overlap only; dependency-aware auto-layout and more advanced packing heuristics remain for later issues.
+
+## 2026-03-06 - Issue #203: Persist Timeline and Gantt view-state independently
+- What changed:
+  - Extended `ProjectTimelinePreference` in `apps/core-api/prisma/schema.prisma` with `timelineViewState` and `ganttViewState` JSON fields, plus a migration in `apps/core-api/prisma/migrations/20260306094000_add_timeline_view_state/`.
+  - Added `PUT /projects/:id/timeline/preferences/view-state/:mode` to `apps/core-api/src/tasks/tasks.controller.ts` and expanded `GET /projects/:id/timeline/preferences` to return both mode-specific view-state payloads alongside lane order.
+  - Added integration coverage in `apps/core-api/test/core.integration.test.ts` for timeline/gantt view-state persistence without cross-mode overwrite.
+  - Updated `apps/web-ui/src/components/project-timeline-view.tsx` to hydrate from server-stored view-state first, fall back to legacy localStorage when server state is empty, and debounce-save mode-specific view-state back to the API.
+  - Preserved lane-order optimistic updates without dropping server-cached view-state and added a dedicated save-failure notice in `apps/web-ui/src/lib/i18n.tsx`.
+  - Extended `e2e/playwright/tests/timeline-gantt-boundary.spec.ts` so Timeline and Gantt controls are verified to persist independently across reloads.
+- Why:
+  - Issue #203 requires Timeline and Gantt to stop sharing a single local preference bucket so each surface can evolve independently without state bleed.
+- How tested (exact commands):
+  - `pnpm install`
+  - `cd apps/core-api && DATABASE_URL='postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public' pnpm exec prisma migrate deploy`
+  - `pnpm --filter @atlaspm/domain build`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `cd apps/core-api && SEARCH_ENABLED=false DATABASE_URL='postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public' pnpm exec vitest run test/core.integration.test.ts -t "timeline preferences and timeline move APIs persist contracts with audit/outbox"`
+  - `cd e2e/playwright && E2E_BASE_URL=http://localhost:3102 pnpm exec playwright test tests/timeline-gantt-boundary.spec.ts tests/timeline.spec.ts --reporter=line --workers=1`
+- Risks/known gaps:
+  - View-state persistence is currently debounced per change and server-first; explicit offline sync or retry queues remain out of scope for this wave.
+
+## 2026-03-06 - Issue #204: Add attribute-based Timeline bar color mapping
+- What changed:
+  - Updated `/Users/tomoakikawada/Dev/atlaspm-worktrees/timeline-p2-1/apps/web-ui/src/components/project-timeline-view.tsx` to derive timeline bar colors from task metadata instead of a single blue style.
+  - Added deterministic project-based accent fallback coloring, custom-field option color support, and status overrides for done, blocked, and overdue tasks.
+  - Pulled in timeline preference hydration hardening and empty section-lane ordering fixes so the color-mapping branch stays consistent with the stacked Timeline work.
+  - Updated `/Users/tomoakikawada/Dev/atlaspm-worktrees/timeline-p2-1/packages/domain/src/services/timeline-layout.ts` so section swimlanes retain empty lanes and the compact-row fallback branch is simplified.
+- Why:
+  - Issue #204 requires Timeline bars to encode more state than a single default color, and the branch also needed the already-reviewed Timeline preference and lane-order fixes to avoid regressions.
+- How tested (exact commands):
+  - `pnpm install --frozen-lockfile`
+  - `pnpm --filter @atlaspm/domain build`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+- Risks/known gaps:
+  - AtlasPM still lacks a persisted `project.color`, so default bar colors are derived from `projectId` until a first-class project color field exists.
+
+## 2026-03-06 - Issue #205: Render milestone and completed Timeline states
+- What changed:
+  - Updated `/Users/tomoakikawada/Dev/atlaspm-worktrees/timeline-p2-2/apps/web-ui/src/components/project-timeline-view.tsx` so milestone tasks render as diamonds and completed tasks fade/strike through in Timeline mode.
+  - Switched bar positioning to reuse `/Users/tomoakikawada/Dev/atlaspm-worktrees/timeline-p2-2/apps/web-ui/src/components/project-timeline-view.tsx` layout coordinates from `timelineLayout.barsByTaskId`, preventing visual drift between bars and dependency overlays.
+  - Simplified unscheduled drag payloads to carry only `taskId`, with lane fallback derived locally at drop time.
+  - Tightened `/Users/tomoakikawada/Dev/atlaspm-worktrees/timeline-p2-2/apps/core-api/src/tasks/tasks.controller.ts` so timeline view-state writes require `ProjectRole.MEMBER`, matching other preference writes.
+- Why:
+  - Issue #205 is about milestone/completed visual states, and the review surfaced adjacent correctness gaps around drag payload semantics and write authorization that should not ship.
+- How tested (exact commands):
+  - `pnpm install --frozen-lockfile`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+- Risks/known gaps:
+  - Milestone rendering is still view-only; milestone-specific interaction affordances remain deferred to later Timeline waves.

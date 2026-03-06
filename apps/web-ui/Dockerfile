@@ -16,8 +16,10 @@ ENV NEXT_PUBLIC_COLLAB_DEV_MODE=${NEXT_PUBLIC_COLLAB_DEV_MODE}
 COPY package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.mjs .prettierrc ./
 COPY apps/web-ui/package.json apps/web-ui/package.json
 COPY packages/shared-types/package.json packages/shared-types/package.json
+COPY packages/domain/package.json packages/domain/package.json
 RUN pnpm install --filter @atlaspm/web-ui... --frozen-lockfile=false
 COPY . .
+RUN pnpm --filter @atlaspm/domain build
 RUN pnpm --filter @atlaspm/web-ui build
 EXPOSE 3000
 CMD ["pnpm", "--filter", "@atlaspm/web-ui", "start"]
