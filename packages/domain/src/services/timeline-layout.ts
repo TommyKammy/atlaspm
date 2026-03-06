@@ -93,8 +93,7 @@ export type BuildTimelineLayoutInput<TTask extends TimelineLayoutTaskInput> = {
 const DEFAULT_UNASSIGNED_LANE_ID = '__unassigned__';
 
 function dayNumber(date: Date): number {
-  const localMidnight = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  return Math.floor(localMidnight.getTime() / DAY_MS);
+  return Math.floor(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) / DAY_MS);
 }
 
 function dayDiff(from: Date, to: Date): number {
