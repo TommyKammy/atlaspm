@@ -838,6 +838,13 @@ export function ProjectScheduleCanvas({
     return next;
   }, [baseFilteredTasks, timeline.dependencyEdges]);
 
+  const describeTaskRisk = (risk: GanttTaskRisk | undefined) => {
+    if (!risk?.isAtRisk) return null;
+    if (risk.overdue) return t('ganttRiskOverdue');
+    if (risk.blockedByOpen > 0) return t('ganttRiskBlocked');
+    return t('ganttRiskLateDependency');
+  };
+
   const filteredTasks = useMemo(() => {
     if (mode !== 'gantt' || ganttRiskFilterMode === 'all') return baseFilteredTasks;
     return baseFilteredTasks.filter((task) => ganttRiskByTaskId.get(task.id)?.isAtRisk);
@@ -2048,6 +2055,8 @@ export function ProjectScheduleCanvas({
                     const primaryTask = row.tasks[0];
                     if (!primaryTask) return null;
                     const fallbackName = primaryTask.title.trim() || t('untitledTask');
+                    const primaryTaskRisk = ganttRiskByTaskId.get(primaryTask.id);
+                    const primaryTaskRiskLabel = describeTaskRisk(primaryTaskRisk);
                     return (
                       <div
                         key={`${lane.id}-row-${row.top}`}
@@ -2058,7 +2067,9 @@ export function ProjectScheduleCanvas({
                         <div className="flex h-full items-center gap-2 px-3">
                           <button
                             type="button"
-                            className="truncate text-left text-sm hover:underline"
+                            className={`truncate text-left text-sm hover:underline ${
+                              mode === 'timeline' && primaryTaskRisk?.isAtRisk ? 'text-destructive' : ''
+                            }`}
                             onClick={() => setSelectedTaskId(primaryTask.id)}
                             data-testid={`timeline-task-${primaryTask.id}`}
                           >
@@ -2093,12 +2104,24 @@ export function ProjectScheduleCanvas({
                                   : t('ganttRiskLateDependency')}
                             </Badge>
                           ) : null}
+                          {mode === 'timeline' && row.tasks.length === 1 && primaryTaskRiskLabel ? (
+                            <Badge
+                              variant="destructive"
+                              className="h-5 px-1.5 text-[10px]"
+                              data-testid={`timeline-risk-badge-${primaryTask.id}`}
+                              title={primaryTaskRiskLabel}
+                            >
+                              {primaryTaskRiskLabel}
+                            </Badge>
+                          ) : null}
                         </div>
                         <div className="relative h-full border-l">
                           {row.tasks.map((task) => {
                             const fallbackTaskName = task.title.trim() || t('untitledTask');
                             const timelineBarStyle = resolveTimelineBarStyle(task, today);
                             const isCompleted = task.status === 'DONE';
+                            const taskRisk = ganttRiskByTaskId.get(task.id);
+                            const taskRiskLabel = describeTaskRisk(taskRisk);
                             const barLayout = timelineLayout.barsByTaskId[task.id];
                             const visibleBaselineStart = task.baselineStart && task.baselineStart < timeline.window.start
                               ? timeline.window.start
@@ -2113,6 +2136,10 @@ export function ProjectScheduleCanvas({
                               const isMilestone = task.type === 'MILESTONE' || dayDiff(task.timelineStart, task.timelineEnd) === 0;
                               const usesExternalLabel = !isMilestone && taskWidth < 88;
                               const clampedProgress = Math.max(0, Math.min(100, task.progressPercent ?? 0));
+                              const barBoxShadow = [
+                                mode === 'timeline' && taskRisk?.isAtRisk ? 'inset 3px 0 0 hsl(var(--destructive))' : null,
+                                dependencyDraft?.targetTaskId === task.id ? '0 0 0 2px hsl(var(--primary))' : null,
+                              ].filter(Boolean).join(', ') || undefined;
                               return (
                                 <div key={task.id} className="group/timeline-bar">
                                   {mode === 'gantt' && task.hasBaseline && task.baselineStart && task.baselineEnd ? (
@@ -2139,16 +2166,14 @@ export function ProjectScheduleCanvas({
                                             width: '14px',
                                             height: '14px',
                                             opacity: isCompleted ? 0.56 : 1,
+                                            boxShadow: barBoxShadow,
                                             ...timelineBarStyle,
                                           }
                                         : {
                                             left: `${taskLeft}px`,
                                             width: `${taskWidth}px`,
                                             opacity: isCompleted ? 0.56 : 1,
-                                            boxShadow:
-                                              dependencyDraft?.targetTaskId === task.id
-                                                ? '0 0 0 2px hsl(var(--primary))'
-                                                : undefined,
+                                            boxShadow: barBoxShadow,
                                             ...timelineBarStyle,
                                           }
                                     }
@@ -2185,8 +2210,10 @@ export function ProjectScheduleCanvas({
                                     onMouseLeave={() => setHoveredTaskId((current) => (current === task.id ? null : current))}
                                     data-testid={`timeline-bar-${task.id}`}
                                     data-timeline-task-id={task.id}
+                                    data-at-risk={taskRisk?.isAtRisk ? 'true' : 'false'}
+                                    data-risk-kind={taskRiskLabel ?? 'none'}
                                     data-connection-target={dependencyDraft?.targetTaskId === task.id ? 'true' : 'false'}
-                                    title={`${task.timelineStart.toLocaleDateString()} - ${task.timelineEnd.toLocaleDateString()}`}
+                                    title={`${task.timelineStart.toLocaleDateString()} - ${task.timelineEnd.toLocaleDateString()}${taskRiskLabel ? ` • ${taskRiskLabel}` : ''}`}
                                   >
                                     {!isMilestone ? (
                                       <span

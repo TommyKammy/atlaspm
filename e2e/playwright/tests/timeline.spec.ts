@@ -168,3 +168,61 @@ test('timeline can create dependency from connector handle drag', async ({ page 
     })
     .toBe(true);
 });
+
+test('timeline highlights dependency risks without opening task details', async ({ page }) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-risk-${now}`;
+  const email = `e2e-timeline-risk-${now}@example.com`;
+
+  await page.goto('/login');
+  await page.fill('input[placeholder="OIDC sub"]', sub);
+  await page.fill('input[placeholder="Email"]', email);
+  await page.click('button:has-text("Dev Login")');
+  await page.waitForURL('**/');
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Risk ${now}`,
+  });
+  const projectId = project.id as string;
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+
+  const blockerStart = new Date();
+  blockerStart.setHours(0, 0, 0, 0);
+  const blockerEnd = new Date(blockerStart);
+  blockerEnd.setDate(blockerEnd.getDate() + 5);
+
+  const blockedStart = new Date(blockerStart);
+  blockedStart.setDate(blockedStart.getDate() + 1);
+  const blockedEnd = new Date(blockerStart);
+  blockedEnd.setDate(blockedEnd.getDate() + 2);
+
+  const blocker = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Timeline Blocker ${now}`,
+    status: 'IN_PROGRESS',
+    startAt: blockerStart.toISOString(),
+    dueAt: blockerEnd.toISOString(),
+  });
+  const blocked = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Timeline Blocked ${now}`,
+    status: 'TODO',
+    startAt: blockedStart.toISOString(),
+    dueAt: blockedEnd.toISOString(),
+  });
+  await api(`/tasks/${blocked.id}/dependencies`, token, 'POST', {
+    dependsOnId: blocker.id,
+    type: 'BLOCKS',
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await expect(page.locator(`[data-testid="timeline-risk-badge-${blocked.id}"]`)).toBeVisible();
+  await expect(page.locator(`[data-testid="timeline-bar-${blocked.id}"]`)).toHaveAttribute('data-at-risk', 'true');
+  await expect(page.locator(`[data-testid="timeline-bar-${blocked.id}"]`)).toHaveAttribute('data-risk-kind', /open blockers|late blockers|未解決ブロッカー|期限遅延依存/);
+});
