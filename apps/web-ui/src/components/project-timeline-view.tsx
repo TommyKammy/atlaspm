@@ -285,16 +285,29 @@ export function ProjectTimelineView({
     enabled: Boolean(projectId),
   });
 
-  const timelineStorageKey = useMemo(
-    () => (meQuery.data?.id ? `${TIMELINE_VIEW_STORAGE_PREFIX}:${meQuery.data.id}:${projectId}:${mode}` : null),
-    [meQuery.data?.id, mode, projectId],
+  const timelineStorageBaseKey = useMemo(
+    () => (projectId ? `${TIMELINE_VIEW_STORAGE_PREFIX}:${projectId}:${mode}` : null),
+    [mode, projectId],
   );
+  const timelineStorageUserKey = useMemo(
+    () => (meQuery.data?.id && timelineStorageBaseKey ? `${timelineStorageBaseKey}:${meQuery.data.id}` : null),
+    [meQuery.data?.id, timelineStorageBaseKey],
+  );
+  const timelineStorageKey = timelineStorageUserKey ?? timelineStorageBaseKey;
+  const hasRestoredTimelinePreferences = useRef(false);
 
   useEffect(() => {
+    hasRestoredTimelinePreferences.current = false;
+  }, [timelineStorageBaseKey]);
+
+  useEffect(() => {
+    if (hasRestoredTimelinePreferences.current) return;
+    if (!timelineStorageBaseKey || typeof window === 'undefined') return;
     setPreferencesHydrated(false);
-    if (!timelineStorageKey || typeof window === 'undefined') return;
-    const raw = window.localStorage.getItem(timelineStorageKey);
-    if (raw) {
+    const preferenceKeys = [timelineStorageUserKey, timelineStorageBaseKey].filter((value): value is string => Boolean(value));
+    for (const key of preferenceKeys) {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) continue;
       try {
         const parsed = JSON.parse(raw) as {
           zoom?: TimelineZoom;
@@ -329,12 +342,14 @@ export function ProjectTimelineView({
         if (typeof parsed.ganttStrictMode === 'boolean') {
           setGanttStrictMode(parsed.ganttStrictMode);
         }
+        break;
       } catch {
         // Ignore malformed local preference state.
       }
     }
     setPreferencesHydrated(true);
-  }, [timelineStorageKey]);
+    hasRestoredTimelinePreferences.current = true;
+  }, [timelineStorageBaseKey, timelineStorageUserKey]);
 
   useEffect(() => {
     if (!timelineStorageKey || !preferencesHydrated || typeof window === 'undefined') return;
@@ -348,16 +363,24 @@ export function ProjectTimelineView({
       ganttStrictMode,
     };
     timelineViewStateRef.current = nextState;
-    window.localStorage.setItem(timelineStorageKey, JSON.stringify(nextState));
+    if (timelineStorageBaseKey) {
+      window.localStorage.setItem(timelineStorageBaseKey, JSON.stringify(nextState));
+    }
+    if (timelineStorageUserKey) {
+      window.localStorage.setItem(timelineStorageUserKey, JSON.stringify(nextState));
+    }
   }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, preferencesHydrated, scheduleFilter, sortMode, swimlane, timelineStorageKey, zoom]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const onBeforeUnload = () => {
-      if (!timelineStorageKey) return;
+      if (!timelineStorageBaseKey) return;
       const state = timelineViewStateRef.current;
       if (!state) return;
-      window.localStorage.setItem(timelineStorageKey, JSON.stringify(state));
+      window.localStorage.setItem(timelineStorageBaseKey, JSON.stringify(state));
+      if (timelineStorageUserKey) {
+        window.localStorage.setItem(timelineStorageUserKey, JSON.stringify(state));
+      }
     };
 
     window.addEventListener('beforeunload', onBeforeUnload);
