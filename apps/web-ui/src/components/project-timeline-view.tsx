@@ -540,6 +540,7 @@ export function ProjectScheduleCanvas({
       window.localStorage.setItem(timelineStorageUserKey, JSON.stringify(nextState));
     }
   }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, preferencesHydrated, scheduleFilter, sortMode, swimlane, timelineStorageBaseKey, timelineStorageUserKey, zoom]);
+  }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, preferencesHydrated, scheduleFilter, sortMode, swimlane, timelineStorageBaseKey, timelineStorageUserKey, zoom]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
