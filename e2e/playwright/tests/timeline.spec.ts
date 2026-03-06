@@ -273,8 +273,7 @@ test('timeline multi-select shifts multiple tasks together', async ({ page }) =>
   const firstBar = page.locator(`[data-testid="timeline-bar-${taskA.id}"]`);
   const secondBar = page.locator(`[data-testid="timeline-bar-${taskB.id}"]`);
   const firstBox = await firstBar.boundingBox();
-  const secondBox = await secondBar.boundingBox();
-  if (!firstBox || !secondBox) {
+  if (!firstBox) {
     throw new Error('Expected timeline bars to have bounds');
   }
 
@@ -311,4 +310,98 @@ test('timeline multi-select shifts multiple tasks together', async ({ page }) =>
       a: new Date(base.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
       b: new Date(taskBStart.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
     });
+});
+
+test('timeline working-days drag skips weekends and Alt keeps calendar-day placement', async ({ page }) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-working-days-${now}`;
+  const email = `e2e-timeline-working-days-${now}@example.com`;
+
+  await page.goto('/login');
+  await page.fill('input[placeholder="OIDC sub"]', sub);
+  await page.fill('input[placeholder="Email"]', email);
+  await page.click('button:has-text("Dev Login")');
+  await page.waitForURL('**/');
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Working Days ${now}`,
+  });
+  const projectId = project.id as string;
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+
+  const friday = new Date('2026-03-06T00:00:00.000Z');
+  const saturday = new Date('2026-03-07T00:00:00.000Z');
+  const monday = new Date('2026-03-09T00:00:00.000Z');
+
+  const taskA = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Timeline Working Days A ${now}`,
+    startAt: friday.toISOString(),
+    dueAt: friday.toISOString(),
+  });
+  const taskB = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Timeline Working Days B ${now}`,
+    startAt: friday.toISOString(),
+    dueAt: friday.toISOString(),
+  });
+
+  await api(`/projects/${projectId}/timeline/preferences/view-state/timeline`, token, 'PUT', {
+    zoom: 'day',
+    anchorDate: friday.toISOString(),
+    swimlane: 'section',
+    sortMode: 'manual',
+    scheduleFilter: 'scheduled',
+    workingDaysOnly: true,
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await expect(page.locator('[data-testid="timeline-working-days-toggle"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-testid="timeline-zoom-day"]')).toHaveAttribute('data-active', 'true');
+
+  const firstBar = page.locator(`[data-testid="timeline-bar-${taskA.id}"]`);
+  const secondBar = page.locator(`[data-testid="timeline-bar-${taskB.id}"]`);
+  const firstBox = await firstBar.boundingBox();
+  if (!firstBox) {
+    throw new Error('Expected timeline bars to have bounds');
+  }
+
+  const deltaX = 64;
+
+  await page.mouse.move(firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(firstBox.x + firstBox.width / 2 + deltaX, firstBox.y + firstBox.height / 2, { steps: 10 });
+  await page.mouse.up();
+
+  await expect
+    .poll(async () => {
+      const updated = await api(`/tasks/${taskA.id}`, token);
+      return updated.startAt as string;
+    })
+    .toBe(monday.toISOString());
+
+  const secondBox = await secondBar.boundingBox();
+  if (!secondBox) {
+    throw new Error('Expected second timeline bar to have bounds after rerender');
+  }
+
+  await page.keyboard.down('Alt');
+  await page.mouse.move(secondBox.x + secondBox.width / 2, secondBox.y + secondBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(secondBox.x + secondBox.width / 2 + deltaX, secondBox.y + secondBox.height / 2, { steps: 10 });
+  await page.mouse.up();
+  await page.keyboard.up('Alt');
+
+  await expect
+    .poll(async () => {
+      const updated = await api(`/tasks/${taskB.id}`, token);
+      return updated.startAt as string;
+    })
+    .toBe(saturday.toISOString());
 });

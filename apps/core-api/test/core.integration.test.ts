@@ -2727,6 +2727,7 @@ describe('Core API Integration', () => {
         swimlane: 'status',
         sortMode: 'dueAt',
         scheduleFilter: 'scheduled',
+        workingDaysOnly: true,
         ganttStrictMode: true,
       })
       .expect(200);
@@ -2736,6 +2737,7 @@ describe('Core API Integration', () => {
       swimlane: 'status',
       sortMode: 'dueAt',
       scheduleFilter: 'scheduled',
+      workingDaysOnly: true,
     });
     expect(timelineViewStateRes.body.ganttViewState).toBeNull();
 
@@ -2756,6 +2758,7 @@ describe('Core API Integration', () => {
       swimlane: 'status',
       sortMode: 'dueAt',
       scheduleFilter: 'scheduled',
+      workingDaysOnly: true,
     });
     expect(ganttViewStateRes.body.ganttViewState).toEqual({
       zoom: 'day',
@@ -2782,6 +2785,7 @@ describe('Core API Integration', () => {
       swimlane: 'status',
       sortMode: 'dueAt',
       scheduleFilter: 'scheduled',
+      workingDaysOnly: true,
     });
     expect(persistedPrefsRes.body.ganttViewState).toEqual({
       zoom: 'day',

@@ -38,6 +38,7 @@ type TimelineViewState = {
   swimlane?: TimelineSwimlane;
   sortMode?: TimelineSortMode;
   scheduleFilter?: TimelineScheduleFilter;
+  workingDaysOnly?: boolean;
   ganttRiskFilterMode?: GanttRiskFilterMode;
   ganttStrictMode?: boolean;
 };
@@ -64,6 +65,7 @@ type LocalTimelineViewStateSnapshot = {
   swimlane: TimelineSwimlane;
   sortMode: TimelineSortMode;
   scheduleFilter: TimelineScheduleFilter;
+  workingDaysOnly: boolean;
   ganttRiskFilterMode: GanttRiskFilterMode;
   ganttStrictMode: boolean;
 };
@@ -111,6 +113,39 @@ function dayNumber(date: Date): number {
 
 function dayDiff(from: Date, to: Date): number {
   return dayNumber(to) - dayNumber(from);
+}
+
+function isWeekend(date: Date): boolean {
+  const day = date.getUTCDay();
+  return day === 0 || day === 6;
+}
+
+function shiftIsoByBusinessDays(value: string | null | undefined, businessDays: number): string | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) return null;
+  if (!businessDays) return parsed.toISOString();
+  const step = businessDays > 0 ? 1 : -1;
+  let remaining = Math.abs(businessDays);
+  while (remaining > 0) {
+    parsed.setUTCDate(parsed.getUTCDate() + step);
+    if (!isWeekend(parsed)) {
+      remaining -= 1;
+    }
+  }
+  return parsed.toISOString();
+}
+
+function shiftTimelineIso(
+  value: string | null | undefined,
+  deltaDays: number,
+  workingDaysOnly: boolean,
+  useCalendarDays: boolean,
+): string | null {
+  if (!workingDaysOnly || useCalendarDays) {
+    return shiftIsoByDays(value, deltaDays);
+  }
+  return shiftIsoByBusinessDays(value, deltaDays);
 }
 
 function colorFromProjectId(projectId: string): { hue: number; saturation: number; lightness: number } {
@@ -385,6 +420,7 @@ function applyTimelineViewState(
     setSwimlane: (value: TimelineSwimlane) => void;
     setSortMode: (value: TimelineSortMode) => void;
     setScheduleFilter: (value: TimelineScheduleFilter) => void;
+    setWorkingDaysOnly: (value: boolean) => void;
     setGanttRiskFilterMode: (value: GanttRiskFilterMode) => void;
     setGanttStrictMode: (value: boolean) => void;
   },
@@ -407,6 +443,9 @@ function applyTimelineViewState(
   if (parsed.scheduleFilter === 'all' || parsed.scheduleFilter === 'scheduled' || parsed.scheduleFilter === 'unscheduled') {
     setters.setScheduleFilter(parsed.scheduleFilter);
   }
+  if (typeof parsed.workingDaysOnly === 'boolean') {
+    setters.setWorkingDaysOnly(parsed.workingDaysOnly);
+  }
   if (parsed.ganttRiskFilterMode === 'all' || parsed.ganttRiskFilterMode === 'risk') {
     setters.setGanttRiskFilterMode(parsed.ganttRiskFilterMode);
   }
@@ -426,6 +465,7 @@ function buildViewStateForMode(
         swimlane: snapshot.swimlane,
         sortMode: snapshot.sortMode,
         scheduleFilter: snapshot.scheduleFilter,
+        workingDaysOnly: snapshot.workingDaysOnly,
       }
     : {
         zoom: snapshot.zoom,
@@ -507,6 +547,7 @@ export function ProjectScheduleCanvas({
   const [swimlane, setSwimlane] = useState<TimelineSwimlane>('section');
   const [sortMode, setSortMode] = useState<TimelineSortMode>('manual');
   const [scheduleFilter, setScheduleFilter] = useState<TimelineScheduleFilter>('all');
+  const [workingDaysOnly, setWorkingDaysOnly] = useState(false);
   const [ganttRiskFilterMode, setGanttRiskFilterMode] = useState<GanttRiskFilterMode>('all');
   const [ganttStrictMode, setGanttStrictMode] = useState(false);
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
@@ -521,6 +562,7 @@ export function ProjectScheduleCanvas({
     originLaneId: string;
     dropLaneId: string | null;
     deltaDays: number;
+    useCalendarDays: boolean;
     moved: boolean;
   } | null>(null);
   const dragStateRef = useRef<{
@@ -532,6 +574,7 @@ export function ProjectScheduleCanvas({
     originLaneId: string;
     dropLaneId: string | null;
     deltaDays: number;
+    useCalendarDays: boolean;
     moved: boolean;
   } | null>(null);
   const [laneDragState, setLaneDragState] = useState<{ draggingLaneId: string; overLaneId: string | null } | null>(null);
@@ -642,6 +685,7 @@ export function ProjectScheduleCanvas({
         setSwimlane,
         setSortMode,
         setScheduleFilter,
+        setWorkingDaysOnly,
         setGanttRiskFilterMode,
         setGanttStrictMode,
       });
@@ -665,6 +709,7 @@ export function ProjectScheduleCanvas({
     swimlane,
     sortMode,
     scheduleFilter,
+    workingDaysOnly,
     ganttRiskFilterMode,
     ganttStrictMode,
   };
@@ -677,7 +722,7 @@ export function ProjectScheduleCanvas({
     if (timelineStorageUserKey) {
       window.localStorage.setItem(timelineStorageUserKey, JSON.stringify(nextState));
     }
-  }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, preferencesHydrated, scheduleFilter, sortMode, swimlane, timelineStorageBaseKey, timelineStorageUserKey, zoom]);
+  }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, preferencesHydrated, scheduleFilter, sortMode, swimlane, timelineStorageBaseKey, timelineStorageUserKey, workingDaysOnly, zoom]);
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const persistLatestViewState = () => {
@@ -719,6 +764,7 @@ export function ProjectScheduleCanvas({
         swimlane,
         sortMode,
         scheduleFilter,
+        workingDaysOnly,
         ganttRiskFilterMode,
         ganttStrictMode,
       };
@@ -742,6 +788,7 @@ export function ProjectScheduleCanvas({
         setSwimlane(context.previousLocalState.swimlane);
         setSortMode(context.previousLocalState.sortMode);
         setScheduleFilter(context.previousLocalState.scheduleFilter);
+        setWorkingDaysOnly(context.previousLocalState.workingDaysOnly);
         setGanttRiskFilterMode(context.previousLocalState.ganttRiskFilterMode);
         setGanttStrictMode(context.previousLocalState.ganttStrictMode);
       }
@@ -770,6 +817,7 @@ export function ProjectScheduleCanvas({
       swimlane,
       sortMode,
       scheduleFilter,
+      workingDaysOnly,
       ganttRiskFilterMode,
       ganttStrictMode,
     });
@@ -791,7 +839,7 @@ export function ProjectScheduleCanvas({
         saveViewStateTimerRef.current = null;
       }
     };
-  }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, mode, preferencesHydrated, scheduleFilter, sortMode, swimlane, zoom]);
+  }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, mode, preferencesHydrated, scheduleFilter, sortMode, swimlane, workingDaysOnly, zoom]);
 
   const zoomConfig = TIMELINE_ZOOM_CONFIG[zoom];
   const effectiveSwimlane: TimelineSwimlane = mode === 'timeline' ? swimlane : 'section';
@@ -1571,6 +1619,7 @@ export function ProjectScheduleCanvas({
     taskId: string,
     taskIds: string[],
     deltaDays: number,
+    useCalendarDays: boolean,
     originLaneId: string,
     dropLaneId: string | null,
   ) => {
@@ -1578,8 +1627,8 @@ export function ProjectScheduleCanvas({
     if (!task) return;
     if (taskIds.some((selectedTaskId) => rescheduleInFlightTaskIdsRef.current.has(selectedTaskId))) return;
 
-    const startAt = shiftIsoByDays(task.startAt, deltaDays);
-    const dueAt = shiftIsoByDays(task.dueAt, deltaDays);
+    const startAt = shiftTimelineIso(task.startAt, deltaDays, workingDaysOnly, useCalendarDays);
+    const dueAt = shiftTimelineIso(task.dueAt, deltaDays, workingDaysOnly, useCalendarDays);
     const hasScheduleMove = Boolean(deltaDays) && Boolean(startAt || dueAt);
     if (taskIds.length > 1) {
       if (!hasScheduleMove) return;
@@ -1589,8 +1638,8 @@ export function ProjectScheduleCanvas({
           if (!selectedTask) return null;
           return {
             taskId: selectedTaskId,
-            startAt: shiftIsoByDays(selectedTask.startAt, deltaDays),
-            dueAt: shiftIsoByDays(selectedTask.dueAt, deltaDays),
+            startAt: shiftTimelineIso(selectedTask.startAt, deltaDays, workingDaysOnly, useCalendarDays),
+            dueAt: shiftTimelineIso(selectedTask.dueAt, deltaDays, workingDaysOnly, useCalendarDays),
             version: selectedTask.version,
           };
         })
@@ -1702,7 +1751,14 @@ export function ProjectScheduleCanvas({
     timelineMoveTask.mutate(timelineMovePayload);
   };
 
-  const beginBarDrag = (taskId: string, pointerId: number, originX: number, originY: number, originLaneId: string) => {
+  const beginBarDrag = (
+    taskId: string,
+    pointerId: number,
+    originX: number,
+    originY: number,
+    originLaneId: string,
+    useCalendarDays: boolean,
+  ) => {
     const taskIds =
       selectedTimelineTaskIds.includes(taskId) && selectedTimelineTaskIds.length > 1
         ? selectedTimelineTaskIds
@@ -1716,13 +1772,14 @@ export function ProjectScheduleCanvas({
       originLaneId,
       dropLaneId: originLaneId,
       deltaDays: 0,
+      useCalendarDays,
       moved: false,
     };
     dragStateRef.current = next;
     setDragState(next);
   };
 
-  const updateBarDrag = (pointerId: number, clientX: number, clientY: number) => {
+  const updateBarDrag = (pointerId: number, clientX: number, clientY: number, useCalendarDays: boolean) => {
     const current = dragStateRef.current;
     if (!current || current.pointerId !== pointerId) return;
     const deltaPx = clientX - current.originX;
@@ -1738,13 +1795,18 @@ export function ProjectScheduleCanvas({
         dropLaneId = resolvedLaneId;
       }
     }
-    if (deltaDays === current.deltaDays && moved === current.moved && dropLaneId === current.dropLaneId) return;
-    const next = { ...current, deltaDays, moved, dropLaneId };
+    if (
+      deltaDays === current.deltaDays
+      && moved === current.moved
+      && dropLaneId === current.dropLaneId
+      && useCalendarDays === current.useCalendarDays
+    ) return;
+    const next = { ...current, deltaDays, moved, dropLaneId, useCalendarDays };
     dragStateRef.current = next;
     setDragState(next);
   };
 
-  const finishBarDrag = (pointerId: number, clientX?: number, clientY?: number) => {
+  const finishBarDrag = (pointerId: number, clientX?: number, clientY?: number, useCalendarDays?: boolean) => {
     const current = dragStateRef.current;
     if (!current || current.pointerId !== pointerId) return;
     const finalDropLaneId =
@@ -1759,6 +1821,7 @@ export function ProjectScheduleCanvas({
       current.taskId,
       current.taskIds,
       current.deltaDays,
+      useCalendarDays ?? current.useCalendarDays,
       current.originLaneId,
       current.taskIds.length > 1 ? current.originLaneId : finalDropLaneId,
     );
@@ -1985,8 +2048,21 @@ export function ProjectScheduleCanvas({
               </Button>
             </div>
 
+            <Button
+              type="button"
+              size="sm"
+              variant={workingDaysOnly ? 'default' : 'outline'}
+              className="h-7 px-2 text-xs"
+              data-testid="timeline-working-days-toggle"
+              data-active={workingDaysOnly ? 'true' : 'false'}
+              onClick={() => setWorkingDaysOnly((current) => !current)}
+              title={t('timelineWorkingDaysHint')}
+            >
+              {t('timelineWorkingDays')}
+            </Button>
+
             <p className="text-xs text-muted-foreground" data-testid="timeline-drag-hint">
-              {t('timelineDragHint')}
+              {workingDaysOnly ? t('timelineDragWorkingDaysHint') : t('timelineDragHint')}
             </p>
             {selectedTimelineTaskIds.length > 0 ? (
               <div className="flex items-center gap-2">
@@ -2419,9 +2495,14 @@ export function ProjectScheduleCanvas({
                             if (task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd) {
                               if (!barLayout) return null;
                               const taskWidth = barLayout.width;
+                              const previewStartAt = shiftTimelineIso(task.startAt, dragState?.taskIds.includes(task.id) ? dragState.deltaDays : 0, workingDaysOnly, dragState?.useCalendarDays ?? false);
+                              const previewStartDate = previewStartAt ? startOfDay(new Date(previewStartAt)) : null;
+                              const previewDeltaDays = previewStartDate && task.timelineStart
+                                ? dayDiff(task.timelineStart, previewStartDate)
+                                : (dragState?.taskIds.includes(task.id) ? dragState.deltaDays : 0);
                               const taskLeft = Math.max(
                                 0,
-                                barLayout.left + (dragState?.taskIds.includes(task.id) ? dragState.deltaDays * zoomConfig.dayColWidth : 0),
+                                barLayout.left + previewDeltaDays * zoomConfig.dayColWidth,
                               );
                               const isMilestone = task.type === 'MILESTONE' || dayDiff(task.timelineStart, task.timelineEnd) === 0;
                               const usesExternalLabel = !isMilestone && taskWidth < 88;
@@ -2496,20 +2577,20 @@ export function ProjectScheduleCanvas({
                                       if (!selectedTimelineTaskIds.includes(task.id)) {
                                         setSelectedTimelineTaskIds([task.id]);
                                       }
-                                      beginBarDrag(task.id, event.pointerId, event.clientX, event.clientY, lane.id);
+                                      beginBarDrag(task.id, event.pointerId, event.clientX, event.clientY, lane.id, event.altKey);
                                       event.currentTarget.setPointerCapture(event.pointerId);
                                     }}
                                     onPointerMove={(event) => {
-                                      updateBarDrag(event.pointerId, event.clientX, event.clientY);
+                                      updateBarDrag(event.pointerId, event.clientX, event.clientY, event.altKey);
                                     }}
                                     onPointerUp={(event) => {
-                                      finishBarDrag(event.pointerId, event.clientX, event.clientY);
+                                      finishBarDrag(event.pointerId, event.clientX, event.clientY, event.altKey);
                                       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
                                         event.currentTarget.releasePointerCapture(event.pointerId);
                                       }
                                     }}
                                     onPointerCancel={(event) => {
-                                      finishBarDrag(event.pointerId, event.clientX, event.clientY);
+                                      finishBarDrag(event.pointerId, event.clientX, event.clientY, event.altKey);
                                       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
                                         event.currentTarget.releasePointerCapture(event.pointerId);
                                       }

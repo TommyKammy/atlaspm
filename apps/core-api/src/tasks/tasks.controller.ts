@@ -279,6 +279,10 @@ class PutTimelineViewStateDto {
   scheduleFilter?: 'all' | 'scheduled' | 'unscheduled';
 
   @IsOptional()
+  @IsBoolean()
+  workingDaysOnly?: boolean;
+
+  @IsOptional()
   @IsIn(['all', 'risk'])
   ganttRiskFilterMode?: 'all' | 'risk';
 
@@ -3044,6 +3048,9 @@ export class TasksController {
           throw new BadRequestException(`scheduleFilter must be one of: ${TIMELINE_SCHEDULE_FILTER_VALUES.join(', ')}`);
         }
         normalized.scheduleFilter = body.scheduleFilter;
+      }
+      if (typeof body.workingDaysOnly === 'boolean') {
+        normalized.workingDaysOnly = body.workingDaysOnly;
       }
     }
 
