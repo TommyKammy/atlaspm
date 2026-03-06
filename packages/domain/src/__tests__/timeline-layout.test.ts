@@ -113,6 +113,40 @@ test('buildTimelineLanes respects preferred section order', () => {
   );
 });
 
+test('buildTimelineLanes keeps empty sections visible and ordered by preference', () => {
+  const tasks: TaskInput[] = [
+    {
+      id: 'task-1',
+      title: 'Design task',
+      sectionId: 'design',
+      assigneeUserId: null,
+      status: 'TODO',
+      hasSchedule: false,
+      inWindow: false,
+      timelineStart: null,
+      timelineEnd: null,
+    },
+  ];
+
+  const lanes = buildTimelineLanes({
+    swimlane: 'section',
+    tasks,
+    sections,
+    membersById: {},
+    preferredLaneOrder: ['section:default', 'section:design'],
+    defaultSectionLabel: 'Tasks',
+    unassignedLabel: 'Unassigned',
+  });
+
+  assert.deepEqual(
+    lanes.map((lane) => ({ id: lane.id, taskCount: lane.tasks.length })),
+    [
+      { id: 'section:default', taskCount: 0 },
+      { id: 'section:design', taskCount: 1 },
+    ],
+  );
+});
+
 test('buildTimelineLanes groups status lanes in fixed workflow order', () => {
   const tasks: TaskInput[] = [
     {
@@ -210,7 +244,6 @@ test('buildTimelineLayout calculates row and bar positions', () => {
   });
 
   const designLane = layout.lanesWithRows.find((lane) => lane.lane.id === 'section:design');
-
   assert.equal(layout.bodyHeight, 104);
   assert.equal(layout.totalRowCount, 3);
   assert.deepEqual(layout.taskRowsById['task-1'], { top: 64, height: 40 });
