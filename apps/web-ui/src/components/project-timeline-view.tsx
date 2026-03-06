@@ -1359,7 +1359,7 @@ export function ProjectScheduleCanvas({
                         }
                         event.preventDefault();
                         if (Array.from(event.dataTransfer.types).includes(UNSCHEDULED_TASK_DND_TYPE)) return;
-                        if (laneDragState.overLaneId !== lane.id) {
+                        if (laneDragState?.overLaneId !== lane.id) {
                           setLaneDragState((current) => (current ? { ...current, overLaneId: lane.id } : current));
                         }
                       }}
