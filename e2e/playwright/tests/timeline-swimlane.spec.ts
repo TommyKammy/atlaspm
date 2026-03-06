@@ -261,6 +261,89 @@ test('timeline supports swimlane toggle and due-date sort without affecting gant
   await expect(page.locator('[data-testid="timeline-schedule-filter-toggle"]')).toHaveCount(0);
 });
 
+test('timeline uses local transient state before saved default and falls back to section', async ({
+  page,
+  browser,
+}) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-default-${now}`;
+  const email = `${sub}@example.com`;
+
+  await login(page, sub, email);
+
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Default ${now}`,
+  });
+  const projectId = project.id as string;
+  const sections = await api(`/projects/${projectId}/sections`, token);
+  const defaultSection = sections.find((section: { isDefault?: boolean }) => section.isDefault) ?? sections[0];
+
+  await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: defaultSection.id,
+    title: `Timeline Default Task ${now}`,
+    startAt: dayIso(1),
+    dueAt: dayIso(2),
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await expect(page.locator('[data-testid="timeline-swimlane-section"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await expect(page.locator('[data-testid="timeline-save-default"]')).toBeDisabled();
+
+  await page.click('[data-testid="timeline-swimlane-status"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await expect(page.locator('[data-testid="timeline-save-default"]')).toBeEnabled();
+
+  await page.reload();
+  await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+
+  const freshContext = await browser.newContext();
+  const freshPage = await freshContext.newPage();
+  await login(freshPage, sub, email);
+  await freshPage.goto(`/projects/${projectId}?view=timeline`);
+  await expect(freshPage.locator('[data-testid="timeline-swimlane-section"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await expect(freshPage.locator('[data-testid="timeline-save-default"]')).toBeDisabled();
+
+  await freshPage.click('[data-testid="timeline-swimlane-status"]');
+  const saveResponse = freshPage.waitForResponse((response) =>
+    response.url().includes(`/projects/${projectId}/timeline/preferences/view-state/timeline`) &&
+    response.request().method() === 'PUT' &&
+    response.ok(),
+  );
+  await freshPage.click('[data-testid="timeline-save-default"]');
+  await saveResponse;
+  await expect(freshPage.locator('[data-testid="timeline-save-default"]')).toBeDisabled();
+  await freshContext.close();
+
+  const savedDefaultContext = await browser.newContext();
+  const savedDefaultPage = await savedDefaultContext.newPage();
+  await login(savedDefaultPage, sub, email);
+  await savedDefaultPage.goto(`/projects/${projectId}?view=timeline`);
+  await expect(savedDefaultPage.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await savedDefaultContext.close();
+});
+
 test('timeline assignee swimlane reorder persists after reload', async ({ page }) => {
   const now = Date.now();
   const sub = `e2e-timeline-reorder-${now}`;

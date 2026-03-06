@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 const API = process.env.E2E_CORE_API_URL ?? 'http://localhost:3001';
 
@@ -21,6 +21,28 @@ function dayIso(deltaDays: number) {
   date.setUTCHours(0, 0, 0, 0);
   date.setUTCDate(date.getUTCDate() + deltaDays);
   return date.toISOString();
+}
+
+async function clearTimelineViewState(
+  page: Page,
+  projectId: string,
+  userId: string,
+  mode: 'timeline' | 'gantt',
+) {
+  await page.evaluate(
+    ({ keys }) => {
+      for (const key of keys) {
+        window.localStorage.removeItem(key);
+      }
+    },
+    {
+      keys: [
+        `atlaspm:timeline-view:${projectId}:${mode}`,
+        `atlaspm:timeline-view:${projectId}:${mode}:${userId}`,
+        `atlaspm:timeline-view:${userId}:${projectId}:${mode}`,
+      ],
+    },
+  );
 }
 
 test('timeline and gantt controls stay isolated while list ordering remains stable', async ({ page }) => {
@@ -90,12 +112,15 @@ test('timeline and gantt controls stay isolated while list ordering remains stab
   await expect(page.locator('[data-testid="gantt-filter-risk"]')).toHaveAttribute('data-active', 'true');
   await page.click('[data-testid="gantt-strict-mode"]');
   await expect(page.locator('[data-testid="gantt-strict-mode"]')).toHaveAttribute('data-active', 'true');
-  await page.waitForResponse((response) =>
-    response.url().includes(`/projects/${projectId}/timeline/preferences/view-state/gantt`)
-    && response.request().method() === 'PUT'
-    && response.ok(),
+  await expect(page.locator('[data-testid="timeline-save-default"]')).toBeEnabled();
+  const saveResponse = page.waitForResponse((response) =>
+    response.url().includes(`/projects/${projectId}/timeline/preferences/view-state/gantt`) &&
+    response.request().method() === 'PUT' &&
+    response.ok(),
   );
-  await page.evaluate((key) => window.localStorage.removeItem(key), `atlaspm:gantt-shell:${sub}:${projectId}`);
+  await page.click('[data-testid="timeline-save-default"]');
+  await saveResponse;
+  await clearTimelineViewState(page, projectId, sub, 'gantt');
 
   await page.reload();
   await expect(page.locator('[data-testid="gantt-filter-risk"]')).toHaveAttribute('data-active', 'true');
