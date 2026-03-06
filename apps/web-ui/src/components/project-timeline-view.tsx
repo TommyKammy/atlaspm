@@ -509,7 +509,7 @@ export function ProjectScheduleCanvas({
   ]);
 
   useEffect(() => {
-    if (!timelineStorageKey || !preferencesHydrated || typeof window === 'undefined') return;
+    if (!timelineStorageKey || typeof window === 'undefined') return;
     window.localStorage.setItem(
       timelineStorageKey,
       JSON.stringify({
@@ -522,7 +522,7 @@ export function ProjectScheduleCanvas({
         ganttStrictMode,
       }),
     );
-  }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, preferencesHydrated, scheduleFilter, sortMode, swimlane, timelineStorageKey, zoom]);
+  }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, scheduleFilter, sortMode, swimlane, timelineStorageKey, zoom]);
 
   const saveViewStateMutation = useMutation({
     mutationFn: async ({
