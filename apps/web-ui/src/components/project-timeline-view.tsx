@@ -1727,6 +1727,7 @@ export function ProjectScheduleCanvas({
                           {row.tasks.map((task) => {
                             const fallbackTaskName = task.title.trim() || t('untitledTask');
                             const timelineBarStyle = resolveTimelineBarStyle(task, today);
+                            const isCompleted = task.status === 'DONE';
                             const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
                               ? timeline.window.start
                               : task.timelineStart;
@@ -1740,6 +1741,14 @@ export function ProjectScheduleCanvas({
                               ? timeline.window.end
                               : task.baselineEnd;
                             if (task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd) {
+                              const taskWidth = Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1)
+                                * zoomConfig.dayColWidth;
+                              const taskLeft = Math.max(
+                                0,
+                                Math.max(0, dayDiff(timeline.window.start, visibleStart ?? task.timelineStart)) * zoomConfig.dayColWidth
+                                  + (dragState?.taskId === task.id ? dragState.deltaDays * zoomConfig.dayColWidth : 0),
+                              );
+                              const isMilestone = task.type === 'MILESTONE' || dayDiff(task.timelineStart, task.timelineEnd) === 0;
                               return (
                                 <div key={task.id}>
                                   {mode === 'gantt' && task.hasBaseline && task.baselineStart && task.baselineEnd ? (
@@ -1754,18 +1763,27 @@ export function ProjectScheduleCanvas({
                                   ) : null}
                                   <button
                                     type="button"
-                                    className={`absolute top-1/2 h-6 -translate-y-1/2 rounded px-2 text-left text-[11px] shadow-sm transition-[background-color,border-color,color,opacity] ${
-                                      dragState?.taskId === task.id && dragState.moved ? 'cursor-grabbing opacity-90' : 'cursor-grab'
-                                    }`}
-                                    style={{
-                                      left: `${Math.max(
-                                        0,
-                                        Math.max(0, dayDiff(timeline.window.start, visibleStart ?? task.timelineStart)) * zoomConfig.dayColWidth
-                                          + (dragState?.taskId === task.id ? dragState.deltaDays * zoomConfig.dayColWidth : 0),
-                                      )}px`,
-                                      width: `${Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1) * zoomConfig.dayColWidth}px`,
-                                      ...timelineBarStyle,
-                                    }}
+                                    className={`absolute top-1/2 text-left text-[11px] shadow-sm transition-[background-color,border-color,color,opacity] ${
+                                      isMilestone
+                                        ? 'h-3.5 w-3.5 -translate-y-1/2 rotate-45 rounded-[2px]'
+                                        : 'h-6 -translate-y-1/2 rounded px-2'
+                                    } ${dragState?.taskId === task.id && dragState.moved ? 'cursor-grabbing opacity-90' : 'cursor-grab'}`}
+                                    style={
+                                      isMilestone
+                                        ? {
+                                            left: `${Math.max(0, taskLeft + taskWidth / 2 - 7)}px`,
+                                            width: '14px',
+                                            height: '14px',
+                                            opacity: isCompleted ? 0.56 : 1,
+                                            ...timelineBarStyle,
+                                          }
+                                        : {
+                                            left: `${taskLeft}px`,
+                                            width: `${taskWidth}px`,
+                                            opacity: isCompleted ? 0.56 : 1,
+                                            ...timelineBarStyle,
+                                          }
+                                    }
                                     onClick={() => {
                                       if (suppressClickTaskIdRef.current === task.id) {
                                         suppressClickTaskIdRef.current = null;
@@ -1798,8 +1816,27 @@ export function ProjectScheduleCanvas({
                                     data-testid={`timeline-bar-${task.id}`}
                                     title={`${task.timelineStart.toLocaleDateString()} - ${task.timelineEnd.toLocaleDateString()}`}
                                   >
-                                    <span className="block truncate">{fallbackTaskName}</span>
+                                    {isMilestone ? <span className="sr-only">{fallbackTaskName}</span> : null}
+                                    {!isMilestone ? (
+                                      <span className={`block truncate ${isCompleted ? 'line-through' : ''}`}>{fallbackTaskName}</span>
+                                    ) : null}
                                   </button>
+                                  {isMilestone ? (
+                                    <button
+                                      type="button"
+                                      className={`absolute top-1/2 -translate-y-1/2 text-left text-[11px] text-foreground ${isCompleted ? 'line-through opacity-60' : ''}`}
+                                      style={{ left: `${Math.max(0, taskLeft + taskWidth / 2 + 10)}px` }}
+                                      onClick={() => {
+                                        if (suppressClickTaskIdRef.current === task.id) {
+                                          suppressClickTaskIdRef.current = null;
+                                          return;
+                                        }
+                                        setSelectedTaskId(task.id);
+                                      }}
+                                    >
+                                      {fallbackTaskName}
+                                    </button>
+                                  ) : null}
                                 </div>
                               );
                             }
