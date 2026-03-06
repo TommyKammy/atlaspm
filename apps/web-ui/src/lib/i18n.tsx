@@ -602,7 +602,7 @@ const dictionaries: Record<Locale, Dictionary> = {
     timelineViewStateSaveFailed: 'タイムライン表示設定の保存に失敗しました。最新の表示に戻しました。',
     timelineScheduledTasks: '予定あり',
     timelineUnscheduled: '未設定',
-    timelineUnscheduledTrayHint: 'このタスクをタイムラインへドラッグして日付を割り当てます。',
+    timelineUnscheduledTrayHint: 'これらのタスクをタイムラインへドラッグして日付を割り当てます。',
     timelineDependencies: '依存関係',
     timelineZoomDay: '日',
     timelineZoomWeek: '週',
