@@ -68,6 +68,10 @@ type LocalTimelineViewStateSnapshot = {
   ganttStrictMode: boolean;
 };
 
+function getLegacyTimelineStorageKey(mode: TimelineMode, userId: string, projectId: string): string {
+  return `atlaspm:timeline-view:${userId}:${projectId}:${mode}`;
+}
+
 const TIMELINE_ZOOM_CONFIG: Record<TimelineZoom, { beforeDays: number; afterDays: number; stepDays: number; dayColWidth: number }> = {
   day: { beforeDays: 1, afterDays: 5, stepDays: 1, dayColWidth: 64 },
   week: { beforeDays: 7, afterDays: 21, stepDays: 7, dayColWidth: 36 },
@@ -566,7 +570,11 @@ export function ProjectScheduleCanvas({
     setPreferencesHydrated(false);
     let restoredLocalState: TimelineViewState | null = null;
     if (typeof window !== 'undefined') {
-      const preferenceKeys = [timelineStorageUserKey, timelineStorageBaseKey].filter((value): value is string => Boolean(value));
+      const preferenceKeys = [
+        timelineStorageUserKey,
+        timelineStorageBaseKey,
+        meQuery.data?.id ? getLegacyTimelineStorageKey(mode, meQuery.data.id, projectId) : null,
+      ].filter((value): value is string => Boolean(value));
       for (const key of preferenceKeys) {
         const raw = window.localStorage.getItem(key);
         if (!raw) continue;
