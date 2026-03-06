@@ -2459,3 +2459,18 @@
   - `cd e2e/playwright && E2E_BASE_URL=http://localhost:3102 pnpm exec playwright test tests/timeline-gantt-boundary.spec.ts tests/timeline.spec.ts --reporter=line --workers=1`
 - Risks/known gaps:
   - View-state persistence is currently debounced per change and server-first; explicit offline sync or retry queues remain out of scope for this wave.
+
+## 2026-03-06 - Issue #204: Add attribute-based Timeline bar color mapping
+- What changed:
+  - Updated `/Users/tomoakikawada/Dev/atlaspm-worktrees/timeline-p2-1/apps/web-ui/src/components/project-timeline-view.tsx` to derive timeline bar colors from task metadata instead of a single blue style.
+  - Added deterministic project-based accent fallback coloring, custom-field option color support, and status overrides for done, blocked, and overdue tasks.
+  - Pulled in timeline preference hydration hardening and empty section-lane ordering fixes so the color-mapping branch stays consistent with the stacked Timeline work.
+  - Updated `/Users/tomoakikawada/Dev/atlaspm-worktrees/timeline-p2-1/packages/domain/src/services/timeline-layout.ts` so section swimlanes retain empty lanes and the compact-row fallback branch is simplified.
+- Why:
+  - Issue #204 requires Timeline bars to encode more state than a single default color, and the branch also needed the already-reviewed Timeline preference and lane-order fixes to avoid regressions.
+- How tested (exact commands):
+  - `pnpm install --frozen-lockfile`
+  - `pnpm --filter @atlaspm/domain build`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+- Risks/known gaps:
+  - AtlasPM still lacks a persisted `project.color`, so default bar colors are derived from `projectId` until a first-class project color field exists.

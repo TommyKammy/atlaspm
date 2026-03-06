@@ -186,8 +186,7 @@ export function buildTimelineLanes<TTask extends TimelineLaneTaskInput>(
       id: `section:${section.id}`,
       label: section.isDefault ? input.defaultSectionLabel : section.name,
       tasks: bySection.get(section.id) ?? [],
-    }))
-    .filter((lane) => lane.tasks.length > 0);
+    }));
 
   return applyLaneOrder(lanes, preferredLaneOrder);
 }
@@ -231,8 +230,6 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
         } else {
           rowEndByIndex.push(taskEndDay);
         }
-      } else if (!input.compactRows) {
-        rowEndByIndex.push(Number.MAX_SAFE_INTEGER);
       } else {
         rowEndByIndex.push(Number.MAX_SAFE_INTEGER);
       }
