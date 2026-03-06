@@ -497,6 +497,7 @@ const MAX_DESCRIPTION_TEXT_LENGTH = 20_000;
 const MAX_COMMENT_BODY_LENGTH = 5000;
 const MAX_IMAGE_UPLOAD_BYTES = 5_000_000;
 const IMAGE_MIME_ALLOWLIST = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const TIMELINE_LANE_ORDER_BASE_LIMIT = 500;
 const TIMELINE_GROUP_BY_VALUES = ['section', 'assignee'] as const;
 const TIMELINE_VIEW_MODE_VALUES = ['timeline', 'gantt'] as const;
 const TIMELINE_ZOOM_VALUES = ['day', 'week', 'month'] as const;
@@ -656,9 +657,10 @@ export class TasksController {
   ) {
     await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
     const groupBy = this.parseTimelineGroupBy(rawGroupBy);
-    const normalizedLaneOrder = this.domain.normalizeTimelineLaneOrder(body.laneOrder);
 
     return this.prisma.$transaction(async (tx) => {
+      const maxLaneCount = await this.resolveTimelineLaneOrderLimit(tx, projectId, groupBy);
+      const normalizedLaneOrder = this.domain.normalizeTimelineLaneOrder(body.laneOrder, maxLaneCount);
       const before = await tx.projectTimelinePreference.findUnique({
         where: { projectId_userId: { projectId, userId: req.user.sub } },
       });
@@ -3001,6 +3003,37 @@ export class TasksController {
       return value as TimelineGroupBy;
     }
     throw new BadRequestException(`groupBy must be one of: ${TIMELINE_GROUP_BY_VALUES.join(', ')}`);
+  }
+
+  private async resolveTimelineLaneOrderLimit(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+    groupBy: TimelineGroupBy,
+  ): Promise<number> {
+    if (groupBy === 'section') {
+      return Math.max(TIMELINE_LANE_ORDER_BASE_LIMIT, await tx.section.count({ where: { projectId } }));
+    }
+
+    const [projectMembers, assignedUsers] = await Promise.all([
+      tx.projectMembership.findMany({
+        where: { projectId },
+        select: { userId: true },
+      }),
+      tx.task.findMany({
+        where: { projectId, assigneeUserId: { not: null } },
+        select: { assigneeUserId: true },
+        distinct: ['assigneeUserId'],
+      }),
+    ]);
+
+    const laneIds = new Set(projectMembers.map((member) => member.userId));
+    for (const task of assignedUsers) {
+      if (task.assigneeUserId) {
+        laneIds.add(task.assigneeUserId);
+      }
+    }
+
+    return Math.max(TIMELINE_LANE_ORDER_BASE_LIMIT, laneIds.size + 1);
   }
 
   private parseTimelineViewMode(value: string): TimelineViewMode {

@@ -19,6 +19,18 @@ test('normalizeTimelineLaneOrder rejects non-string values', () => {
   );
 });
 
+test('normalizeTimelineLaneOrder honors a custom lane limit', () => {
+  const laneOrder = normalizeTimelineLaneOrder(
+    ['section-a', 'section-b', 'section-c'],
+    3,
+  );
+  assert.deepEqual(laneOrder, ['section-a', 'section-b', 'section-c']);
+  assert.throws(
+    () => normalizeTimelineLaneOrder(['section-a', 'section-b', 'section-c', 'section-d'], 3),
+    DomainValidationError,
+  );
+});
+
 test('deriveTimelineDropSchedule keeps current duration when available', () => {
   const result = deriveTimelineDropSchedule({
     dropAt: new Date('2026-03-10T00:00:00.000Z'),

@@ -232,16 +232,25 @@ test('timeline supports swimlane toggle and due-date sort without affecting gant
     'true',
   );
   const assigneeLaneTestId = `timeline-lane-assignee-${sub}`;
-  await expect(page.locator('[data-testid^="timeline-lane-assignee-"]')).toHaveCount(1);
+  await expect(page.locator('[data-testid^="timeline-lane-assignee-"]')).toHaveCount(2);
   await expectHeaderOnlyRail(page, assigneeLaneTestId, [taskLate.title, taskEarly.title]);
+  await expectHeaderOnlyRail(page, 'timeline-lane-assignee-__unassigned__', [
+    taskLate.title,
+    taskEarly.title,
+  ]);
 
   await page.click('[data-testid="timeline-swimlane-status"]');
   await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute(
     'data-active',
     'true',
   );
-  await expect(page.locator('[data-testid^="timeline-lane-status-"]')).toHaveCount(2);
-  for (const laneTestId of ['timeline-lane-status-IN_PROGRESS', 'timeline-lane-status-BLOCKED']) {
+  await expect(page.locator('[data-testid^="timeline-lane-status-"]')).toHaveCount(4);
+  for (const laneTestId of [
+    'timeline-lane-status-TODO',
+    'timeline-lane-status-IN_PROGRESS',
+    'timeline-lane-status-DONE',
+    'timeline-lane-status-BLOCKED',
+  ]) {
     await expectHeaderOnlyRail(page, laneTestId, [taskLate.title, taskEarly.title]);
   }
 
@@ -512,13 +521,6 @@ test('timeline drag can move task across section and status lanes', async ({ pag
     startAt: dayIso(2),
     dueAt: dayIso(4),
   });
-  await api(`/projects/${projectId}/tasks`, token, 'POST', {
-    sectionId: sectionA.id,
-    title: `Status Anchor ${now}`,
-    status: 'IN_PROGRESS',
-    startAt: dayIso(2),
-    dueAt: dayIso(4),
-  });
 
   await page.goto(`/projects/${projectId}?view=timeline`);
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
@@ -541,6 +543,7 @@ test('timeline drag can move task across section and status lanes', async ({ pag
     'data-active',
     'true',
   );
+  await expect(page.locator('[data-testid="timeline-lane-status-IN_PROGRESS"]')).toBeVisible();
   await dragTimelineBarToLane(page, movableTask.id, 'timeline-lane-status-IN_PROGRESS');
   await expect
     .poll(async () => {
