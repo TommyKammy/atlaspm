@@ -208,10 +208,11 @@ test('buildTimelineLayout calculates row and bar positions', () => {
     taskRowHeight: 40,
   });
 
-  assert.equal(layout.bodyHeight, 72);
-  assert.equal(layout.totalRowCount, 2);
-  assert.deepEqual(layout.taskRowsById['task-1'], { top: 32, height: 40 });
-  assert.deepEqual(layout.barsByTaskId['task-1'], { left: 20, width: 60, y: 52 });
+  const designLane = layout.lanesWithRows.find((lane) => lane.lane.id === 'section:design');
+  assert.equal(layout.bodyHeight, 104);
+  assert.equal(layout.totalRowCount, 3);
+  assert.deepEqual(layout.taskRowsById['task-1'], { top: 64, height: 40 });
+  assert.deepEqual(layout.barsByTaskId['task-1'], { left: 20, width: 60, y: 84 });
 });
 
 test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () => {
@@ -271,10 +272,14 @@ test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () =
     compactRows: true,
   });
 
-  assert.equal(layout.bodyHeight, 112);
-  assert.equal(layout.totalRowCount, 3);
-  assert.equal(layout.lanesWithRows[0]?.rows.length, 2);
-  assert.deepEqual(layout.taskRowsById['task-1'], { top: 32, height: 40 });
-  assert.deepEqual(layout.taskRowsById['task-2'], { top: 32, height: 40 });
-  assert.deepEqual(layout.taskRowsById['task-3'], { top: 72, height: 40 });
+  const designLane = layout.lanesWithRows.find(
+    (lane) => lane.lane.id === 'section:design',
+  );
+
+  assert.equal(layout.bodyHeight, 144);
+  assert.equal(layout.totalRowCount, 4);
+  assert.equal(designLane?.rows.length, 2);
+  assert.deepEqual(layout.taskRowsById['task-1'], { top: 64, height: 40 });
+  assert.deepEqual(layout.taskRowsById['task-2'], { top: 64, height: 40 });
+  assert.deepEqual(layout.taskRowsById['task-3'], { top: 104, height: 40 });
 });
