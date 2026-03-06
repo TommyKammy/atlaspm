@@ -2474,7 +2474,6 @@
   - `pnpm --filter @atlaspm/web-ui type-check`
 - Risks/known gaps:
   - AtlasPM still lacks a persisted `project.color`, so default bar colors are derived from `projectId` until a first-class project color field exists.
-
 ## 2026-03-06 - Issue #205: Render milestone and completed Timeline states
 - What changed:
   - Updated `/Users/tomoakikawada/Dev/atlaspm-worktrees/timeline-p2-2/apps/web-ui/src/components/project-timeline-view.tsx` so milestone tasks render as diamonds and completed tasks fade/strike through in Timeline mode.
