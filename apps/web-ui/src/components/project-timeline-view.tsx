@@ -247,12 +247,19 @@ function applyTaskScheduleInGroups(
 function applyTaskTimelineMoveInGroups(
   groups: SectionTaskGroup[],
   taskId: string,
-  next: { startAt?: string | null; dueAt?: string | null; assigneeUserId?: string | null },
+  next: {
+    startAt?: string | null;
+    dueAt?: string | null;
+    assigneeUserId?: string | null;
+    sectionId?: string;
+    status?: Task['status'];
+  },
 ) {
-  return groups.map((group) => ({
+  let movedTask: Task | null = null;
+  const withoutTask = groups.map((group) => ({
     ...group,
-    tasks: group.tasks.map((task) => {
-      if (task.id !== taskId) return task;
+    tasks: group.tasks.filter((task) => {
+      if (task.id !== taskId) return true;
       const updatedTask: Task = { ...task };
       if (next.startAt !== undefined) {
         updatedTask.startAt = next.startAt;
@@ -263,9 +270,33 @@ function applyTaskTimelineMoveInGroups(
       if (next.assigneeUserId !== undefined) {
         updatedTask.assigneeUserId = next.assigneeUserId;
       }
-      return updatedTask;
+      if (next.sectionId !== undefined) {
+        updatedTask.sectionId = next.sectionId;
+      }
+      if (next.status !== undefined) {
+        updatedTask.status = next.status;
+        updatedTask.completedAt = next.status === 'DONE' ? task.completedAt ?? new Date().toISOString() : null;
+      }
+      movedTask = updatedTask;
+      return false;
     }),
   }));
+
+  if (!movedTask) return groups;
+  const finalizedTask: Task = movedTask;
+  if (next.sectionId === undefined || next.sectionId === finalizedTask.sectionId) {
+    return withoutTask.map((group) =>
+      group.section.id === finalizedTask.sectionId
+        ? { ...group, tasks: [...group.tasks, finalizedTask] }
+        : group,
+    );
+  }
+
+  return withoutTask.map((group) =>
+    group.section.id === next.sectionId
+      ? { ...group, tasks: [...group.tasks, finalizedTask] }
+      : group,
+  );
 }
 
 function parseAssigneeLaneId(laneId: string): string | null | undefined {
@@ -282,6 +313,20 @@ function deriveLaneIdForTask(task: TimelineTask, swimlane: TimelineSwimlane): st
     return `status:${task.status}`;
   }
   return `section:${task.sectionId}`;
+}
+
+function parseSectionLaneId(laneId: string): string | undefined {
+  if (!laneId.startsWith('section:')) return undefined;
+  return laneId.slice('section:'.length) || undefined;
+}
+
+function parseStatusLaneId(laneId: string): Task['status'] | undefined {
+  if (!laneId.startsWith('status:')) return undefined;
+  const raw = laneId.slice('status:'.length);
+  if (raw === 'TODO' || raw === 'IN_PROGRESS' || raw === 'DONE' || raw === 'BLOCKED') {
+    return raw;
+  }
+  return undefined;
 }
 
 function isLaneOrderGroupBy(value: TimelineSwimlane): value is TimelineLaneOrderGroupBy {
@@ -908,29 +953,41 @@ export function ProjectScheduleCanvas({
     mutationFn: async ({
       taskId,
       assigneeUserId,
+      sectionId,
+      status,
       startAt,
       dueAt,
       version,
     }: {
       taskId: string;
       assigneeUserId?: string | null;
+      sectionId?: string;
+      status?: Task['status'];
       startAt?: string | null;
       dueAt?: string | null;
       version: number;
     }) =>
       (await api(`/tasks/${taskId}/timeline-move`, {
         method: 'PATCH',
-        body: { assigneeUserId, startAt, dueAt, version },
+        body: { assigneeUserId, sectionId, status, startAt, dueAt, version },
       })) as Task,
-    onMutate: async ({ taskId, assigneeUserId, startAt, dueAt }) => {
+    onMutate: async ({ taskId, assigneeUserId, sectionId, status, startAt, dueAt }) => {
       setRescheduleNotice(null);
       await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
       await queryClient.cancelQueries({ queryKey: queryKeys.taskDetail(taskId) });
       const previous = queryClient.getQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId));
       const previousTaskDetail = queryClient.getQueryData<Task>(queryKeys.taskDetail(taskId));
       if (previous) {
-        const optimisticMove: { startAt?: string | null; dueAt?: string | null; assigneeUserId?: string | null } = {};
+        const optimisticMove: {
+          startAt?: string | null;
+          dueAt?: string | null;
+          assigneeUserId?: string | null;
+          sectionId?: string;
+          status?: Task['status'];
+        } = {};
         if (assigneeUserId !== undefined) optimisticMove.assigneeUserId = assigneeUserId;
+        if (sectionId !== undefined) optimisticMove.sectionId = sectionId;
+        if (status !== undefined) optimisticMove.status = status;
         if (startAt !== undefined) optimisticMove.startAt = startAt;
         if (dueAt !== undefined) optimisticMove.dueAt = dueAt;
         queryClient.setQueryData<SectionTaskGroup[]>(
@@ -942,6 +999,13 @@ export function ProjectScheduleCanvas({
         const optimisticTaskDetail: Task = { ...previousTaskDetail };
         if (assigneeUserId !== undefined) {
           optimisticTaskDetail.assigneeUserId = assigneeUserId;
+        }
+        if (sectionId !== undefined) {
+          optimisticTaskDetail.sectionId = sectionId;
+        }
+        if (status !== undefined) {
+          optimisticTaskDetail.status = status;
+          optimisticTaskDetail.completedAt = status === 'DONE' ? previousTaskDetail.completedAt ?? new Date().toISOString() : null;
         }
         if (startAt !== undefined) {
           optimisticTaskDetail.startAt = startAt;
@@ -961,15 +1025,15 @@ export function ProjectScheduleCanvas({
         queryClient.setQueryData<Task>(queryKeys.taskDetail(variables.taskId), context.previousTaskDetail);
       }
       const isDateChange = variables.startAt !== undefined || variables.dueAt !== undefined;
-      const isAssigneeChange = variables.assigneeUserId !== undefined;
-      const conflictKey = isDateChange && !isAssigneeChange
+      const isLaneChange = variables.assigneeUserId !== undefined || variables.sectionId !== undefined || variables.status !== undefined;
+      const conflictKey = isDateChange && !isLaneChange
         ? 'timelineRescheduleConflict'
-        : isAssigneeChange && !isDateChange
+        : isLaneChange && !isDateChange
           ? 'timelineMoveConflict'
           : 'timelineMoveAndRescheduleConflict';
-      const failedKey = isDateChange && !isAssigneeChange
+      const failedKey = isDateChange && !isLaneChange
         ? 'timelineRescheduleFailed'
-        : isAssigneeChange && !isDateChange
+        : isLaneChange && !isDateChange
           ? 'timelineMoveFailed'
           : 'timelineMoveAndRescheduleFailed';
       if (isApiConflictError(error)) {
@@ -1078,7 +1142,34 @@ export function ProjectScheduleCanvas({
     zoom,
   ]);
 
-  const resolveLaneIdAtClientY = (clientY: number): string | null => {
+  const laneIdFromTestId = (testId: string): string | null => {
+    if (testId.startsWith('timeline-lane-section-')) {
+      return `section:${testId.slice('timeline-lane-section-'.length)}`;
+    }
+    if (testId.startsWith('timeline-lane-assignee-')) {
+      return `assignee:${testId.slice('timeline-lane-assignee-'.length)}`;
+    }
+    if (testId.startsWith('timeline-lane-status-')) {
+      return `status:${testId.slice('timeline-lane-status-'.length)}`;
+    }
+    return null;
+  };
+
+  const resolveLaneIdAtClientPosition = (clientX: number, clientY: number): string | null => {
+    if (typeof document !== 'undefined') {
+      const hoveredElements = document.elementsFromPoint(clientX, clientY);
+      for (const element of hoveredElements) {
+        if (!(element instanceof HTMLElement)) continue;
+        const laneHost = element.closest<HTMLElement>('[data-timeline-lane-id], [data-testid^="timeline-lane-"]');
+        if (!laneHost) continue;
+        const explicitLaneId = laneHost.dataset.timelineLaneId;
+        if (explicitLaneId) return explicitLaneId;
+        const testId = laneHost.dataset.testid ?? '';
+        const resolvedLaneId = laneIdFromTestId(testId);
+        if (resolvedLaneId) return resolvedLaneId;
+      }
+    }
+
     const container = scrollContainerRef.current;
     if (!container) return null;
     const stickyHeaderHeight = stickyHeaderRef.current?.offsetHeight ?? 0;
@@ -1105,17 +1196,23 @@ export function ProjectScheduleCanvas({
     if (!hasScheduleMove && !laneChanged) return;
 
     const assigneeUserId =
-      effectiveSwimlane === 'assignee' && laneChanged && dropLaneId
-        ? parseAssigneeLaneId(dropLaneId)
-        : undefined;
+      effectiveSwimlane === 'assignee' && laneChanged && dropLaneId ? parseAssigneeLaneId(dropLaneId) : undefined;
+    const sectionId =
+      effectiveSwimlane === 'section' && laneChanged && dropLaneId ? parseSectionLaneId(dropLaneId) : undefined;
+    const status =
+      effectiveSwimlane === 'status' && laneChanged && dropLaneId ? parseStatusLaneId(dropLaneId) : undefined;
     const hasAssigneeMove = assigneeUserId !== undefined && assigneeUserId !== task.assigneeUserId;
-    if (!hasScheduleMove && !hasAssigneeMove) return;
+    const hasSectionMove = sectionId !== undefined && sectionId !== task.sectionId;
+    const hasStatusMove = status !== undefined && status !== task.status;
+    if (!hasScheduleMove && !hasAssigneeMove && !hasSectionMove && !hasStatusMove) return;
 
     rescheduleInFlightTaskIdsRef.current.add(taskId);
-    if (hasAssigneeMove) {
+    if (hasAssigneeMove || hasSectionMove || hasStatusMove) {
       const timelineMovePayload: {
         taskId: string;
         assigneeUserId?: string | null;
+        sectionId?: string;
+        status?: Task['status'];
         startAt?: string | null;
         dueAt?: string | null;
         version: number;
@@ -1124,6 +1221,8 @@ export function ProjectScheduleCanvas({
         version: task.version,
       };
       if (assigneeUserId !== undefined) timelineMovePayload.assigneeUserId = assigneeUserId;
+      if (sectionId !== undefined) timelineMovePayload.sectionId = sectionId;
+      if (status !== undefined) timelineMovePayload.status = status;
       if (hasScheduleMove) {
         timelineMovePayload.startAt = startAt;
         timelineMovePayload.dueAt = dueAt;
@@ -1154,8 +1253,10 @@ export function ProjectScheduleCanvas({
     if (!targetDay) return;
 
     const startDate = startOfDay(targetDay);
-    const dropLaneId = resolveLaneIdAtClientY(clientY) ?? fallbackLaneId;
+    const dropLaneId = resolveLaneIdAtClientPosition(clientX, clientY) ?? fallbackLaneId;
     const assigneeUserId = effectiveSwimlane === 'assignee' ? parseAssigneeLaneId(dropLaneId) : undefined;
+    const sectionId = effectiveSwimlane === 'section' ? parseSectionLaneId(dropLaneId) : undefined;
+    const status = effectiveSwimlane === 'status' ? parseStatusLaneId(dropLaneId) : undefined;
     const durationDays =
       task.startAt && task.dueAt
         ? Math.max(0, dayDiff(startOfDay(new Date(task.startAt)), startOfDay(new Date(task.dueAt))))
@@ -1164,6 +1265,8 @@ export function ProjectScheduleCanvas({
     const timelineMovePayload: {
       taskId: string;
       assigneeUserId?: string | null;
+      sectionId?: string;
+      status?: Task['status'];
       startAt?: string | null;
       dueAt?: string | null;
       version: number;
@@ -1175,6 +1278,12 @@ export function ProjectScheduleCanvas({
     };
     if (assigneeUserId !== undefined) {
       timelineMovePayload.assigneeUserId = assigneeUserId;
+    }
+    if (sectionId !== undefined) {
+      timelineMovePayload.sectionId = sectionId;
+    }
+    if (status !== undefined) {
+      timelineMovePayload.status = status;
     }
 
     rescheduleInFlightTaskIdsRef.current.add(taskId);
@@ -1205,21 +1314,25 @@ export function ProjectScheduleCanvas({
     const moved = current.moved
       || Math.abs(deltaPx) >= DRAG_START_THRESHOLD_PX
       || Math.abs(deltaY) >= DRAG_START_THRESHOLD_PX;
-    const dropLaneId = resolveLaneIdAtClientY(clientY) ?? current.dropLaneId;
+    const dropLaneId = resolveLaneIdAtClientPosition(clientX, clientY) ?? current.dropLaneId;
     if (deltaDays === current.deltaDays && moved === current.moved && dropLaneId === current.dropLaneId) return;
     const next = { ...current, deltaDays, moved, dropLaneId };
     dragStateRef.current = next;
     setDragState(next);
   };
 
-  const finishBarDrag = (pointerId: number) => {
+  const finishBarDrag = (pointerId: number, clientX?: number, clientY?: number) => {
     const current = dragStateRef.current;
     if (!current || current.pointerId !== pointerId) return;
+    const finalDropLaneId =
+      clientX !== undefined && clientY !== undefined
+        ? resolveLaneIdAtClientPosition(clientX, clientY) ?? current.dropLaneId
+        : current.dropLaneId;
     dragStateRef.current = null;
     setDragState(null);
     if (!current.moved) return;
     suppressClickTaskIdRef.current = current.taskId;
-    commitTimelineDrag(current.taskId, current.deltaDays, current.originLaneId, current.dropLaneId);
+    commitTimelineDrag(current.taskId, current.deltaDays, current.originLaneId, finalDropLaneId);
   };
 
   const handleLaneDrop = (draggingLaneId: string, overLaneId: string) => {
@@ -1647,14 +1760,18 @@ export function ProjectScheduleCanvas({
                 : rows.length * TASK_ROW_HEIGHT;
 
               return (
-                <div key={lane.id} className="border-b last:border-b-0">
+                <div
+                  key={lane.id}
+                  className="border-b last:border-b-0"
+                  data-testid={`timeline-lane-${normalizeTestIdSegment(lane.id)}`}
+                  data-timeline-lane-id={lane.id}
+                >
                   {sectionVisible ? (
                     <div
                       className={`grid h-8 border-b bg-muted/20 ${
                         laneDragState?.overLaneId === lane.id ? 'ring-1 ring-primary/40' : ''
                       }`}
                       style={{ gridTemplateColumns: `${TASK_NAME_COL_WIDTH}px ${gridWidth}px` }}
-                      data-testid={`timeline-lane-${normalizeTestIdSegment(lane.id)}`}
                       draggable={mode === 'timeline' && effectiveSwimlane !== 'status'}
                       onDragStart={(event) => {
                         if (mode !== 'timeline' || effectiveSwimlane === 'status') return;
@@ -1834,13 +1951,13 @@ export function ProjectScheduleCanvas({
                                       updateBarDrag(event.pointerId, event.clientX, event.clientY);
                                     }}
                                     onPointerUp={(event) => {
-                                      finishBarDrag(event.pointerId);
+                                      finishBarDrag(event.pointerId, event.clientX, event.clientY);
                                       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
                                         event.currentTarget.releasePointerCapture(event.pointerId);
                                       }
                                     }}
                                     onPointerCancel={(event) => {
-                                      finishBarDrag(event.pointerId);
+                                      finishBarDrag(event.pointerId, event.clientX, event.clientY);
                                       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
                                         event.currentTarget.releasePointerCapture(event.pointerId);
                                       }

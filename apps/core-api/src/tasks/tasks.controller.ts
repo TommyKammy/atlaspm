@@ -285,7 +285,6 @@ class PutTimelineViewStateDto {
   @IsBoolean()
   ganttStrictMode?: boolean;
 }
-
 class PatchTaskCustomFieldValueDto {
   @IsUUID()
   fieldId!: string;
