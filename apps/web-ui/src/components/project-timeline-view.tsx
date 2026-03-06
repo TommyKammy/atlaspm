@@ -1732,12 +1732,6 @@ export function ProjectScheduleCanvas({
                             const timelineBarStyle = resolveTimelineBarStyle(task, today);
                             const isCompleted = task.status === 'DONE';
                             const barLayout = timelineLayout.barsByTaskId[task.id];
-                            const visibleStart = task.timelineStart && task.timelineStart < timeline.window.start
-                              ? timeline.window.start
-                              : task.timelineStart;
-                            const visibleEnd = task.timelineEnd && task.timelineEnd > timeline.window.end
-                              ? timeline.window.end
-                              : task.timelineEnd;
                             const visibleBaselineStart = task.baselineStart && task.baselineStart < timeline.window.start
                               ? timeline.window.start
                               : task.baselineStart;
