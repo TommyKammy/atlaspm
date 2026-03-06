@@ -48,6 +48,26 @@ function laneRailTestId(laneTestId: string) {
   return laneTestId.replace('timeline-lane-', 'timeline-lane-rail-');
 }
 
+async function expectHeaderOnlyRail(page: Page, laneTestId: string, forbiddenTaskTitles: string[]) {
+  const laneHeader = page.locator(`[data-testid="${laneHeaderTestId(laneTestId)}"]`);
+  const laneRail = page.locator(`[data-testid="${laneRailTestId(laneTestId)}"]`);
+  await expect(laneHeader).toBeVisible();
+  await expect(laneRail).toHaveAttribute('data-header-only', 'true');
+  for (const taskTitle of forbiddenTaskTitles) {
+    await expect(laneRail).not.toContainText(taskTitle);
+  }
+
+  const [headerBox, railBox, childElementCount] = await Promise.all([
+    laneHeader.boundingBox(),
+    laneRail.boundingBox(),
+    laneRail.evaluate((element) => element.childElementCount),
+  ]);
+  expect(headerBox).toBeTruthy();
+  expect(railBox).toBeTruthy();
+  expect(childElementCount).toBe(1);
+  expect(Math.abs((railBox?.height ?? 0) - (headerBox?.height ?? 0))).toBeLessThanOrEqual(1);
+}
+
 async function dragTimelineLaneHeaderToLane(
   page: Page,
   draggingLaneTestId: string,
@@ -213,12 +233,7 @@ test('timeline supports swimlane toggle and due-date sort without affecting gant
   );
   const assigneeLaneTestId = `timeline-lane-assignee-${sub}`;
   await expect(page.locator('[data-testid^="timeline-lane-assignee-"]')).toHaveCount(1);
-  const assigneeHeader = page.locator(`[data-testid="${laneHeaderTestId(assigneeLaneTestId)}"]`);
-  await expect(assigneeHeader).toBeVisible();
-  const assigneeRail = page.locator(`[data-testid="${laneRailTestId(assigneeLaneTestId)}"]`);
-  await expect(assigneeRail).toHaveAttribute('data-header-only', 'true');
-  await expect(assigneeRail).not.toContainText(taskLate.title);
-  await expect(assigneeRail).not.toContainText(taskEarly.title);
+  await expectHeaderOnlyRail(page, assigneeLaneTestId, [taskLate.title, taskEarly.title]);
 
   await page.click('[data-testid="timeline-swimlane-status"]');
   await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute(
@@ -227,12 +242,7 @@ test('timeline supports swimlane toggle and due-date sort without affecting gant
   );
   await expect(page.locator('[data-testid^="timeline-lane-status-"]')).toHaveCount(2);
   for (const laneTestId of ['timeline-lane-status-IN_PROGRESS', 'timeline-lane-status-BLOCKED']) {
-    const laneHeader = page.locator(`[data-testid="${laneHeaderTestId(laneTestId)}"]`);
-    await expect(laneHeader).toBeVisible();
-    const laneRail = page.locator(`[data-testid="${laneRailTestId(laneTestId)}"]`);
-    await expect(laneRail).toHaveAttribute('data-header-only', 'true');
-    await expect(laneRail).not.toContainText(taskLate.title);
-    await expect(laneRail).not.toContainText(taskEarly.title);
+    await expectHeaderOnlyRail(page, laneTestId, [taskLate.title, taskEarly.title]);
   }
 
   await page.click('[data-testid="timeline-filter-unscheduled"]');

@@ -2816,7 +2816,11 @@ export function ProjectScheduleCanvas({
                   data-testid={`timeline-lane-${normalizeTestIdSegment(lane.id)}`}
                   data-timeline-lane-id={lane.id}
                 >
-                  <div className={showHeaderOnlyLaneRail ? 'relative' : 'border-r bg-muted/10'}>
+                  <div
+                    className={
+                      showHeaderOnlyLaneRail ? 'relative self-start' : 'border-r bg-muted/10'
+                    }
+                  >
                     <div
                       className={showHeaderOnlyLaneRail ? 'w-full border-r bg-muted/10' : undefined}
                       data-testid={`timeline-lane-rail-${normalizeTestIdSegment(lane.id)}`}
