@@ -292,6 +292,14 @@ class TimelineMoveTaskDto {
   assigneeUserId?: string | null;
 
   @IsOptional()
+  @IsUUID()
+  sectionId?: string;
+
+  @IsOptional()
+  @IsEnum(TaskStatus)
+  status?: TaskStatus;
+
+  @IsOptional()
   @IsISO8601()
   startAt?: string | null;
 
@@ -308,6 +316,11 @@ class TimelineMoveTaskDto {
   @Min(1)
   @Max(365)
   durationDays?: number;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PatchTaskCustomFieldValueDto)
+  customFieldMove?: PatchTaskCustomFieldValueDto;
 
   @IsInt()
   version!: number;
@@ -1055,9 +1068,14 @@ export class TasksController {
     const rawDropAt = body.dropAt;
     const hasSchedulePatch = body.startAt !== undefined || body.dueAt !== undefined;
     const hasAssigneePatch = body.assigneeUserId !== undefined;
+    const hasSectionPatch = body.sectionId !== undefined;
+    const hasStatusPatch = body.status !== undefined;
+    const hasCustomFieldPatch = body.customFieldMove !== undefined;
     const hasDrop = rawDropAt !== undefined && rawDropAt !== null;
-    if (!hasSchedulePatch && !hasAssigneePatch && !hasDrop) {
-      throw new BadRequestException('At least one of assigneeUserId, startAt, dueAt, or dropAt must be provided');
+    if (!hasSchedulePatch && !hasAssigneePatch && !hasSectionPatch && !hasStatusPatch && !hasCustomFieldPatch && !hasDrop) {
+      throw new BadRequestException(
+        'At least one of assigneeUserId, sectionId, status, customFieldMove, startAt, dueAt, or dropAt must be provided',
+      );
     }
     if (body.durationDays !== undefined && !hasDrop) {
       throw new BadRequestException('durationDays requires dropAt');
@@ -1078,6 +1096,13 @@ export class TasksController {
     if (hasAssigneePatch && typeof body.assigneeUserId === 'string') {
       await this.domain.requireProjectRole(task.projectId, body.assigneeUserId, ProjectRole.VIEWER);
     }
+    if (hasSectionPatch) {
+      const section = await this.prisma.section.findFirst({
+        where: { id: body.sectionId, projectId: task.projectId },
+        select: { id: true },
+      });
+      if (!section) throw new NotFoundException('Section not found');
+    }
 
     if (body.version !== task.version) {
       throw new ConflictException({
@@ -1085,6 +1110,8 @@ export class TasksController {
         latest: {
           version: task.version,
           assigneeUserId: task.assigneeUserId,
+          sectionId: task.sectionId,
+          status: task.status,
           startAt: task.startAt,
           dueAt: task.dueAt,
         },
@@ -1113,6 +1140,83 @@ export class TasksController {
     this.domain.assertTimelineScheduleRange(nextStartAt, nextDueAt);
     assertValidDateRange(nextStartAt?.toISOString() ?? null, nextDueAt?.toISOString() ?? null);
 
+    let parsedCustomFieldMove: {
+      definition: Prisma.CustomFieldDefinitionGetPayload<{
+        include: { options: true };
+      }>;
+      parsed: ParsedCustomFieldValue | null;
+    } | null = null;
+    let serializedBeforeCustomFieldValues: SerializedTaskCustomFieldValue[] = [];
+    if (hasCustomFieldPatch) {
+      if (!body.customFieldMove || !Object.prototype.hasOwnProperty.call(body.customFieldMove, 'value')) {
+        throw new ConflictException('customFieldMove.value is required');
+      }
+      const definition = await this.prisma.customFieldDefinition.findFirst({
+        where: {
+          id: body.customFieldMove.fieldId,
+          projectId: task.projectId,
+          archivedAt: null,
+        },
+        include: {
+          options: {
+            where: { archivedAt: null },
+          },
+        },
+      });
+      if (!definition) {
+        throw new ConflictException('Unknown or archived custom field definition');
+      }
+      const parsed = parseCustomFieldValue(
+        {
+          id: definition.id,
+          type: definition.type,
+          archivedAt: definition.archivedAt,
+          options: definition.options.map((option) => ({
+            id: option.id,
+            value: option.value,
+            archivedAt: option.archivedAt,
+          })),
+        },
+        body.customFieldMove.value,
+      );
+      if (definition.required && parsed === null) {
+        throw new ConflictException(`Required custom field cannot be empty: ${definition.name}`);
+      }
+      parsedCustomFieldMove = { definition, parsed };
+      const beforeValues = await this.prisma.taskCustomFieldValue.findMany({
+        where: {
+          taskId: id,
+          field: { archivedAt: null },
+        },
+        include: {
+          field: { select: { id: true, name: true, type: true, required: true, archivedAt: true, position: true } },
+          option: { select: { id: true, label: true, value: true, color: true, archivedAt: true } },
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+      serializedBeforeCustomFieldValues = beforeValues.map((value) => this.serializeTaskCustomFieldValue(value));
+    }
+
+    const nextStatus =
+      hasStatusPatch
+        ? body.status!
+        : task.status;
+    const nextProgress =
+      hasStatusPatch
+        ? this.domain.deriveNormalizedTaskProgress({
+            taskType: task.type,
+            progress: task.progressPercent,
+            status: body.status!,
+            hasStatusOverride: true,
+          })
+        : task.progressPercent;
+    const nextCompletedAt =
+      hasStatusPatch
+        ? nextStatus === TaskStatus.DONE
+          ? task.completedAt ?? new Date()
+          : null
+        : task.completedAt;
+
     return this.prisma.$transaction(async (tx) => {
       const updateData: Prisma.TaskUpdateManyMutationInput = {
         version: { increment: 1 },
@@ -1126,6 +1230,14 @@ export class TasksController {
       if (hasDrop || body.dueAt !== undefined) {
         updateData.dueAt = nextDueAt;
       }
+      if (hasSectionPatch) {
+        updateData.sectionId = body.sectionId;
+      }
+      if (hasStatusPatch) {
+        updateData.status = nextStatus;
+        updateData.progressPercent = nextProgress;
+        updateData.completedAt = nextCompletedAt;
+      }
 
       const updatedRows = await tx.task.updateMany({
         where: { id, deletedAt: null, version: body.version },
@@ -1138,13 +1250,49 @@ export class TasksController {
           latest: {
             version: latest.version,
             assigneeUserId: latest.assigneeUserId,
+            sectionId: latest.sectionId,
+            status: latest.status,
             startAt: latest.startAt,
             dueAt: latest.dueAt,
           },
         });
       }
 
+      if (parsedCustomFieldMove) {
+        if (parsedCustomFieldMove.parsed === null) {
+          await tx.taskCustomFieldValue.deleteMany({
+            where: { taskId: id, fieldId: parsedCustomFieldMove.definition.id },
+          });
+        } else {
+          const storage = this.toCustomFieldStorage(parsedCustomFieldMove.parsed);
+          await tx.taskCustomFieldValue.upsert({
+            where: { taskId_fieldId: { taskId: id, fieldId: parsedCustomFieldMove.definition.id } },
+            create: {
+              taskId: id,
+              fieldId: parsedCustomFieldMove.definition.id,
+              ...storage,
+            },
+            update: storage,
+          });
+        }
+      }
+
       const updated = await tx.task.findFirstOrThrow({ where: { id, deletedAt: null } });
+      let serializedCurrentCustomFieldValues: SerializedTaskCustomFieldValue[] | undefined;
+      if (parsedCustomFieldMove) {
+        const currentValues = await tx.taskCustomFieldValue.findMany({
+          where: {
+            taskId: id,
+            field: { archivedAt: null },
+          },
+          include: {
+            field: { select: { id: true, name: true, type: true, required: true, archivedAt: true, position: true } },
+            option: { select: { id: true, label: true, value: true, color: true, archivedAt: true } },
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+        serializedCurrentCustomFieldValues = currentValues.map((value) => this.serializeTaskCustomFieldValue(value));
+      }
       await this.domain.appendAuditOutbox({
         tx,
         actor: req.user.sub,
@@ -1154,14 +1302,20 @@ export class TasksController {
         beforeJson: {
           version: task.version,
           assigneeUserId: task.assigneeUserId,
+          sectionId: task.sectionId,
+          status: task.status,
           startAt: task.startAt,
           dueAt: task.dueAt,
+          ...(parsedCustomFieldMove ? { customFieldValues: serializedBeforeCustomFieldValues } : {}),
         },
         afterJson: {
           version: updated.version,
           assigneeUserId: updated.assigneeUserId,
+          sectionId: updated.sectionId,
+          status: updated.status,
           startAt: updated.startAt,
           dueAt: updated.dueAt,
+          ...(serializedCurrentCustomFieldValues ? { customFieldValues: serializedCurrentCustomFieldValues } : {}),
         },
         correlationId: req.correlationId,
         outboxType: 'task.timeline.moved',
@@ -1170,15 +1324,23 @@ export class TasksController {
           projectId: task.projectId,
           version: updated.version,
           assigneeUserId: updated.assigneeUserId,
+          sectionId: updated.sectionId,
+          status: updated.status,
           startAt: updated.startAt,
           dueAt: updated.dueAt,
           movedByDrop: hasDrop,
+          ...(body.customFieldMove ? { customFieldMove: body.customFieldMove } : {}),
         },
       });
-      return updated;
+      return {
+        updated,
+        customFieldValues: serializedCurrentCustomFieldValues,
+      };
     }).then((updated) => {
-      void this.indexTaskWithCustomFields(updated);
-      return updated;
+      void this.reindexTaskById(updated.updated.id);
+      return updated.customFieldValues
+        ? { ...updated.updated, customFieldValues: updated.customFieldValues }
+        : updated.updated;
     });
   }
 

@@ -2366,6 +2366,26 @@
 - Risks/known gaps:
   - Timeline and Gantt now have separate shell boundaries, but most rendering logic is still shared inside `ProjectScheduleCanvas`; deeper extraction moves to Issue #196.
 
+## 2026-03-06 - Issue #197: Extend timeline move API for lane-based reassignment
+- What changed:
+  - Expanded `PATCH /tasks/:id/timeline-move` in `apps/core-api/src/tasks/tasks.controller.ts` to accept lane-driven updates for:
+    - `sectionId`
+    - `status`
+    - `customFieldMove { fieldId, value }`
+  - Kept optimistic locking and extended conflict payloads to include `sectionId` and `status`.
+  - Reused existing custom-field validation/storage rules inside timeline moves so lane reassignment honors archived/required/option constraints.
+  - Extended audit/outbox payloads for `task.timeline.moved` to include section/status/custom-field lane changes.
+  - Added integration coverage in `apps/core-api/test/core.integration.test.ts` for a combined section + status + custom-field move.
+- Why:
+  - Issue #197 must stabilize the backend contract before Timeline swimlane UI can safely reassign tasks across section/status/custom-field lanes.
+- How tested (exact commands):
+  - `pnpm install`
+  - `pnpm --filter @atlaspm/domain build`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `cd apps/core-api && SEARCH_ENABLED=false DATABASE_URL=${DATABASE_URL:-postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public} pnpm exec vitest run test/core.integration.test.ts -t "timeline"`
+- Risks/known gaps:
+  - Full `core.integration.test.ts` still has an unrelated existing flake in dependency-cycle coverage (`socket hang up`); timeline-targeted coverage for this change is green.
+
 ## 2026-03-06 - Issue #196: Extract timeline lane and layout domain model
 - What changed:
   - Added pure timeline lane/layout services in `packages/domain/src/services/timeline-layout.ts`.
