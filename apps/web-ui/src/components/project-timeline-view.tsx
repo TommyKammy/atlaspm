@@ -1758,6 +1758,8 @@ export function ProjectScheduleCanvas({
                               const taskWidth = barLayout.width;
                               const taskLeft = Math.max(0, barLayout.left + (dragState?.taskId === task.id ? dragState.deltaDays * zoomConfig.dayColWidth : 0));
                               const isMilestone = task.type === 'MILESTONE' || dayDiff(task.timelineStart, task.timelineEnd) === 0;
+                              const usesExternalLabel = !isMilestone && taskWidth < 88;
+                              const clampedProgress = Math.max(0, Math.min(100, task.progressPercent ?? 0));
                               return (
                                 <div key={task.id}>
                                   {mode === 'gantt' && task.hasBaseline && task.baselineStart && task.baselineEnd ? (
@@ -1775,7 +1777,7 @@ export function ProjectScheduleCanvas({
                                     className={`absolute top-1/2 text-left text-[11px] shadow-sm transition-[background-color,border-color,color,opacity] ${
                                       isMilestone
                                         ? 'h-3.5 w-3.5 -translate-y-1/2 rotate-45 rounded-[2px]'
-                                        : 'h-6 -translate-y-1/2 rounded px-2'
+                                        : 'h-6 -translate-y-1/2 overflow-hidden rounded px-2'
                                     } ${dragState?.taskId === task.id && dragState.moved ? 'cursor-grabbing opacity-90' : 'cursor-grab'}`}
                                     style={
                                       isMilestone
@@ -1825,16 +1827,24 @@ export function ProjectScheduleCanvas({
                                     data-testid={`timeline-bar-${task.id}`}
                                     title={`${task.timelineStart.toLocaleDateString()} - ${task.timelineEnd.toLocaleDateString()}`}
                                   >
+                                    {!isMilestone ? (
+                                      <span
+                                        className="pointer-events-none absolute inset-y-0 left-0 rounded-l bg-current opacity-15"
+                                        style={{ width: `${clampedProgress}%` }}
+                                      />
+                                    ) : null}
                                     {isMilestone ? <span className="sr-only">{fallbackTaskName}</span> : null}
                                     {!isMilestone ? (
-                                      <span className={`block truncate ${isCompleted ? 'line-through' : ''}`}>{fallbackTaskName}</span>
+                                      <span className={`relative z-[1] block truncate ${usesExternalLabel ? 'sr-only' : ''} ${isCompleted ? 'line-through' : ''}`}>
+                                        {fallbackTaskName}
+                                      </span>
                                     ) : null}
                                   </button>
-                                  {isMilestone ? (
+                                  {isMilestone || usesExternalLabel ? (
                                     <button
                                       type="button"
                                       className={`absolute top-1/2 -translate-y-1/2 text-left text-[11px] text-foreground ${isCompleted ? 'line-through opacity-60' : ''}`}
-                                      style={{ left: `${Math.max(0, taskLeft + taskWidth / 2 + 10)}px` }}
+                                      style={{ left: `${Math.max(0, taskLeft + taskWidth + (isMilestone ? -taskWidth / 2 + 10 : 8))}px` }}
                                       onClick={() => {
                                         if (suppressClickTaskIdRef.current === task.id) {
                                           suppressClickTaskIdRef.current = null;
