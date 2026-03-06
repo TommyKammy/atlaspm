@@ -993,6 +993,7 @@ export class TasksController {
     }
     if (body.version !== task.version) {
       throw new ConflictException({
+        statusCode: 409,
         message: 'Version conflict',
         latest: {
           version: task.version,
@@ -1017,6 +1018,7 @@ export class TasksController {
       if (updatedRows.count === 0) {
         const latest = await tx.task.findFirstOrThrow({ where: { id, deletedAt: null } });
         throw new ConflictException({
+          statusCode: 409,
           message: 'Version conflict',
           latest: {
             version: latest.version,
@@ -1072,6 +1074,12 @@ export class TasksController {
     const hasStatusPatch = body.status !== undefined;
     const hasCustomFieldPatch = body.customFieldMove !== undefined;
     const hasDrop = rawDropAt !== undefined && rawDropAt !== null;
+    if (body.sectionId === null) {
+      throw new BadRequestException('sectionId must not be null');
+    }
+    if (body.status === null) {
+      throw new BadRequestException('status must not be null');
+    }
     if (!hasSchedulePatch && !hasAssigneePatch && !hasSectionPatch && !hasStatusPatch && !hasCustomFieldPatch && !hasDrop) {
       throw new BadRequestException(
         'At least one of assigneeUserId, sectionId, status, customFieldMove, startAt, dueAt, or dropAt must be provided',
