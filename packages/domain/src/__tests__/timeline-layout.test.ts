@@ -20,8 +20,9 @@ const sections: TimelineSectionInput[] = [
   { id: 'design', name: 'Design', position: 2000, isDefault: false },
 ];
 
-function utcDate(value: string): Date {
-  return new Date(`${value}T00:00:00.000Z`);
+function localDate(value: string): Date {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year!, month! - 1, day!);
 }
 
 test('buildTimelineLanes groups assignee lanes with unassigned at the end', () => {
@@ -34,8 +35,8 @@ test('buildTimelineLanes groups assignee lanes with unassigned at the end', () =
       status: 'IN_PROGRESS',
       hasSchedule: true,
       inWindow: true,
-      timelineStart: utcDate('2026-03-01'),
-      timelineEnd: utcDate('2026-03-03'),
+      timelineStart: localDate('2026-03-01'),
+      timelineEnd: localDate('2026-03-03'),
     },
     {
       id: 'task-2',
@@ -45,8 +46,8 @@ test('buildTimelineLanes groups assignee lanes with unassigned at the end', () =
       status: 'TODO',
       hasSchedule: true,
       inWindow: true,
-      timelineStart: utcDate('2026-03-01'),
-      timelineEnd: utcDate('2026-03-02'),
+      timelineStart: localDate('2026-03-01'),
+      timelineEnd: localDate('2026-03-02'),
     },
   ];
 
@@ -184,8 +185,8 @@ test('buildTimelineLayout calculates row and bar positions', () => {
       status: 'IN_PROGRESS',
       hasSchedule: true,
       inWindow: true,
-      timelineStart: utcDate('2026-03-02'),
-      timelineEnd: utcDate('2026-03-04'),
+      timelineStart: localDate('2026-03-02'),
+      timelineEnd: localDate('2026-03-04'),
     },
   ];
 
@@ -201,8 +202,8 @@ test('buildTimelineLayout calculates row and bar positions', () => {
 
   const layout = buildTimelineLayout({
     lanes,
-    windowStart: utcDate('2026-03-01'),
-    windowEnd: utcDate('2026-03-10'),
+    windowStart: localDate('2026-03-01'),
+    windowEnd: localDate('2026-03-10'),
     dayColumnWidth: 20,
     sectionRowHeight: 32,
     taskRowHeight: 40,
@@ -224,8 +225,8 @@ test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () =
       status: 'TODO',
       hasSchedule: true,
       inWindow: true,
-      timelineStart: utcDate('2026-03-02'),
-      timelineEnd: utcDate('2026-03-03'),
+      timelineStart: localDate('2026-03-02'),
+      timelineEnd: localDate('2026-03-03'),
     },
     {
       id: 'task-2',
@@ -235,8 +236,8 @@ test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () =
       status: 'IN_PROGRESS',
       hasSchedule: true,
       inWindow: true,
-      timelineStart: utcDate('2026-03-05'),
-      timelineEnd: utcDate('2026-03-06'),
+      timelineStart: localDate('2026-03-05'),
+      timelineEnd: localDate('2026-03-06'),
     },
     {
       id: 'task-3',
@@ -246,8 +247,8 @@ test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () =
       status: 'BLOCKED',
       hasSchedule: true,
       inWindow: true,
-      timelineStart: utcDate('2026-03-03'),
-      timelineEnd: utcDate('2026-03-05'),
+      timelineStart: localDate('2026-03-03'),
+      timelineEnd: localDate('2026-03-05'),
     },
   ];
 
@@ -263,8 +264,8 @@ test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () =
 
   const layout = buildTimelineLayout({
     lanes,
-    windowStart: utcDate('2026-03-01'),
-    windowEnd: utcDate('2026-03-10'),
+    windowStart: localDate('2026-03-01'),
+    windowEnd: localDate('2026-03-10'),
     dayColumnWidth: 20,
     sectionRowHeight: 32,
     taskRowHeight: 40,
@@ -281,6 +282,10 @@ test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () =
   assert.deepEqual(layout.taskRowsById['task-1'], { top: 64, height: 40 });
   assert.deepEqual(layout.taskRowsById['task-2'], { top: 64, height: 40 });
   assert.deepEqual(layout.taskRowsById['task-3'], { top: 104, height: 40 });
+  assert.deepEqual(designLane?.rows.map((row) => ({ index: row.index, taskIds: row.tasks.map((task) => task.id) })), [
+    { index: 0, taskIds: ['task-1', 'task-2'] },
+    { index: 1, taskIds: ['task-3'] },
+  ]);
 });
 
 test('buildTimelineLayout keeps input order inside compact rows', () => {
@@ -293,8 +298,8 @@ test('buildTimelineLayout keeps input order inside compact rows', () => {
       status: 'TODO',
       hasSchedule: true,
       inWindow: true,
-      timelineStart: utcDate('2026-03-05'),
-      timelineEnd: utcDate('2026-03-06'),
+      timelineStart: localDate('2026-03-05'),
+      timelineEnd: localDate('2026-03-06'),
     },
     {
       id: 'task-due-earlier',
@@ -304,15 +309,15 @@ test('buildTimelineLayout keeps input order inside compact rows', () => {
       status: 'DONE',
       hasSchedule: true,
       inWindow: true,
-      timelineStart: utcDate('2026-03-02'),
-      timelineEnd: utcDate('2026-03-03'),
+      timelineStart: localDate('2026-03-02'),
+      timelineEnd: localDate('2026-03-03'),
     },
   ];
 
   const layout = buildTimelineLayout({
     lanes: [{ id: 'section:design', label: 'Design', tasks }],
-    windowStart: utcDate('2026-03-01'),
-    windowEnd: utcDate('2026-03-10'),
+    windowStart: localDate('2026-03-01'),
+    windowEnd: localDate('2026-03-10'),
     dayColumnWidth: 20,
     sectionRowHeight: 32,
     taskRowHeight: 40,

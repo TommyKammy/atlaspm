@@ -84,7 +84,8 @@ function addDays(base: Date, delta: number): Date {
 }
 
 function dayNumber(date: Date): number {
-  return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / DAY_MS);
+  const localMidnight = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  return Math.floor(localMidnight.getTime() / DAY_MS);
 }
 
 function dayDiff(from: Date, to: Date): number {
@@ -380,13 +381,13 @@ export function ProjectScheduleCanvas({
   mode: TimelineMode;
 }) {
   const { t } = useI18n();
-  const today = useMemo(() => startOfDay(new Date()), []);
   const queryClient = useQueryClient();
   const meQuery = useQuery<{ id: string }>({
     queryKey: queryKeys.me,
     queryFn: () => api('/me'),
   });
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [today, setToday] = useState(() => startOfDay(new Date()));
   const [zoom, setZoom] = useState<TimelineZoom>('week');
   const [anchorDate, setAnchorDate] = useState(() => startOfDay(new Date()));
   const [swimlane, setSwimlane] = useState<TimelineSwimlane>('section');
@@ -421,6 +422,28 @@ export function ProjectScheduleCanvas({
   const [unscheduledDragTaskId, setUnscheduledDragTaskId] = useState<string | null>(null);
   const suppressClickTaskIdRef = useRef<string | null>(null);
   const [rescheduleNotice, setRescheduleNotice] = useState<{ type: 'conflict' | 'error'; message: string } | null>(null);
+
+  useEffect(() => {
+    let timeoutId: number | undefined;
+
+    const scheduleNextMidnightUpdate = () => {
+      const now = new Date();
+      const nextMidnight = startOfDay(addDays(now, 1));
+      const msUntilNextMidnight = Math.max(1000, nextMidnight.getTime() - now.getTime());
+      timeoutId = window.setTimeout(() => {
+        setToday(startOfDay(new Date()));
+        scheduleNextMidnightUpdate();
+      }, msUntilNextMidnight);
+    };
+
+    scheduleNextMidnightUpdate();
+
+    return () => {
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, []);
   const rescheduleInFlightTaskIdsRef = useRef(new Set<string>());
   const lastHydratedViewStateRef = useRef<TimelineViewState | null>(null);
   const timelineViewStateRef = useRef<TimelineViewState | null>(null);
@@ -1897,7 +1920,7 @@ export function ProjectScheduleCanvas({
         projectId={projectId}
       />
 
-      {unscheduledTasks.length ? (
+      {mode === 'timeline' && unscheduledTasks.length ? (
         <div className="rounded-lg border border-dashed bg-card/70 p-3" data-testid="timeline-unscheduled-tray">
           <div className="mb-2 flex items-center justify-between gap-2">
             <div>
