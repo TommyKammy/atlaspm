@@ -208,10 +208,13 @@ test('buildTimelineLayout calculates row and bar positions', () => {
     taskRowHeight: 40,
   });
 
+  const designLane = layout.lanesWithRows.find((lane) => lane.lane.id === 'section:design');
+
   assert.equal(layout.bodyHeight, 104);
   assert.equal(layout.totalRowCount, 3);
   assert.deepEqual(layout.taskRowsById['task-1'], { top: 64, height: 40 });
   assert.deepEqual(layout.barsByTaskId['task-1'], { left: 20, width: 60, y: 84 });
+  assert.equal(designLane?.rows.length, 1);
 });
 
 test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () => {
@@ -272,6 +275,7 @@ test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () =
   });
 
 <<<<<<< HEAD
+<<<<<<< HEAD
   const designLane = layout.lanesWithRows.find(
     (lane) => lane.lane.id === 'section:design',
   );
@@ -290,4 +294,14 @@ test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () =
   assert.deepEqual(layout.taskRowsById['task-2'], { top: 32, height: 40 });
   assert.deepEqual(layout.taskRowsById['task-3'], { top: 72, height: 40 });
 >>>>>>> 236be17 (test(domain): align timeline layout expected heights)
+=======
+  const designLane = layout.lanesWithRows.find((lane) => lane.lane.id === 'section:design');
+
+  assert.equal(layout.bodyHeight, 144);
+  assert.equal(layout.totalRowCount, 4);
+  assert.equal(designLane?.rows.length, 2);
+  assert.deepEqual(layout.taskRowsById['task-1'], { top: 64, height: 40 });
+  assert.deepEqual(layout.taskRowsById['task-2'], { top: 64, height: 40 });
+  assert.deepEqual(layout.taskRowsById['task-3'], { top: 104, height: 40 });
+>>>>>>> 11708ab (test(domain): align timeline layout expected values for section layout)
 });
