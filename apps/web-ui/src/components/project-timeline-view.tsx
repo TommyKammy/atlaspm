@@ -15,10 +15,7 @@ import type { SectionTaskGroup, Task } from '@/lib/types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TASK_NAME_COL_WIDTH = 260;
-const VIEW_STORAGE_PREFIX: Record<TimelineMode, string> = {
-  timeline: 'atlaspm:timeline-shell',
-  gantt: 'atlaspm:gantt-shell',
-};
+const TIMELINE_VIEW_STORAGE_PREFIX = 'atlaspm:timeline-view';
 const SECTION_ROW_HEIGHT = 32;
 const TASK_ROW_HEIGHT = 40;
 const VIRTUALIZE_ROW_THRESHOLD = 120;
@@ -69,10 +66,6 @@ type LocalTimelineViewStateSnapshot = {
   ganttRiskFilterMode: GanttRiskFilterMode;
   ganttStrictMode: boolean;
 };
-
-function getLegacyTimelineStorageKey(mode: TimelineMode, userId: string, projectId: string): string {
-  return `atlaspm:timeline-view:${userId}:${projectId}:${mode}`;
-}
 
 const TIMELINE_ZOOM_CONFIG: Record<TimelineZoom, { beforeDays: number; afterDays: number; stepDays: number; dayColWidth: number }> = {
   day: { beforeDays: 1, afterDays: 5, stepDays: 1, dayColWidth: 64 },
@@ -429,7 +422,6 @@ export function ProjectScheduleCanvas({
   const suppressClickTaskIdRef = useRef<string | null>(null);
   const [rescheduleNotice, setRescheduleNotice] = useState<{ type: 'conflict' | 'error'; message: string } | null>(null);
   const rescheduleInFlightTaskIdsRef = useRef(new Set<string>());
-  const hydratedPreferenceKeyRef = useRef<string | null>(null);
   const lastHydratedViewStateRef = useRef<TimelineViewState | null>(null);
   const saveViewStateTimerRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -442,22 +434,27 @@ export function ProjectScheduleCanvas({
     enabled: Boolean(projectId),
   });
 
-  const timelineStorageKey = useMemo(
-    () => (meQuery.data?.id ? `${VIEW_STORAGE_PREFIX[mode]}:${meQuery.data.id}:${projectId}` : null),
-    [meQuery.data?.id, mode, projectId],
+  const timelineStorageBaseKey = useMemo(
+    () => (projectId ? `${TIMELINE_VIEW_STORAGE_PREFIX}:${projectId}:${mode}` : null),
+    [mode, projectId],
   );
+  const timelineStorageUserKey = useMemo(
+    () => (meQuery.data?.id && timelineStorageBaseKey ? `${timelineStorageBaseKey}:${meQuery.data.id}` : null),
+    [meQuery.data?.id, timelineStorageBaseKey],
+  );
+  const hasRestoredTimelinePreferences = useRef(false);
 
   useEffect(() => {
+    hasRestoredTimelinePreferences.current = false;
+  }, [timelineStorageBaseKey]);
+
+  useEffect(() => {
+    if (hasRestoredTimelinePreferences.current) return;
+    if (!timelineStorageBaseKey || !timelinePreferencesQuery.isFetched) return;
     setPreferencesHydrated(false);
-    hydratedPreferenceKeyRef.current = null;
-    lastHydratedViewStateRef.current = null;
-  }, [timelineStorageKey]);
 
-  useEffect(() => {
-    if (!timelineStorageKey || hydratedPreferenceKeyRef.current === timelineStorageKey) return;
-    if (!timelinePreferencesQuery.isFetched) return;
-
-    const serverViewState = mode === 'timeline' ? timelinePreferencesQuery.data?.timelineViewState : timelinePreferencesQuery.data?.ganttViewState;
+    const serverViewState =
+      mode === 'timeline' ? timelinePreferencesQuery.data?.timelineViewState : timelinePreferencesQuery.data?.ganttViewState;
     if (serverViewState && Object.keys(serverViewState).length > 0) {
       applyTimelineViewState(serverViewState, {
         setZoom,
@@ -469,15 +466,16 @@ export function ProjectScheduleCanvas({
         setGanttStrictMode,
       });
       lastHydratedViewStateRef.current = serverViewState;
-      hydratedPreferenceKeyRef.current = timelineStorageKey;
+      hasRestoredTimelinePreferences.current = true;
       setPreferencesHydrated(true);
       return;
     }
 
     if (typeof window !== 'undefined') {
-      const legacyKey = meQuery.data?.id ? getLegacyTimelineStorageKey(mode, meQuery.data.id, projectId) : null;
-      const raw = window.localStorage.getItem(timelineStorageKey) ?? (legacyKey ? window.localStorage.getItem(legacyKey) : null);
-      if (raw) {
+      const preferenceKeys = [timelineStorageUserKey, timelineStorageBaseKey].filter((value): value is string => Boolean(value));
+      for (const key of preferenceKeys) {
+        const raw = window.localStorage.getItem(key);
+        if (!raw) continue;
         try {
           const parsedLocalState = JSON.parse(raw) as TimelineViewState;
           applyTimelineViewState(parsedLocalState, {
@@ -490,39 +488,41 @@ export function ProjectScheduleCanvas({
             setGanttStrictMode,
           });
           lastHydratedViewStateRef.current = parsedLocalState;
+          break;
         } catch {
           // Ignore malformed local preference state.
         }
       }
     }
 
-    hydratedPreferenceKeyRef.current = timelineStorageKey;
+    hasRestoredTimelinePreferences.current = true;
     setPreferencesHydrated(true);
   }, [
-    meQuery.data?.id,
     mode,
     projectId,
     timelinePreferencesQuery.data?.ganttViewState,
     timelinePreferencesQuery.data?.timelineViewState,
     timelinePreferencesQuery.isFetched,
-    timelineStorageKey,
+    timelineStorageBaseKey,
+    timelineStorageUserKey,
   ]);
 
   useEffect(() => {
-    if (!timelineStorageKey || typeof window === 'undefined') return;
-    window.localStorage.setItem(
-      timelineStorageKey,
-      JSON.stringify({
-        zoom,
-        anchorDate: anchorDate.toISOString(),
-        swimlane,
-        sortMode,
-        scheduleFilter,
-        ganttRiskFilterMode,
-        ganttStrictMode,
-      }),
-    );
-  }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, scheduleFilter, sortMode, swimlane, timelineStorageKey, zoom]);
+    if (!timelineStorageBaseKey || typeof window === 'undefined') return;
+    const nextState: TimelineViewState = {
+      zoom,
+      anchorDate: anchorDate.toISOString(),
+      swimlane,
+      sortMode,
+      scheduleFilter,
+      ganttRiskFilterMode,
+      ganttStrictMode,
+    };
+    window.localStorage.setItem(timelineStorageBaseKey, JSON.stringify(nextState));
+    if (timelineStorageUserKey) {
+      window.localStorage.setItem(timelineStorageUserKey, JSON.stringify(nextState));
+    }
+  }, [anchorDate, ganttRiskFilterMode, ganttStrictMode, scheduleFilter, sortMode, swimlane, timelineStorageBaseKey, timelineStorageUserKey, zoom]);
 
   const saveViewStateMutation = useMutation({
     mutationFn: async ({
