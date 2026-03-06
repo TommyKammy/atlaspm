@@ -274,27 +274,6 @@ test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () =
     compactRows: true,
   });
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-  const designLane = layout.lanesWithRows.find(
-    (lane) => lane.lane.id === 'section:design',
-  );
-
-  assert.equal(layout.bodyHeight, 144);
-  assert.equal(layout.totalRowCount, 4);
-  assert.equal(designLane?.rows.length, 2);
-  assert.deepEqual(layout.taskRowsById['task-1'], { top: 64, height: 40 });
-  assert.deepEqual(layout.taskRowsById['task-2'], { top: 64, height: 40 });
-  assert.deepEqual(layout.taskRowsById['task-3'], { top: 104, height: 40 });
-=======
-  assert.equal(layout.bodyHeight, 144);
-  assert.equal(layout.totalRowCount, 4);
-  assert.equal(layout.lanesWithRows[0]?.rows.length, 2);
-  assert.deepEqual(layout.taskRowsById['task-1'], { top: 32, height: 40 });
-  assert.deepEqual(layout.taskRowsById['task-2'], { top: 32, height: 40 });
-  assert.deepEqual(layout.taskRowsById['task-3'], { top: 72, height: 40 });
->>>>>>> 236be17 (test(domain): align timeline layout expected heights)
-=======
   const designLane = layout.lanesWithRows.find((lane) => lane.lane.id === 'section:design');
 
   assert.equal(layout.bodyHeight, 144);
@@ -303,5 +282,4 @@ test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () =
   assert.deepEqual(layout.taskRowsById['task-1'], { top: 64, height: 40 });
   assert.deepEqual(layout.taskRowsById['task-2'], { top: 64, height: 40 });
   assert.deepEqual(layout.taskRowsById['task-3'], { top: 104, height: 40 });
->>>>>>> 11708ab (test(domain): align timeline layout expected values for section layout)
 });
