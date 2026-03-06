@@ -360,3 +360,73 @@ test('buildTimelineLayout keeps input order inside compact rows', () => {
 
   assert.deepEqual(layout.lanesWithRows[0]?.rows[0]?.tasks.map((task) => task.id), ['task-due-later', 'task-due-earlier']);
 });
+
+test('buildTimelineLayout can align dependency chains ahead of unrelated blockers', () => {
+  const tasks: TaskInput[] = [
+    {
+      id: 'task-blocker',
+      title: 'Long blocker',
+      sectionId: 'design',
+      assigneeUserId: 'user-1',
+      status: 'TODO',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-02'),
+      timelineEnd: utcDate('2026-03-10'),
+    },
+    {
+      id: 'task-chain-a',
+      title: 'Chain start',
+      sectionId: 'design',
+      assigneeUserId: 'user-1',
+      status: 'IN_PROGRESS',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-05'),
+      timelineEnd: utcDate('2026-03-06'),
+    },
+    {
+      id: 'task-chain-b',
+      title: 'Chain follow-up',
+      sectionId: 'design',
+      assigneeUserId: 'user-1',
+      status: 'TODO',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-07'),
+      timelineEnd: utcDate('2026-03-08'),
+    },
+  ];
+
+  const lanes = [{ id: 'section:design', label: 'Design', tasks }];
+
+  const compactLayout = buildTimelineLayout({
+    lanes,
+    windowStart: utcDate('2026-03-01'),
+    windowEnd: utcDate('2026-03-10'),
+    dayColumnWidth: 20,
+    sectionRowHeight: 32,
+    taskRowHeight: 40,
+    compactRows: true,
+  });
+
+  const alignedLayout = buildTimelineLayout({
+    lanes,
+    windowStart: utcDate('2026-03-01'),
+    windowEnd: utcDate('2026-03-10'),
+    dayColumnWidth: 20,
+    sectionRowHeight: 32,
+    taskRowHeight: 40,
+    compactRows: true,
+    dependencyAwarePacking: true,
+    dependencyEdges: [{ source: 'task-chain-a', target: 'task-chain-b', type: 'BLOCKS' }],
+  });
+
+  assert.equal(compactLayout.taskRowsById['task-blocker']?.top, 32);
+  assert.equal(compactLayout.taskRowsById['task-chain-a']?.top, 72);
+  assert.equal(compactLayout.taskRowsById['task-chain-b']?.top, 72);
+
+  assert.equal(alignedLayout.taskRowsById['task-chain-a']?.top, 32);
+  assert.equal(alignedLayout.taskRowsById['task-chain-b']?.top, 32);
+  assert.equal(alignedLayout.taskRowsById['task-blocker']?.top, 72);
+});

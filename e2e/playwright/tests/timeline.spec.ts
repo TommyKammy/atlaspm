@@ -405,3 +405,85 @@ test('timeline working-days drag skips weekends and Alt keeps calendar-day place
     })
     .toBe(saturday.toISOString());
 });
+
+test('timeline align toggle repacks dependency chains ahead of unrelated blockers', async ({ page }) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-align-${now}`;
+  const email = `e2e-timeline-align-${now}@example.com`;
+
+  await page.goto('/login');
+  await page.fill('input[placeholder="OIDC sub"]', sub);
+  await page.fill('input[placeholder="Email"]', email);
+  await page.click('button:has-text("Dev Login")');
+  await page.waitForURL('**/');
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Align ${now}`,
+  });
+  const projectId = project.id as string;
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+
+  const blocker = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Timeline Blocker ${now}`,
+    startAt: '2026-03-02T00:00:00.000Z',
+    dueAt: '2026-03-10T00:00:00.000Z',
+  });
+  const chainA = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Timeline Chain A ${now}`,
+    startAt: '2026-03-05T00:00:00.000Z',
+    dueAt: '2026-03-06T00:00:00.000Z',
+  });
+  const chainB = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Timeline Chain B ${now}`,
+    startAt: '2026-03-07T00:00:00.000Z',
+    dueAt: '2026-03-08T00:00:00.000Z',
+  });
+  await api(`/tasks/${chainB.id}/dependencies`, token, 'POST', {
+    dependsOnId: chainA.id,
+    type: 'BLOCKS',
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+
+  const blockerBar = page.locator(`[data-testid="timeline-bar-${blocker.id}"]`);
+  const chainABar = page.locator(`[data-testid="timeline-bar-${chainA.id}"]`);
+  const chainBBar = page.locator(`[data-testid="timeline-bar-${chainB.id}"]`);
+
+  const beforeBlockerBox = await blockerBar.boundingBox();
+  const beforeChainABox = await chainABar.boundingBox();
+  if (!beforeBlockerBox || !beforeChainABox) {
+    throw new Error('Expected timeline bars before align');
+  }
+  expect(beforeChainABox.y).toBeGreaterThan(beforeBlockerBox.y);
+
+  await page.click('[data-testid="timeline-align-toggle"]');
+  await expect(page.locator('[data-testid="timeline-align-toggle"]')).toHaveAttribute('data-active', 'true');
+
+  await expect
+    .poll(async () => {
+      const [nextBlockerBox, nextChainABox, nextChainBBox] = await Promise.all([
+        blockerBar.boundingBox(),
+        chainABar.boundingBox(),
+        chainBBar.boundingBox(),
+      ]);
+      return {
+        blockerY: Math.round(nextBlockerBox?.y ?? -1),
+        chainAY: Math.round(nextChainABox?.y ?? -1),
+        chainBY: Math.round(nextChainBBox?.y ?? -1),
+      };
+    })
+    .toEqual({
+      blockerY: Math.round(beforeChainABox.y),
+      chainAY: Math.round(beforeBlockerBox.y),
+      chainBY: Math.round(beforeBlockerBox.y),
+    });
+});

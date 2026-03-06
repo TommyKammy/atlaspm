@@ -548,6 +548,7 @@ export function ProjectScheduleCanvas({
   const [sortMode, setSortMode] = useState<TimelineSortMode>('manual');
   const [scheduleFilter, setScheduleFilter] = useState<TimelineScheduleFilter>('all');
   const [workingDaysOnly, setWorkingDaysOnly] = useState(false);
+  const [dependencyAwarePacking, setDependencyAwarePacking] = useState(false);
   const [ganttRiskFilterMode, setGanttRiskFilterMode] = useState<GanttRiskFilterMode>('all');
   const [ganttStrictMode, setGanttStrictMode] = useState(false);
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
@@ -1461,8 +1462,10 @@ export function ProjectScheduleCanvas({
       sectionRowHeight: SECTION_ROW_HEIGHT,
       taskRowHeight: TASK_ROW_HEIGHT,
       compactRows: mode === 'timeline',
+      dependencyAwarePacking: mode === 'timeline' && dependencyAwarePacking,
+      dependencyEdges: timeline.dependencyEdges,
     });
-  }, [mode, timeline.window.end, timeline.window.start, timelineLanes, zoomConfig.dayColWidth]);
+  }, [dependencyAwarePacking, mode, timeline.dependencyEdges, timeline.window.end, timeline.window.start, timelineLanes, zoomConfig.dayColWidth]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -2059,6 +2062,19 @@ export function ProjectScheduleCanvas({
               title={t('timelineWorkingDaysHint')}
             >
               {t('timelineWorkingDays')}
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              variant={dependencyAwarePacking ? 'default' : 'outline'}
+              className="h-7 px-2 text-xs"
+              data-testid="timeline-align-toggle"
+              data-active={dependencyAwarePacking ? 'true' : 'false'}
+              onClick={() => setDependencyAwarePacking((current) => !current)}
+              title={t('timelineAlignHint')}
+            >
+              {t('timelineAlign')}
             </Button>
 
             <p className="text-xs text-muted-foreground" data-testid="timeline-drag-hint">
