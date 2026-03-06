@@ -3065,7 +3065,7 @@ describe('Core API Integration', () => {
       .expect(409);
 
     expect(firstMove.body.status).toBe('BLOCKED');
-    expect(conflictRes.body.statusCode).toBe(409);
+    expect(conflictRes.statusCode).toBe(409);
     expect(conflictRes.body.message).toBe('Version conflict');
     expect(conflictRes.body.latest).toMatchObject({
       version: firstMove.body.version,
