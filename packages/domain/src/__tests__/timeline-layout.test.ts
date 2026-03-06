@@ -25,7 +25,7 @@ function utcDate(value: string): Date {
 }
 
 
-test('buildTimelineLanes groups assignee lanes with unassigned at the end', () => {
+test('buildTimelineLanes keeps assignee lanes visible for project members and unassigned', () => {
   const tasks: TaskInput[] = [
     {
       id: 'task-1',
@@ -57,6 +57,7 @@ test('buildTimelineLanes groups assignee lanes with unassigned at the end', () =
     sections,
     membersById: {
       'user-1': { displayName: 'Dev User' },
+      'user-2': { displayName: 'QA User' },
     },
     preferredLaneOrder: [],
     defaultSectionLabel: 'Tasks',
@@ -64,11 +65,16 @@ test('buildTimelineLanes groups assignee lanes with unassigned at the end', () =
   });
 
   assert.deepEqual(
-    lanes.map((lane) => lane.id),
-    ['assignee:user-1', 'assignee:__unassigned__'],
+    lanes.map((lane) => ({ id: lane.id, taskCount: lane.tasks.length })),
+    [
+      { id: 'assignee:user-1', taskCount: 1 },
+      { id: 'assignee:user-2', taskCount: 0 },
+      { id: 'assignee:__unassigned__', taskCount: 1 },
+    ],
   );
   assert.equal(lanes[0]?.label, 'Dev User');
-  assert.equal(lanes[1]?.label, 'Unassigned');
+  assert.equal(lanes[1]?.label, 'QA User');
+  assert.equal(lanes[2]?.label, 'Unassigned');
 });
 
 test('buildTimelineLanes respects preferred section order', () => {
@@ -147,7 +153,7 @@ test('buildTimelineLanes keeps empty sections visible and ordered by preference'
   );
 });
 
-test('buildTimelineLanes groups status lanes in fixed workflow order', () => {
+test('buildTimelineLanes keeps status lanes visible in fixed workflow order', () => {
   const tasks: TaskInput[] = [
     {
       id: 'task-1',
@@ -201,12 +207,18 @@ test('buildTimelineLanes groups status lanes in fixed workflow order', () => {
   });
 
   assert.deepEqual(
-    lanes.map((lane) => lane.id),
-    ['status:TODO', 'status:DONE', 'status:BLOCKED'],
+    lanes.map((lane) => ({ id: lane.id, taskCount: lane.tasks.length })),
+    [
+      { id: 'status:TODO', taskCount: 1 },
+      { id: 'status:IN_PROGRESS', taskCount: 0 },
+      { id: 'status:DONE', taskCount: 1 },
+      { id: 'status:BLOCKED', taskCount: 1 },
+    ],
   );
   assert.equal(lanes[0]?.label, 'To do');
-  assert.equal(lanes[1]?.label, 'Done');
-  assert.equal(lanes[2]?.label, 'Blocked');
+  assert.equal(lanes[1]?.label, 'In progress');
+  assert.equal(lanes[2]?.label, 'Done');
+  assert.equal(lanes[3]?.label, 'Blocked');
 });
 
 test('buildTimelineLayout calculates row and bar positions', () => {

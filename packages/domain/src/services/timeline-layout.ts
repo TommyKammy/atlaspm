@@ -162,8 +162,10 @@ export function buildTimelineLanes<TTask extends TimelineLaneTaskInput>(
       grouped.set(laneId, next);
     }
 
-    const lanes = [...grouped.entries()]
-      .map(([laneId, tasks]) => {
+    const laneIds = new Set<string>([...grouped.keys(), ...Object.keys(input.membersById), unassignedLaneId]);
+    const lanes = [...laneIds]
+      .map((laneId) => {
+        const tasks = grouped.get(laneId) ?? [];
         const label =
           laneId === unassignedLaneId
             ? input.unassignedLabel
@@ -205,8 +207,7 @@ export function buildTimelineLanes<TTask extends TimelineLaneTaskInput>(
         id: `status:${status}`,
         label: statusLabels[status],
         tasks: grouped.get(status) ?? [],
-      }))
-      .filter((lane) => lane.tasks.length > 0);
+      }));
   }
 
   const bySection = new Map<string, TTask[]>();
