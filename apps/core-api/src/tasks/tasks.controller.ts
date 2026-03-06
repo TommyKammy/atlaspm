@@ -1226,7 +1226,7 @@ export class TasksController {
         : task.completedAt;
 
     return this.prisma.$transaction(async (tx) => {
-      const updateData: Prisma.TaskUpdateManyMutationInput = {
+      const updateData: Prisma.TaskUncheckedUpdateManyInput = {
         version: { increment: 1 },
       };
       if (hasAssigneePatch) {
