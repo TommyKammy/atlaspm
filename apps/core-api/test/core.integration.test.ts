@@ -2837,4 +2837,127 @@ describe('Core API Integration', () => {
       })
       .expect(409);
   });
+
+  test('timeline move supports section, status, and custom field lane reassignment', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Timeline Lane Reassignment Project' })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSection = sectionsRes.body.find((section: any) => section.isDefault);
+    expect(defaultSection?.id).toBeTruthy();
+
+    const laneSectionRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Doing Lane' })
+      .expect(201);
+
+    const laneFieldRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/custom-fields`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: 'Timeline Lane',
+        type: 'SELECT',
+        options: [
+          { label: 'Backlog', value: 'backlog' },
+          { label: 'In Flight', value: 'in-flight' },
+        ],
+      })
+      .expect(201);
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Timeline lane move target',
+        sectionId: defaultSection.id,
+        status: 'TODO',
+      })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+
+    const moveStart = new Date();
+    const movedTaskRes = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/timeline-move`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        sectionId: laneSectionRes.body.id,
+        status: 'IN_PROGRESS',
+        customFieldMove: {
+          fieldId: laneFieldRes.body.id,
+          value: laneFieldRes.body.options[1].id,
+        },
+        version: taskRes.body.version,
+      })
+      .expect(200);
+
+    expect(movedTaskRes.body.sectionId).toBe(laneSectionRes.body.id);
+    expect(movedTaskRes.body.status).toBe('IN_PROGRESS');
+    expect(movedTaskRes.body.customFieldValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fieldId: laneFieldRes.body.id,
+          optionId: laneFieldRes.body.options[1].id,
+        }),
+      ]),
+    );
+
+    const detailRes = await request(app.getHttpServer())
+      .get(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(detailRes.body.sectionId).toBe(laneSectionRes.body.id);
+    expect(detailRes.body.status).toBe('IN_PROGRESS');
+    expect(detailRes.body.customFieldValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fieldId: laneFieldRes.body.id,
+          optionId: laneFieldRes.body.options[1].id,
+        }),
+      ]),
+    );
+
+    const timelineAudit = await prisma.auditEvent.findFirst({
+      where: {
+        entityType: 'Task',
+        entityId: taskId,
+        action: 'task.timeline.moved',
+        createdAt: { gte: moveStart },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(timelineAudit).toBeTruthy();
+    expect(timelineAudit?.afterJson).toMatchObject({
+      sectionId: laneSectionRes.body.id,
+      status: 'IN_PROGRESS',
+    });
+
+    const timelineOutbox = await prisma.outboxEvent.findFirst({
+      where: {
+        type: 'task.timeline.moved',
+        createdAt: { gte: moveStart },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect((timelineOutbox?.payload as any)?.taskId).toBe(taskId);
+    expect((timelineOutbox?.payload as any)?.sectionId).toBe(laneSectionRes.body.id);
+    expect((timelineOutbox?.payload as any)?.status).toBe('IN_PROGRESS');
+    expect((timelineOutbox?.payload as any)?.customFieldMove).toEqual({
+      fieldId: laneFieldRes.body.id,
+      value: laneFieldRes.body.options[1].id,
+    });
+  });
 });
