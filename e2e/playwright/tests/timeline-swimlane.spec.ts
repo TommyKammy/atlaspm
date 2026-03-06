@@ -49,7 +49,7 @@ async function dragTimelineBarToLane(page: Page, taskId: string, laneTestId: str
 
   const startX = barBox.x + Math.min(Math.max(8, barBox.width / 4), barBox.width - 4);
   const startY = barBox.y + barBox.height / 2;
-  const targetY = laneBox.y + laneBox.height / 2;
+  const targetY = laneBox.y + Math.min(Math.max(20, laneBox.height * 0.2), laneBox.height - 12);
 
   await page.mouse.move(startX, startY);
   await page.mouse.down();
@@ -262,6 +262,68 @@ test('timeline drag can move task across assignee lanes into unassigned', async 
       return latest.assigneeUserId;
     })
     .toBe(movableTask.assigneeUserId);
+});
+
+test('timeline drag can move task across section and status lanes', async ({ page }) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-lane-attrs-${now}`;
+  const email = `${sub}@example.com`;
+
+  await login(page, sub, email);
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Lane Attributes ${now}`,
+  });
+  const projectId = project.id as string;
+  const sectionA = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Section A' });
+  const sectionB = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Section B' });
+
+  const movableTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: sectionA.id,
+    title: `Move Between Lanes ${now}`,
+    startAt: dayIso(1),
+    dueAt: dayIso(3),
+  });
+  await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: sectionB.id,
+    title: `Section B Anchor ${now}`,
+    startAt: dayIso(2),
+    dueAt: dayIso(4),
+  });
+  await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: sectionA.id,
+    title: `Status Anchor ${now}`,
+    status: 'IN_PROGRESS',
+    startAt: dayIso(2),
+    dueAt: dayIso(4),
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await page.click('[data-testid="timeline-zoom-day"]');
+
+  await dragTimelineBarToLane(page, movableTask.id, `timeline-lane-section-${sectionB.id}`);
+  await expect
+    .poll(async () => {
+      const latest = await api(`/tasks/${movableTask.id}`, token);
+      return latest.sectionId;
+    })
+    .toBe(sectionB.id);
+
+  await page.click('[data-testid="timeline-swimlane-status"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute('data-active', 'true');
+  await dragTimelineBarToLane(page, movableTask.id, 'timeline-lane-status-IN_PROGRESS');
+  await expect
+    .poll(async () => {
+      const latest = await api(`/tasks/${movableTask.id}`, token);
+      return latest.status;
+    })
+    .toBe('IN_PROGRESS');
 });
 
 test('timeline can schedule unscheduled tasks via drag and drop', async ({ page }) => {

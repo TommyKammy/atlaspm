@@ -2961,6 +2961,17 @@ describe('Core API Integration', () => {
       fieldId: laneFieldRes.body.id,
       value: laneFieldRes.body.options[1].id,
     });
+
+    await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/timeline-move`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        customFieldMove: {
+          fieldId: laneFieldRes.body.id,
+        },
+        version: movedTaskRes.body.version,
+      })
+      .expect(400);
   });
 
   test('timeline move rejects unknown section and unknown custom field lane targets', async () => {

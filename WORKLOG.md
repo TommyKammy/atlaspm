@@ -2542,3 +2542,22 @@
   - `cd apps/core-api && SEARCH_ENABLED=false DATABASE_URL='postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public' pnpm exec vitest run test/core.integration.test.ts -t "timeline"`
 - Risks/known gaps:
   - This wave strengthens backend contracts only; Timeline UI still needs dedicated swimlane group-by and drag wiring in later issues.
+
+## 2026-03-06 - Issue #200: Implement lane-to-attribute drag reassignment
+- What changed:
+  - Extended `apps/web-ui/src/components/project-timeline-view.tsx` so Timeline bar drag can commit lane changes for `assignee`, `section`, and `status` swimlanes in addition to schedule shifts.
+  - Updated optimistic cache handling to move tasks across grouped sections immediately, including `status` / `sectionId` changes and derived `completedAt` state.
+  - Switched lane hit detection to resolve from the full lane container instead of only the lane header, so dragging onto task rows in another lane still commits the intended reassignment.
+  - Fixed `apps/core-api/src/tasks/tasks.controller.ts` timeline move persistence by allowing direct scalar foreign-key updates with `Prisma.TaskUncheckedUpdateManyInput` and by moving `PatchTaskCustomFieldValueDto` before `TimelineMoveTaskDto` so Nest/class-transformer can construct the DTO at runtime.
+  - Extended `e2e/playwright/tests/timeline-swimlane.spec.ts` with section/status lane reassignment coverage.
+- Why:
+  - Issue #200 requires drag-and-drop lane changes in Timeline to update the backing task attribute, not just assignee or date fields.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `cd apps/core-api && SEARCH_ENABLED=false DATABASE_URL='postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public' pnpm exec vitest run test/core.integration.test.ts -t "timeline move supports section, status, and custom field lane reassignment"`
+  - `PORT=3107 DEV_AUTH_ENABLED=true DEV_AUTH_SECRET=dev-secret DATABASE_URL='postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public' SEARCH_ENABLED=false pnpm --filter @atlaspm/core-api dev`
+  - `NEXT_PUBLIC_DEV_AUTH_ENABLED=true NEXT_PUBLIC_DEV_TOKEN_ENDPOINT=http://localhost:3107/dev-auth/token NEXT_PUBLIC_CORE_API_URL=http://localhost:3107 NEXT_PUBLIC_COLLAB_URL=ws://localhost:18080 pnpm --filter @atlaspm/web-ui exec next dev -p 3108`
+  - `cd e2e/playwright && E2E_BASE_URL=http://localhost:3108 E2E_CORE_API_URL=http://localhost:3107 pnpm exec playwright test tests/timeline-swimlane.spec.ts -g "timeline drag can move task across assignee lanes into unassigned|timeline drag can move task across section and status lanes" --reporter=line --workers=1`
+- Risks/known gaps:
+  - Full-file `timeline-swimlane.spec.ts` still depends on Issue #201 for the unscheduled tray scenario; this branch validates only the lane reassignment paths that belong to #200.
