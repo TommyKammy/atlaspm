@@ -2423,3 +2423,19 @@
   - `cd e2e/playwright && E2E_BASE_URL=http://localhost:3100 pnpm exec playwright test tests/timeline-swimlane.spec.ts --reporter=list`
 - Risks/known gaps:
   - Empty placeholder lanes are only rendered for section swimlanes in this wave; assignee/status empty-lane UX remains deferred until later timeline planning iterations.
+
+## 2026-03-06 - Issue #202: Compact non-overlapping Timeline rows within a swimlane
+- What changed:
+  - Extended `packages/domain/src/services/timeline-layout.ts` with compact-row packing support so non-overlapping scheduled tasks can share a single row when Timeline mode is active.
+  - Added packed-row metadata to the domain layout result and kept Gantt on strict one-row-per-task behavior by only enabling compact rows in Timeline mode.
+  - Updated `apps/web-ui/src/components/project-timeline-view.tsx` to render packed rows, keep dependency positioning stable, and expose row-level test ids.
+  - Added domain coverage for compact packing and Playwright coverage that verifies three tasks collapse into two rows when their schedules do not overlap.
+- Why:
+  - Issue #202 requires Timeline to move away from one-row-per-task rendering so lanes stay compact and closer to Asana's bird's-eye planning layout.
+- How tested (exact commands):
+  - `pnpm --filter @atlaspm/domain build`
+  - `node --test packages/domain/dist/__tests__/timeline-layout.test.js`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `cd e2e/playwright && E2E_BASE_URL=http://localhost:3101 pnpm exec playwright test tests/timeline-swimlane.spec.ts --reporter=list`
+- Risks/known gaps:
+  - Timeline compact packing currently uses interval overlap only; dependency-aware auto-layout and more advanced packing heuristics remain for later issues.

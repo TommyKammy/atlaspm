@@ -57,12 +57,18 @@ export type TimelineTaskRow<TTask extends TimelineLayoutTaskInput = TimelineLayo
   top: number;
 };
 
+export type TimelinePackedRow<TTask extends TimelineLayoutTaskInput = TimelineLayoutTaskInput> = {
+  top: number;
+  tasks: TTask[];
+};
+
 export type TimelineLayoutLane<TTask extends TimelineLayoutTaskInput = TimelineLayoutTaskInput> = {
   lane: TimelineLane<TTask>;
   tasks: TTask[];
   top: number;
   bottom: number;
   taskRows: Array<TimelineTaskRow<TTask>>;
+  rows: Array<TimelinePackedRow<TTask>>;
 };
 
 export type TimelineLayout<TTask extends TimelineLayoutTaskInput = TimelineLayoutTaskInput> = {
@@ -80,6 +86,7 @@ export type BuildTimelineLayoutInput<TTask extends TimelineLayoutTaskInput> = {
   dayColumnWidth: number;
   sectionRowHeight: number;
   taskRowHeight: number;
+  compactRows?: boolean;
 };
 
 const DEFAULT_UNASSIGNED_LANE_ID = '__unassigned__';
@@ -197,9 +204,46 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
     const laneTop = cursorY;
     cursorY += input.sectionRowHeight;
     const taskRows: Array<TimelineTaskRow<TTask>> = [];
+    const rows: Array<TimelinePackedRow<TTask>> = [];
+    const rowEndByIndex: number[] = [];
 
-    for (const task of lane.tasks) {
-      const rowTop = cursorY;
+    const tasks = input.compactRows
+      ? [...lane.tasks].sort((left, right) => {
+          const leftStart = left.timelineStart ? dayNumber(left.timelineStart) : Number.MAX_SAFE_INTEGER;
+          const rightStart = right.timelineStart ? dayNumber(right.timelineStart) : Number.MAX_SAFE_INTEGER;
+          if (leftStart !== rightStart) return leftStart - rightStart;
+          const leftEnd = left.timelineEnd ? dayNumber(left.timelineEnd) : Number.MAX_SAFE_INTEGER;
+          const rightEnd = right.timelineEnd ? dayNumber(right.timelineEnd) : Number.MAX_SAFE_INTEGER;
+          if (leftEnd !== rightEnd) return leftEnd - rightEnd;
+          return left.id.localeCompare(right.id);
+        })
+      : lane.tasks;
+
+    for (const task of tasks) {
+      let rowIndex = rows.length;
+      if (input.compactRows && task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd) {
+        const taskStartDay = dayNumber(task.timelineStart);
+        const taskEndDay = dayNumber(task.timelineEnd);
+        const candidateIndex = rowEndByIndex.findIndex((endDay) => endDay < taskStartDay);
+        if (candidateIndex >= 0) {
+          rowIndex = candidateIndex;
+          rowEndByIndex[candidateIndex] = taskEndDay;
+        } else {
+          rowEndByIndex.push(taskEndDay);
+        }
+      } else if (!input.compactRows) {
+        rowEndByIndex.push(Number.MAX_SAFE_INTEGER);
+      } else {
+        rowEndByIndex.push(Number.MAX_SAFE_INTEGER);
+      }
+      if (!rows[rowIndex]) {
+        rows[rowIndex] = {
+          top: cursorY + rowIndex * input.taskRowHeight,
+          tasks: [],
+        };
+      }
+      const row = rows[rowIndex]!;
+      const rowTop = row.top;
       taskRowsById[task.id] = { top: rowTop, height: input.taskRowHeight };
 
       const visibleStart = task.timelineStart && task.timelineStart < input.windowStart ? input.windowStart : task.timelineStart;
@@ -211,13 +255,14 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
           width:
             Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1)
             * input.dayColumnWidth,
-          y: cursorY + input.taskRowHeight / 2,
+          y: rowTop + input.taskRowHeight / 2,
         };
       }
 
+      row.tasks.push(task);
       taskRows.push({ task, top: rowTop });
-      cursorY += input.taskRowHeight;
     }
+    cursorY += rows.length * input.taskRowHeight;
 
     lanesWithRows.push({
       lane,
@@ -225,6 +270,7 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
       top: laneTop,
       bottom: cursorY,
       taskRows,
+      rows,
     });
   }
 
@@ -233,6 +279,6 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
     barsByTaskId,
     taskRowsById,
     bodyHeight: cursorY,
-    totalRowCount: input.lanes.length + input.lanes.reduce((sum, lane) => sum + lane.tasks.length, 0),
+    totalRowCount: input.lanes.length + lanesWithRows.reduce((sum, lane) => sum + lane.rows.length, 0),
   };
 }

@@ -213,3 +213,68 @@ test('buildTimelineLayout calculates row and bar positions', () => {
   assert.deepEqual(layout.taskRowsById['task-1'], { top: 32, height: 40 });
   assert.deepEqual(layout.barsByTaskId['task-1'], { left: 20, width: 60, y: 52 });
 });
+
+test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () => {
+  const tasks: TaskInput[] = [
+    {
+      id: 'task-1',
+      title: 'First',
+      sectionId: 'design',
+      assigneeUserId: 'user-1',
+      status: 'TODO',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-02'),
+      timelineEnd: utcDate('2026-03-03'),
+    },
+    {
+      id: 'task-2',
+      title: 'Second',
+      sectionId: 'design',
+      assigneeUserId: 'user-1',
+      status: 'IN_PROGRESS',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-05'),
+      timelineEnd: utcDate('2026-03-06'),
+    },
+    {
+      id: 'task-3',
+      title: 'Overlap',
+      sectionId: 'design',
+      assigneeUserId: 'user-1',
+      status: 'BLOCKED',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-03'),
+      timelineEnd: utcDate('2026-03-05'),
+    },
+  ];
+
+  const lanes = buildTimelineLanes({
+    swimlane: 'section',
+    tasks,
+    sections,
+    membersById: {},
+    preferredLaneOrder: [],
+    defaultSectionLabel: 'Tasks',
+    unassignedLabel: 'Unassigned',
+  });
+
+  const layout = buildTimelineLayout({
+    lanes,
+    windowStart: utcDate('2026-03-01'),
+    windowEnd: utcDate('2026-03-10'),
+    dayColumnWidth: 20,
+    sectionRowHeight: 32,
+    taskRowHeight: 40,
+    compactRows: true,
+  });
+
+  assert.equal(layout.bodyHeight, 112);
+  assert.equal(layout.totalRowCount, 3);
+  assert.equal(layout.lanesWithRows[0]?.rows.length, 2);
+  assert.deepEqual(layout.taskRowsById['task-1'], { top: 32, height: 40 });
+  assert.deepEqual(layout.taskRowsById['task-2'], { top: 32, height: 40 });
+  assert.deepEqual(layout.taskRowsById['task-3'], { top: 72, height: 40 });
+});
