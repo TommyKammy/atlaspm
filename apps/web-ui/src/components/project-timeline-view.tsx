@@ -510,6 +510,19 @@ function buildViewStateForMode(
       };
 }
 
+function buildDefaultTimelineViewStateSnapshot(anchorDate = startOfDay(new Date())): LocalTimelineViewStateSnapshot {
+  return {
+    zoom: 'week',
+    anchorDate,
+    swimlane: 'section',
+    sortMode: 'manual',
+    scheduleFilter: 'all',
+    workingDaysOnly: false,
+    ganttRiskFilterMode: 'all',
+    ganttStrictMode: false,
+  };
+}
+
 function areTimelineViewStatesEqual(
   left: TimelineViewState | null | undefined,
   right: TimelineViewState,
@@ -667,9 +680,7 @@ export function ProjectScheduleCanvas({
     };
   }, []);
   const rescheduleInFlightTaskIdsRef = useRef(new Set<string>());
-  const lastHydratedViewStateRef = useRef<TimelineViewState | null>(null);
   const timelineViewStateRef = useRef<TimelineViewState | null>(null);
-  const saveViewStateTimerRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
   const timelineCanvasRef = useRef<HTMLDivElement | null>(null);
@@ -693,6 +704,21 @@ export function ProjectScheduleCanvas({
         : null,
     [meQuery.data?.id, timelineStorageBaseKey],
   );
+  const fallbackViewState = useMemo(
+    () => buildViewStateForMode(mode, buildDefaultTimelineViewStateSnapshot()),
+    [mode, projectId],
+  );
+  const persistedDefaultViewState = useMemo(() => {
+    const candidate =
+      mode === 'timeline'
+        ? timelinePreferencesQuery.data?.timelineViewState
+        : timelinePreferencesQuery.data?.ganttViewState;
+    return candidate && Object.keys(candidate).length > 0 ? candidate : null;
+  }, [
+    mode,
+    timelinePreferencesQuery.data?.ganttViewState,
+    timelinePreferencesQuery.data?.timelineViewState,
+  ]);
   const laneOrderGroupBy = mode === 'timeline' && isLaneOrderGroupBy(swimlane) ? swimlane : null;
   const laneOrderStorageBaseKey = useMemo(
     () =>
@@ -738,35 +764,25 @@ export function ProjectScheduleCanvas({
       }
     }
 
-    const serverViewState =
-      mode === 'timeline'
-        ? timelinePreferencesQuery.data?.timelineViewState
-        : timelinePreferencesQuery.data?.ganttViewState;
-    const preferredViewState =
-      restoredLocalState ??
-      (serverViewState && Object.keys(serverViewState).length > 0 ? serverViewState : null);
-
-    if (preferredViewState) {
-      applyTimelineViewState(preferredViewState, {
-        setZoom,
-        setAnchorDate,
-        setSwimlane,
-        setSortMode,
-        setScheduleFilter,
-        setWorkingDaysOnly,
-        setGanttRiskFilterMode,
-        setGanttStrictMode,
-      });
-      lastHydratedViewStateRef.current = preferredViewState;
-    }
+    const preferredViewState = restoredLocalState ?? persistedDefaultViewState ?? fallbackViewState;
+    applyTimelineViewState(preferredViewState, {
+      setZoom,
+      setAnchorDate,
+      setSwimlane,
+      setSortMode,
+      setScheduleFilter,
+      setWorkingDaysOnly,
+      setGanttRiskFilterMode,
+      setGanttStrictMode,
+    });
     hasRestoredTimelinePreferences.current = true;
     setPreferencesHydrated(true);
   }, [
+    fallbackViewState,
     mode,
-    projectId,
-    timelinePreferencesQuery.data?.ganttViewState,
-    timelinePreferencesQuery.data?.timelineViewState,
     timelinePreferencesQuery.isFetched,
+    persistedDefaultViewState,
+    projectId,
     timelineStorageBaseKey,
     timelineStorageUserKey,
   ]);
@@ -836,22 +852,13 @@ export function ProjectScheduleCanvas({
         body: viewState,
       })) as TimelinePreferences,
     onMutate: async ({ nextMode, viewState }) => {
+      setRescheduleNotice(null);
       await queryClient.cancelQueries({
         queryKey: queryKeys.projectTimelinePreferences(projectId),
       });
       const previous = queryClient.getQueryData<TimelinePreferences>(
         queryKeys.projectTimelinePreferences(projectId),
       );
-      const previousLocalState: LocalTimelineViewStateSnapshot = {
-        zoom,
-        anchorDate,
-        swimlane,
-        sortMode,
-        scheduleFilter,
-        workingDaysOnly,
-        ganttRiskFilterMode,
-        ganttStrictMode,
-      };
       queryClient.setQueryData<TimelinePreferences>(
         queryKeys.projectTimelinePreferences(projectId),
         {
@@ -864,7 +871,7 @@ export function ProjectScheduleCanvas({
           ganttViewState: nextMode === 'gantt' ? viewState : (previous?.ganttViewState ?? null),
         },
       );
-      return { previous, previousLocalState };
+      return { previous };
     },
     onError: (_error, _variables, context) => {
       if (context?.previous) {
@@ -873,27 +880,7 @@ export function ProjectScheduleCanvas({
           context.previous,
         );
       }
-      if (context?.previousLocalState) {
-        setZoom(context.previousLocalState.zoom);
-        setAnchorDate(context.previousLocalState.anchorDate);
-        setSwimlane(context.previousLocalState.swimlane);
-        setSortMode(context.previousLocalState.sortMode);
-        setScheduleFilter(context.previousLocalState.scheduleFilter);
-        setWorkingDaysOnly(context.previousLocalState.workingDaysOnly);
-        setGanttRiskFilterMode(context.previousLocalState.ganttRiskFilterMode);
-        setGanttStrictMode(context.previousLocalState.ganttStrictMode);
-      }
-      lastHydratedViewStateRef.current =
-        mode === 'timeline'
-          ? (context?.previous?.timelineViewState ?? null)
-          : (context?.previous?.ganttViewState ?? null);
       setRescheduleNotice({ type: 'error', message: t('timelineViewStateSaveFailed') });
-    },
-    onSuccess: (result, variables) => {
-      lastHydratedViewStateRef.current =
-        variables.nextMode === 'timeline'
-          ? (result.timelineViewState ?? null)
-          : (result.ganttViewState ?? null);
     },
     onSettled: async () => {
       await queryClient.invalidateQueries({
@@ -902,48 +889,34 @@ export function ProjectScheduleCanvas({
     },
   });
 
-  useEffect(() => {
-    if (!preferencesHydrated) return;
-    const nextViewState = buildViewStateForMode(mode, {
-      zoom,
+  const currentModeViewState = useMemo(
+    () =>
+      buildViewStateForMode(mode, {
+        zoom,
+        anchorDate,
+        swimlane,
+        sortMode,
+        scheduleFilter,
+        workingDaysOnly,
+        ganttRiskFilterMode,
+        ganttStrictMode,
+      }),
+    [
       anchorDate,
-      swimlane,
-      sortMode,
-      scheduleFilter,
-      workingDaysOnly,
       ganttRiskFilterMode,
       ganttStrictMode,
-    });
-    if (areTimelineViewStatesEqual(lastHydratedViewStateRef.current, nextViewState)) {
-      return;
-    }
-    if (saveViewStateTimerRef.current !== null) {
-      window.clearTimeout(saveViewStateTimerRef.current);
-    }
-    saveViewStateTimerRef.current = window.setTimeout(() => {
-      saveViewStateMutation.mutate({
-        nextMode: mode,
-        viewState: nextViewState,
-      });
-    }, 300);
-    return () => {
-      if (saveViewStateTimerRef.current !== null) {
-        window.clearTimeout(saveViewStateTimerRef.current);
-        saveViewStateTimerRef.current = null;
-      }
-    };
-  }, [
-    anchorDate,
-    ganttRiskFilterMode,
-    ganttStrictMode,
-    mode,
-    preferencesHydrated,
-    scheduleFilter,
-    sortMode,
-    swimlane,
-    workingDaysOnly,
-    zoom,
-  ]);
+      mode,
+      scheduleFilter,
+      sortMode,
+      swimlane,
+      workingDaysOnly,
+      zoom,
+    ],
+  );
+  const viewStateSaveBaseline = persistedDefaultViewState ?? fallbackViewState;
+  const hasUnsavedDefaultViewStateChanges =
+    preferencesHydrated &&
+    !areTimelineViewStatesEqual(viewStateSaveBaseline, currentModeViewState);
 
   const zoomConfig = TIMELINE_ZOOM_CONFIG[zoom];
   const effectiveSwimlane: TimelineSwimlane = mode === 'timeline' ? swimlane : 'section';
@@ -2303,6 +2276,22 @@ export function ProjectScheduleCanvas({
               {timeline.window.start.toLocaleDateString()} -{' '}
               {timeline.window.end.toLocaleDateString()}
             </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 px-3 text-xs"
+              data-testid="timeline-save-default"
+              disabled={!hasUnsavedDefaultViewStateChanges || saveViewStateMutation.isPending}
+              onClick={() =>
+                saveViewStateMutation.mutate({
+                  nextMode: mode,
+                  viewState: currentModeViewState,
+                })
+              }
+            >
+              {saveViewStateMutation.isPending ? t('saving') : t('timelineSaveDefault')}
+            </Button>
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Badge variant="secondary">{scheduledTasks.length}</Badge>
