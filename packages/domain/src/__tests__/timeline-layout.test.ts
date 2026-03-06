@@ -308,13 +308,15 @@ test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () =
     compactRows: true,
   });
 
-  assert.equal(layout.bodyHeight, 112);
-  assert.equal(layout.totalRowCount, 3);
-  assert.equal(layout.lanesWithRows[0]?.rows.length, 2);
-  assert.deepEqual(layout.taskRowsById['task-1'], { top: 32, height: 40 });
-  assert.deepEqual(layout.taskRowsById['task-2'], { top: 32, height: 40 });
-  assert.deepEqual(layout.taskRowsById['task-3'], { top: 72, height: 40 });
-  assert.deepEqual(layout.lanesWithRows[0]?.rows.map((row) => ({ index: row.index, taskIds: row.tasks.map((task) => task.id) })), [
+  const designLane = layout.lanesWithRows.find((lane) => lane.lane.id === 'section:design');
+
+  assert.equal(layout.bodyHeight, 144);
+  assert.equal(layout.totalRowCount, 4);
+  assert.equal(designLane?.rows.length, 2);
+  assert.deepEqual(layout.taskRowsById['task-1'], { top: 64, height: 40 });
+  assert.deepEqual(layout.taskRowsById['task-2'], { top: 64, height: 40 });
+  assert.deepEqual(layout.taskRowsById['task-3'], { top: 104, height: 40 });
+  assert.deepEqual(designLane?.rows.map((row) => ({ index: row.index, taskIds: row.tasks.map((task) => task.id) })), [
     { index: 0, taskIds: ['task-1', 'task-2'] },
     { index: 1, taskIds: ['task-3'] },
   ]);
