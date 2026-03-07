@@ -94,7 +94,7 @@ type TimelineSelectionDraft = {
   currentY: number;
 };
 
-type SectionTimelineRailItem = {
+type TimelineRailItem = {
   task: TimelineTask;
   depth: number;
   hasChildren: boolean;
@@ -102,16 +102,16 @@ type SectionTimelineRailItem = {
   ancestorHasNextSibling: boolean[];
 };
 
-type SectionTimelineNode = {
+type TimelineRailNode = {
   task: TimelineTask;
-  children: SectionTimelineNode[];
+  children: TimelineRailNode[];
 };
 
-type SectionTimelineLaneHierarchy = {
+type TimelineLaneRail = {
   orderedTasks: TimelineTask[];
-  railItems: SectionTimelineRailItem[];
-  railItemByTaskId: Map<string, SectionTimelineRailItem>;
-  hasHierarchy: boolean;
+  railItems: TimelineRailItem[];
+  railItemByTaskId: Map<string, TimelineRailItem>;
+  showTaskRail: boolean;
 };
 
 function getLegacyTimelineStorageKey(
@@ -309,26 +309,41 @@ function compareTimelineTasks(
   return left.title.localeCompare(right.title);
 }
 
-function buildSectionTimelineLaneHierarchy(tasks: TimelineTask[]): SectionTimelineLaneHierarchy {
-  const byId = new Map<string, SectionTimelineNode>();
+function buildTimelineLaneRail(
+  tasks: TimelineTask[],
+  childTaskCountByParentId: Map<string, number>,
+): TimelineLaneRail {
+  const showTaskRail = tasks.some(
+    (task) => Boolean(task.parentId) || (childTaskCountByParentId.get(task.id) ?? 0) > 0,
+  );
+  if (!showTaskRail) {
+    return {
+      orderedTasks: tasks,
+      railItems: [],
+      railItemByTaskId: new Map(),
+      showTaskRail: false,
+    };
+  }
+
+  const byId = new Map<string, TimelineRailNode>();
   const orderByTaskId = new Map(tasks.map((task, index) => [task.id, index]));
   for (const task of tasks) {
     byId.set(task.id, { task, children: [] });
   }
 
-  const roots: SectionTimelineNode[] = [];
+  const roots: TimelineRailNode[] = [];
   for (const task of tasks) {
     const node = byId.get(task.id);
     if (!node) continue;
     const parentNode = task.parentId ? byId.get(task.parentId) : undefined;
-    if (parentNode && parentNode.task.sectionId === task.sectionId) {
+    if (parentNode) {
       parentNode.children.push(node);
       continue;
     }
     roots.push(node);
   }
 
-  const sortNodes = (nodes: SectionTimelineNode[]) => {
+  const sortNodes = (nodes: TimelineRailNode[]) => {
     nodes.sort(
       (left, right) => (orderByTaskId.get(left.task.id) ?? 0) - (orderByTaskId.get(right.task.id) ?? 0),
     );
@@ -338,9 +353,9 @@ function buildSectionTimelineLaneHierarchy(tasks: TimelineTask[]): SectionTimeli
   };
   sortNodes(roots);
 
-  const railItems: SectionTimelineRailItem[] = [];
+  const railItems: TimelineRailItem[] = [];
   const walk = (
-    nodes: SectionTimelineNode[],
+    nodes: TimelineRailNode[],
     depth: number,
     ancestorHasNextSibling: boolean[],
   ) => {
@@ -364,7 +379,7 @@ function buildSectionTimelineLaneHierarchy(tasks: TimelineTask[]): SectionTimeli
     orderedTasks: railItems.map((item) => item.task),
     railItems,
     railItemByTaskId: new Map(railItems.map((item) => [item.task.id, item])),
-    hasHierarchy: railItems.some((item) => item.depth > 0),
+    showTaskRail: true,
   };
 }
 
@@ -1220,6 +1235,18 @@ export function ProjectScheduleCanvas({
     if (mode !== 'gantt' || ganttRiskFilterMode === 'all') return baseFilteredTasks;
     return baseFilteredTasks.filter((task) => ganttRiskByTaskId.get(task.id)?.isAtRisk);
   }, [baseFilteredTasks, ganttRiskByTaskId, ganttRiskFilterMode, mode]);
+  const scheduledTimelineTasks = useMemo(
+    () => filteredTasks.filter((task) => task.hasSchedule),
+    [filteredTasks],
+  );
+  const childTaskCountByParentId = useMemo(() => {
+    const next = new Map<string, number>();
+    for (const task of scheduledTimelineTasks) {
+      if (!task.parentId) continue;
+      next.set(task.parentId, (next.get(task.parentId) ?? 0) + 1);
+    }
+    return next;
+  }, [scheduledTimelineTasks]);
 
   const preferredLaneOrder = useMemo(() => {
     const storedLaneOrder = readStoredTimelineLaneOrder([
@@ -1262,7 +1289,6 @@ export function ProjectScheduleCanvas({
     : false;
 
   const baseTimelineLanes = useMemo(() => {
-    const scheduledTimelineTasks = filteredTasks.filter((task) => task.hasSchedule);
     const lanes = buildTimelineLanes({
       swimlane: effectiveSwimlane,
       tasks: scheduledTimelineTasks,
@@ -1283,33 +1309,33 @@ export function ProjectScheduleCanvas({
     return lanes;
   }, [
     effectiveSwimlane,
-    filteredTasks,
     hasActiveManualLayout,
     preferredLaneOrder,
     preferredManualLayout,
+    scheduledTimelineTasks,
     t,
     timeline.membersById,
     timeline.sections,
   ]);
-  const sectionTimelineHierarchyByLaneId = useMemo(() => {
-    const next = new Map<string, SectionTimelineLaneHierarchy>();
-    if (mode !== 'timeline' || effectiveSwimlane !== 'section') return next;
+  const timelineLaneRailByLaneId = useMemo(() => {
+    const next = new Map<string, TimelineLaneRail>();
+    if (mode !== 'timeline') return next;
     for (const lane of baseTimelineLanes) {
-      next.set(lane.id, buildSectionTimelineLaneHierarchy(lane.tasks));
+      next.set(lane.id, buildTimelineLaneRail(lane.tasks, childTaskCountByParentId));
     }
     return next;
-  }, [baseTimelineLanes, effectiveSwimlane, mode]);
+  }, [baseTimelineLanes, childTaskCountByParentId, mode]);
   const timelineLanes = useMemo(
     () =>
       baseTimelineLanes.map((lane) => {
-        const hierarchy = sectionTimelineHierarchyByLaneId.get(lane.id);
-        if (!hierarchy?.hasHierarchy) return lane;
+        const rail = timelineLaneRailByLaneId.get(lane.id);
+        if (!rail?.showTaskRail) return lane;
         return {
           ...lane,
-          tasks: hierarchy.orderedTasks,
+          tasks: rail.orderedTasks,
         };
       }),
-    [baseTimelineLanes, sectionTimelineHierarchyByLaneId],
+    [baseTimelineLanes, timelineLaneRailByLaneId],
   );
   const laneTaskCountById = useMemo(
     () => new Map(timelineLanes.map((lane) => [lane.id, lane.tasks.length])),
@@ -1329,19 +1355,18 @@ export function ProjectScheduleCanvas({
               .map((lane) => lane.id)
           : [];
       const hierarchyLaneIds =
-        mode === 'timeline' && effectiveSwimlane === 'section'
+        mode === 'timeline'
           ? visibleTimelineLanes
-              .filter((lane) => sectionTimelineHierarchyByLaneId.get(lane.id)?.hasHierarchy)
+              .filter((lane) => timelineLaneRailByLaneId.get(lane.id)?.showTaskRail)
               .map((lane) => lane.id)
           : [];
       return Array.from(new Set([...manualLaneIds, ...hierarchyLaneIds]));
     },
     [
-      effectiveSwimlane,
       mode,
       preferredManualLayout,
-      sectionTimelineHierarchyByLaneId,
       sortMode,
+      timelineLaneRailByLaneId,
       visibleTimelineLanes,
     ],
   );
@@ -3295,14 +3320,12 @@ export function ProjectScheduleCanvas({
                 : rows;
               if (!sectionVisible && visibleRows.length === 0) return null;
               const isLaneCollapsed = collapsedLaneIds.has(lane.id);
-              const showHeaderOnlyLaneRail = effectiveSwimlane !== 'section';
               const laneTaskCount = laneTaskCountById.get(lane.id) ?? 0;
               const laneContentId = `timeline-lane-content-${normalizeTestIdSegment(lane.id)}`;
-              const sectionRailHierarchy = sectionTimelineHierarchyByLaneId.get(lane.id);
-              const showSectionTaskRail =
-                mode === 'timeline' &&
-                effectiveSwimlane === 'section' &&
-                Boolean(sectionRailHierarchy?.hasHierarchy);
+              const timelineLaneRail = timelineLaneRailByLaneId.get(lane.id);
+              const showTimelineTaskRail =
+                mode === 'timeline' && Boolean(timelineLaneRail?.showTaskRail);
+              const showHeaderOnlyLaneRail = !showTimelineTaskRail;
               const laneRowsTop = top + SECTION_ROW_HEIGHT;
               const topSpacer = visibleRows.length
                 ? Math.max(0, visibleRows[0]!.top - laneRowsTop)
@@ -3437,10 +3460,10 @@ export function ProjectScheduleCanvas({
                           </Badge>
                         ) : null}
                       </div>
-                      {showSectionTaskRail && !isLaneCollapsed && topSpacer > 0 ? (
+                      {showTimelineTaskRail && !isLaneCollapsed && topSpacer > 0 ? (
                         <div style={{ height: `${topSpacer}px` }} />
                       ) : null}
-                      {showSectionTaskRail && !isLaneCollapsed
+                      {showTimelineTaskRail && !isLaneCollapsed
                         ? visibleRows.map((row) => {
                             const task = row.tasks[0];
                             if (!task) {
@@ -3451,7 +3474,7 @@ export function ProjectScheduleCanvas({
                                 />
                               );
                             }
-                            const railItem = sectionRailHierarchy?.railItemByTaskId.get(task.id);
+                            const railItem = timelineLaneRail?.railItemByTaskId.get(task.id);
                             if (!railItem) {
                               return (
                                 <div
@@ -3527,7 +3550,7 @@ export function ProjectScheduleCanvas({
                             );
                           })
                         : null}
-                      {showSectionTaskRail && !isLaneCollapsed && bottomSpacer > 0 ? (
+                      {showTimelineTaskRail && !isLaneCollapsed && bottomSpacer > 0 ? (
                         <div style={{ height: `${bottomSpacer}px` }} />
                       ) : null}
                     </div>
