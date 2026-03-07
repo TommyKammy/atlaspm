@@ -186,6 +186,9 @@ model ProjectTimelinePreference {
   userId              String
   laneOrderBySection  String[] @default([])
   laneOrderByAssignee String[] @default([])
+  taskOrderBySection  Json?
+  taskOrderByAssignee Json?
+  taskOrderByStatus   Json?
   timelineViewState   Json?
   ganttViewState      Json?
   createdAt           DateTime @default(now())
