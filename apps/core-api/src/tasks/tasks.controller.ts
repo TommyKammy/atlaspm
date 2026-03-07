@@ -515,6 +515,7 @@ const MAX_COMMENT_BODY_LENGTH = 5000;
 const MAX_IMAGE_UPLOAD_BYTES = 5_000_000;
 const IMAGE_MIME_ALLOWLIST = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const TIMELINE_LANE_ORDER_BASE_LIMIT = 500;
+const TIMELINE_TASK_ORDER_LIMIT = 1000;
 const TIMELINE_GROUP_BY_VALUES = ['section', 'assignee'] as const;
 const TIMELINE_TASK_ORDER_GROUP_BY_VALUES = ['section', 'assignee', 'status'] as const;
 const TIMELINE_VIEW_MODE_VALUES = ['timeline', 'gantt'] as const;
@@ -762,15 +763,27 @@ export class TasksController {
       const beforeTaskOrderByStatus = this.parseTimelineTaskOrderMap(before?.taskOrderByStatus);
       const nextTaskOrderBySection =
         groupBy === 'section'
-          ? { ...beforeTaskOrderBySection, [body.laneId]: normalizedTaskOrder }
+          ? this.mergeTimelineTaskOrderMap(
+              beforeTaskOrderBySection,
+              body.laneId,
+              normalizedTaskOrder,
+            )
           : beforeTaskOrderBySection;
       const nextTaskOrderByAssignee =
         groupBy === 'assignee'
-          ? { ...beforeTaskOrderByAssignee, [body.laneId]: normalizedTaskOrder }
+          ? this.mergeTimelineTaskOrderMap(
+              beforeTaskOrderByAssignee,
+              body.laneId,
+              normalizedTaskOrder,
+            )
           : beforeTaskOrderByAssignee;
       const nextTaskOrderByStatus =
         groupBy === 'status'
-          ? { ...beforeTaskOrderByStatus, [body.laneId]: normalizedTaskOrder }
+          ? this.mergeTimelineTaskOrderMap(
+              beforeTaskOrderByStatus,
+              body.laneId,
+              normalizedTaskOrder,
+            )
           : beforeTaskOrderByStatus;
       const updated = await tx.projectTimelinePreference.upsert({
         where: { projectId_userId: { projectId, userId: req.user.sub } },
@@ -3460,6 +3473,18 @@ export class TasksController {
     return Object.fromEntries(entries.filter(([, taskOrder]) => taskOrder.length > 0));
   }
 
+  private mergeTimelineTaskOrderMap(
+    current: TimelineTaskOrderMap,
+    laneId: string,
+    taskOrder: string[],
+  ): TimelineTaskOrderMap {
+    if (taskOrder.length === 0) {
+      const { [laneId]: _removed, ...rest } = current;
+      return rest;
+    }
+    return { ...current, [laneId]: taskOrder };
+  }
+
   private async normalizeTimelineTaskOrder(
     projectId: string,
     groupBy: TimelineTaskOrderGroupBy,
@@ -3473,6 +3498,11 @@ export class TasksController {
     this.assertTimelineTaskOrderLane(groupBy, body.laneId);
     if (!normalizedTaskOrder.length) {
       return [];
+    }
+    if (normalizedTaskOrder.length > TIMELINE_TASK_ORDER_LIMIT) {
+      throw new BadRequestException(
+        `taskOrder may not contain more than ${TIMELINE_TASK_ORDER_LIMIT} tasks`,
+      );
     }
 
     const tasks = await this.prisma.task.findMany({

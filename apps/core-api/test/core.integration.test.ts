@@ -3,7 +3,7 @@ import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { createServer } from 'node:http';
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { AuthService } from '../src/auth/auth.service';
@@ -2933,6 +2933,33 @@ describe('Core API Integration', () => {
       [`assignee:${timelineAssigneeId}`]: [timelineTaskARes.body.id, timelineTaskBRes.body.id],
     });
 
+    const clearedAssigneeTaskOrderRes = await request(app.getHttpServer())
+      .put(`/projects/${projectId}/timeline/preferences/task-order/assignee`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        laneId: `assignee:${timelineAssigneeId}`,
+        taskOrder: [],
+      })
+      .expect(200);
+    expect(clearedAssigneeTaskOrderRes.body.taskOrderByAssignee).toEqual({});
+    const preferencesAfterClear = await prisma.projectTimelinePreference.findUniqueOrThrow({
+      where: { projectId_userId: { projectId, userId: 'test-user' } },
+      select: { taskOrderByAssignee: true },
+    });
+    expect(preferencesAfterClear.taskOrderByAssignee).toEqual({});
+
+    const restoredAssigneeTaskOrderRes = await request(app.getHttpServer())
+      .put(`/projects/${projectId}/timeline/preferences/task-order/assignee`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        laneId: `assignee:${timelineAssigneeId}`,
+        taskOrder: [timelineTaskARes.body.id, timelineTaskBRes.body.id],
+      })
+      .expect(200);
+    expect(restoredAssigneeTaskOrderRes.body.taskOrderByAssignee).toEqual({
+      [`assignee:${timelineAssigneeId}`]: [timelineTaskARes.body.id, timelineTaskBRes.body.id],
+    });
+
     const statusTaskOrderRes = await request(app.getHttpServer())
       .put(`/projects/${projectId}/timeline/preferences/task-order/status`)
       .set('Authorization', `Bearer ${token}`)
@@ -2944,6 +2971,15 @@ describe('Core API Integration', () => {
     expect(statusTaskOrderRes.body.taskOrderByStatus).toEqual({
       'status:IN_PROGRESS': [timelineTaskBRes.body.id, timelineTaskARes.body.id],
     });
+
+    await request(app.getHttpServer())
+      .put(`/projects/${projectId}/timeline/preferences/task-order/section`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        laneId: `section:${defaultSection.id}`,
+        taskOrder: Array.from({ length: 1001 }, () => randomUUID()),
+      })
+      .expect(400);
 
     const extraMemberIds = Array.from(
       { length: 501 },
