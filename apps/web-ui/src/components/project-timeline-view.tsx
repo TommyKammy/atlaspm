@@ -94,14 +94,6 @@ type TimelineSelectionDraft = {
   currentY: number;
 };
 
-type TimelineRailItem = {
-  task: TimelineTask;
-  depth: number;
-  hasChildren: boolean;
-  hasNextSibling: boolean;
-  ancestorHasNextSibling: boolean[];
-};
-
 type TimelineRailNode = {
   task: TimelineTask;
   children: TimelineRailNode[];
@@ -109,8 +101,6 @@ type TimelineRailNode = {
 
 type TimelineLaneRail = {
   orderedTasks: TimelineTask[];
-  railItems: TimelineRailItem[];
-  railItemByTaskId: Map<string, TimelineRailItem>;
   usesHierarchicalTaskOrder: boolean;
 };
 
@@ -335,8 +325,6 @@ function buildTimelineLaneRail(
   if (!usesHierarchicalTaskOrder) {
     return {
       orderedTasks: tasks,
-      railItems: [],
-      railItemByTaskId: new Map(),
       usesHierarchicalTaskOrder: false,
     };
   }
@@ -369,32 +357,21 @@ function buildTimelineLaneRail(
   };
   sortNodes(roots);
 
-  const railItems: TimelineRailItem[] = [];
+  const orderedTasks: TimelineTask[] = [];
   const walk = (
     nodes: TimelineRailNode[],
-    depth: number,
-    ancestorHasNextSibling: boolean[],
   ) => {
-    nodes.forEach((node, index) => {
-      const hasNextSibling = index < nodes.length - 1;
-      railItems.push({
-        task: node.task,
-        depth,
-        hasChildren: node.children.length > 0,
-        hasNextSibling,
-        ancestorHasNextSibling,
-      });
+    nodes.forEach((node) => {
+      orderedTasks.push(node.task);
       if (node.children.length > 0) {
-        walk(node.children, depth + 1, [...ancestorHasNextSibling, hasNextSibling]);
+        walk(node.children);
       }
     });
   };
-  walk(roots, 0, []);
+  walk(roots);
 
   return {
-    orderedTasks: railItems.map((item) => item.task),
-    railItems,
-    railItemByTaskId: new Map(railItems.map((item) => [item.task.id, item])),
+    orderedTasks,
     usesHierarchicalTaskOrder: true,
   };
 }
@@ -3456,10 +3433,6 @@ export function ProjectScheduleCanvas({
               const isLaneCollapsed = collapsedLaneIds.has(lane.id);
               const laneTaskCount = laneTaskCountById.get(lane.id) ?? 0;
               const laneContentId = `timeline-lane-content-${normalizeTestIdSegment(lane.id)}`;
-              const timelineLaneRail = timelineLaneRailByLaneId.get(lane.id);
-              // Grouped timeline modes keep task interaction on the canvas; the rail only shows lane headers.
-              const renderTimelineTaskRail = false;
-              const showHeaderOnlyLaneRail = true;
               const laneRowsTop = top + SECTION_ROW_HEIGHT;
               const topSpacer = visibleRows.length
                 ? Math.max(0, visibleRows[0]!.top - laneRowsTop)
@@ -3482,16 +3455,13 @@ export function ProjectScheduleCanvas({
                   data-testid={`timeline-lane-${normalizeTestIdSegment(lane.id)}`}
                   data-timeline-lane-id={lane.id}
                 >
-                  <div
-                    className={
-                      showHeaderOnlyLaneRail ? 'relative self-start' : 'border-r bg-muted/10'
-                    }
-                  >
+                  <div className="relative self-start">
                     <div
-                      className={showHeaderOnlyLaneRail ? 'w-full border-r bg-muted/10' : undefined}
+                      className="w-full border-r bg-muted/10"
                       data-testid={`timeline-lane-rail-${normalizeTestIdSegment(lane.id)}`}
-                      data-header-only={showHeaderOnlyLaneRail ? 'true' : 'false'}
+                      data-header-only="true"
                     >
+                      {/* Timeline lanes keep task interaction on the canvas; the rail only shows lane headers. */}
                       <div
                         className={`flex h-8 items-center gap-2 border-b px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground ${
                           laneDragState?.overLaneId === lane.id
@@ -3594,99 +3564,6 @@ export function ProjectScheduleCanvas({
                           </Badge>
                         ) : null}
                       </div>
-                      {renderTimelineTaskRail && !isLaneCollapsed && topSpacer > 0 ? (
-                        <div style={{ height: `${topSpacer}px` }} />
-                      ) : null}
-                      {renderTimelineTaskRail && !isLaneCollapsed
-                        ? visibleRows.map((row) => {
-                            const task = row.tasks[0];
-                            if (!task) {
-                              return (
-                                <div
-                                  key={`timeline-rail-spacer-${lane.id}-${row.index}`}
-                                  style={{ height: `${TASK_ROW_HEIGHT}px` }}
-                                />
-                              );
-                            }
-                            const railItem = timelineLaneRail?.railItemByTaskId.get(task.id);
-                            if (!railItem) {
-                              return (
-                                <div
-                                  key={`timeline-rail-fallback-${lane.id}-${task.id}`}
-                                  style={{ height: `${TASK_ROW_HEIGHT}px` }}
-                                />
-                              );
-                            }
-                            const title = task.title.trim() || t('untitledTask');
-                            const depthOffsetPx = railItem.depth * 16;
-                            const branchLeftPx = Math.max(0, depthOffsetPx - 8);
-                            return (
-                              <div
-                                key={`timeline-rail-task-row-${lane.id}-${task.id}`}
-                                className="relative h-10 border-b last:border-b-0"
-                              >
-                                {railItem.ancestorHasNextSibling.map((hasNextSibling, index) =>
-                                  hasNextSibling ? (
-                                    <span
-                                      key={`timeline-rail-guide-${task.id}-${index}`}
-                                      aria-hidden="true"
-                                      className="pointer-events-none absolute inset-y-0 w-px bg-border/50"
-                                      style={{ left: `${index * 16 + 8}px` }}
-                                    />
-                                  ) : null,
-                                )}
-                                {railItem.hasChildren ? (
-                                  <span
-                                    aria-hidden="true"
-                                    className="pointer-events-none absolute bottom-0 top-1/2 w-px bg-border/70"
-                                    style={{ left: `${depthOffsetPx + 8}px` }}
-                                  />
-                                ) : null}
-                                {railItem.depth > 0 ? (
-                                  <span
-                                    aria-hidden="true"
-                                    className="pointer-events-none absolute inset-y-0 w-3"
-                                    style={{ left: `${branchLeftPx}px` }}
-                                    data-testid={`timeline-rail-branch-${task.id}`}
-                                  >
-                                    <span className="absolute left-1/2 top-0 bottom-1/2 w-px -translate-x-1/2 bg-border/70" />
-                                    {railItem.hasNextSibling ? (
-                                      <span className="absolute left-1/2 top-1/2 bottom-0 w-px -translate-x-1/2 bg-border/70" />
-                                    ) : null}
-                                    <span className="absolute left-1/2 top-1/2 h-px w-3 bg-border/70" />
-                                  </span>
-                                ) : null}
-                                <button
-                                  type="button"
-                                  className={`flex h-full items-center rounded pr-2 text-left text-sm transition hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                                    task.status === 'DONE'
-                                      ? 'text-muted-foreground'
-                                      : 'text-foreground'
-                                  }`}
-                                  style={{
-                                    marginLeft: `${depthOffsetPx}px`,
-                                    width: `calc(100% - ${depthOffsetPx}px)`,
-                                  }}
-                                  onClick={() => setSelectedTaskId(task.id)}
-                                  data-testid={`timeline-rail-task-${task.id}`}
-                                  data-depth={String(railItem.depth)}
-                                  title={title}
-                                >
-                                  <span
-                                    className={`truncate px-2 ${
-                                      task.status === 'DONE' ? 'line-through' : ''
-                                    }`}
-                                  >
-                                    {title}
-                                  </span>
-                                </button>
-                              </div>
-                            );
-                          })
-                        : null}
-                      {renderTimelineTaskRail && !isLaneCollapsed && bottomSpacer > 0 ? (
-                        <div style={{ height: `${bottomSpacer}px` }} />
-                      ) : null}
                     </div>
                   </div>
 
