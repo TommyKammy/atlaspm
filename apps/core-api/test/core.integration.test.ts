@@ -3166,6 +3166,72 @@ describe('Core API Integration', () => {
       .expect(400);
   });
 
+  test('timeline move preserves edited duration after general date updates', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Timeline Date Consistency Project' })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSection = sectionsRes.body.find((section: any) => section.isDefault);
+    expect(defaultSection?.id).toBeTruthy();
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Timeline duration source of truth',
+        sectionId: defaultSection.id,
+        startAt: '2026-04-10T00:00:00.000Z',
+        dueAt: '2026-04-12T00:00:00.000Z',
+      })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+
+    const editedTaskRes = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        dueAt: '2026-04-14T00:00:00.000Z',
+        version: taskRes.body.version,
+      })
+      .expect(200);
+
+    expect(editedTaskRes.body.startAt).toContain('2026-04-10');
+    expect(editedTaskRes.body.dueAt).toContain('2026-04-14');
+
+    const movedTaskRes = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/timeline-move`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        dropAt: '2026-04-20T00:00:00.000Z',
+        version: editedTaskRes.body.version,
+      })
+      .expect(200);
+
+    expect(movedTaskRes.body.startAt).toContain('2026-04-20');
+    expect(movedTaskRes.body.dueAt).toContain('2026-04-24');
+
+    const detailRes = await request(app.getHttpServer())
+      .get(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(detailRes.body.startAt).toContain('2026-04-20');
+    expect(detailRes.body.dueAt).toContain('2026-04-24');
+  });
+
   test('timeline reschedule preserves descendant schedules and reports parent move policy', async () => {
     const workspaceRes = await request(app.getHttpServer())
       .get('/workspaces')
