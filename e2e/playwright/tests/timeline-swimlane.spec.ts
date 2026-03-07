@@ -157,6 +157,14 @@ async function dragTimelineBarVertically(page: Page, taskId: string, deltaY: num
   await page.mouse.up();
 }
 
+async function dragUnscheduledTaskToLane(page: Page, taskId: string, laneTestId: string) {
+  const task = page.locator(`[data-testid="timeline-unscheduled-${taskId}"]`);
+  const lane = page.locator(`[data-testid="${laneTestId}"]`);
+  await expect(task).toBeVisible();
+  await expect(lane).toBeVisible();
+  await task.dragTo(lane, { targetPosition: { x: 320, y: 16 } });
+}
+
 test('timeline supports swimlane toggle and due-date sort without affecting gantt route', async ({
   page,
 }) => {
@@ -760,6 +768,98 @@ test('timeline can schedule unscheduled tasks via drag and drop', async ({ page 
 
   const scheduled = await api(`/tasks/${unscheduledTask.id}`, token);
   expect(String(scheduled.startAt).slice(0, 10)).toBe(String(scheduled.dueAt).slice(0, 10));
+});
+
+test('timeline unscheduled tray drop assigns grouped lane attributes in section assignee and status modes', async ({
+  page,
+}) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-unscheduled-grouped-${now}`;
+  const email = `${sub}@example.com`;
+
+  await login(page, sub, email);
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Unscheduled Grouped DnD ${now}`,
+  });
+  const projectId = project.id as string;
+  const targetSection = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Target Section',
+  });
+
+  const sectionTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    title: `Section Drop ${now}`,
+  });
+  const assigneeTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    title: `Assignee Drop ${now}`,
+  });
+  const statusTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    title: `Status Drop ${now}`,
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+
+  await dragUnscheduledTaskToLane(page, sectionTask.id, `timeline-lane-section-${targetSection.id}`);
+  await expect
+    .poll(async () => {
+      const latest = await api(`/tasks/${sectionTask.id}`, token);
+      return {
+        sectionId: latest.sectionId as string,
+        hasSchedule: Boolean(latest.startAt && latest.dueAt),
+      };
+    })
+    .toEqual({
+      sectionId: targetSection.id,
+      hasSchedule: true,
+    });
+
+  await page.click('[data-testid="timeline-swimlane-assignee"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await dragUnscheduledTaskToLane(page, assigneeTask.id, `timeline-lane-assignee-${sub}`);
+  await expect
+    .poll(async () => {
+      const latest = await api(`/tasks/${assigneeTask.id}`, token);
+      return {
+        assigneeUserId: latest.assigneeUserId as string | null,
+        hasSchedule: Boolean(latest.startAt && latest.dueAt),
+      };
+    })
+    .toEqual({
+      assigneeUserId: sub,
+      hasSchedule: true,
+    });
+
+  await page.click('[data-testid="timeline-swimlane-status"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await dragUnscheduledTaskToLane(page, statusTask.id, 'timeline-lane-status-BLOCKED');
+  await expect
+    .poll(async () => {
+      const latest = await api(`/tasks/${statusTask.id}`, token);
+      return {
+        status: latest.status as string,
+        hasSchedule: Boolean(latest.startAt && latest.dueAt),
+      };
+    })
+    .toEqual({
+      status: 'BLOCKED',
+      hasSchedule: true,
+    });
+
+  await expect(page.locator(`[data-testid="timeline-bar-${sectionTask.id}"]`)).toBeVisible();
+  await expect(page.locator(`[data-testid="timeline-bar-${assigneeTask.id}"]`)).toBeVisible();
+  await expect(page.locator(`[data-testid="timeline-bar-${statusTask.id}"]`)).toBeVisible();
 });
 
 test('timeline compacts non-overlapping tasks into shared rows', async ({ page }) => {
