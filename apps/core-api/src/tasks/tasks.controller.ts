@@ -518,6 +518,12 @@ type TimelineViewMode = (typeof TIMELINE_VIEW_MODE_VALUES)[number];
 type TimelineSwimlane = (typeof TIMELINE_SWIMLANE_VALUES)[number];
 type TimelineManualLayoutByLane = Record<string, string[]>;
 type TimelineManualLayoutState = Record<TimelineSwimlane, TimelineManualLayoutByLane>;
+type TimelineManualLayoutPreferenceRecord = {
+  timelineManualLayout?: Prisma.JsonValue | null;
+  taskOrderBySection?: Prisma.JsonValue | null;
+  taskOrderByAssignee?: Prisma.JsonValue | null;
+  taskOrderByStatus?: Prisma.JsonValue | null;
+};
 type TimelineManualLayoutTaskRecord = Pick<Prisma.TaskGetPayload<{ select: { id: true; sectionId: true; assigneeUserId: true; status: true } }>, 'id' | 'sectionId' | 'assigneeUserId' | 'status'>;
 
 type TaskCustomFieldValueWithRelations = Prisma.TaskCustomFieldValueGetPayload<{
@@ -668,7 +674,7 @@ export class TasksController {
       userId: req.user.sub,
       laneOrderBySection: preferences?.laneOrderBySection ?? [],
       laneOrderByAssignee: preferences?.laneOrderByAssignee ?? [],
-      timelineManualLayout: this.normalizeTimelineManualLayout(preferences?.timelineManualLayout),
+      timelineManualLayout: this.resolveTimelineManualLayout(preferences),
       timelineViewState: preferences?.timelineViewState ?? null,
       ganttViewState: preferences?.ganttViewState ?? null,
     };
@@ -727,7 +733,7 @@ export class TasksController {
         userId: req.user.sub,
         laneOrderBySection: updated.laneOrderBySection,
         laneOrderByAssignee: updated.laneOrderByAssignee,
-        timelineManualLayout: this.normalizeTimelineManualLayout(updated.timelineManualLayout),
+        timelineManualLayout: this.resolveTimelineManualLayout(updated),
         timelineViewState: updated.timelineViewState ?? null,
         ganttViewState: updated.ganttViewState ?? null,
       };
@@ -760,7 +766,7 @@ export class TasksController {
       const before = await tx.projectTimelinePreference.findUnique({
         where: { projectId_userId: { projectId, userId: req.user.sub } },
       });
-      const previousLayout = this.normalizeTimelineManualLayout(before?.timelineManualLayout);
+      const previousLayout = this.resolveTimelineManualLayout(before);
       const nextLayout: TimelineManualLayoutState = {
         ...previousLayout,
         [groupBy]: normalizedGroupLayout,
@@ -800,7 +806,7 @@ export class TasksController {
         userId: req.user.sub,
         laneOrderBySection: updated.laneOrderBySection,
         laneOrderByAssignee: updated.laneOrderByAssignee,
-        timelineManualLayout: this.normalizeTimelineManualLayout(updated.timelineManualLayout),
+        timelineManualLayout: this.resolveTimelineManualLayout(updated),
         timelineViewState: updated.timelineViewState ?? null,
         ganttViewState: updated.ganttViewState ?? null,
       };
@@ -859,7 +865,7 @@ export class TasksController {
         userId: req.user.sub,
         laneOrderBySection: updated.laneOrderBySection,
         laneOrderByAssignee: updated.laneOrderByAssignee,
-        timelineManualLayout: this.normalizeTimelineManualLayout(updated.timelineManualLayout),
+        timelineManualLayout: this.resolveTimelineManualLayout(updated),
         timelineViewState: updated.timelineViewState ?? null,
         ganttViewState: updated.ganttViewState ?? null,
       };
@@ -3192,7 +3198,41 @@ export class TasksController {
     return this.resolveTimelineLaneOrderLimit(tx, projectId, groupBy);
   }
 
-  private normalizeTimelineManualLayout(
+  private resolveTimelineManualLayout(
+    preference: TimelineManualLayoutPreferenceRecord | null | undefined,
+  ): TimelineManualLayoutState {
+    const next = this.normalizeTimelineManualLayoutValue(preference?.timelineManualLayout);
+    if (this.timelineManualLayoutHasEntries(next)) {
+      return next;
+    }
+
+    return {
+      section: this.normalizeStoredTimelineManualLayoutGroup(
+        'section',
+        preference?.taskOrderBySection,
+        Number.MAX_SAFE_INTEGER,
+        Number.MAX_SAFE_INTEGER,
+      ),
+      assignee: this.normalizeStoredTimelineManualLayoutGroup(
+        'assignee',
+        preference?.taskOrderByAssignee,
+        Number.MAX_SAFE_INTEGER,
+        Number.MAX_SAFE_INTEGER,
+      ),
+      status: this.normalizeStoredTimelineManualLayoutGroup(
+        'status',
+        preference?.taskOrderByStatus,
+        Number.MAX_SAFE_INTEGER,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    };
+  }
+
+  private timelineManualLayoutHasEntries(value: TimelineManualLayoutState): boolean {
+    return TIMELINE_SWIMLANE_VALUES.some((groupBy) => Object.keys(value[groupBy]).length > 0);
+  }
+
+  private normalizeTimelineManualLayoutValue(
     value: Prisma.JsonValue | null | undefined,
   ): TimelineManualLayoutState {
     const next = createEmptyTimelineManualLayoutState();
@@ -3200,10 +3240,13 @@ export class TasksController {
       return next;
     }
     const candidate = value as Record<string, unknown>;
+    const hasGroupedShape = TIMELINE_SWIMLANE_VALUES.some((groupBy) =>
+      Object.prototype.hasOwnProperty.call(candidate, groupBy),
+    );
     for (const groupBy of TIMELINE_SWIMLANE_VALUES) {
       next[groupBy] = this.normalizeStoredTimelineManualLayoutGroup(
         groupBy,
-        candidate[groupBy],
+        hasGroupedShape ? candidate[groupBy] : candidate,
         Number.MAX_SAFE_INTEGER,
         Number.MAX_SAFE_INTEGER,
       );

@@ -3057,6 +3057,157 @@ describe('Core API Integration', () => {
       .expect(409);
   });
 
+  test('timeline manual layout preserves legacy per-swimlane task order state when upgrading from #232', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Timeline Legacy Manual Layout Project' })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const timelineAssigneeId = 'timeline-legacy-member-1';
+    await prisma.user.upsert({
+      where: { id: timelineAssigneeId },
+      create: {
+        id: timelineAssigneeId,
+        email: 'timeline-legacy-member-1@example.com',
+        displayName: 'Timeline Legacy Member 1',
+        status: 'ACTIVE',
+      },
+      update: {},
+    });
+    await prisma.workspaceMembership.upsert({
+      where: { workspaceId_userId: { workspaceId, userId: timelineAssigneeId } },
+      create: { workspaceId, userId: timelineAssigneeId, role: 'WS_MEMBER' },
+      update: {},
+    });
+    await prisma.projectMembership.upsert({
+      where: { projectId_userId: { projectId, userId: timelineAssigneeId } },
+      create: { projectId, userId: timelineAssigneeId, role: 'VIEWER' },
+      update: {},
+    });
+
+    const defaultSection = await prisma.section.findFirstOrThrow({
+      where: { projectId, isDefault: true },
+    });
+    const timelineTaskARes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        sectionId: defaultSection.id,
+        title: 'Timeline legacy task A',
+        assigneeUserId: timelineAssigneeId,
+        status: 'TODO',
+      })
+      .expect(201);
+    const timelineTaskBRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        sectionId: defaultSection.id,
+        title: 'Timeline legacy task B',
+        assigneeUserId: timelineAssigneeId,
+        status: 'TODO',
+      })
+      .expect(201);
+    const timelineTaskCRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        sectionId: defaultSection.id,
+        title: 'Timeline legacy task C',
+        assigneeUserId: timelineAssigneeId,
+        status: 'TODO',
+      })
+      .expect(201);
+
+    const legacySectionLayout = {
+      [`section:${defaultSection.id}`]: [timelineTaskCRes.body.id, timelineTaskARes.body.id],
+    };
+    const legacyAssigneeLayout = {
+      [`assignee:${timelineAssigneeId}`]: [timelineTaskBRes.body.id, timelineTaskARes.body.id],
+    };
+    const legacyStatusLaneId = `status:${timelineTaskARes.body.status as string}`;
+
+    await prisma.projectTimelinePreference.create({
+      data: {
+        projectId,
+        userId: 'test-user',
+        laneOrderBySection: [],
+        laneOrderByAssignee: [],
+      },
+    });
+    await prisma.$executeRawUnsafe(
+      `
+        UPDATE "ProjectTimelinePreference"
+        SET "taskOrderBySection" = $1::jsonb,
+            "taskOrderByAssignee" = $2::jsonb
+        WHERE "projectId" = $3 AND "userId" = $4
+      `,
+      JSON.stringify(legacySectionLayout),
+      JSON.stringify(legacyAssigneeLayout),
+      projectId,
+      'test-user',
+    );
+
+    const legacyPrefsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/timeline/preferences`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(legacyPrefsRes.body.timelineManualLayout).toEqual({
+      section: legacySectionLayout,
+      assignee: legacyAssigneeLayout,
+      status: {},
+    });
+
+    const statusManualLayoutRes = await request(app.getHttpServer())
+      .put(`/projects/${projectId}/timeline/preferences/manual-layout/status`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        laneTaskOrder: {
+          [legacyStatusLaneId]: [
+            timelineTaskARes.body.id,
+            timelineTaskBRes.body.id,
+            timelineTaskCRes.body.id,
+          ],
+        },
+      })
+      .expect(200);
+    expect(statusManualLayoutRes.body.timelineManualLayout).toEqual({
+      section: legacySectionLayout,
+      assignee: legacyAssigneeLayout,
+      status: {
+        [legacyStatusLaneId]: [
+          timelineTaskARes.body.id,
+          timelineTaskBRes.body.id,
+          timelineTaskCRes.body.id,
+        ],
+      },
+    });
+
+    const persistedPrefsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/timeline/preferences`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(persistedPrefsRes.body.timelineManualLayout).toEqual({
+      section: legacySectionLayout,
+      assignee: legacyAssigneeLayout,
+      status: {
+        [legacyStatusLaneId]: [
+          timelineTaskARes.body.id,
+          timelineTaskBRes.body.id,
+          timelineTaskCRes.body.id,
+        ],
+      },
+    });
+  });
+
   test('timeline move supports section, status, and custom field lane reassignment', async () => {
     const workspaceRes = await request(app.getHttpServer())
       .get('/workspaces')
