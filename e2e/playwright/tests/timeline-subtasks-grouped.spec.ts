@@ -43,21 +43,15 @@ async function expectHeaderOnlyRail(page: Page, laneTestId: string, hiddenTaskTi
   }
 }
 
-async function expectNestedRailItem(page: Page, taskId: string, expectedDepth: string) {
-  const railItem = page.locator(`[data-testid="timeline-rail-task-${taskId}"]`);
-  await expect(railItem).toBeVisible();
-  await expect(railItem).toHaveAttribute('data-depth', expectedDepth);
-  await expect(page.locator(`[data-testid="timeline-rail-branch-${taskId}"]`)).toBeVisible();
+async function expectTaskRailHidden(page: Page, taskIds: string[]) {
+  for (const taskId of taskIds) {
+    await expect(page.locator(`[data-testid="timeline-rail-task-${taskId}"]`)).toHaveCount(0);
+    await expect(page.locator(`[data-testid="timeline-rail-branch-${taskId}"]`)).toHaveCount(0);
+    await expect(page.locator(`[data-testid="timeline-bar-${taskId}"]`)).toBeVisible();
+  }
 }
 
-async function expectFlatRailItem(page: Page, taskId: string) {
-  const railItem = page.locator(`[data-testid="timeline-rail-task-${taskId}"]`);
-  await expect(railItem).toBeVisible();
-  await expect(railItem).toHaveAttribute('data-depth', '0');
-  await expect(page.locator(`[data-testid="timeline-rail-branch-${taskId}"]`)).toHaveCount(0);
-}
-
-test('timeline grouped swimlanes preserve same-group hierarchy and flatten cross-group subtasks', async ({
+test('timeline grouped swimlanes keep left rails header-only even when subtasks share a lane', async ({
   page,
 }) => {
   const now = Date.now();
@@ -124,18 +118,36 @@ test('timeline grouped swimlanes preserve same-group hierarchy and flatten cross
     'data-active',
     'true',
   );
-
-  await expectNestedRailItem(page, sameGroupChild.id, '1');
-  await expectFlatRailItem(page, splitGroupChild.id);
+  await expectHeaderOnlyRail(page, `timeline-lane-assignee-${sub}`, [
+    sameGroupParent.title,
+    sameGroupChild.title,
+    splitGroupParent.title,
+  ]);
+  await expectHeaderOnlyRail(page, 'timeline-lane-assignee-__unassigned__', [splitGroupChild.title]);
+  await expectTaskRailHidden(page, [
+    sameGroupParent.id,
+    sameGroupChild.id,
+    splitGroupParent.id,
+    splitGroupChild.id,
+  ]);
 
   await page.click('[data-testid="timeline-swimlane-status"]');
   await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute(
     'data-active',
     'true',
   );
-
-  await expectNestedRailItem(page, sameGroupChild.id, '1');
-  await expectFlatRailItem(page, splitGroupChild.id);
+  await expectHeaderOnlyRail(page, 'timeline-lane-status-IN_PROGRESS', [
+    sameGroupParent.title,
+    sameGroupChild.title,
+    splitGroupParent.title,
+  ]);
+  await expectHeaderOnlyRail(page, 'timeline-lane-status-DONE', [splitGroupChild.title]);
+  await expectTaskRailHidden(page, [
+    sameGroupParent.id,
+    sameGroupChild.id,
+    splitGroupParent.id,
+    splitGroupChild.id,
+  ]);
 });
 
 test('timeline grouped rails ignore unscheduled subtasks when visible lanes stay flat', async ({
@@ -188,6 +200,7 @@ test('timeline grouped rails ignore unscheduled subtasks when visible lanes stay
     parentTask.title,
     unscheduledChild.title,
   ]);
+  await expectTaskRailHidden(page, [parentTask.id]);
 
   await page.click('[data-testid="timeline-swimlane-status"]');
   await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute(
@@ -198,4 +211,5 @@ test('timeline grouped rails ignore unscheduled subtasks when visible lanes stay
     parentTask.title,
     unscheduledChild.title,
   ]);
+  await expectTaskRailHidden(page, [parentTask.id]);
 });
