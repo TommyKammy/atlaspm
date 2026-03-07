@@ -56,6 +56,33 @@ describe('Core API Integration', () => {
     await app.close();
   });
 
+  test('concurrent first authenticated requests bootstrap a fresh user without 500s', async () => {
+    const auth = app.get(AuthService);
+    const userId = `concurrent-user-${Date.now()}`;
+    const freshToken = await auth.mintDevToken(
+      userId,
+      `${userId}@example.com`,
+      'Concurrent User',
+    );
+
+    const responses = await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        request(app.getHttpServer())
+          .get(index % 2 === 0 ? '/workspaces' : '/me')
+          .set('Authorization', `Bearer ${freshToken}`),
+      ),
+    );
+
+    for (const response of responses) {
+      expect(response.status).toBe(200);
+    }
+
+    const memberships = await prisma.workspaceMembership.findMany({
+      where: { userId },
+    });
+    expect(memberships).toHaveLength(1);
+  });
+
   test('project/member/sections/tasks/rules/reorder/audit/outbox flow', async () => {
     await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
     const wsRes = await request(app.getHttpServer())
