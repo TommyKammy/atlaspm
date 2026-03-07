@@ -536,6 +536,69 @@ test('buildTimelineLayout keeps manual task order authoritative over dependency 
   assert.equal(layout.taskRowsById['task-chain-b']?.top, 112);
 });
 
+test('buildTimelineLayout preserves manual vertical order while still compacting non-overlapping tasks', () => {
+  const manualOrderTasks: TaskInput[] = [
+    {
+      id: 'task-late',
+      title: 'Manual top, late dates',
+      sectionId: 'design',
+      assigneeUserId: 'user-1',
+      status: 'TODO',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-05'),
+      timelineEnd: utcDate('2026-03-06'),
+    },
+    {
+      id: 'task-early',
+      title: 'Manual second, early dates',
+      sectionId: 'design',
+      assigneeUserId: 'user-1',
+      status: 'IN_PROGRESS',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-02'),
+      timelineEnd: utcDate('2026-03-03'),
+    },
+    {
+      id: 'task-overlap',
+      title: 'Manual third, overlaps both',
+      sectionId: 'design',
+      assigneeUserId: 'user-1',
+      status: 'BLOCKED',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-03'),
+      timelineEnd: utcDate('2026-03-05'),
+    },
+  ];
+
+  const layout = buildTimelineLayout({
+    lanes: [{ id: 'section:design', label: 'Design', tasks: manualOrderTasks }],
+    windowStart: utcDate('2026-03-01'),
+    windowEnd: utcDate('2026-03-10'),
+    dayColumnWidth: 20,
+    sectionRowHeight: 32,
+    taskRowHeight: 40,
+    compactRows: true,
+    manualRowLaneIds: ['section:design'],
+  });
+
+  const designLane = layout.lanesWithRows[0];
+
+  assert.equal(designLane?.rows.length, 2);
+  assert.deepEqual(
+    designLane?.rows.map((row) => ({ index: row.index, taskIds: row.tasks.map((task) => task.id) })),
+    [
+      { index: 0, taskIds: ['task-late', 'task-early'] },
+      { index: 1, taskIds: ['task-overlap'] },
+    ],
+  );
+  assert.deepEqual(layout.taskRowsById['task-late'], { top: 32, height: 40 });
+  assert.deepEqual(layout.taskRowsById['task-early'], { top: 32, height: 40 });
+  assert.deepEqual(layout.taskRowsById['task-overlap'], { top: 72, height: 40 });
+});
+
 test('buildTimelineLayout keeps input order inside compact rows', () => {
   const tasks: TaskInput[] = [
     {
