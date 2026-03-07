@@ -157,6 +157,29 @@ async function dragTimelineBarVertically(page: Page, taskId: string, deltaY: num
   await page.mouse.up();
 }
 
+async function dragTimelineBarHorizontally(page: Page, taskId: string, deltaDays: number) {
+  const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
+  await expect(bar).toBeVisible();
+  const box = await bar.boundingBox();
+  if (!box) throw new Error(`Unable to resolve bounds for timeline bar ${taskId}`);
+
+  const startX = box.x + Math.min(Math.max(8, box.width / 4), box.width - 4);
+  const startY = box.y + box.height / 2;
+
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + deltaDays * DAY_COLUMN_WIDTH, startY, { steps: 18 });
+  await page.mouse.up();
+}
+
+async function timelineBarBox(page: Page, taskId: string) {
+  const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
+  await expect(bar).toBeVisible();
+  const box = await bar.boundingBox();
+  if (!box) throw new Error(`Unable to resolve bounds for timeline bar ${taskId}`);
+  return box;
+}
+
 function parseTimelineConnectorPath(pathData: string | null) {
   if (!pathData) {
     throw new Error('Expected timeline connector path data');
@@ -853,6 +876,111 @@ test('timeline drag can move task across section and status lanes', async ({ pag
       return latest.status;
     })
     .toBe('IN_PROGRESS');
+});
+
+test('timeline grouped bars stay in sync with drawer date edits after drag reschedule', async ({
+  page,
+}) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-date-sync-${now}`;
+  const email = `${sub}@example.com`;
+
+  await login(page, sub, email);
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Date Sync ${now}`,
+  });
+  const projectId = project.id as string;
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Timeline Date Sync Section',
+  });
+
+  const scheduledTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Date Sync Task ${now}`,
+    assigneeUserId: sub,
+    startAt: dayIso(1),
+    dueAt: dayIso(2),
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await page.click('[data-testid="timeline-zoom-day"]');
+  await expect(page.locator('[data-testid="timeline-zoom-day"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await page.click('[data-testid="timeline-swimlane-assignee"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+
+  const initialBox = await timelineBarBox(page, scheduledTask.id);
+  await dragTimelineBarHorizontally(page, scheduledTask.id, 1);
+
+  const draggedStartDate = dayIso(2).slice(0, 10);
+  const draggedDueDate = dayIso(3).slice(0, 10);
+  await expect
+    .poll(async () => {
+      const latest = await api(`/tasks/${scheduledTask.id}`, token);
+      return {
+        startAt: String(latest.startAt).slice(0, 10),
+        dueAt: String(latest.dueAt).slice(0, 10),
+      };
+    })
+    .toEqual({
+      startAt: draggedStartDate,
+      dueAt: draggedDueDate,
+    });
+
+  const draggedBox = await timelineBarBox(page, scheduledTask.id);
+  expect(Math.abs((draggedBox.x - initialBox.x) - DAY_COLUMN_WIDTH)).toBeLessThanOrEqual(4);
+
+  await page.click(`[data-testid="timeline-bar-${scheduledTask.id}"]`);
+  await expect(page.locator('[data-testid="task-detail-start-date"]')).toHaveValue(draggedStartDate);
+  await expect(page.locator('[data-testid="task-detail-due-date"]')).toHaveValue(draggedDueDate);
+
+  const extendedDueDate = dayIso(5).slice(0, 10);
+  const dueDateInput = page.locator('[data-testid="task-detail-due-date"]');
+  await dueDateInput.fill(extendedDueDate);
+  await dueDateInput.blur();
+
+  await expect
+    .poll(async () => {
+      const latest = await api(`/tasks/${scheduledTask.id}`, token);
+      return String(latest.dueAt).slice(0, 10);
+    })
+    .toBe(extendedDueDate);
+
+  const extendedBox = await timelineBarBox(page, scheduledTask.id);
+  expect(Math.abs((extendedBox.width - draggedBox.width) - DAY_COLUMN_WIDTH * 2)).toBeLessThanOrEqual(4);
+  await expect(page.locator(`[data-testid="timeline-lane-assignee-${sub}"]`)).toContainText(
+    scheduledTask.title,
+  );
+
+  const widenedStartDate = dayIso(1).slice(0, 10);
+  const startDateInput = page.locator('[data-testid="task-detail-start-date"]');
+  await startDateInput.fill(widenedStartDate);
+  await startDateInput.blur();
+
+  await expect
+    .poll(async () => {
+      const latest = await api(`/tasks/${scheduledTask.id}`, token);
+      return String(latest.startAt).slice(0, 10);
+    })
+    .toBe(widenedStartDate);
+
+  const widenedBox = await timelineBarBox(page, scheduledTask.id);
+  expect(Math.abs((extendedBox.x - widenedBox.x) - DAY_COLUMN_WIDTH)).toBeLessThanOrEqual(4);
+  expect(Math.abs((widenedBox.width - extendedBox.width) - DAY_COLUMN_WIDTH)).toBeLessThanOrEqual(4);
+  await expect(page.locator('[data-testid="task-detail-start-date"]')).toHaveValue(widenedStartDate);
+  await expect(page.locator('[data-testid="task-detail-due-date"]')).toHaveValue(extendedDueDate);
 });
 
 test('timeline can schedule unscheduled tasks via drag and drop', async ({ page }) => {
