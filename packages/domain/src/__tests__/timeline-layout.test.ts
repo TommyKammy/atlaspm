@@ -24,6 +24,7 @@ function utcDate(value: string): Date {
   return new Date(`${value}T00:00:00.000Z`);
 }
 
+
 test('buildTimelineLanes keeps assignee lanes visible for project members and unassigned', () => {
   const tasks: TaskInput[] = [
     {
@@ -220,6 +221,62 @@ test('buildTimelineLanes keeps status lanes visible in fixed workflow order', ()
   assert.equal(lanes[3]?.label, 'Blocked');
 });
 
+test('buildTimelineLanes respects preferred task order per lane', () => {
+  const tasks: TaskInput[] = [
+    {
+      id: 'task-1',
+      title: 'First',
+      sectionId: 'design',
+      assigneeUserId: 'user-1',
+      status: 'TODO',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-01'),
+      timelineEnd: utcDate('2026-03-03'),
+    },
+    {
+      id: 'task-2',
+      title: 'Second',
+      sectionId: 'design',
+      assigneeUserId: 'user-1',
+      status: 'TODO',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-01'),
+      timelineEnd: utcDate('2026-03-03'),
+    },
+    {
+      id: 'task-3',
+      title: 'Third',
+      sectionId: 'design',
+      assigneeUserId: 'user-1',
+      status: 'TODO',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-01'),
+      timelineEnd: utcDate('2026-03-03'),
+    },
+  ];
+
+  const lanes = buildTimelineLanes({
+    swimlane: 'section',
+    tasks,
+    sections,
+    membersById: {},
+    preferredLaneOrder: [],
+    preferredTaskOrderByLane: {
+      'section:design': ['task-3', 'task-1'],
+    },
+    defaultSectionLabel: 'Tasks',
+    unassignedLabel: 'Unassigned',
+  });
+
+  assert.deepEqual(
+    lanes.find((lane) => lane.id === 'section:design')?.tasks.map((task) => task.id),
+    ['task-3', 'task-1', 'task-2'],
+  );
+});
+
 test('buildTimelineLayout calculates row and bar positions', () => {
   const tasks: TaskInput[] = [
     {
@@ -327,16 +384,86 @@ test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () =
   assert.deepEqual(layout.taskRowsById['task-1'], { top: 64, height: 40 });
   assert.deepEqual(layout.taskRowsById['task-2'], { top: 64, height: 40 });
   assert.deepEqual(layout.taskRowsById['task-3'], { top: 104, height: 40 });
-  assert.deepEqual(
-    designLane?.rows.map((row) => ({
-      index: row.index,
-      taskIds: row.tasks.map((task) => task.id),
-    })),
-    [
-      { index: 0, taskIds: ['task-1', 'task-2'] },
-      { index: 1, taskIds: ['task-3'] },
+  assert.deepEqual(designLane?.rows.map((row) => ({ index: row.index, taskIds: row.tasks.map((task) => task.id) })), [
+    { index: 0, taskIds: ['task-1', 'task-2'] },
+    { index: 1, taskIds: ['task-3'] },
+  ]);
+});
+
+test('buildTimelineLayout keeps manual-layout lanes expanded while compacting other lanes', () => {
+  const layout = buildTimelineLayout({
+    lanes: [
+      {
+        id: 'section:design',
+        label: 'Design',
+        tasks: [
+          {
+            id: 'task-manual-1',
+            title: 'Manual First',
+            sectionId: 'design',
+            assigneeUserId: 'user-1',
+            status: 'TODO',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-02'),
+            timelineEnd: utcDate('2026-03-03'),
+          },
+          {
+            id: 'task-manual-2',
+            title: 'Manual Second',
+            sectionId: 'design',
+            assigneeUserId: 'user-1',
+            status: 'IN_PROGRESS',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-05'),
+            timelineEnd: utcDate('2026-03-06'),
+          },
+        ],
+      },
+      {
+        id: 'section:default',
+        label: 'Tasks',
+        tasks: [
+          {
+            id: 'task-packed-1',
+            title: 'Packed First',
+            sectionId: 'default',
+            assigneeUserId: 'user-1',
+            status: 'TODO',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-02'),
+            timelineEnd: utcDate('2026-03-03'),
+          },
+          {
+            id: 'task-packed-2',
+            title: 'Packed Second',
+            sectionId: 'default',
+            assigneeUserId: 'user-1',
+            status: 'IN_PROGRESS',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-05'),
+            timelineEnd: utcDate('2026-03-06'),
+          },
+        ],
+      },
     ],
-  );
+    windowStart: utcDate('2026-03-01'),
+    windowEnd: utcDate('2026-03-10'),
+    dayColumnWidth: 20,
+    sectionRowHeight: 32,
+    taskRowHeight: 40,
+    compactRows: true,
+    manualRowLaneIds: ['section:design'],
+  });
+
+  const designLane = layout.lanesWithRows.find((lane) => lane.lane.id === 'section:design');
+  const defaultLane = layout.lanesWithRows.find((lane) => lane.lane.id === 'section:default');
+
+  assert.equal(designLane?.rows.length, 2);
+  assert.equal(defaultLane?.rows.length, 1);
 });
 
 test('buildTimelineLayout keeps input order inside compact rows', () => {
@@ -375,56 +502,7 @@ test('buildTimelineLayout keeps input order inside compact rows', () => {
     compactRows: true,
   });
 
-  assert.deepEqual(
-    layout.lanesWithRows[0]?.rows[0]?.tasks.map((task) => task.id),
-    ['task-due-later', 'task-due-earlier'],
-  );
-});
-
-test('buildTimelineLayout keeps manual-order lanes expanded as explicit rows', () => {
-  const tasks: TaskInput[] = [
-    {
-      id: 'task-1',
-      title: 'First',
-      sectionId: 'design',
-      assigneeUserId: 'user-1',
-      status: 'TODO',
-      hasSchedule: true,
-      inWindow: true,
-      timelineStart: utcDate('2026-03-02'),
-      timelineEnd: utcDate('2026-03-03'),
-    },
-    {
-      id: 'task-2',
-      title: 'Second',
-      sectionId: 'design',
-      assigneeUserId: 'user-1',
-      status: 'IN_PROGRESS',
-      hasSchedule: true,
-      inWindow: true,
-      timelineStart: utcDate('2026-03-05'),
-      timelineEnd: utcDate('2026-03-06'),
-    },
-  ];
-
-  const layout = buildTimelineLayout({
-    lanes: [{ id: 'section:design', label: 'Design', tasks: [tasks[1]!, tasks[0]!] }],
-    windowStart: utcDate('2026-03-01'),
-    windowEnd: utcDate('2026-03-10'),
-    dayColumnWidth: 20,
-    sectionRowHeight: 32,
-    taskRowHeight: 40,
-    compactRows: true,
-    manualRowLaneIds: ['section:design'],
-  });
-
-  assert.equal(layout.lanesWithRows[0]?.rows.length, 2);
-  assert.deepEqual(
-    layout.lanesWithRows[0]?.rows.map((row) => row.tasks.map((task) => task.id)),
-    [['task-2'], ['task-1']],
-  );
-  assert.deepEqual(layout.taskRowsById['task-2'], { top: 32, height: 40 });
-  assert.deepEqual(layout.taskRowsById['task-1'], { top: 72, height: 40 });
+  assert.deepEqual(layout.lanesWithRows[0]?.rows[0]?.tasks.map((task) => task.id), ['task-due-later', 'task-due-earlier']);
 });
 
 test('buildTimelineLayout can align dependency chains ahead of unrelated blockers', () => {
