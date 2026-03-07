@@ -89,6 +89,7 @@ export type BuildTimelineLayoutInput<TTask extends TimelineLayoutTaskInput> = {
   sectionRowHeight: number;
   taskRowHeight: number;
   compactRows?: boolean;
+  manualRowLaneIds?: string[];
   dependencyAwarePacking?: boolean;
   dependencyEdges?: Array<{ source: string; target: string; type?: string }>;
 };
@@ -274,6 +275,7 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
   const barsByTaskId: Record<string, { left: number; width: number; y: number }> = {};
   const taskRowsById: Record<string, { top: number; height: number }> = {};
   const lanesWithRows: Array<TimelineLayoutLane<TTask>> = [];
+  const manualRowLaneIds = new Set(input.manualRowLaneIds ?? []);
 
   for (const lane of input.lanes) {
     const laneTop = cursorY;
@@ -281,8 +283,9 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
     const taskRows: Array<TimelineTaskRow<TTask>> = [];
     const rows: Array<TimelinePackedRow<TTask>> = [];
     const rowIndexByTaskId: Record<string, number> = {};
+    const laneUsesManualRows = manualRowLaneIds.has(lane.id);
 
-    if (input.compactRows) {
+    if (input.compactRows && !laneUsesManualRows) {
       const laneTaskIds = new Set(lane.tasks.map((task) => task.id));
       const relevantDependencyEdges = input.dependencyAwarePacking
         ? (input.dependencyEdges ?? []).filter((edge) =>
@@ -402,7 +405,8 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
     }
 
     for (const task of lane.tasks) {
-      const rowIndex = input.compactRows ? (rowIndexByTaskId[task.id] ?? rows.length) : rows.length;
+      const rowIndex =
+        input.compactRows && !laneUsesManualRows ? (rowIndexByTaskId[task.id] ?? rows.length) : rows.length;
       if (!rows[rowIndex]) {
         rows[rowIndex] = {
           index: rowIndex,

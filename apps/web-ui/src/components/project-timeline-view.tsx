@@ -722,6 +722,7 @@ export function ProjectScheduleCanvas({
     useCalendarDays: boolean;
     moved: boolean;
   } | null>(null);
+  const dragPointerTargetRef = useRef<HTMLElement | null>(null);
   const [laneDragState, setLaneDragState] = useState<{
     draggingLaneId: string;
     overLaneId: string | null;
@@ -1204,6 +1205,15 @@ export function ProjectScheduleCanvas({
     () =>
       timelineLanes.map((lane) => (collapsedLaneIds.has(lane.id) ? { ...lane, tasks: [] } : lane)),
     [collapsedLaneIds, timelineLanes],
+  );
+  const manualLayoutLaneIds = useMemo(
+    () =>
+      mode === 'timeline' && sortMode === 'manual'
+        ? visibleTimelineLanes
+            .filter((lane) => (preferredManualLayout[lane.id] ?? []).length > 0)
+            .map((lane) => lane.id)
+        : [],
+    [mode, preferredManualLayout, sortMode, visibleTimelineLanes],
   );
 
   useEffect(() => {
@@ -1832,13 +1842,14 @@ export function ProjectScheduleCanvas({
       dayColumnWidth: zoomConfig.dayColWidth,
       sectionRowHeight: SECTION_ROW_HEIGHT,
       taskRowHeight: TASK_ROW_HEIGHT,
-      compactRows: mode === 'timeline' && !hasActiveManualLayout,
+      compactRows: mode === 'timeline',
+      manualRowLaneIds: mode === 'timeline' ? manualLayoutLaneIds : [],
       dependencyAwarePacking: mode === 'timeline' && dependencyAwarePacking,
       dependencyEdges: timeline.dependencyEdges,
     });
   }, [
     dependencyAwarePacking,
-    hasActiveManualLayout,
+    manualLayoutLaneIds,
     mode,
     timeline.dependencyEdges,
     timeline.window.end,
@@ -2383,6 +2394,15 @@ export function ProjectScheduleCanvas({
   ) => {
     const current = dragStateRef.current;
     if (!current || current.pointerId !== pointerId) return;
+    const dragPointerTarget = dragPointerTargetRef.current;
+    dragPointerTargetRef.current = null;
+    try {
+      if (dragPointerTarget?.hasPointerCapture(pointerId)) {
+        dragPointerTarget.releasePointerCapture(pointerId);
+      }
+    } catch {
+      // Ignore release failures if the target unmounted mid-drag.
+    }
     const finalDropLaneId =
       clientX !== undefined && clientY !== undefined
         ? (resolveLaneIdAtClientPosition(clientX, clientY) ?? current.dropLaneId)
@@ -2421,28 +2441,36 @@ export function ProjectScheduleCanvas({
     );
   };
 
+  const updateBarDragRef = useRef(updateBarDrag);
+  const finishBarDragRef = useRef(finishBarDrag);
+
+  useEffect(() => {
+    updateBarDragRef.current = updateBarDrag;
+    finishBarDragRef.current = finishBarDrag;
+  });
+
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
-      updateBarDrag(event.pointerId, event.clientX, event.clientY, event.altKey);
+      updateBarDragRef.current(event.pointerId, event.clientX, event.clientY, event.altKey);
     };
 
     const handlePointerUp = (event: PointerEvent) => {
-      finishBarDrag(event.pointerId, event.clientX, event.clientY, event.altKey);
+      finishBarDragRef.current(event.pointerId, event.clientX, event.clientY, event.altKey);
     };
 
     const handlePointerCancel = (event: PointerEvent) => {
-      finishBarDrag(event.pointerId, event.clientX, event.clientY, event.altKey);
+      finishBarDragRef.current(event.pointerId, event.clientX, event.clientY, event.altKey);
     };
 
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-    window.addEventListener('pointercancel', handlePointerCancel);
+    window.addEventListener('pointermove', handlePointerMove, { capture: true });
+    window.addEventListener('pointerup', handlePointerUp, { capture: true });
+    window.addEventListener('pointercancel', handlePointerCancel, { capture: true });
     return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-      window.removeEventListener('pointercancel', handlePointerCancel);
+      window.removeEventListener('pointermove', handlePointerMove, { capture: true });
+      window.removeEventListener('pointerup', handlePointerUp, { capture: true });
+      window.removeEventListener('pointercancel', handlePointerCancel, { capture: true });
     };
-  }, [finishBarDrag, updateBarDrag]);
+  }, []);
 
   const handleLaneDrop = (draggingLaneId: string, overLaneId: string) => {
     const laneIds = timelineLanes.map((lane) => lane.id);
@@ -3418,6 +3446,12 @@ export function ProjectScheduleCanvas({
                                               lane.id,
                                               event.altKey,
                                             );
+                                            try {
+                                              event.currentTarget.setPointerCapture(event.pointerId);
+                                              dragPointerTargetRef.current = event.currentTarget;
+                                            } catch {
+                                              dragPointerTargetRef.current = null;
+                                            }
                                           }}
                                           onMouseEnter={() => setHoveredTaskId(task.id)}
                                           onMouseLeave={() =>

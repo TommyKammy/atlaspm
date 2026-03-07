@@ -510,12 +510,14 @@ const TIMELINE_SWIMLANE_VALUES = ['section', 'assignee', 'status'] as const;
 const TIMELINE_SORT_MODE_VALUES = ['manual', 'startAt', 'dueAt'] as const;
 const TIMELINE_SCHEDULE_FILTER_VALUES = ['all', 'scheduled', 'unscheduled'] as const;
 const GANTT_RISK_FILTER_MODE_VALUES = ['all', 'risk'] as const;
+const TIMELINE_UNASSIGNED_LANE_ID = '__unassigned__';
 
 type TimelineGroupBy = (typeof TIMELINE_GROUP_BY_VALUES)[number];
 type TimelineViewMode = (typeof TIMELINE_VIEW_MODE_VALUES)[number];
 type TimelineSwimlane = (typeof TIMELINE_SWIMLANE_VALUES)[number];
 type TimelineManualLayoutByLane = Record<string, string[]>;
 type TimelineManualLayoutState = Record<TimelineSwimlane, TimelineManualLayoutByLane>;
+type TimelineManualLayoutTaskRecord = Pick<Prisma.TaskGetPayload<{ select: { id: true; sectionId: true; assigneeUserId: true; status: true } }>, 'id' | 'sectionId' | 'assigneeUserId' | 'status'>;
 
 type TaskCustomFieldValueWithRelations = Prisma.TaskCustomFieldValueGetPayload<{
   include: {
@@ -740,7 +742,9 @@ export class TasksController {
         this.resolveTimelineManualLayoutLaneLimit(tx, projectId, groupBy),
         tx.task.count({ where: { projectId, deletedAt: null } }),
       ]);
-      const normalizedGroupLayout = this.normalizeTimelineManualLayoutGroup(
+      const normalizedGroupLayout = await this.validateAndNormalizeTimelineManualLayoutGroup(
+        tx,
+        projectId,
         groupBy,
         body.laneTaskOrder,
         maxLaneCount,
@@ -3162,7 +3166,7 @@ export class TasksController {
     }
     const candidate = value as Record<string, unknown>;
     for (const groupBy of TIMELINE_SWIMLANE_VALUES) {
-      next[groupBy] = this.normalizeTimelineManualLayoutGroup(
+      next[groupBy] = this.normalizeStoredTimelineManualLayoutGroup(
         groupBy,
         candidate[groupBy],
         Number.MAX_SAFE_INTEGER,
@@ -3172,7 +3176,7 @@ export class TasksController {
     return next;
   }
 
-  private normalizeTimelineManualLayoutGroup(
+  private normalizeStoredTimelineManualLayoutGroup(
     groupBy: TimelineSwimlane,
     value: unknown,
     maxLaneCount: number,
@@ -3201,6 +3205,134 @@ export class TasksController {
       }
     }
     return next;
+  }
+
+  private async validateAndNormalizeTimelineManualLayoutGroup(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+    groupBy: TimelineSwimlane,
+    value: unknown,
+    maxLaneCount: number,
+    maxTaskCount: number,
+  ): Promise<TimelineManualLayoutByLane> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new BadRequestException('laneTaskOrder must be an object of lane ids to task id arrays');
+    }
+
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length > maxLaneCount) {
+      throw new BadRequestException(`laneTaskOrder may not contain more than ${maxLaneCount} lanes`);
+    }
+
+    const normalized: TimelineManualLayoutByLane = {};
+    const laneTaskIds = new Map<string, string[]>();
+    const uniqueTaskIds = new Set<string>();
+
+    for (const [laneIdRaw, rawTaskIds] of entries) {
+      const laneId = laneIdRaw.trim();
+      this.assertTimelineManualLayoutLane(groupBy, laneId);
+      if (!Array.isArray(rawTaskIds)) {
+        throw new BadRequestException('laneTaskOrder values must be arrays of task ids');
+      }
+
+      const laneSeenTaskIds = new Set<string>();
+      const normalizedTaskIds: string[] = [];
+      for (const rawTaskId of rawTaskIds) {
+        if (typeof rawTaskId !== 'string') {
+          throw new BadRequestException('laneTaskOrder values must contain task id strings');
+        }
+        const taskId = rawTaskId.trim();
+        if (!taskId || laneSeenTaskIds.has(taskId)) {
+          continue;
+        }
+        laneSeenTaskIds.add(taskId);
+        uniqueTaskIds.add(taskId);
+        normalizedTaskIds.push(taskId);
+      }
+
+      if (normalizedTaskIds.length > 0) {
+        normalized[laneId] = normalizedTaskIds;
+        laneTaskIds.set(laneId, normalizedTaskIds);
+      }
+    }
+
+    if (uniqueTaskIds.size > maxTaskCount) {
+      throw new BadRequestException(`laneTaskOrder may not contain more than ${maxTaskCount} tasks`);
+    }
+
+    if (uniqueTaskIds.size === 0) {
+      return {};
+    }
+
+    const tasks = await tx.task.findMany({
+      where: {
+        projectId,
+        deletedAt: null,
+        id: { in: [...uniqueTaskIds] },
+      },
+      select: {
+        id: true,
+        sectionId: true,
+        assigneeUserId: true,
+        status: true,
+      },
+    });
+    const taskById = new Map(tasks.map((task) => [task.id, task] as const));
+    if (taskById.size !== uniqueTaskIds.size) {
+      throw new BadRequestException('laneTaskOrder must reference active tasks in the project');
+    }
+
+    for (const [laneId, taskIds] of laneTaskIds) {
+      for (const taskId of taskIds) {
+        const task = taskById.get(taskId);
+        if (!task || !this.timelineTaskMatchesManualLayoutLane(groupBy, laneId, task)) {
+          throw new BadRequestException('laneTaskOrder must match the provided lane ids');
+        }
+      }
+    }
+
+    return normalized;
+  }
+
+  private assertTimelineManualLayoutLane(groupBy: TimelineSwimlane, laneId: string): void {
+    if (!laneId) {
+      throw new BadRequestException('laneTaskOrder keys must be non-empty lane ids');
+    }
+
+    if (groupBy === 'section') {
+      if (!laneId.startsWith('section:') || !laneId.slice('section:'.length)) {
+        throw new BadRequestException('laneTaskOrder keys must be section lane ids');
+      }
+      return;
+    }
+
+    if (groupBy === 'assignee') {
+      if (!laneId.startsWith('assignee:') || !laneId.slice('assignee:'.length)) {
+        throw new BadRequestException('laneTaskOrder keys must be assignee lane ids');
+      }
+      return;
+    }
+
+    const status = laneId.startsWith('status:') ? laneId.slice('status:'.length) : '';
+    if (!Object.values(TaskStatus).includes(status as TaskStatus)) {
+      throw new BadRequestException('laneTaskOrder keys must be status lane ids');
+    }
+  }
+
+  private timelineTaskMatchesManualLayoutLane(
+    groupBy: TimelineSwimlane,
+    laneId: string,
+    task: TimelineManualLayoutTaskRecord,
+  ): boolean {
+    if (groupBy === 'section') {
+      return laneId === `section:${task.sectionId}`;
+    }
+
+    if (groupBy === 'assignee') {
+      return laneId === `assignee:${task.assigneeUserId ?? TIMELINE_UNASSIGNED_LANE_ID}`;
+    }
+
+    return laneId === `status:${task.status}`;
   }
 
   private normalizeTimelineViewState(mode: TimelineViewMode, body: PutTimelineViewStateDto): Prisma.JsonObject {

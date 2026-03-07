@@ -390,6 +390,82 @@ test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () =
   ]);
 });
 
+test('buildTimelineLayout keeps manual-layout lanes expanded while compacting other lanes', () => {
+  const layout = buildTimelineLayout({
+    lanes: [
+      {
+        id: 'section:design',
+        label: 'Design',
+        tasks: [
+          {
+            id: 'task-manual-1',
+            title: 'Manual First',
+            sectionId: 'design',
+            assigneeUserId: 'user-1',
+            status: 'TODO',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-02'),
+            timelineEnd: utcDate('2026-03-03'),
+          },
+          {
+            id: 'task-manual-2',
+            title: 'Manual Second',
+            sectionId: 'design',
+            assigneeUserId: 'user-1',
+            status: 'IN_PROGRESS',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-05'),
+            timelineEnd: utcDate('2026-03-06'),
+          },
+        ],
+      },
+      {
+        id: 'section:default',
+        label: 'Tasks',
+        tasks: [
+          {
+            id: 'task-packed-1',
+            title: 'Packed First',
+            sectionId: 'default',
+            assigneeUserId: 'user-1',
+            status: 'TODO',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-02'),
+            timelineEnd: utcDate('2026-03-03'),
+          },
+          {
+            id: 'task-packed-2',
+            title: 'Packed Second',
+            sectionId: 'default',
+            assigneeUserId: 'user-1',
+            status: 'IN_PROGRESS',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-05'),
+            timelineEnd: utcDate('2026-03-06'),
+          },
+        ],
+      },
+    ],
+    windowStart: utcDate('2026-03-01'),
+    windowEnd: utcDate('2026-03-10'),
+    dayColumnWidth: 20,
+    sectionRowHeight: 32,
+    taskRowHeight: 40,
+    compactRows: true,
+    manualRowLaneIds: ['section:design'],
+  });
+
+  const designLane = layout.lanesWithRows.find((lane) => lane.lane.id === 'section:design');
+  const defaultLane = layout.lanesWithRows.find((lane) => lane.lane.id === 'section:default');
+
+  assert.equal(designLane?.rows.length, 2);
+  assert.equal(defaultLane?.rows.length, 1);
+});
+
 test('buildTimelineLayout keeps input order inside compact rows', () => {
   const tasks: TaskInput[] = [
     {

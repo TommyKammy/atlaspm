@@ -2710,6 +2710,7 @@ describe('Core API Integration', () => {
         sectionId: defaultSectionId,
         title: 'Timeline layout task A',
         assigneeUserId: timelineAssigneeId,
+        status: 'TODO',
       })
       .expect(201);
     const timelineTaskB = await request(app.getHttpServer())
@@ -2719,6 +2720,7 @@ describe('Core API Integration', () => {
         sectionId: defaultSectionId,
         title: 'Timeline layout task B',
         assigneeUserId: timelineAssigneeId,
+        status: 'TODO',
       })
       .expect(201);
     const timelineTaskC = await request(app.getHttpServer())
@@ -2728,8 +2730,15 @@ describe('Core API Integration', () => {
         sectionId: defaultSectionId,
         title: 'Timeline layout task C',
         assigneeUserId: timelineAssigneeId,
+        status: 'TODO',
       })
       .expect(201);
+    const timelineTaskStatus = String(timelineTaskA.body.status);
+    expect(timelineTaskB.body.status).toBe(timelineTaskStatus);
+    expect(timelineTaskC.body.status).toBe(timelineTaskStatus);
+    const timelineStatusLaneId = `status:${timelineTaskStatus}`;
+    const invalidTimelineStatusLaneId =
+      timelineStatusLaneId === 'status:DONE' ? 'status:TODO' : 'status:DONE';
 
     const initialPrefsRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/timeline/preferences`)
@@ -2844,7 +2853,7 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         laneTaskOrder: {
-          'status:TODO': [timelineTaskA.body.id, timelineTaskB.body.id, timelineTaskC.body.id],
+          [timelineStatusLaneId]: [timelineTaskA.body.id, timelineTaskB.body.id, timelineTaskC.body.id],
         },
       })
       .expect(200);
@@ -2855,8 +2864,28 @@ describe('Core API Integration', () => {
       [`assignee:${timelineAssigneeId}`]: [timelineTaskB.body.id, timelineTaskA.body.id],
     });
     expect(statusManualLayoutRes.body.timelineManualLayout.status).toEqual({
-      'status:TODO': [timelineTaskA.body.id, timelineTaskB.body.id, timelineTaskC.body.id],
+      [timelineStatusLaneId]: [timelineTaskA.body.id, timelineTaskB.body.id, timelineTaskC.body.id],
     });
+
+    await request(app.getHttpServer())
+      .put(`/projects/${projectId}/timeline/preferences/manual-layout/status`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        laneTaskOrder: {
+          [invalidTimelineStatusLaneId]: [timelineTaskA.body.id],
+        },
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .put(`/projects/${projectId}/timeline/preferences/manual-layout/section`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        laneTaskOrder: {
+          [`section:${defaultSectionId}`]: ['00000000-0000-4000-8000-000000000000'],
+        },
+      })
+      .expect(400);
 
     const timelineViewStateRes = await request(app.getHttpServer())
       .put(`/projects/${projectId}/timeline/preferences/view-state/timeline`)
@@ -2941,7 +2970,7 @@ describe('Core API Integration', () => {
         [`assignee:${timelineAssigneeId}`]: [timelineTaskB.body.id, timelineTaskA.body.id],
       },
       status: {
-        'status:TODO': [timelineTaskA.body.id, timelineTaskB.body.id, timelineTaskC.body.id],
+        [timelineStatusLaneId]: [timelineTaskA.body.id, timelineTaskB.body.id, timelineTaskC.body.id],
       },
     });
 
