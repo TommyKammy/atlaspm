@@ -90,6 +90,7 @@ export type BuildTimelineLayoutInput<TTask extends TimelineLayoutTaskInput> = {
   taskRowHeight: number;
   compactRows?: boolean;
   manualRowLaneIds?: string[];
+  expandedRowLaneIds?: string[];
   dependencyAwarePacking?: boolean;
   dependencyEdges?: Array<{ source: string; target: string; type?: string }>;
 };
@@ -109,38 +110,6 @@ function dayNumber(date: Date): number {
 
 function dayDiff(from: Date, to: Date): number {
   return dayNumber(to) - dayNumber(from);
-}
-
-function pushHeap<T>(heap: T[], value: T, compare: (left: T, right: T) => number): void {
-  heap.push(value);
-  let index = heap.length - 1;
-  while (index > 0) {
-    const parent = Math.floor((index - 1) / 2);
-    if (compare(heap[index]!, heap[parent]!) >= 0) break;
-    [heap[index], heap[parent]] = [heap[parent]!, heap[index]!];
-    index = parent;
-  }
-}
-
-function popHeap<T>(heap: T[], compare: (left: T, right: T) => number): T | undefined {
-  if (!heap.length) return undefined;
-  const first = heap[0]!;
-  const last = heap.pop();
-  if (heap.length && last !== undefined) {
-    heap[0] = last;
-    let index = 0;
-    while (true) {
-      const left = index * 2 + 1;
-      const right = left + 1;
-      let smallest = index;
-      if (left < heap.length && compare(heap[left]!, heap[smallest]!) < 0) smallest = left;
-      if (right < heap.length && compare(heap[right]!, heap[smallest]!) < 0) smallest = right;
-      if (smallest === index) break;
-      [heap[index], heap[smallest]] = [heap[smallest]!, heap[index]!];
-      index = smallest;
-    }
-  }
-  return first;
 }
 
 function applyLaneOrder<TLane extends { id: string }>(lanes: TLane[], preferredOrder: string[]): TLane[] {
@@ -182,6 +151,7 @@ function buildCompactRowPlacement<TTask extends TimelineLayoutTaskInput>(
   tasks: TTask[],
   dependencyAwarePacking: boolean | undefined,
   dependencyEdges: Array<{ source: string; target: string; type?: string }> | undefined,
+  preserveInputOrder: boolean = false,
 ): CompactRowPlacement {
   const rowIndexByTaskId: Record<string, number> = {};
   const laneTaskIds = new Set(tasks.map((task) => task.id));
@@ -265,20 +235,23 @@ function buildCompactRowPlacement<TTask extends TimelineLayoutTaskInput>(
     }
   }
 
-  const tasksForPacking = [...tasks].sort((left, right) => {
-    if (dependencyAwarePacking) {
-      const leftComponentSize = componentSizeByTaskId.get(left.id) ?? 1;
-      const rightComponentSize = componentSizeByTaskId.get(right.id) ?? 1;
-      if (leftComponentSize !== rightComponentSize) return rightComponentSize - leftComponentSize;
-      const leftDepth = depthByTaskId.get(left.id) ?? 0;
-      const rightDepth = depthByTaskId.get(right.id) ?? 0;
-      if (leftDepth !== rightDepth) return leftDepth - rightDepth;
-    }
-    return fallbackTaskCompare(left, right);
-  });
+  const tasksForPacking = preserveInputOrder
+    ? [...tasks]
+    : [...tasks].sort((left, right) => {
+        if (dependencyAwarePacking) {
+          const leftComponentSize = componentSizeByTaskId.get(left.id) ?? 1;
+          const rightComponentSize = componentSizeByTaskId.get(right.id) ?? 1;
+          if (leftComponentSize !== rightComponentSize) {
+            return rightComponentSize - leftComponentSize;
+          }
+          const leftDepth = depthByTaskId.get(left.id) ?? 0;
+          const rightDepth = depthByTaskId.get(right.id) ?? 0;
+          if (leftDepth !== rightDepth) return leftDepth - rightDepth;
+        }
+        return fallbackTaskCompare(left, right);
+      });
 
-  const activeRows: Array<{ rowIndex: number; endDay: number }> = [];
-  const availableRowIndexes: number[] = [];
+  const occupiedRangesByRow: Array<Array<{ startDay: number; endDay: number }>> = [];
   let nextRowIndex = 0;
 
   for (const task of tasksForPacking) {
@@ -286,23 +259,22 @@ function buildCompactRowPlacement<TTask extends TimelineLayoutTaskInput>(
     if (task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd) {
       const taskStartDay = dayNumber(task.timelineStart);
       const taskEndDay = dayNumber(task.timelineEnd);
-
-      while (activeRows.length && activeRows[0]!.endDay < taskStartDay) {
-        const released = popHeap(
-          activeRows,
-          (left, right) => left.endDay - right.endDay || left.rowIndex - right.rowIndex,
+      rowIndex = -1;
+      for (let candidateRowIndex = 0; candidateRowIndex < occupiedRangesByRow.length; candidateRowIndex += 1) {
+        const occupiedRanges = occupiedRangesByRow[candidateRowIndex] ?? [];
+        const overlapsExistingTask = occupiedRanges.some(
+          (range) => !(range.endDay < taskStartDay || range.startDay > taskEndDay),
         );
-        if (released) {
-          pushHeap(availableRowIndexes, released.rowIndex, (left, right) => left - right);
+        if (!overlapsExistingTask) {
+          rowIndex = candidateRowIndex;
+          occupiedRanges.push({ startDay: taskStartDay, endDay: taskEndDay });
+          break;
         }
       }
-
-      rowIndex = popHeap(availableRowIndexes, (left, right) => left - right) ?? nextRowIndex++;
-      pushHeap(
-        activeRows,
-        { rowIndex, endDay: taskEndDay },
-        (left, right) => left.endDay - right.endDay || left.rowIndex - right.rowIndex,
-      );
+      if (rowIndex < 0) {
+        rowIndex = nextRowIndex++;
+        occupiedRangesByRow[rowIndex] = [{ startDay: taskStartDay, endDay: taskEndDay }];
+      }
     } else {
       rowIndex = nextRowIndex++;
     }
@@ -421,6 +393,7 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
   const taskRowsById: Record<string, { top: number; height: number }> = {};
   const lanesWithRows: Array<TimelineLayoutLane<TTask>> = [];
   const manualRowLaneIds = new Set(input.manualRowLaneIds ?? []);
+  const expandedRowLaneIds = new Set(input.expandedRowLaneIds ?? []);
 
   for (const lane of input.lanes) {
     const laneTop = cursorY;
@@ -429,21 +402,25 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
     const rows: Array<TimelinePackedRow<TTask>> = [];
     const rowIndexByTaskId: Record<string, number> = {};
     const laneUsesManualRows = manualRowLaneIds.has(lane.id);
+    const laneUsesExpandedRows = expandedRowLaneIds.has(lane.id);
 
-    if (input.compactRows && !laneUsesManualRows) {
+    if (input.compactRows && !laneUsesExpandedRows) {
       Object.assign(
         rowIndexByTaskId,
         buildCompactRowPlacement(
           lane.tasks,
           input.dependencyAwarePacking,
           input.dependencyEdges,
+          laneUsesManualRows,
         ).rowIndexByTaskId,
       );
     }
 
     for (const task of lane.tasks) {
       const rowIndex =
-        input.compactRows && !laneUsesManualRows ? (rowIndexByTaskId[task.id] ?? rows.length) : rows.length;
+        input.compactRows && !laneUsesExpandedRows
+          ? (rowIndexByTaskId[task.id] ?? rows.length)
+          : rows.length;
       if (!rows[rowIndex]) {
         rows[rowIndex] = {
           index: rowIndex,
@@ -496,10 +473,10 @@ export function buildTimelineTaskOrderByLane<TTask extends TimelineLayoutTaskInp
   input: BuildTimelineLayoutInput<TTask>,
 ): TimelineTaskOrderByLane {
   const laneTaskOrder: TimelineTaskOrderByLane = {};
-  const manualRowLaneIds = new Set(input.manualRowLaneIds ?? []);
+  const expandedRowLaneIds = new Set(input.expandedRowLaneIds ?? []);
   for (const lane of input.lanes) {
     if (!lane.tasks.length) continue;
-    if (!input.compactRows || manualRowLaneIds.has(lane.id)) {
+    if (!input.compactRows || expandedRowLaneIds.has(lane.id)) {
       laneTaskOrder[lane.id] = lane.tasks.map((task) => task.id);
       continue;
     }

@@ -391,7 +391,7 @@ test('buildTimelineLayout compacts non-overlapping tasks into shared rows', () =
   ]);
 });
 
-test('buildTimelineLayout keeps manual-layout lanes expanded while compacting other lanes', () => {
+test('buildTimelineLayout keeps expanded-row lanes un-packed while compacting other lanes', () => {
   const layout = buildTimelineLayout({
     lanes: [
       {
@@ -457,7 +457,7 @@ test('buildTimelineLayout keeps manual-layout lanes expanded while compacting ot
     sectionRowHeight: 32,
     taskRowHeight: 40,
     compactRows: true,
-    manualRowLaneIds: ['section:design'],
+    expandedRowLaneIds: ['section:design'],
   });
 
   const designLane = layout.lanesWithRows.find((lane) => lane.lane.id === 'section:design');
@@ -527,13 +527,12 @@ test('buildTimelineLayout keeps manual task order authoritative over dependency 
     designLane?.rows.map((row) => ({ index: row.index, taskIds: row.tasks.map((task) => task.id) })),
     [
       { index: 0, taskIds: ['task-blocker'] },
-      { index: 1, taskIds: ['task-chain-a'] },
-      { index: 2, taskIds: ['task-chain-b'] },
+      { index: 1, taskIds: ['task-chain-a', 'task-chain-b'] },
     ],
   );
   assert.equal(layout.taskRowsById['task-blocker']?.top, 32);
   assert.equal(layout.taskRowsById['task-chain-a']?.top, 72);
-  assert.equal(layout.taskRowsById['task-chain-b']?.top, 112);
+  assert.equal(layout.taskRowsById['task-chain-b']?.top, 72);
 });
 
 test('buildTimelineLayout preserves manual vertical order while still compacting non-overlapping tasks', () => {
@@ -597,6 +596,58 @@ test('buildTimelineLayout preserves manual vertical order while still compacting
   assert.deepEqual(layout.taskRowsById['task-late'], { top: 32, height: 40 });
   assert.deepEqual(layout.taskRowsById['task-early'], { top: 32, height: 40 });
   assert.deepEqual(layout.taskRowsById['task-overlap'], { top: 72, height: 40 });
+});
+
+test('buildTimelineLayout respects manual order for overlapping tasks even when dates start earlier', () => {
+  const layout = buildTimelineLayout({
+    lanes: [
+      {
+        id: 'section:design',
+        label: 'Design',
+        tasks: [
+          {
+            id: 'task-late-first',
+            title: 'Manual top despite later start',
+            sectionId: 'design',
+            assigneeUserId: 'user-1',
+            status: 'TODO',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-04'),
+            timelineEnd: utcDate('2026-03-07'),
+          },
+          {
+            id: 'task-early-second',
+            title: 'Manual second despite earlier start',
+            sectionId: 'design',
+            assigneeUserId: 'user-1',
+            status: 'IN_PROGRESS',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-02'),
+            timelineEnd: utcDate('2026-03-05'),
+          },
+        ],
+      },
+    ],
+    windowStart: utcDate('2026-03-01'),
+    windowEnd: utcDate('2026-03-10'),
+    dayColumnWidth: 20,
+    sectionRowHeight: 32,
+    taskRowHeight: 40,
+    compactRows: true,
+    manualRowLaneIds: ['section:design'],
+  });
+
+  assert.deepEqual(
+    layout.lanesWithRows[0]?.rows.map((row) => ({ index: row.index, taskIds: row.tasks.map((task) => task.id) })),
+    [
+      { index: 0, taskIds: ['task-late-first'] },
+      { index: 1, taskIds: ['task-early-second'] },
+    ],
+  );
+  assert.equal(layout.taskRowsById['task-late-first']?.top, 32);
+  assert.equal(layout.taskRowsById['task-early-second']?.top, 72);
 });
 
 test('buildTimelineLayout keeps input order inside compact rows', () => {
