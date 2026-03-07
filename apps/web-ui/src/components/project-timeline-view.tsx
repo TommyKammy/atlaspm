@@ -94,6 +94,26 @@ type TimelineSelectionDraft = {
   currentY: number;
 };
 
+type SectionTimelineRailItem = {
+  task: TimelineTask;
+  depth: number;
+  hasChildren: boolean;
+  hasNextSibling: boolean;
+  ancestorHasNextSibling: boolean[];
+};
+
+type SectionTimelineNode = {
+  task: TimelineTask;
+  children: SectionTimelineNode[];
+};
+
+type SectionTimelineLaneHierarchy = {
+  orderedTasks: TimelineTask[];
+  railItems: SectionTimelineRailItem[];
+  railItemByTaskId: Map<string, SectionTimelineRailItem>;
+  hasHierarchy: boolean;
+};
+
 function getLegacyTimelineStorageKey(
   mode: TimelineMode,
   userId: string,
@@ -287,6 +307,65 @@ function compareTimelineTasks(
   const positionDelta = left.position - right.position;
   if (positionDelta !== 0) return positionDelta;
   return left.title.localeCompare(right.title);
+}
+
+function buildSectionTimelineLaneHierarchy(tasks: TimelineTask[]): SectionTimelineLaneHierarchy {
+  const byId = new Map<string, SectionTimelineNode>();
+  const orderByTaskId = new Map(tasks.map((task, index) => [task.id, index]));
+  for (const task of tasks) {
+    byId.set(task.id, { task, children: [] });
+  }
+
+  const roots: SectionTimelineNode[] = [];
+  for (const task of tasks) {
+    const node = byId.get(task.id);
+    if (!node) continue;
+    const parentNode = task.parentId ? byId.get(task.parentId) : undefined;
+    if (parentNode && parentNode.task.sectionId === task.sectionId) {
+      parentNode.children.push(node);
+      continue;
+    }
+    roots.push(node);
+  }
+
+  const sortNodes = (nodes: SectionTimelineNode[]) => {
+    nodes.sort(
+      (left, right) => (orderByTaskId.get(left.task.id) ?? 0) - (orderByTaskId.get(right.task.id) ?? 0),
+    );
+    for (const node of nodes) {
+      sortNodes(node.children);
+    }
+  };
+  sortNodes(roots);
+
+  const railItems: SectionTimelineRailItem[] = [];
+  const walk = (
+    nodes: SectionTimelineNode[],
+    depth: number,
+    ancestorHasNextSibling: boolean[],
+  ) => {
+    nodes.forEach((node, index) => {
+      const hasNextSibling = index < nodes.length - 1;
+      railItems.push({
+        task: node.task,
+        depth,
+        hasChildren: node.children.length > 0,
+        hasNextSibling,
+        ancestorHasNextSibling,
+      });
+      if (node.children.length > 0) {
+        walk(node.children, depth + 1, [...ancestorHasNextSibling, hasNextSibling]);
+      }
+    });
+  };
+  walk(roots, 0, []);
+
+  return {
+    orderedTasks: railItems.map((item) => item.task),
+    railItems,
+    railItemByTaskId: new Map(railItems.map((item) => [item.task.id, item])),
+    hasHierarchy: railItems.some((item) => item.depth > 0),
+  };
 }
 
 function baselineVarianceDays(task: TimelineTask): number | null {
@@ -1182,7 +1261,7 @@ export function ProjectScheduleCanvas({
     ? hasTimelineManualLayout(preferredManualLayout)
     : false;
 
-  const timelineLanes = useMemo(() => {
+  const baseTimelineLanes = useMemo(() => {
     const scheduledTimelineTasks = filteredTasks.filter((task) => task.hasSchedule);
     const lanes = buildTimelineLanes({
       swimlane: effectiveSwimlane,
@@ -1212,6 +1291,26 @@ export function ProjectScheduleCanvas({
     timeline.membersById,
     timeline.sections,
   ]);
+  const sectionTimelineHierarchyByLaneId = useMemo(() => {
+    const next = new Map<string, SectionTimelineLaneHierarchy>();
+    if (mode !== 'timeline' || effectiveSwimlane !== 'section') return next;
+    for (const lane of baseTimelineLanes) {
+      next.set(lane.id, buildSectionTimelineLaneHierarchy(lane.tasks));
+    }
+    return next;
+  }, [baseTimelineLanes, effectiveSwimlane, mode]);
+  const timelineLanes = useMemo(
+    () =>
+      baseTimelineLanes.map((lane) => {
+        const hierarchy = sectionTimelineHierarchyByLaneId.get(lane.id);
+        if (!hierarchy?.hasHierarchy) return lane;
+        return {
+          ...lane,
+          tasks: hierarchy.orderedTasks,
+        };
+      }),
+    [baseTimelineLanes, sectionTimelineHierarchyByLaneId],
+  );
   const laneTaskCountById = useMemo(
     () => new Map(timelineLanes.map((lane) => [lane.id, lane.tasks.length])),
     [timelineLanes],
@@ -1222,13 +1321,29 @@ export function ProjectScheduleCanvas({
     [collapsedLaneIds, timelineLanes],
   );
   const manualLayoutLaneIds = useMemo(
-    () =>
-      mode === 'timeline' && sortMode === 'manual'
-        ? visibleTimelineLanes
-            .filter((lane) => (preferredManualLayout[lane.id] ?? []).length > 0)
-            .map((lane) => lane.id)
-        : [],
-    [mode, preferredManualLayout, sortMode, visibleTimelineLanes],
+    () => {
+      const manualLaneIds =
+        mode === 'timeline' && sortMode === 'manual'
+          ? visibleTimelineLanes
+              .filter((lane) => (preferredManualLayout[lane.id] ?? []).length > 0)
+              .map((lane) => lane.id)
+          : [];
+      const hierarchyLaneIds =
+        mode === 'timeline' && effectiveSwimlane === 'section'
+          ? visibleTimelineLanes
+              .filter((lane) => sectionTimelineHierarchyByLaneId.get(lane.id)?.hasHierarchy)
+              .map((lane) => lane.id)
+          : [];
+      return Array.from(new Set([...manualLaneIds, ...hierarchyLaneIds]));
+    },
+    [
+      effectiveSwimlane,
+      mode,
+      preferredManualLayout,
+      sectionTimelineHierarchyByLaneId,
+      sortMode,
+      visibleTimelineLanes,
+    ],
   );
 
   useEffect(() => {
@@ -3183,6 +3298,11 @@ export function ProjectScheduleCanvas({
               const showHeaderOnlyLaneRail = effectiveSwimlane !== 'section';
               const laneTaskCount = laneTaskCountById.get(lane.id) ?? 0;
               const laneContentId = `timeline-lane-content-${normalizeTestIdSegment(lane.id)}`;
+              const sectionRailHierarchy = sectionTimelineHierarchyByLaneId.get(lane.id);
+              const showSectionTaskRail =
+                mode === 'timeline' &&
+                effectiveSwimlane === 'section' &&
+                Boolean(sectionRailHierarchy?.hasHierarchy);
               const laneRowsTop = top + SECTION_ROW_HEIGHT;
               const topSpacer = visibleRows.length
                 ? Math.max(0, visibleRows[0]!.top - laneRowsTop)
@@ -3317,6 +3437,99 @@ export function ProjectScheduleCanvas({
                           </Badge>
                         ) : null}
                       </div>
+                      {showSectionTaskRail && !isLaneCollapsed && topSpacer > 0 ? (
+                        <div style={{ height: `${topSpacer}px` }} />
+                      ) : null}
+                      {showSectionTaskRail && !isLaneCollapsed
+                        ? visibleRows.map((row) => {
+                            const task = row.tasks[0];
+                            if (!task) {
+                              return (
+                                <div
+                                  key={`timeline-rail-spacer-${lane.id}-${row.index}`}
+                                  style={{ height: `${TASK_ROW_HEIGHT}px` }}
+                                />
+                              );
+                            }
+                            const railItem = sectionRailHierarchy?.railItemByTaskId.get(task.id);
+                            if (!railItem) {
+                              return (
+                                <div
+                                  key={`timeline-rail-fallback-${lane.id}-${task.id}`}
+                                  style={{ height: `${TASK_ROW_HEIGHT}px` }}
+                                />
+                              );
+                            }
+                            const title = task.title.trim() || t('untitledTask');
+                            const depthOffsetPx = railItem.depth * 16;
+                            const branchLeftPx = Math.max(0, depthOffsetPx - 8);
+                            return (
+                              <div
+                                key={`timeline-rail-task-row-${lane.id}-${task.id}`}
+                                className="relative h-10 border-b last:border-b-0"
+                              >
+                                {railItem.ancestorHasNextSibling.map((hasNextSibling, index) =>
+                                  hasNextSibling ? (
+                                    <span
+                                      key={`timeline-rail-guide-${task.id}-${index}`}
+                                      aria-hidden="true"
+                                      className="pointer-events-none absolute inset-y-0 w-px bg-border/50"
+                                      style={{ left: `${index * 16 + 8}px` }}
+                                    />
+                                  ) : null,
+                                )}
+                                {railItem.hasChildren ? (
+                                  <span
+                                    aria-hidden="true"
+                                    className="pointer-events-none absolute bottom-0 top-1/2 w-px bg-border/70"
+                                    style={{ left: `${depthOffsetPx + 8}px` }}
+                                  />
+                                ) : null}
+                                {railItem.depth > 0 ? (
+                                  <span
+                                    aria-hidden="true"
+                                    className="pointer-events-none absolute inset-y-0 w-3"
+                                    style={{ left: `${branchLeftPx}px` }}
+                                    data-testid={`timeline-rail-branch-${task.id}`}
+                                  >
+                                    <span className="absolute left-1/2 top-0 bottom-1/2 w-px -translate-x-1/2 bg-border/70" />
+                                    {railItem.hasNextSibling ? (
+                                      <span className="absolute left-1/2 top-1/2 bottom-0 w-px -translate-x-1/2 bg-border/70" />
+                                    ) : null}
+                                    <span className="absolute left-1/2 top-1/2 h-px w-3 bg-border/70" />
+                                  </span>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  className={`flex h-full items-center rounded pr-2 text-left text-sm transition hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                                    task.status === 'DONE'
+                                      ? 'text-muted-foreground'
+                                      : 'text-foreground'
+                                  }`}
+                                  style={{
+                                    marginLeft: `${depthOffsetPx}px`,
+                                    width: `calc(100% - ${depthOffsetPx}px)`,
+                                  }}
+                                  onClick={() => setSelectedTaskId(task.id)}
+                                  data-testid={`timeline-rail-task-${task.id}`}
+                                  data-depth={String(railItem.depth)}
+                                  title={title}
+                                >
+                                  <span
+                                    className={`truncate px-2 ${
+                                      task.status === 'DONE' ? 'line-through' : ''
+                                    }`}
+                                  >
+                                    {title}
+                                  </span>
+                                </button>
+                              </div>
+                            );
+                          })
+                        : null}
+                      {showSectionTaskRail && !isLaneCollapsed && bottomSpacer > 0 ? (
+                        <div style={{ height: `${bottomSpacer}px` }} />
+                      ) : null}
                     </div>
                   </div>
 
