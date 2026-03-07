@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   buildTimelineLanes,
   buildTimelineLayout,
+  buildTimelineTaskOrderByLane,
   type TimelineLaneTaskInput,
   type TimelineSectionInput,
 } from '../services/timeline-layout.js';
@@ -466,6 +467,75 @@ test('buildTimelineLayout keeps manual-layout lanes expanded while compacting ot
   assert.equal(defaultLane?.rows.length, 1);
 });
 
+test('buildTimelineLayout keeps manual task order authoritative over dependency packing', () => {
+  const layout = buildTimelineLayout({
+    lanes: [
+      {
+        id: 'section:design',
+        label: 'Design',
+        tasks: [
+          {
+            id: 'task-blocker',
+            title: 'Manual blocker first',
+            sectionId: 'design',
+            assigneeUserId: 'user-1',
+            status: 'TODO',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-02'),
+            timelineEnd: utcDate('2026-03-10'),
+          },
+          {
+            id: 'task-chain-a',
+            title: 'Chain start',
+            sectionId: 'design',
+            assigneeUserId: 'user-1',
+            status: 'IN_PROGRESS',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-05'),
+            timelineEnd: utcDate('2026-03-06'),
+          },
+          {
+            id: 'task-chain-b',
+            title: 'Chain follow-up',
+            sectionId: 'design',
+            assigneeUserId: 'user-1',
+            status: 'TODO',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-07'),
+            timelineEnd: utcDate('2026-03-08'),
+          },
+        ],
+      },
+    ],
+    windowStart: utcDate('2026-03-01'),
+    windowEnd: utcDate('2026-03-10'),
+    dayColumnWidth: 20,
+    sectionRowHeight: 32,
+    taskRowHeight: 40,
+    compactRows: true,
+    manualRowLaneIds: ['section:design'],
+    dependencyAwarePacking: true,
+    dependencyEdges: [{ source: 'task-chain-a', target: 'task-chain-b', type: 'BLOCKS' }],
+  });
+
+  const designLane = layout.lanesWithRows[0];
+
+  assert.deepEqual(
+    designLane?.rows.map((row) => ({ index: row.index, taskIds: row.tasks.map((task) => task.id) })),
+    [
+      { index: 0, taskIds: ['task-blocker'] },
+      { index: 1, taskIds: ['task-chain-a'] },
+      { index: 2, taskIds: ['task-chain-b'] },
+    ],
+  );
+  assert.equal(layout.taskRowsById['task-blocker']?.top, 32);
+  assert.equal(layout.taskRowsById['task-chain-a']?.top, 72);
+  assert.equal(layout.taskRowsById['task-chain-b']?.top, 112);
+});
+
 test('buildTimelineLayout keeps input order inside compact rows', () => {
   const tasks: TaskInput[] = [
     {
@@ -573,4 +643,67 @@ test('buildTimelineLayout can align dependency chains ahead of unrelated blocker
   assert.equal(alignedLayout.taskRowsById['task-chain-a']?.top, 32);
   assert.equal(alignedLayout.taskRowsById['task-chain-b']?.top, 32);
   assert.equal(alignedLayout.taskRowsById['task-blocker']?.top, 72);
+});
+
+test('buildTimelineTaskOrderByLane returns explicit aligned order for visible lanes', () => {
+  const laneTaskOrder = buildTimelineTaskOrderByLane({
+    lanes: [
+      {
+        id: 'section:design',
+        label: 'Design',
+        tasks: [
+          {
+            id: 'task-chain-b',
+            title: 'Chain follow-up',
+            sectionId: 'design',
+            assigneeUserId: 'user-1',
+            status: 'TODO',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-07'),
+            timelineEnd: utcDate('2026-03-08'),
+          },
+          {
+            id: 'task-chain-a',
+            title: 'Chain start',
+            sectionId: 'design',
+            assigneeUserId: 'user-1',
+            status: 'IN_PROGRESS',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-05'),
+            timelineEnd: utcDate('2026-03-06'),
+          },
+          {
+            id: 'task-blocker',
+            title: 'Long blocker',
+            sectionId: 'design',
+            assigneeUserId: 'user-1',
+            status: 'TODO',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-02'),
+            timelineEnd: utcDate('2026-03-10'),
+          },
+        ],
+      },
+      {
+        id: 'section:empty',
+        label: 'Empty',
+        tasks: [],
+      },
+    ],
+    windowStart: utcDate('2026-03-01'),
+    windowEnd: utcDate('2026-03-10'),
+    dayColumnWidth: 20,
+    sectionRowHeight: 32,
+    taskRowHeight: 40,
+    compactRows: true,
+    dependencyAwarePacking: true,
+    dependencyEdges: [{ source: 'task-chain-a', target: 'task-chain-b', type: 'BLOCKS' }],
+  });
+
+  assert.deepEqual(laneTaskOrder, {
+    'section:design': ['task-chain-a', 'task-chain-b', 'task-blocker'],
+  });
 });

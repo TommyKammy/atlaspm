@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { buildTimelineLanes, buildTimelineLayout } from '@atlaspm/domain';
+import {
+  buildTimelineLanes,
+  buildTimelineLayout,
+  buildTimelineTaskOrderByLane,
+} from '@atlaspm/domain';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import TaskDetailDrawer from '@/components/task-detail-drawer';
@@ -607,6 +611,17 @@ function hasTimelineManualLayout(layout: TimelineManualLayoutByLane): boolean {
   return Object.values(layout).some((laneTaskOrder) => laneTaskOrder.length > 0);
 }
 
+function mergeTimelineManualLaneTaskOrder(
+  existingTaskOrder: string[] | undefined,
+  nextTaskOrder: string[],
+): string[] {
+  const seenTaskIds = new Set(nextTaskOrder);
+  return [
+    ...nextTaskOrder,
+    ...(existingTaskOrder ?? []).filter((taskId) => !seenTaskIds.has(taskId)),
+  ];
+}
+
 function readStoredTimelineLaneOrder(keys: Array<string | null | undefined>): string[] {
   if (typeof window === 'undefined') return [];
   for (const key of keys) {
@@ -690,7 +705,6 @@ export function ProjectScheduleCanvas({
   const [sortMode, setSortMode] = useState<TimelineSortMode>('manual');
   const [scheduleFilter, setScheduleFilter] = useState<TimelineScheduleFilter>('all');
   const [workingDaysOnly, setWorkingDaysOnly] = useState(false);
-  const [dependencyAwarePacking, setDependencyAwarePacking] = useState(false);
   const [ganttRiskFilterMode, setGanttRiskFilterMode] = useState<GanttRiskFilterMode>('all');
   const [ganttStrictMode, setGanttStrictMode] = useState(false);
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
@@ -1844,11 +1858,9 @@ export function ProjectScheduleCanvas({
       taskRowHeight: TASK_ROW_HEIGHT,
       compactRows: mode === 'timeline',
       manualRowLaneIds: mode === 'timeline' ? manualLayoutLaneIds : [],
-      dependencyAwarePacking: mode === 'timeline' && dependencyAwarePacking,
       dependencyEdges: timeline.dependencyEdges,
     });
   }, [
-    dependencyAwarePacking,
     manualLayoutLaneIds,
     mode,
     timeline.dependencyEdges,
@@ -1857,6 +1869,43 @@ export function ProjectScheduleCanvas({
     visibleTimelineLanes,
     zoomConfig.dayColWidth,
   ]);
+
+  const alignTimeline = () => {
+    if (mode !== 'timeline') return;
+    const expandedTimelineLanes = timelineLanes.filter((lane) => !collapsedLaneIds.has(lane.id));
+    if (!expandedTimelineLanes.length) return;
+
+    const alignedLaneTaskOrder = buildTimelineTaskOrderByLane({
+      lanes: expandedTimelineLanes,
+      windowStart: timeline.window.start,
+      windowEnd: timeline.window.end,
+      dayColumnWidth: zoomConfig.dayColWidth,
+      sectionRowHeight: SECTION_ROW_HEIGHT,
+      taskRowHeight: TASK_ROW_HEIGHT,
+      compactRows: true,
+      dependencyAwarePacking: true,
+      dependencyEdges: timeline.dependencyEdges,
+    });
+
+    const nextManualLayout = { ...preferredManualLayout };
+    for (const lane of expandedTimelineLanes) {
+      const alignedTaskOrder = alignedLaneTaskOrder[lane.id];
+      if (!alignedTaskOrder?.length) continue;
+      nextManualLayout[lane.id] = mergeTimelineManualLaneTaskOrder(
+        preferredManualLayout[lane.id],
+        alignedTaskOrder,
+      );
+    }
+
+    if (JSON.stringify(nextManualLayout) === JSON.stringify(preferredManualLayout)) {
+      return;
+    }
+
+    saveManualLayoutMutation.mutate({
+      groupBy: effectiveSwimlane,
+      laneTaskOrder: nextManualLayout,
+    });
+  };
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -2753,11 +2802,12 @@ export function ProjectScheduleCanvas({
             <Button
               type="button"
               size="sm"
-              variant={dependencyAwarePacking ? 'default' : 'outline'}
+              variant="outline"
               className="h-7 px-2 text-xs"
               data-testid="timeline-align-toggle"
-              data-active={dependencyAwarePacking ? 'true' : 'false'}
-              onClick={() => setDependencyAwarePacking((current) => !current)}
+              data-active="false"
+              onClick={alignTimeline}
+              disabled={saveManualLayoutMutation.isPending}
               title={t('timelineAlignHint')}
             >
               {t('timelineAlign')}
