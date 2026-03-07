@@ -111,7 +111,6 @@ type TimelineLaneRail = {
   orderedTasks: TimelineTask[];
   railItems: TimelineRailItem[];
   railItemByTaskId: Map<string, TimelineRailItem>;
-  hasHierarchy: boolean;
   showTaskRail: boolean;
 };
 
@@ -314,6 +313,18 @@ function buildTimelineLaneRail(
   tasks: TimelineTask[],
   childTaskCountByParentId: Map<string, number>,
 ): TimelineLaneRail {
+  const showTaskRail = tasks.some(
+    (task) => Boolean(task.parentId) || (childTaskCountByParentId.get(task.id) ?? 0) > 0,
+  );
+  if (!showTaskRail) {
+    return {
+      orderedTasks: tasks,
+      railItems: [],
+      railItemByTaskId: new Map(),
+      showTaskRail: false,
+    };
+  }
+
   const byId = new Map<string, TimelineRailNode>();
   const orderByTaskId = new Map(tasks.map((task, index) => [task.id, index]));
   for (const task of tasks) {
@@ -368,10 +379,7 @@ function buildTimelineLaneRail(
     orderedTasks: railItems.map((item) => item.task),
     railItems,
     railItemByTaskId: new Map(railItems.map((item) => [item.task.id, item])),
-    hasHierarchy: railItems.some((item) => item.depth > 0),
-    showTaskRail: tasks.some(
-      (task) => Boolean(task.parentId) || (childTaskCountByParentId.get(task.id) ?? 0) > 0,
-    ),
+    showTaskRail: true,
   };
 }
 
@@ -1227,14 +1235,18 @@ export function ProjectScheduleCanvas({
     if (mode !== 'gantt' || ganttRiskFilterMode === 'all') return baseFilteredTasks;
     return baseFilteredTasks.filter((task) => ganttRiskByTaskId.get(task.id)?.isAtRisk);
   }, [baseFilteredTasks, ganttRiskByTaskId, ganttRiskFilterMode, mode]);
+  const scheduledTimelineTasks = useMemo(
+    () => filteredTasks.filter((task) => task.hasSchedule),
+    [filteredTasks],
+  );
   const childTaskCountByParentId = useMemo(() => {
     const next = new Map<string, number>();
-    for (const task of filteredTasks) {
+    for (const task of scheduledTimelineTasks) {
       if (!task.parentId) continue;
       next.set(task.parentId, (next.get(task.parentId) ?? 0) + 1);
     }
     return next;
-  }, [filteredTasks]);
+  }, [scheduledTimelineTasks]);
 
   const preferredLaneOrder = useMemo(() => {
     const storedLaneOrder = readStoredTimelineLaneOrder([
@@ -1277,7 +1289,6 @@ export function ProjectScheduleCanvas({
     : false;
 
   const baseTimelineLanes = useMemo(() => {
-    const scheduledTimelineTasks = filteredTasks.filter((task) => task.hasSchedule);
     const lanes = buildTimelineLanes({
       swimlane: effectiveSwimlane,
       tasks: scheduledTimelineTasks,
@@ -1298,10 +1309,10 @@ export function ProjectScheduleCanvas({
     return lanes;
   }, [
     effectiveSwimlane,
-    filteredTasks,
     hasActiveManualLayout,
     preferredLaneOrder,
     preferredManualLayout,
+    scheduledTimelineTasks,
     t,
     timeline.membersById,
     timeline.sections,

@@ -31,6 +31,18 @@ function dayIso(deltaDays: number) {
   return date.toISOString();
 }
 
+function laneRailTestId(laneTestId: string) {
+  return laneTestId.replace('timeline-lane-', 'timeline-lane-rail-');
+}
+
+async function expectHeaderOnlyRail(page: Page, laneTestId: string, hiddenTaskTitles: string[]) {
+  const laneRail = page.locator(`[data-testid="${laneRailTestId(laneTestId)}"]`);
+  await expect(laneRail).toHaveAttribute('data-header-only', 'true');
+  for (const taskTitle of hiddenTaskTitles) {
+    await expect(laneRail).not.toContainText(taskTitle);
+  }
+}
+
 async function expectNestedRailItem(page: Page, taskId: string, expectedDepth: string) {
   const railItem = page.locator(`[data-testid="timeline-rail-task-${taskId}"]`);
   await expect(railItem).toBeVisible();
@@ -124,4 +136,66 @@ test('timeline grouped swimlanes preserve same-group hierarchy and flatten cross
 
   await expectNestedRailItem(page, sameGroupChild.id, '1');
   await expectFlatRailItem(page, splitGroupChild.id);
+});
+
+test('timeline grouped rails ignore unscheduled subtasks when visible lanes stay flat', async ({
+  page,
+}) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-unscheduled-subtasks-${now}`;
+  const email = `${sub}@example.com`;
+
+  await login(page, sub, email);
+
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Unscheduled Subtasks ${now}`,
+  });
+  const projectId = project.id as string;
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Timeline Section',
+  });
+
+  const parentTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Visible Parent ${now}`,
+    assigneeUserId: sub,
+    startAt: dayIso(0),
+    dueAt: dayIso(3),
+  });
+  const unscheduledChild = await api(`/tasks/${parentTask.id}/subtasks`, token, 'POST', {
+    title: `Hidden Child ${now}`,
+  });
+  await api(`/tasks/${unscheduledChild.id}`, token, 'PATCH', {
+    assigneeUserId: sub,
+    version: unscheduledChild.version,
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+
+  await page.click('[data-testid="timeline-swimlane-assignee"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await expectHeaderOnlyRail(page, `timeline-lane-assignee-${sub}`, [
+    parentTask.title,
+    unscheduledChild.title,
+  ]);
+
+  await page.click('[data-testid="timeline-swimlane-status"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await expectHeaderOnlyRail(page, 'timeline-lane-status-IN_PROGRESS', [
+    parentTask.title,
+    unscheduledChild.title,
+  ]);
 });
