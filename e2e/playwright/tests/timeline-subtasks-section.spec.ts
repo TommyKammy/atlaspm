@@ -31,7 +31,35 @@ function dayIso(deltaDays: number) {
   return date.toISOString();
 }
 
-test('timeline section swimlane renders same-section subtasks as indented branch items', async ({
+function laneRailTestId(laneTestId: string) {
+  return laneTestId.replace('timeline-lane-', 'timeline-lane-rail-');
+}
+
+function laneHeaderTestId(laneTestId: string) {
+  return laneTestId.replace('timeline-lane-', 'timeline-lane-header-');
+}
+
+async function expectHeaderOnlyRail(page: Page, laneTestId: string, hiddenTaskTitles: string[]) {
+  const laneHeader = page.locator(`[data-testid="${laneHeaderTestId(laneTestId)}"]`);
+  const laneRail = page.locator(`[data-testid="${laneRailTestId(laneTestId)}"]`);
+  await expect(laneHeader).toBeVisible();
+  await expect(laneRail).toHaveAttribute('data-header-only', 'true');
+  for (const taskTitle of hiddenTaskTitles) {
+    await expect(laneRail).not.toContainText(taskTitle);
+  }
+
+  const [headerBox, railBox, childElementCount] = await Promise.all([
+    laneHeader.boundingBox(),
+    laneRail.boundingBox(),
+    laneRail.evaluate((element) => element.childElementCount),
+  ]);
+  expect(headerBox).toBeTruthy();
+  expect(railBox).toBeTruthy();
+  expect(childElementCount).toBe(1);
+  expect(Math.abs((railBox?.height ?? 0) - (headerBox?.height ?? 0))).toBeLessThanOrEqual(1);
+}
+
+test('timeline section swimlane keeps the left rail header-only even with subtasks', async ({
   page,
 }) => {
   const now = Date.now();
@@ -72,25 +100,12 @@ test('timeline section swimlane renders same-section subtasks as indented branch
     'data-active',
     'true',
   );
-
-  const parentRailItem = page.locator(`[data-testid="timeline-rail-task-${parentTask.id}"]`);
-  const childRailItem = page.locator(`[data-testid="timeline-rail-task-${childTask.id}"]`);
-
-  await expect(parentRailItem).toBeVisible();
-  await expect(childRailItem).toBeVisible();
-  await expect(childRailItem).toHaveAttribute('data-depth', '1');
-  await expect(
-    page.locator(`[data-testid="timeline-rail-branch-${childTask.id}"]`),
-  ).toBeVisible();
-
-  const [parentBox, childBox] = await Promise.all([
-    parentRailItem.boundingBox(),
-    childRailItem.boundingBox(),
+  await expectHeaderOnlyRail(page, `timeline-lane-section-${section.id}`, [
+    parentTask.title,
+    childTask.title,
   ]);
-  if (!parentBox || !childBox) {
-    throw new Error('Expected parent and child section rail items to have bounds');
-  }
-
-  expect(childBox.x).toBeGreaterThan(parentBox.x + 8);
-  expect(childBox.y).toBeGreaterThan(parentBox.y);
+  await expect(page.locator(`[data-testid="timeline-rail-task-${parentTask.id}"]`)).toHaveCount(0);
+  await expect(page.locator(`[data-testid="timeline-rail-task-${childTask.id}"]`)).toHaveCount(0);
+  await expect(page.locator(`[data-testid="timeline-bar-${parentTask.id}"]`)).toBeVisible();
+  await expect(page.locator(`[data-testid="timeline-bar-${childTask.id}"]`)).toBeVisible();
 });

@@ -111,7 +111,7 @@ type TimelineLaneRail = {
   orderedTasks: TimelineTask[];
   railItems: TimelineRailItem[];
   railItemByTaskId: Map<string, TimelineRailItem>;
-  showTaskRail: boolean;
+  usesHierarchicalTaskOrder: boolean;
 };
 
 type TimelineTaskMutationResult = Task & {
@@ -329,15 +329,15 @@ function buildTimelineLaneRail(
   tasks: TimelineTask[],
   childTaskCountByParentId: Map<string, number>,
 ): TimelineLaneRail {
-  const showTaskRail = tasks.some(
+  const usesHierarchicalTaskOrder = tasks.some(
     (task) => Boolean(task.parentId) || (childTaskCountByParentId.get(task.id) ?? 0) > 0,
   );
-  if (!showTaskRail) {
+  if (!usesHierarchicalTaskOrder) {
     return {
       orderedTasks: tasks,
       railItems: [],
       railItemByTaskId: new Map(),
-      showTaskRail: false,
+      usesHierarchicalTaskOrder: false,
     };
   }
 
@@ -395,7 +395,7 @@ function buildTimelineLaneRail(
     orderedTasks: railItems.map((item) => item.task),
     railItems,
     railItemByTaskId: new Map(railItems.map((item) => [item.task.id, item])),
-    showTaskRail: true,
+    usesHierarchicalTaskOrder: true,
   };
 }
 
@@ -1356,7 +1356,7 @@ export function ProjectScheduleCanvas({
     () =>
       baseTimelineLanes.map((lane) => {
         const rail = timelineLaneRailByLaneId.get(lane.id);
-        if (!rail?.showTaskRail) return lane;
+        if (!rail?.usesHierarchicalTaskOrder) return lane;
         return {
           ...lane,
           tasks: rail.orderedTasks,
@@ -1384,7 +1384,7 @@ export function ProjectScheduleCanvas({
       const hierarchyLaneIds =
         mode === 'timeline'
           ? visibleTimelineLanes
-              .filter((lane) => timelineLaneRailByLaneId.get(lane.id)?.showTaskRail)
+              .filter((lane) => timelineLaneRailByLaneId.get(lane.id)?.usesHierarchicalTaskOrder)
               .map((lane) => lane.id)
           : [];
       return Array.from(new Set([...manualLaneIds, ...hierarchyLaneIds]));
@@ -3457,9 +3457,9 @@ export function ProjectScheduleCanvas({
               const laneTaskCount = laneTaskCountById.get(lane.id) ?? 0;
               const laneContentId = `timeline-lane-content-${normalizeTestIdSegment(lane.id)}`;
               const timelineLaneRail = timelineLaneRailByLaneId.get(lane.id);
-              const showTimelineTaskRail =
-                mode === 'timeline' && Boolean(timelineLaneRail?.showTaskRail);
-              const showHeaderOnlyLaneRail = !showTimelineTaskRail;
+              // Grouped timeline modes keep task interaction on the canvas; the rail only shows lane headers.
+              const renderTimelineTaskRail = false;
+              const showHeaderOnlyLaneRail = true;
               const laneRowsTop = top + SECTION_ROW_HEIGHT;
               const topSpacer = visibleRows.length
                 ? Math.max(0, visibleRows[0]!.top - laneRowsTop)
@@ -3594,10 +3594,10 @@ export function ProjectScheduleCanvas({
                           </Badge>
                         ) : null}
                       </div>
-                      {showTimelineTaskRail && !isLaneCollapsed && topSpacer > 0 ? (
+                      {renderTimelineTaskRail && !isLaneCollapsed && topSpacer > 0 ? (
                         <div style={{ height: `${topSpacer}px` }} />
                       ) : null}
-                      {showTimelineTaskRail && !isLaneCollapsed
+                      {renderTimelineTaskRail && !isLaneCollapsed
                         ? visibleRows.map((row) => {
                             const task = row.tasks[0];
                             if (!task) {
@@ -3684,7 +3684,7 @@ export function ProjectScheduleCanvas({
                             );
                           })
                         : null}
-                      {showTimelineTaskRail && !isLaneCollapsed && bottomSpacer > 0 ? (
+                      {renderTimelineTaskRail && !isLaneCollapsed && bottomSpacer > 0 ? (
                         <div style={{ height: `${bottomSpacer}px` }} />
                       ) : null}
                     </div>
