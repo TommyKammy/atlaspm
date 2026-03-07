@@ -3479,8 +3479,10 @@ export class TasksController {
     taskOrder: string[],
   ): TimelineTaskOrderMap {
     if (taskOrder.length === 0) {
-      const { [laneId]: _removed, ...rest } = current;
-      return rest;
+      if (!(laneId in current)) return current;
+      const next = { ...current };
+      delete next[laneId];
+      return next;
     }
     return { ...current, [laneId]: taskOrder };
   }
