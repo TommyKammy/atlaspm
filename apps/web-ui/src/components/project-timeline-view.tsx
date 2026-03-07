@@ -2048,6 +2048,7 @@ export function ProjectScheduleCanvas({
       dayColumnWidth: zoomConfig.dayColWidth,
       sectionRowHeight: SECTION_ROW_HEIGHT,
       taskRowHeight: TASK_ROW_HEIGHT,
+      laneFooterHeight: mode === 'timeline' ? TASK_ROW_HEIGHT : 0,
       compactRows: mode === 'timeline',
       manualRowLaneIds: mode === 'timeline' ? manualOrderLaneIds : [],
       expandedRowLaneIds: mode === 'timeline' ? expandedRowLaneIds : [],
@@ -3416,7 +3417,7 @@ export function ProjectScheduleCanvas({
                 data-testid="timeline-selection-box"
               />
             ) : null}
-            {timelineLayout.lanesWithRows.map(({ lane, top, rows }) => {
+            {timelineLayout.lanesWithRows.map(({ lane, top, rows, footerHeight }) => {
               const sectionVisible =
                 !virtualizationEnabled ||
                 (top + SECTION_ROW_HEIGHT >= visibleRange.start && top <= visibleRange.end);
@@ -3432,18 +3433,17 @@ export function ProjectScheduleCanvas({
               const laneTaskCount = laneTaskCountById.get(lane.id) ?? 0;
               const laneContentId = `timeline-lane-content-${normalizeTestIdSegment(lane.id)}`;
               const laneRowsTop = top + SECTION_ROW_HEIGHT;
+              const laneRowsBottom = top + SECTION_ROW_HEIGHT + rows.length * TASK_ROW_HEIGHT;
+              const laneContentBottom = laneRowsBottom + footerHeight;
               const topSpacer = visibleRows.length
                 ? Math.max(0, visibleRows[0]!.top - laneRowsTop)
                 : 0;
               const bottomSpacer = visibleRows.length
                 ? Math.max(
                     0,
-                    top +
-                      SECTION_ROW_HEIGHT +
-                      rows.length * TASK_ROW_HEIGHT -
-                      (visibleRows[visibleRows.length - 1]!.top + TASK_ROW_HEIGHT),
+                    laneContentBottom - (visibleRows[visibleRows.length - 1]!.top + TASK_ROW_HEIGHT),
                   )
-                : rows.length * TASK_ROW_HEIGHT;
+                : rows.length * TASK_ROW_HEIGHT + footerHeight;
 
               return (
                 <div

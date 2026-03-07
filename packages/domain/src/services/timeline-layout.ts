@@ -69,6 +69,7 @@ export type TimelineLayoutLane<TTask extends TimelineLayoutTaskInput = TimelineL
   tasks: TTask[];
   top: number;
   bottom: number;
+  footerHeight: number;
   taskRows: Array<TimelineTaskRow<TTask>>;
   rows: Array<TimelinePackedRow<TTask>>;
 };
@@ -88,6 +89,7 @@ export type BuildTimelineLayoutInput<TTask extends TimelineLayoutTaskInput> = {
   dayColumnWidth: number;
   sectionRowHeight: number;
   taskRowHeight: number;
+  laneFooterHeight?: number;
   compactRows?: boolean;
   manualRowLaneIds?: string[];
   expandedRowLaneIds?: string[];
@@ -394,6 +396,8 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
   const lanesWithRows: Array<TimelineLayoutLane<TTask>> = [];
   const manualRowLaneIds = new Set(input.manualRowLaneIds ?? []);
   const expandedRowLaneIds = new Set(input.expandedRowLaneIds ?? []);
+  const laneFooterHeight = Math.max(0, input.laneFooterHeight ?? 0);
+  const footerRowCount = laneFooterHeight > 0 ? Math.ceil(laneFooterHeight / input.taskRowHeight) : 0;
 
   for (const lane of input.lanes) {
     const laneTop = cursorY;
@@ -449,12 +453,14 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
       taskRows.push({ task, top: rowTop });
     }
     cursorY += rows.length * input.taskRowHeight;
+    cursorY += laneFooterHeight;
 
     lanesWithRows.push({
       lane,
       tasks: lane.tasks,
       top: laneTop,
       bottom: cursorY,
+      footerHeight: laneFooterHeight,
       taskRows,
       rows,
     });
@@ -465,7 +471,9 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
     barsByTaskId,
     taskRowsById,
     bodyHeight: cursorY,
-    totalRowCount: input.lanes.length + lanesWithRows.reduce((sum, lane) => sum + lane.rows.length, 0),
+    totalRowCount:
+      input.lanes.length +
+      lanesWithRows.reduce((sum, lane) => sum + lane.rows.length + footerRowCount, 0),
   };
 }
 
