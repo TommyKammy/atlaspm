@@ -640,7 +640,7 @@ test('timeline align action saves dependency chains ahead of unrelated blockers'
     })
     .toMatchObject({
       chainAY: Math.round(beforeBlockerBox.y),
-      chainBY: Math.round(beforeChainABox.y),
+      chainBY: Math.round(beforeBlockerBox.y),
     });
 
   await expect
@@ -671,7 +671,7 @@ test('timeline align action saves dependency chains ahead of unrelated blockers'
     })
     .toMatchObject({
       chainAY: Math.round(beforeBlockerBox.y),
-      chainBY: Math.round(beforeChainABox.y),
+      chainBY: Math.round(beforeBlockerBox.y),
     });
 
   await expect

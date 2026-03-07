@@ -1350,29 +1350,24 @@ export function ProjectScheduleCanvas({
       timelineLanes.map((lane) => (collapsedLaneIds.has(lane.id) ? { ...lane, tasks: [] } : lane)),
     [collapsedLaneIds, timelineLanes],
   );
-  const manualLayoutLaneIds = useMemo(
+  const manualOrderLaneIds = useMemo(
     () => {
-      const manualLaneIds =
-        mode === 'timeline' && sortMode === 'manual'
-          ? visibleTimelineLanes
-              .filter((lane) => (preferredManualLayout[lane.id] ?? []).length > 0)
-              .map((lane) => lane.id)
-          : [];
-      const hierarchyLaneIds =
-        mode === 'timeline'
-          ? visibleTimelineLanes
-              .filter((lane) => timelineLaneRailByLaneId.get(lane.id)?.usesHierarchicalTaskOrder)
-              .map((lane) => lane.id)
-          : [];
-      return Array.from(new Set([...manualLaneIds, ...hierarchyLaneIds]));
+      return mode === 'timeline' && sortMode === 'manual'
+        ? visibleTimelineLanes
+            .filter((lane) => (preferredManualLayout[lane.id] ?? []).length > 0)
+            .map((lane) => lane.id)
+        : [];
     },
-    [
-      mode,
-      preferredManualLayout,
-      sortMode,
-      timelineLaneRailByLaneId,
-      visibleTimelineLanes,
-    ],
+    [mode, preferredManualLayout, sortMode, visibleTimelineLanes],
+  );
+  const expandedRowLaneIds = useMemo(
+    () =>
+      mode === 'timeline'
+        ? visibleTimelineLanes
+            .filter((lane) => timelineLaneRailByLaneId.get(lane.id)?.usesHierarchicalTaskOrder)
+            .map((lane) => lane.id)
+        : [],
+    [mode, timelineLaneRailByLaneId, visibleTimelineLanes],
   );
 
   useEffect(() => {
@@ -2054,11 +2049,13 @@ export function ProjectScheduleCanvas({
       sectionRowHeight: SECTION_ROW_HEIGHT,
       taskRowHeight: TASK_ROW_HEIGHT,
       compactRows: mode === 'timeline',
-      manualRowLaneIds: mode === 'timeline' ? manualLayoutLaneIds : [],
+      manualRowLaneIds: mode === 'timeline' ? manualOrderLaneIds : [],
+      expandedRowLaneIds: mode === 'timeline' ? expandedRowLaneIds : [],
       dependencyEdges: timeline.dependencyEdges,
     });
   }, [
-    manualLayoutLaneIds,
+    expandedRowLaneIds,
+    manualOrderLaneIds,
     mode,
     timeline.dependencyEdges,
     timeline.window.end,
@@ -2080,6 +2077,7 @@ export function ProjectScheduleCanvas({
       sectionRowHeight: SECTION_ROW_HEIGHT,
       taskRowHeight: TASK_ROW_HEIGHT,
       compactRows: true,
+      expandedRowLaneIds,
       dependencyAwarePacking: true,
       dependencyEdges: timeline.dependencyEdges,
     });
