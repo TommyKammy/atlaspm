@@ -94,6 +94,13 @@ export type BuildTimelineLayoutInput<TTask extends TimelineLayoutTaskInput> = {
   dependencyEdges?: Array<{ source: string; target: string; type?: string }>;
 };
 
+export type TimelineTaskOrderByLane = Record<string, string[]>;
+
+type CompactRowPlacement = {
+  rowIndexByTaskId: Record<string, number>;
+  packingOrderByTaskId: Map<string, number>;
+};
+
 const DEFAULT_UNASSIGNED_LANE_ID = '__unassigned__';
 
 function dayNumber(date: Date): number {
@@ -169,6 +176,144 @@ function applyTaskOrder<TTask extends { id: string }>(
     if (leftRank !== rightRank) return leftRank - rightRank;
     return (fallbackTaskOrder.get(left.id) ?? 0) - (fallbackTaskOrder.get(right.id) ?? 0);
   });
+}
+
+function buildCompactRowPlacement<TTask extends TimelineLayoutTaskInput>(
+  tasks: TTask[],
+  dependencyAwarePacking: boolean | undefined,
+  dependencyEdges: Array<{ source: string; target: string; type?: string }> | undefined,
+): CompactRowPlacement {
+  const rowIndexByTaskId: Record<string, number> = {};
+  const laneTaskIds = new Set(tasks.map((task) => task.id));
+  const relevantDependencyEdges = dependencyAwarePacking
+    ? (dependencyEdges ?? []).filter(
+        (edge) =>
+          edge.type !== 'RELATES_TO' && laneTaskIds.has(edge.source) && laneTaskIds.has(edge.target),
+      )
+    : [];
+  const incomingByTaskId = new Map<string, Set<string>>();
+  const outgoingByTaskId = new Map<string, Set<string>>();
+  const undirectedByTaskId = new Map<string, Set<string>>();
+  for (const task of tasks) {
+    incomingByTaskId.set(task.id, new Set());
+    outgoingByTaskId.set(task.id, new Set());
+    undirectedByTaskId.set(task.id, new Set());
+  }
+  for (const edge of relevantDependencyEdges) {
+    incomingByTaskId.get(edge.target)?.add(edge.source);
+    outgoingByTaskId.get(edge.source)?.add(edge.target);
+    undirectedByTaskId.get(edge.source)?.add(edge.target);
+    undirectedByTaskId.get(edge.target)?.add(edge.source);
+  }
+
+  const componentSizeByTaskId = new Map<string, number>();
+  const visited = new Set<string>();
+  for (const task of tasks) {
+    if (visited.has(task.id)) continue;
+    const stack = [task.id];
+    const component: string[] = [];
+    visited.add(task.id);
+    while (stack.length) {
+      const current = stack.pop()!;
+      component.push(current);
+      for (const neighbor of undirectedByTaskId.get(current) ?? []) {
+        if (visited.has(neighbor)) continue;
+        visited.add(neighbor);
+        stack.push(neighbor);
+      }
+    }
+    for (const taskId of component) {
+      componentSizeByTaskId.set(taskId, component.length);
+    }
+  }
+
+  const fallbackTaskCompare = (left: TTask, right: TTask) => {
+    const leftStart = left.timelineStart ? dayNumber(left.timelineStart) : Number.MAX_SAFE_INTEGER;
+    const rightStart = right.timelineStart ? dayNumber(right.timelineStart) : Number.MAX_SAFE_INTEGER;
+    if (leftStart !== rightStart) return leftStart - rightStart;
+    const leftEnd = left.timelineEnd ? dayNumber(left.timelineEnd) : Number.MAX_SAFE_INTEGER;
+    const rightEnd = right.timelineEnd ? dayNumber(right.timelineEnd) : Number.MAX_SAFE_INTEGER;
+    if (leftEnd !== rightEnd) return leftEnd - rightEnd;
+    return left.id.localeCompare(right.id);
+  };
+
+  const taskById = new Map(tasks.map((task) => [task.id, task] as const));
+  const indegreeByTaskId = new Map<string, number>();
+  const depthByTaskId = new Map<string, number>();
+  for (const task of tasks) {
+    indegreeByTaskId.set(task.id, incomingByTaskId.get(task.id)?.size ?? 0);
+    depthByTaskId.set(task.id, 0);
+  }
+
+  const queue = [...tasks]
+    .filter((task) => (indegreeByTaskId.get(task.id) ?? 0) === 0)
+    .sort(fallbackTaskCompare);
+  while (queue.length) {
+    const current = queue.shift()!;
+    const currentDepth = depthByTaskId.get(current.id) ?? 0;
+    for (const targetTaskId of outgoingByTaskId.get(current.id) ?? []) {
+      depthByTaskId.set(targetTaskId, Math.max(depthByTaskId.get(targetTaskId) ?? 0, currentDepth + 1));
+      const nextInDegree = (indegreeByTaskId.get(targetTaskId) ?? 0) - 1;
+      indegreeByTaskId.set(targetTaskId, nextInDegree);
+      if (nextInDegree === 0) {
+        const nextTask = taskById.get(targetTaskId);
+        if (nextTask) {
+          queue.push(nextTask);
+          queue.sort(fallbackTaskCompare);
+        }
+      }
+    }
+  }
+
+  const tasksForPacking = [...tasks].sort((left, right) => {
+    if (dependencyAwarePacking) {
+      const leftComponentSize = componentSizeByTaskId.get(left.id) ?? 1;
+      const rightComponentSize = componentSizeByTaskId.get(right.id) ?? 1;
+      if (leftComponentSize !== rightComponentSize) return rightComponentSize - leftComponentSize;
+      const leftDepth = depthByTaskId.get(left.id) ?? 0;
+      const rightDepth = depthByTaskId.get(right.id) ?? 0;
+      if (leftDepth !== rightDepth) return leftDepth - rightDepth;
+    }
+    return fallbackTaskCompare(left, right);
+  });
+
+  const activeRows: Array<{ rowIndex: number; endDay: number }> = [];
+  const availableRowIndexes: number[] = [];
+  let nextRowIndex = 0;
+
+  for (const task of tasksForPacking) {
+    let rowIndex: number;
+    if (task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd) {
+      const taskStartDay = dayNumber(task.timelineStart);
+      const taskEndDay = dayNumber(task.timelineEnd);
+
+      while (activeRows.length && activeRows[0]!.endDay < taskStartDay) {
+        const released = popHeap(
+          activeRows,
+          (left, right) => left.endDay - right.endDay || left.rowIndex - right.rowIndex,
+        );
+        if (released) {
+          pushHeap(availableRowIndexes, released.rowIndex, (left, right) => left - right);
+        }
+      }
+
+      rowIndex = popHeap(availableRowIndexes, (left, right) => left - right) ?? nextRowIndex++;
+      pushHeap(
+        activeRows,
+        { rowIndex, endDay: taskEndDay },
+        (left, right) => left.endDay - right.endDay || left.rowIndex - right.rowIndex,
+      );
+    } else {
+      rowIndex = nextRowIndex++;
+    }
+
+    rowIndexByTaskId[task.id] = rowIndex;
+  }
+
+  return {
+    rowIndexByTaskId,
+    packingOrderByTaskId: new Map(tasksForPacking.map((task, index) => [task.id, index])),
+  };
 }
 
 export function buildTimelineLanes<TTask extends TimelineLaneTaskInput>(
@@ -286,122 +431,14 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
     const laneUsesManualRows = manualRowLaneIds.has(lane.id);
 
     if (input.compactRows && !laneUsesManualRows) {
-      const laneTaskIds = new Set(lane.tasks.map((task) => task.id));
-      const relevantDependencyEdges = input.dependencyAwarePacking
-        ? (input.dependencyEdges ?? []).filter((edge) =>
-            edge.type !== 'RELATES_TO' && laneTaskIds.has(edge.source) && laneTaskIds.has(edge.target))
-        : [];
-      const incomingByTaskId = new Map<string, Set<string>>();
-      const outgoingByTaskId = new Map<string, Set<string>>();
-      const undirectedByTaskId = new Map<string, Set<string>>();
-      for (const task of lane.tasks) {
-        incomingByTaskId.set(task.id, new Set());
-        outgoingByTaskId.set(task.id, new Set());
-        undirectedByTaskId.set(task.id, new Set());
-      }
-      for (const edge of relevantDependencyEdges) {
-        incomingByTaskId.get(edge.target)?.add(edge.source);
-        outgoingByTaskId.get(edge.source)?.add(edge.target);
-        undirectedByTaskId.get(edge.source)?.add(edge.target);
-        undirectedByTaskId.get(edge.target)?.add(edge.source);
-      }
-
-      const componentSizeByTaskId = new Map<string, number>();
-      const visited = new Set<string>();
-      for (const task of lane.tasks) {
-        if (visited.has(task.id)) continue;
-        const stack = [task.id];
-        const component: string[] = [];
-        visited.add(task.id);
-        while (stack.length) {
-          const current = stack.pop()!;
-          component.push(current);
-          for (const neighbor of undirectedByTaskId.get(current) ?? []) {
-            if (visited.has(neighbor)) continue;
-            visited.add(neighbor);
-            stack.push(neighbor);
-          }
-        }
-        for (const taskId of component) {
-          componentSizeByTaskId.set(taskId, component.length);
-        }
-      }
-
-      const fallbackTaskCompare = (left: TTask, right: TTask) => {
-        const leftStart = left.timelineStart ? dayNumber(left.timelineStart) : Number.MAX_SAFE_INTEGER;
-        const rightStart = right.timelineStart ? dayNumber(right.timelineStart) : Number.MAX_SAFE_INTEGER;
-        if (leftStart !== rightStart) return leftStart - rightStart;
-        const leftEnd = left.timelineEnd ? dayNumber(left.timelineEnd) : Number.MAX_SAFE_INTEGER;
-        const rightEnd = right.timelineEnd ? dayNumber(right.timelineEnd) : Number.MAX_SAFE_INTEGER;
-        if (leftEnd !== rightEnd) return leftEnd - rightEnd;
-        return left.id.localeCompare(right.id);
-      };
-
-      const taskById = new Map(lane.tasks.map((task) => [task.id, task] as const));
-      const indegreeByTaskId = new Map<string, number>();
-      const depthByTaskId = new Map<string, number>();
-      for (const task of lane.tasks) {
-        indegreeByTaskId.set(task.id, incomingByTaskId.get(task.id)?.size ?? 0);
-        depthByTaskId.set(task.id, 0);
-      }
-
-      const queue = [...lane.tasks]
-        .filter((task) => (indegreeByTaskId.get(task.id) ?? 0) === 0)
-        .sort(fallbackTaskCompare);
-      while (queue.length) {
-        const current = queue.shift()!;
-        const currentDepth = depthByTaskId.get(current.id) ?? 0;
-        for (const targetTaskId of outgoingByTaskId.get(current.id) ?? []) {
-          depthByTaskId.set(targetTaskId, Math.max(depthByTaskId.get(targetTaskId) ?? 0, currentDepth + 1));
-          const nextInDegree = (indegreeByTaskId.get(targetTaskId) ?? 0) - 1;
-          indegreeByTaskId.set(targetTaskId, nextInDegree);
-          if (nextInDegree === 0) {
-            const nextTask = taskById.get(targetTaskId);
-            if (nextTask) {
-              queue.push(nextTask);
-              queue.sort(fallbackTaskCompare);
-            }
-          }
-        }
-      }
-
-      const tasksForPacking = [...lane.tasks].sort((left, right) => {
-        if (input.dependencyAwarePacking) {
-          const leftComponentSize = componentSizeByTaskId.get(left.id) ?? 1;
-          const rightComponentSize = componentSizeByTaskId.get(right.id) ?? 1;
-          if (leftComponentSize !== rightComponentSize) return rightComponentSize - leftComponentSize;
-          const leftDepth = depthByTaskId.get(left.id) ?? 0;
-          const rightDepth = depthByTaskId.get(right.id) ?? 0;
-          if (leftDepth !== rightDepth) return leftDepth - rightDepth;
-        }
-        return fallbackTaskCompare(left, right);
-      });
-
-      const activeRows: Array<{ rowIndex: number; endDay: number }> = [];
-      const availableRowIndexes: number[] = [];
-      let nextRowIndex = 0;
-
-      for (const task of tasksForPacking) {
-        let rowIndex: number;
-        if (task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd) {
-          const taskStartDay = dayNumber(task.timelineStart);
-          const taskEndDay = dayNumber(task.timelineEnd);
-
-          while (activeRows.length && activeRows[0]!.endDay < taskStartDay) {
-            const released = popHeap(activeRows, (left, right) => left.endDay - right.endDay || left.rowIndex - right.rowIndex);
-            if (released) {
-              pushHeap(availableRowIndexes, released.rowIndex, (left, right) => left - right);
-            }
-          }
-
-          rowIndex = popHeap(availableRowIndexes, (left, right) => left - right) ?? nextRowIndex++;
-          pushHeap(activeRows, { rowIndex, endDay: taskEndDay }, (left, right) => left.endDay - right.endDay || left.rowIndex - right.rowIndex);
-        } else {
-          rowIndex = nextRowIndex++;
-        }
-
-        rowIndexByTaskId[task.id] = rowIndex;
-      }
+      Object.assign(
+        rowIndexByTaskId,
+        buildCompactRowPlacement(
+          lane.tasks,
+          input.dependencyAwarePacking,
+          input.dependencyEdges,
+        ).rowIndexByTaskId,
+      );
     }
 
     for (const task of lane.tasks) {
@@ -453,4 +490,37 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
     bodyHeight: cursorY,
     totalRowCount: input.lanes.length + lanesWithRows.reduce((sum, lane) => sum + lane.rows.length, 0),
   };
+}
+
+export function buildTimelineTaskOrderByLane<TTask extends TimelineLayoutTaskInput>(
+  input: BuildTimelineLayoutInput<TTask>,
+): TimelineTaskOrderByLane {
+  const laneTaskOrder: TimelineTaskOrderByLane = {};
+  const manualRowLaneIds = new Set(input.manualRowLaneIds ?? []);
+  for (const lane of input.lanes) {
+    if (!lane.tasks.length) continue;
+    if (!input.compactRows || manualRowLaneIds.has(lane.id)) {
+      laneTaskOrder[lane.id] = lane.tasks.map((task) => task.id);
+      continue;
+    }
+
+    const compactPlacement = buildCompactRowPlacement(
+      lane.tasks,
+      input.dependencyAwarePacking,
+      input.dependencyEdges,
+    );
+    laneTaskOrder[lane.id] = [...lane.tasks]
+      .sort((left, right) => {
+        const rowDelta =
+          (compactPlacement.rowIndexByTaskId[left.id] ?? 0) -
+          (compactPlacement.rowIndexByTaskId[right.id] ?? 0);
+        if (rowDelta !== 0) return rowDelta;
+        return (
+          (compactPlacement.packingOrderByTaskId.get(left.id) ?? 0) -
+          (compactPlacement.packingOrderByTaskId.get(right.id) ?? 0)
+        );
+      })
+      .map((task) => task.id);
+  }
+  return laneTaskOrder;
 }

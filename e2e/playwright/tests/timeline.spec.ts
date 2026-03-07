@@ -551,7 +551,7 @@ test('timeline working-days drag skips weekends and Alt keeps calendar-day place
     .toBe(saturday.toISOString());
 });
 
-test('timeline align toggle repacks dependency chains ahead of unrelated blockers', async ({
+test('timeline align action saves dependency chains ahead of unrelated blockers', async ({
   page,
 }) => {
   const now = Date.now();
@@ -614,11 +614,16 @@ test('timeline align toggle repacks dependency chains ahead of unrelated blocker
   }
   expect(beforeChainABox.y).toBeGreaterThan(beforeBlockerBox.y);
 
-  await page.click('[data-testid="timeline-align-toggle"]');
-  await expect(page.locator('[data-testid="timeline-align-toggle"]')).toHaveAttribute(
-    'data-active',
-    'true',
-  );
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === 'PUT' &&
+        response.url().includes(
+          `/projects/${projectId}/timeline/preferences/manual-layout/section`,
+        ),
+    ),
+    page.click('[data-testid="timeline-align-toggle"]'),
+  ]);
 
   await expect
     .poll(async () => {
@@ -633,9 +638,49 @@ test('timeline align toggle repacks dependency chains ahead of unrelated blocker
         chainBY: Math.round(nextChainBBox?.y ?? -1),
       };
     })
-    .toEqual({
-      blockerY: Math.round(beforeChainABox.y),
+    .toMatchObject({
       chainAY: Math.round(beforeBlockerBox.y),
-      chainBY: Math.round(beforeBlockerBox.y),
+      chainBY: Math.round(beforeChainABox.y),
     });
+
+  await expect
+    .poll(async () => {
+      const [nextBlockerBox, nextChainBBox] = await Promise.all([
+        blockerBar.boundingBox(),
+        chainBBar.boundingBox(),
+      ]);
+      return Math.round((nextBlockerBox?.y ?? -1) - (nextChainBBox?.y ?? -1));
+    })
+    .toBeGreaterThan(0);
+
+  await page.reload();
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+
+  await expect
+    .poll(async () => {
+      const [nextBlockerBox, nextChainABox, nextChainBBox] = await Promise.all([
+        blockerBar.boundingBox(),
+        chainABar.boundingBox(),
+        chainBBar.boundingBox(),
+      ]);
+      return {
+        blockerY: Math.round(nextBlockerBox?.y ?? -1),
+        chainAY: Math.round(nextChainABox?.y ?? -1),
+        chainBY: Math.round(nextChainBBox?.y ?? -1),
+      };
+    })
+    .toMatchObject({
+      chainAY: Math.round(beforeBlockerBox.y),
+      chainBY: Math.round(beforeChainABox.y),
+    });
+
+  await expect
+    .poll(async () => {
+      const [nextBlockerBox, nextChainBBox] = await Promise.all([
+        blockerBar.boundingBox(),
+        chainBBar.boundingBox(),
+      ]);
+      return Math.round((nextBlockerBox?.y ?? -1) - (nextChainBBox?.y ?? -1));
+    })
+    .toBeGreaterThan(0);
 });
