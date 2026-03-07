@@ -88,6 +88,7 @@ export type BuildTimelineLayoutInput<TTask extends TimelineLayoutTaskInput> = {
   sectionRowHeight: number;
   taskRowHeight: number;
   compactRows?: boolean;
+  manualRowLaneIds?: string[];
   dependencyAwarePacking?: boolean;
   dependencyEdges?: Array<{ source: string; target: string; type?: string }>;
 };
@@ -95,7 +96,9 @@ export type BuildTimelineLayoutInput<TTask extends TimelineLayoutTaskInput> = {
 const DEFAULT_UNASSIGNED_LANE_ID = '__unassigned__';
 
 function dayNumber(date: Date): number {
-  return Math.floor(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) / DAY_MS);
+  return Math.floor(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) / DAY_MS,
+  );
 }
 
 function dayDiff(from: Date, to: Date): number {
@@ -134,7 +137,10 @@ function popHeap<T>(heap: T[], compare: (left: T, right: T) => number): T | unde
   return first;
 }
 
-function applyLaneOrder<TLane extends { id: string }>(lanes: TLane[], preferredOrder: string[]): TLane[] {
+function applyLaneOrder<TLane extends { id: string }>(
+  lanes: TLane[],
+  preferredOrder: string[],
+): TLane[] {
   if (!preferredOrder.length) return lanes;
   const indexById = new Map(preferredOrder.map((laneId, index) => [laneId, index]));
   return [...lanes].sort((left, right) => {
@@ -162,7 +168,11 @@ export function buildTimelineLanes<TTask extends TimelineLaneTaskInput>(
       grouped.set(laneId, next);
     }
 
-    const laneIds = new Set<string>([...grouped.keys(), ...Object.keys(input.membersById), unassignedLaneId]);
+    const laneIds = new Set<string>([
+      ...grouped.keys(),
+      ...Object.keys(input.membersById),
+      unassignedLaneId,
+    ]);
     const lanes = [...laneIds]
       .map((laneId) => {
         const tasks = grouped.get(laneId) ?? [];
@@ -202,12 +212,11 @@ export function buildTimelineLanes<TTask extends TimelineLaneTaskInput>(
       grouped.set(task.status, next);
     }
 
-    return statusOrder
-      .map((status) => ({
-        id: `status:${status}`,
-        label: statusLabels[status],
-        tasks: grouped.get(status) ?? [],
-      }));
+    return statusOrder.map((status) => ({
+      id: `status:${status}`,
+      label: statusLabels[status],
+      tasks: grouped.get(status) ?? [],
+    }));
   }
 
   const bySection = new Map<string, TTask[]>();
@@ -217,12 +226,11 @@ export function buildTimelineLanes<TTask extends TimelineLaneTaskInput>(
     bySection.set(task.sectionId, next);
   }
 
-  const lanes = input.sections
-    .map((section) => ({
-      id: `section:${section.id}`,
-      label: section.isDefault ? input.defaultSectionLabel : section.name,
-      tasks: bySection.get(section.id) ?? [],
-    }));
+  const lanes = input.sections.map((section) => ({
+    id: `section:${section.id}`,
+    label: section.isDefault ? input.defaultSectionLabel : section.name,
+    tasks: bySection.get(section.id) ?? [],
+  }));
 
   return applyLaneOrder(lanes, preferredLaneOrder);
 }
@@ -234,6 +242,7 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
   const barsByTaskId: Record<string, { left: number; width: number; y: number }> = {};
   const taskRowsById: Record<string, { top: number; height: number }> = {};
   const lanesWithRows: Array<TimelineLayoutLane<TTask>> = [];
+  const manualRowLaneIds = new Set(input.manualRowLaneIds ?? []);
 
   for (const lane of input.lanes) {
     const laneTop = cursorY;
@@ -241,12 +250,17 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
     const taskRows: Array<TimelineTaskRow<TTask>> = [];
     const rows: Array<TimelinePackedRow<TTask>> = [];
     const rowIndexByTaskId: Record<string, number> = {};
+    const laneUsesManualRows = manualRowLaneIds.has(lane.id);
 
-    if (input.compactRows) {
+    if (input.compactRows && !laneUsesManualRows) {
       const laneTaskIds = new Set(lane.tasks.map((task) => task.id));
       const relevantDependencyEdges = input.dependencyAwarePacking
-        ? (input.dependencyEdges ?? []).filter((edge) =>
-            edge.type !== 'RELATES_TO' && laneTaskIds.has(edge.source) && laneTaskIds.has(edge.target))
+        ? (input.dependencyEdges ?? []).filter(
+            (edge) =>
+              edge.type !== 'RELATES_TO' &&
+              laneTaskIds.has(edge.source) &&
+              laneTaskIds.has(edge.target),
+          )
         : [];
       const incomingByTaskId = new Map<string, Set<string>>();
       const outgoingByTaskId = new Map<string, Set<string>>();
@@ -285,8 +299,12 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
       }
 
       const fallbackTaskCompare = (left: TTask, right: TTask) => {
-        const leftStart = left.timelineStart ? dayNumber(left.timelineStart) : Number.MAX_SAFE_INTEGER;
-        const rightStart = right.timelineStart ? dayNumber(right.timelineStart) : Number.MAX_SAFE_INTEGER;
+        const leftStart = left.timelineStart
+          ? dayNumber(left.timelineStart)
+          : Number.MAX_SAFE_INTEGER;
+        const rightStart = right.timelineStart
+          ? dayNumber(right.timelineStart)
+          : Number.MAX_SAFE_INTEGER;
         if (leftStart !== rightStart) return leftStart - rightStart;
         const leftEnd = left.timelineEnd ? dayNumber(left.timelineEnd) : Number.MAX_SAFE_INTEGER;
         const rightEnd = right.timelineEnd ? dayNumber(right.timelineEnd) : Number.MAX_SAFE_INTEGER;
@@ -309,7 +327,10 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
         const current = queue.shift()!;
         const currentDepth = depthByTaskId.get(current.id) ?? 0;
         for (const targetTaskId of outgoingByTaskId.get(current.id) ?? []) {
-          depthByTaskId.set(targetTaskId, Math.max(depthByTaskId.get(targetTaskId) ?? 0, currentDepth + 1));
+          depthByTaskId.set(
+            targetTaskId,
+            Math.max(depthByTaskId.get(targetTaskId) ?? 0, currentDepth + 1),
+          );
           const nextInDegree = (indegreeByTaskId.get(targetTaskId) ?? 0) - 1;
           indegreeByTaskId.set(targetTaskId, nextInDegree);
           if (nextInDegree === 0) {
@@ -326,7 +347,8 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
         if (input.dependencyAwarePacking) {
           const leftComponentSize = componentSizeByTaskId.get(left.id) ?? 1;
           const rightComponentSize = componentSizeByTaskId.get(right.id) ?? 1;
-          if (leftComponentSize !== rightComponentSize) return rightComponentSize - leftComponentSize;
+          if (leftComponentSize !== rightComponentSize)
+            return rightComponentSize - leftComponentSize;
           const leftDepth = depthByTaskId.get(left.id) ?? 0;
           const rightDepth = depthByTaskId.get(right.id) ?? 0;
           if (leftDepth !== rightDepth) return leftDepth - rightDepth;
@@ -345,14 +367,21 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
           const taskEndDay = dayNumber(task.timelineEnd);
 
           while (activeRows.length && activeRows[0]!.endDay < taskStartDay) {
-            const released = popHeap(activeRows, (left, right) => left.endDay - right.endDay || left.rowIndex - right.rowIndex);
+            const released = popHeap(
+              activeRows,
+              (left, right) => left.endDay - right.endDay || left.rowIndex - right.rowIndex,
+            );
             if (released) {
               pushHeap(availableRowIndexes, released.rowIndex, (left, right) => left - right);
             }
           }
 
           rowIndex = popHeap(availableRowIndexes, (left, right) => left - right) ?? nextRowIndex++;
-          pushHeap(activeRows, { rowIndex, endDay: taskEndDay }, (left, right) => left.endDay - right.endDay || left.rowIndex - right.rowIndex);
+          pushHeap(
+            activeRows,
+            { rowIndex, endDay: taskEndDay },
+            (left, right) => left.endDay - right.endDay || left.rowIndex - right.rowIndex,
+          );
         } else {
           rowIndex = nextRowIndex++;
         }
@@ -362,7 +391,10 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
     }
 
     for (const task of lane.tasks) {
-      const rowIndex = input.compactRows ? (rowIndexByTaskId[task.id] ?? rows.length) : rows.length;
+      const rowIndex =
+        input.compactRows && !laneUsesManualRows
+          ? (rowIndexByTaskId[task.id] ?? rows.length)
+          : rows.length;
       if (!rows[rowIndex]) {
         rows[rowIndex] = {
           index: rowIndex,
@@ -374,15 +406,23 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
       const rowTop = row.top;
       taskRowsById[task.id] = { top: rowTop, height: input.taskRowHeight };
 
-      const visibleStart = task.timelineStart && task.timelineStart < input.windowStart ? input.windowStart : task.timelineStart;
-      const visibleEnd = task.timelineEnd && task.timelineEnd > input.windowEnd ? input.windowEnd : task.timelineEnd;
+      const visibleStart =
+        task.timelineStart && task.timelineStart < input.windowStart
+          ? input.windowStart
+          : task.timelineStart;
+      const visibleEnd =
+        task.timelineEnd && task.timelineEnd > input.windowEnd ? input.windowEnd : task.timelineEnd;
 
       if (task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd) {
         barsByTaskId[task.id] = {
-          left: Math.max(0, dayDiff(input.windowStart, visibleStart ?? task.timelineStart)) * input.dayColumnWidth,
+          left:
+            Math.max(0, dayDiff(input.windowStart, visibleStart ?? task.timelineStart)) *
+            input.dayColumnWidth,
           width:
-            Math.max(1, dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1)
-            * input.dayColumnWidth,
+            Math.max(
+              1,
+              dayDiff(visibleStart ?? task.timelineStart, visibleEnd ?? task.timelineEnd) + 1,
+            ) * input.dayColumnWidth,
           y: rowTop + input.taskRowHeight / 2,
         };
       }
@@ -407,6 +447,7 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
     barsByTaskId,
     taskRowsById,
     bodyHeight: cursorY,
-    totalRowCount: input.lanes.length + lanesWithRows.reduce((sum, lane) => sum + lane.rows.length, 0),
+    totalRowCount:
+      input.lanes.length + lanesWithRows.reduce((sum, lane) => sum + lane.rows.length, 0),
   };
 }
