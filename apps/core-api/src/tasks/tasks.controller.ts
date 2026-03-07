@@ -511,6 +511,7 @@ const TIMELINE_SORT_MODE_VALUES = ['manual', 'startAt', 'dueAt'] as const;
 const TIMELINE_SCHEDULE_FILTER_VALUES = ['all', 'scheduled', 'unscheduled'] as const;
 const GANTT_RISK_FILTER_MODE_VALUES = ['all', 'risk'] as const;
 const TIMELINE_UNASSIGNED_LANE_ID = '__unassigned__';
+const TIMELINE_PARENT_MOVE_LARGE_IMPACT_THRESHOLD = 5;
 
 type TimelineGroupBy = (typeof TIMELINE_GROUP_BY_VALUES)[number];
 type TimelineViewMode = (typeof TIMELINE_VIEW_MODE_VALUES)[number];
@@ -550,6 +551,12 @@ type SerializedTaskCustomFieldValue = {
     value: string;
     color: string | null;
   } | null;
+};
+
+type TimelineSubtaskMovePolicy = {
+  mode: 'preserve';
+  descendantCount: number;
+  largeImpact: boolean;
 };
 
 function createEmptyTimelineManualLayoutState(): TimelineManualLayoutState {
@@ -1129,6 +1136,7 @@ export class TasksController {
       }
 
       const updated = await tx.task.findFirstOrThrow({ where: { id, deletedAt: null } });
+      const subtaskMovePolicy = await this.buildTimelineSubtaskMovePolicy(tx, id);
       await this.domain.appendAuditOutbox({
         tx,
         actor: req.user.sub,
@@ -1155,10 +1163,16 @@ export class TasksController {
           dueAt: updated.dueAt,
         },
       });
-      return updated;
+      return {
+        updated,
+        subtaskMovePolicy,
+      };
     }).then((updated) => {
-      void this.indexTaskWithCustomFields(updated);
-      return updated;
+      void this.indexTaskWithCustomFields(updated.updated);
+      return {
+        ...updated.updated,
+        subtaskMovePolicy: updated.subtaskMovePolicy,
+      };
     });
   }
 
@@ -1389,6 +1403,7 @@ export class TasksController {
       }
 
       const updated = await tx.task.findFirstOrThrow({ where: { id, deletedAt: null } });
+      const subtaskMovePolicy = await this.buildTimelineSubtaskMovePolicy(tx, id);
       let serializedCurrentCustomFieldValues: SerializedTaskCustomFieldValue[] | undefined;
       if (parsedCustomFieldMove) {
         const currentValues = await tx.taskCustomFieldValue.findMany({
@@ -1446,12 +1461,15 @@ export class TasksController {
       return {
         updated,
         customFieldValues: serializedCurrentCustomFieldValues,
+        subtaskMovePolicy,
       };
     }).then((updated) => {
       void this.reindexTaskById(updated.updated.id);
-      return updated.customFieldValues
-        ? { ...updated.updated, customFieldValues: updated.customFieldValues }
-        : updated.updated;
+      return {
+        ...updated.updated,
+        ...(updated.customFieldValues ? { customFieldValues: updated.customFieldValues } : {}),
+        subtaskMovePolicy: updated.subtaskMovePolicy,
+      };
     });
   }
 
@@ -2940,6 +2958,19 @@ export class TasksController {
       for (const child of children) queue.push(child.id);
     }
     return [...visited];
+  }
+
+  private async buildTimelineSubtaskMovePolicy(
+    tx: Prisma.TransactionClient,
+    taskId: string,
+  ): Promise<TimelineSubtaskMovePolicy> {
+    const subtreeIds = await this.collectSubtreeIds(tx, taskId);
+    const descendantCount = Math.max(0, subtreeIds.length - 1);
+    return {
+      mode: 'preserve',
+      descendantCount,
+      largeImpact: descendantCount >= TIMELINE_PARENT_MOVE_LARGE_IMPACT_THRESHOLD,
+    };
   }
 
   private async removeTasksFromSearch(taskIds: string[]) {

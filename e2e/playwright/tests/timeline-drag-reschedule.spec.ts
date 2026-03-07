@@ -115,3 +115,73 @@ test('timeline drag reschedule supports optimistic success and conflict rollback
     })
     .toBe(externalTaskBDue.slice(0, 10));
 });
+
+test('timeline drag on a parent task offers undo when many subtasks stay in place', async ({
+  page,
+}) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-parent-move-${now}`;
+  const email = `${sub}@example.com`;
+
+  await loginWithTimelineEnabled(page, sub, email);
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Parent Move ${now}`,
+  });
+  const projectId = project.id as string;
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Timeline Section' });
+
+  const nowUtc = new Date();
+  const baseStartIso = new Date(
+    Date.UTC(nowUtc.getUTCFullYear(), nowUtc.getUTCMonth(), nowUtc.getUTCDate() + 2, 0, 0, 0, 0),
+  ).toISOString();
+  const baseDueIso = addDaysIso(baseStartIso, 2);
+
+  const parentTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Drag Parent ${now}`,
+    startAt: baseStartIso,
+    dueAt: baseDueIso,
+  });
+
+  for (let index = 0; index < 5; index += 1) {
+    const childStart = addDaysIso(baseStartIso, index);
+    await api(`/tasks/${parentTask.id}/subtasks`, token, 'POST', {
+      title: `Drag Child ${index + 1} ${now}`,
+      startAt: childStart,
+      dueAt: childStart,
+    });
+  }
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await page.click('[data-testid="timeline-zoom-day"]');
+  await expect(page.locator('[data-testid="timeline-zoom-day"]')).toHaveAttribute('data-active', 'true');
+
+  await dragTimelineBar(page, parentTask.id, 2);
+
+  await expect(page.locator('[data-testid="timeline-parent-move-undo-banner"]')).toBeVisible();
+  await expect(page.locator('[data-testid="timeline-parent-move-undo-banner"]')).toContainText(
+    '5',
+  );
+  await expect
+    .poll(async () => {
+      const latest = await api(`/tasks/${parentTask.id}`, token);
+      return String(latest.startAt).slice(0, 10);
+    })
+    .toBe(addDaysIso(baseStartIso, 2).slice(0, 10));
+
+  await page.click('[data-testid="timeline-parent-move-undo-action"]');
+
+  await expect
+    .poll(async () => {
+      const latest = await api(`/tasks/${parentTask.id}`, token);
+      return String(latest.startAt).slice(0, 10);
+    })
+    .toBe(baseStartIso.slice(0, 10));
+});

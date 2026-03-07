@@ -151,6 +151,11 @@
 - `packages/domain` and `packages/rule-engine` provide extraction boundaries for phase 2.
 - Task model includes `startAt`/`dueAt` for future Gantt/Timeline support.
 
+## Timeline Parent Moves
+- Timeline parent moves preserve descendant timeline placement in the first pass; children do not auto-follow.
+- `PATCH /tasks/:id/reschedule` and `PATCH /tasks/:id/timeline-move` include `subtaskMovePolicy` metadata so clients can treat parent-only moves deterministically.
+- `web-ui` warns when descendants stay in place and offers undo when the preserved descendant count reaches the large-impact threshold.
+
 ## Collaboration (Phase 3)
 - New app boundary:
   - `apps/collab-server` handles Yjs websocket collaboration and presence only.

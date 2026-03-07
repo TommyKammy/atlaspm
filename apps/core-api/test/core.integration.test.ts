@@ -3166,6 +3166,154 @@ describe('Core API Integration', () => {
       .expect(400);
   });
 
+  test('timeline reschedule preserves descendant schedules and reports parent move policy', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Timeline Parent Move Policy Project' })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSection = sectionsRes.body.find((section: any) => section.isDefault);
+    expect(defaultSection?.id).toBeTruthy();
+
+    const parentTaskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Timeline parent move policy target',
+        sectionId: defaultSection.id,
+        startAt: '2026-04-10T00:00:00.000Z',
+        dueAt: '2026-04-12T00:00:00.000Z',
+      })
+      .expect(201);
+    const parentTaskId = parentTaskRes.body.id as string;
+
+    const childTaskRes = await request(app.getHttpServer())
+      .post(`/tasks/${parentTaskId}/subtasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Timeline child preserved',
+        startAt: '2026-04-11T00:00:00.000Z',
+        dueAt: '2026-04-11T00:00:00.000Z',
+      })
+      .expect(201);
+
+    const grandchildTaskRes = await request(app.getHttpServer())
+      .post(`/tasks/${childTaskRes.body.id}/subtasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Timeline grandchild preserved',
+        startAt: '2026-04-12T00:00:00.000Z',
+        dueAt: '2026-04-12T00:00:00.000Z',
+      })
+      .expect(201);
+
+    const rescheduleRes = await request(app.getHttpServer())
+      .patch(`/tasks/${parentTaskId}/reschedule`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        startAt: '2026-04-14T00:00:00.000Z',
+        dueAt: '2026-04-16T00:00:00.000Z',
+        version: parentTaskRes.body.version,
+      })
+      .expect(200);
+
+    expect(rescheduleRes.body.startAt).toContain('2026-04-14');
+    expect(rescheduleRes.body.dueAt).toContain('2026-04-16');
+    expect(rescheduleRes.body.subtaskMovePolicy).toEqual({
+      mode: 'preserve',
+      descendantCount: 2,
+      largeImpact: false,
+    });
+
+    const childDetailRes = await request(app.getHttpServer())
+      .get(`/tasks/${childTaskRes.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(childDetailRes.body.startAt).toContain('2026-04-11');
+    expect(childDetailRes.body.dueAt).toContain('2026-04-11');
+
+    const grandchildDetailRes = await request(app.getHttpServer())
+      .get(`/tasks/${grandchildTaskRes.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(grandchildDetailRes.body.startAt).toContain('2026-04-12');
+    expect(grandchildDetailRes.body.dueAt).toContain('2026-04-12');
+  });
+
+  test('timeline move marks large subtask impact when a parent has many descendants', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Timeline Parent Move Impact Project' })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSection = sectionsRes.body.find((section: any) => section.isDefault);
+    expect(defaultSection?.id).toBeTruthy();
+
+    const parentTaskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Timeline large impact parent',
+        sectionId: defaultSection.id,
+        startAt: '2026-05-01T00:00:00.000Z',
+        dueAt: '2026-05-03T00:00:00.000Z',
+      })
+      .expect(201);
+    const parentTaskId = parentTaskRes.body.id as string;
+
+    for (let index = 0; index < 5; index += 1) {
+      await request(app.getHttpServer())
+        .post(`/tasks/${parentTaskId}/subtasks`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          title: `Large impact child ${index + 1}`,
+          startAt: `2026-05-0${index + 1}T00:00:00.000Z`,
+          dueAt: `2026-05-0${index + 1}T00:00:00.000Z`,
+        })
+        .expect(201);
+    }
+
+    const movedTaskRes = await request(app.getHttpServer())
+      .patch(`/tasks/${parentTaskId}/timeline-move`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        startAt: '2026-05-06T00:00:00.000Z',
+        dueAt: '2026-05-08T00:00:00.000Z',
+        version: parentTaskRes.body.version,
+      })
+      .expect(200);
+
+    expect(movedTaskRes.body.subtaskMovePolicy).toEqual({
+      mode: 'preserve',
+      descendantCount: 5,
+      largeImpact: true,
+    });
+  });
+
   test('timeline move rejects unknown section and unknown custom field lane targets', async () => {
     const workspaceRes = await request(app.getHttpServer())
       .get('/workspaces')
