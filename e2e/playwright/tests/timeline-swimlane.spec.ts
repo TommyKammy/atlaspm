@@ -157,6 +157,61 @@ async function dragTimelineBarVertically(page: Page, taskId: string, deltaY: num
   await page.mouse.up();
 }
 
+function parseTimelineConnectorPath(pathData: string | null) {
+  if (!pathData) {
+    throw new Error('Expected timeline connector path data');
+  }
+  const match = pathData.match(
+    /^M\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+C\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?,\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?,\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)$/,
+  );
+  if (!match) {
+    throw new Error(`Unexpected timeline connector path: ${pathData}`);
+  }
+  return {
+    x1: Number(match[1]),
+    y1: Number(match[2]),
+    x2: Number(match[3]),
+    y2: Number(match[4]),
+  };
+}
+
+async function expectTimelineConnectorAnchored(page: Page, sourceTaskId: string, targetTaskId: string) {
+  const connector = page.locator(
+    `[data-testid="timeline-connector-${sourceTaskId}-${targetTaskId}"]`,
+  );
+  const layer = page.locator('[data-testid="timeline-dependency-layer"]');
+  const sourceBar = page.locator(`[data-testid="timeline-bar-${sourceTaskId}"]`);
+  const targetBar = page.locator(`[data-testid="timeline-bar-${targetTaskId}"]`);
+
+  await expect(layer).toBeVisible();
+  await expect(connector).toBeVisible();
+  await expect(sourceBar).toBeVisible();
+  await expect(targetBar).toBeVisible();
+
+  const [pathData, layerBox, sourceBox, targetBox] = await Promise.all([
+    connector.getAttribute('d'),
+    layer.boundingBox(),
+    sourceBar.boundingBox(),
+    targetBar.boundingBox(),
+  ]);
+  if (!layerBox || !sourceBox || !targetBox) {
+    throw new Error('Expected timeline connector layer and bar bounds');
+  }
+
+  const path = parseTimelineConnectorPath(pathData);
+  const expectedStartX = sourceBox.x + sourceBox.width - layerBox.x;
+  const expectedStartY = sourceBox.y + sourceBox.height / 2 - layerBox.y;
+  const expectedEndX = targetBox.x - layerBox.x;
+  const expectedEndY = targetBox.y + targetBox.height / 2 - layerBox.y;
+
+  expect(Math.abs(path.x1 - expectedStartX)).toBeLessThanOrEqual(2);
+  expect(Math.abs(path.y1 - expectedStartY)).toBeLessThanOrEqual(2);
+  expect(Math.abs(path.x2 - expectedEndX)).toBeLessThanOrEqual(2);
+  expect(Math.abs(path.y2 - expectedEndY)).toBeLessThanOrEqual(2);
+
+  return path;
+}
+
 async function dragUnscheduledTaskToLane(page: Page, taskId: string, laneTestId: string) {
   const task = page.locator(`[data-testid="timeline-unscheduled-${taskId}"]`);
   const lane = page.locator(`[data-testid="${laneTestId}"]`);
@@ -575,6 +630,84 @@ test('timeline manual row layout persists separately for section assignee and st
     'true',
   );
   await expect.poll(() => orderedTaskIdsByTop(page, taskIds)).toEqual(statusExpectedOrder);
+});
+
+test('timeline dependency connectors stay attached after manual layout and across grouped lanes', async ({
+  page,
+}) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-connectors-${now}`;
+  const email = `${sub}@example.com`;
+
+  await login(page, sub, email);
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Connectors ${now}`,
+  });
+  const projectId = project.id as string;
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Timeline Connector Section',
+  });
+
+  const blockerTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Timeline Blocker ${now}`,
+    status: 'IN_PROGRESS',
+    assigneeUserId: sub,
+    startAt: dayIso(1),
+    dueAt: dayIso(4),
+  });
+  const blockedTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Timeline Blocked ${now}`,
+    status: 'TODO',
+    assigneeUserId: sub,
+    startAt: dayIso(1),
+    dueAt: dayIso(4),
+  });
+  await api(`/tasks/${blockedTask.id}/dependencies`, token, 'POST', {
+    dependsOnId: blockerTask.id,
+    type: 'BLOCKS',
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await page.click('[data-testid="timeline-zoom-day"]');
+  await expect(page.locator('[data-testid="timeline-zoom-day"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+
+  const initialPath = await expectTimelineConnectorAnchored(page, blockerTask.id, blockedTask.id);
+
+  const sectionOrder = await orderedTaskIdsByTop(page, [blockerTask.id, blockedTask.id]);
+  const sectionExpectedOrder = [sectionOrder[1]!, sectionOrder[0]!];
+  const movingTaskId = sectionExpectedOrder[0];
+  await dragTimelineBarVertically(page, movingTaskId, -120);
+  await expect.poll(() => orderedTaskIdsByTop(page, [blockerTask.id, blockedTask.id])).toEqual(
+    sectionExpectedOrder,
+  );
+
+  const reorderedPath = await expectTimelineConnectorAnchored(
+    page,
+    blockerTask.id,
+    blockedTask.id,
+  );
+  expect(reorderedPath.y1 === initialPath.y1 && reorderedPath.y2 === initialPath.y2).toBe(false);
+
+  await page.click('[data-testid="timeline-swimlane-status"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+
+  const crossGroupPath = await expectTimelineConnectorAnchored(page, blockerTask.id, blockedTask.id);
+  expect(crossGroupPath.y1).not.toBe(crossGroupPath.y2);
 });
 
 test('timeline drag can move task across assignee lanes into unassigned', async ({ page }) => {

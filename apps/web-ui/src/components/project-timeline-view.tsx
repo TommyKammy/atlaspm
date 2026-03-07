@@ -747,6 +747,7 @@ export function ProjectScheduleCanvas({
   const [collapsedLaneIds, setCollapsedLaneIds] = useState<Set<string>>(() => new Set());
   const [unscheduledDragTaskId, setUnscheduledDragTaskId] = useState<string | null>(null);
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
+  const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
   const [dependencyDraft, setDependencyDraft] = useState<TimelineDependencyDraft | null>(null);
   const [selectedTimelineTaskIds, setSelectedTimelineTaskIds] = useState<string[]>([]);
   const selectedTimelineTaskIdsRef = useRef<string[]>([]);
@@ -1040,7 +1041,7 @@ export function ProjectScheduleCanvas({
   const effectiveSortMode: TimelineSortMode = mode === 'timeline' ? sortMode : 'manual';
   const effectiveScheduleFilter: TimelineScheduleFilter =
     mode === 'timeline' ? scheduleFilter : 'all';
-  const showDependencyConnectors = mode === 'gantt';
+  const showDependencyConnectors = mode === 'timeline' || mode === 'gantt';
 
   const timelineWindow = useMemo(
     () => ({
@@ -1953,6 +1954,21 @@ export function ProjectScheduleCanvas({
     visibleRange.start,
     virtualizationEnabled,
   ]);
+  const laneIdByTaskId = useMemo(() => {
+    const next = new Map<string, string>();
+    for (const lane of visibleTimelineLanes) {
+      for (const task of lane.tasks) {
+        next.set(task.id, lane.id);
+      }
+    }
+    return next;
+  }, [visibleTimelineLanes]);
+  const activeConnectorTaskId =
+    hoveredTaskId ??
+    focusedTaskId ??
+    dependencyDraft?.sourceTaskId ??
+    dependencyDraft?.targetTaskId ??
+    null;
 
   const connectorEdges = useMemo(
     () =>
@@ -1962,8 +1978,12 @@ export function ProjectScheduleCanvas({
           visibleTaskIds.has(edge.target) &&
           timelineLayout.barsByTaskId[edge.source] &&
           timelineLayout.barsByTaskId[edge.target],
-      ),
-    [timeline.dependencyEdges, timelineLayout.barsByTaskId, visibleTaskIds],
+      ).map((edge) => ({
+        ...edge,
+        sourceLaneId: laneIdByTaskId.get(edge.source) ?? null,
+        targetLaneId: laneIdByTaskId.get(edge.target) ?? null,
+      })),
+    [laneIdByTaskId, timeline.dependencyEdges, timelineLayout.barsByTaskId, visibleTaskIds],
   );
 
   const dependencyDraftPreview = useMemo(() => {
@@ -2645,6 +2665,10 @@ export function ProjectScheduleCanvas({
               <>
                 <Badge variant="secondary">{totalDependencyEdges}</Badge>
                 <span>{t('timelineDependencies')}</span>
+              </>
+            ) : null}
+            {mode === 'gantt' ? (
+              <>
                 <Badge variant={ganttRiskTasks.length ? 'destructive' : 'secondary'}>
                   {ganttRiskTasks.length}
                 </Badge>
@@ -2988,23 +3012,55 @@ export function ProjectScheduleCanvas({
                 const to = timelineLayout.barsByTaskId[edge.target];
                 if (!from || !to) return null;
                 const targetRisk = ganttRiskByTaskId.get(edge.target);
+                const isCrossGroup =
+                  edge.sourceLaneId !== null &&
+                  edge.targetLaneId !== null &&
+                  edge.sourceLaneId !== edge.targetLaneId;
+                const isEmphasized =
+                  activeConnectorTaskId !== null &&
+                  (edge.source === activeConnectorTaskId || edge.target === activeConnectorTaskId);
                 const x1 = from.left + from.width;
                 const y1 = from.y;
                 const x2 = to.left;
                 const y2 = to.y;
                 const cx = x2 >= x1 ? x1 + Math.max(16, (x2 - x1) / 2) : x1 + 16;
                 const path = `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`;
+                const stroke =
+                  targetRisk?.isAtRisk && mode === 'gantt'
+                    ? 'hsl(var(--destructive))'
+                    : 'hsl(var(--primary))';
+                const strokeWidth =
+                  targetRisk?.isAtRisk && mode === 'gantt'
+                    ? 1.75
+                    : isEmphasized
+                      ? 1.75
+                      : isCrossGroup && mode === 'timeline'
+                        ? 1.5
+                        : 1.25;
+                const opacity =
+                  activeConnectorTaskId !== null
+                    ? isEmphasized
+                      ? 0.95
+                      : mode === 'timeline'
+                        ? 0.16
+                        : 0.28
+                    : mode === 'timeline'
+                      ? isCrossGroup
+                        ? 0.52
+                        : 0.34
+                      : targetRisk?.isAtRisk
+                        ? 0.9
+                        : 0.7;
                 return (
                   <path
                     key={`${edge.source}-${edge.target}-${edge.type}`}
                     d={path}
                     fill="none"
-                    stroke={
-                      targetRisk?.isAtRisk ? 'hsl(var(--destructive))' : 'hsl(var(--primary))'
-                    }
-                    strokeWidth={targetRisk?.isAtRisk ? 1.75 : 1.25}
+                    stroke={stroke}
+                    strokeWidth={strokeWidth}
+                    strokeDasharray={isCrossGroup && mode === 'timeline' ? '6 4' : undefined}
                     markerEnd={`url(#${markerId})`}
-                    opacity={targetRisk?.isAtRisk ? 0.9 : 0.7}
+                    opacity={opacity}
                     data-testid={`timeline-connector-${edge.source}-${edge.target}`}
                   />
                 );
@@ -3412,7 +3468,23 @@ export function ProjectScheduleCanvas({
                                         .filter(Boolean)
                                         .join(', ') || undefined;
                                     return (
-                                      <div key={task.id} className="group/timeline-bar">
+                                      <div
+                                        key={task.id}
+                                        className="group/timeline-bar"
+                                        onFocusCapture={() => setFocusedTaskId(task.id)}
+                                        onBlurCapture={(event) => {
+                                          if (
+                                            event.currentTarget.contains(
+                                              event.relatedTarget as Node | null,
+                                            )
+                                          ) {
+                                            return;
+                                          }
+                                          setFocusedTaskId((current) =>
+                                            current === task.id ? null : current,
+                                          );
+                                        }}
+                                      >
                                         {mode === 'gantt' &&
                                         task.hasBaseline &&
                                         task.baselineStart &&
@@ -3543,6 +3615,7 @@ export function ProjectScheduleCanvas({
                                             type="button"
                                             className={`absolute top-1/2 z-[2] h-3.5 w-3.5 -translate-y-1/2 rounded-full border border-primary/50 bg-background shadow-sm transition ${
                                               hoveredTaskId === task.id ||
+                                              focusedTaskId === task.id ||
                                               dependencyDraft?.sourceTaskId === task.id
                                                 ? 'opacity-100'
                                                 : 'opacity-0 group-hover/timeline-bar:opacity-100'
