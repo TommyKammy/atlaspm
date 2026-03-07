@@ -114,6 +114,22 @@ type TimelineLaneRail = {
   showTaskRail: boolean;
 };
 
+type TimelineTaskMutationResult = Task & {
+  subtaskMovePolicy?: Task['subtaskMovePolicy'];
+};
+
+type TimelineParentMoveUndoState = {
+  taskId: string;
+  title: string;
+  version: number;
+  descendantCount: number;
+  previousStartAt: string | null;
+  previousDueAt: string | null;
+  previousAssigneeUserId: string | null;
+  previousSectionId: string;
+  previousStatus: Task['status'];
+};
+
 function getLegacyTimelineStorageKey(
   mode: TimelineMode,
   userId: string,
@@ -449,6 +465,14 @@ function applyTaskSchedulesInGroups(
         : task;
     }),
   }));
+}
+
+function findTaskInGroups(groups: SectionTaskGroup[], taskId: string): Task | undefined {
+  for (const group of groups) {
+    const task = group.tasks.find((candidate) => candidate.id === taskId);
+    if (task) return task;
+  }
+  return undefined;
 }
 
 function applyTaskTimelineMoveInGroups(
@@ -849,9 +873,12 @@ export function ProjectScheduleCanvas({
   const selectionDraftRef = useRef<TimelineSelectionDraft | null>(null);
   const suppressClickTaskIdRef = useRef<string | null>(null);
   const [rescheduleNotice, setRescheduleNotice] = useState<{
-    type: 'conflict' | 'error';
+    type: 'conflict' | 'error' | 'warning';
     message: string;
   } | null>(null);
+  const [timelineParentMoveUndo, setTimelineParentMoveUndo] =
+    useState<TimelineParentMoveUndoState | null>(null);
+  const timelineParentMoveUndoActionRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     let timeoutId: number | undefined;
@@ -1566,6 +1593,35 @@ export function ProjectScheduleCanvas({
     },
   });
 
+  const handleParentMovePolicy = (
+    result: TimelineTaskMutationResult,
+    previousTask: Task | undefined,
+    skipSubtaskNotice: boolean = false,
+  ) => {
+    if (skipSubtaskNotice) return;
+    const policy = result.subtaskMovePolicy;
+    if (!policy || policy.descendantCount <= 0 || !previousTask) return;
+    const message = t('timelineParentMoveWarning').replace(
+      '{count}',
+      String(policy.descendantCount),
+    );
+    if (policy.largeImpact) {
+      setTimelineParentMoveUndo({
+        taskId: result.id,
+        title: result.title,
+        version: result.version,
+        descendantCount: policy.descendantCount,
+        previousStartAt: previousTask.startAt ?? null,
+        previousDueAt: previousTask.dueAt ?? null,
+        previousAssigneeUserId: previousTask.assigneeUserId ?? null,
+        previousSectionId: previousTask.sectionId,
+        previousStatus: previousTask.status,
+      });
+      return;
+    }
+    setRescheduleNotice({ type: 'warning', message });
+  };
+
   const rescheduleTask = useMutation({
     mutationFn: async ({
       taskId,
@@ -1581,15 +1637,17 @@ export function ProjectScheduleCanvas({
       (await api(`/tasks/${taskId}/reschedule`, {
         method: 'PATCH',
         body: { startAt, dueAt, version },
-      })) as Task,
+      })) as TimelineTaskMutationResult,
     onMutate: async ({ taskId, startAt, dueAt }) => {
       setRescheduleNotice(null);
+      setTimelineParentMoveUndo(null);
       await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
       await queryClient.cancelQueries({ queryKey: queryKeys.taskDetail(taskId) });
       const previous = queryClient.getQueryData<SectionTaskGroup[]>(
         queryKeys.projectTasksGrouped(projectId),
       );
       const previousTaskDetail = queryClient.getQueryData<Task>(queryKeys.taskDetail(taskId));
+      const previousTaskSnapshot = previousTaskDetail ?? (previous ? findTaskInGroups(previous, taskId) : undefined);
       if (previous) {
         queryClient.setQueryData<SectionTaskGroup[]>(
           queryKeys.projectTasksGrouped(projectId),
@@ -1603,7 +1661,11 @@ export function ProjectScheduleCanvas({
           dueAt,
         });
       }
-      return { previous, previousTaskDetail };
+      return { previous, previousTaskDetail, previousTaskSnapshot };
+    },
+    onSuccess: (result, variables, context) => {
+      queryClient.setQueryData<Task>(queryKeys.taskDetail(variables.taskId), result);
+      handleParentMovePolicy(result, context?.previousTaskSnapshot);
     },
     onError: (error, variables, context) => {
       if (context?.previous) {
@@ -1741,19 +1803,25 @@ export function ProjectScheduleCanvas({
       startAt?: string | null;
       dueAt?: string | null;
       version: number;
+      skipSubtaskNotice?: boolean;
     }) =>
       (await api(`/tasks/${taskId}/timeline-move`, {
         method: 'PATCH',
         body: { assigneeUserId, sectionId, status, startAt, dueAt, version },
-      })) as Task,
+      })) as TimelineTaskMutationResult,
     onMutate: async ({ taskId, assigneeUserId, sectionId, status, startAt, dueAt }) => {
       setRescheduleNotice(null);
+      setTimelineParentMoveUndo(null);
       await queryClient.cancelQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
       await queryClient.cancelQueries({ queryKey: queryKeys.taskDetail(taskId) });
       const previous = queryClient.getQueryData<SectionTaskGroup[]>(
         queryKeys.projectTasksGrouped(projectId),
       );
       const previousTaskDetail = queryClient.getQueryData<Task>(queryKeys.taskDetail(taskId));
+      const previousTaskSnapshot =
+        previousTaskDetail ??
+        (previous ? findTaskInGroups(previous, taskId) : undefined) ??
+        taskById.get(taskId);
       if (previous) {
         const optimisticMove: {
           startAt?: string | null;
@@ -1793,7 +1861,11 @@ export function ProjectScheduleCanvas({
         }
         queryClient.setQueryData<Task>(queryKeys.taskDetail(taskId), optimisticTaskDetail);
       }
-      return { previous, previousTaskDetail };
+      return { previous, previousTaskDetail, previousTaskSnapshot };
+    },
+    onSuccess: (result, variables, context) => {
+      queryClient.setQueryData<Task>(queryKeys.taskDetail(variables.taskId), result);
+      handleParentMovePolicy(result, context?.previousTaskSnapshot, variables.skipSubtaskNotice);
     },
     onError: (error, variables, context) => {
       if (context?.previous) {
@@ -1872,6 +1944,13 @@ export function ProjectScheduleCanvas({
     const timer = window.setTimeout(() => setRescheduleNotice(null), 4000);
     return () => window.clearTimeout(timer);
   }, [rescheduleNotice]);
+
+  useEffect(() => {
+    if (!timelineParentMoveUndo) return;
+    timelineParentMoveUndoActionRef.current?.focus();
+    const timer = window.setTimeout(() => setTimelineParentMoveUndo(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [timelineParentMoveUndo]);
 
   useEffect(() => {
     if (!dependencyDraft) return;
@@ -2715,15 +2794,70 @@ export function ProjectScheduleCanvas({
           className={`rounded-md border px-3 py-2 text-xs ${
             rescheduleNotice.type === 'conflict'
               ? 'border-warning/40 bg-warning/10 text-foreground'
-              : 'border-destructive/40 bg-destructive/10 text-foreground'
+              : rescheduleNotice.type === 'warning'
+                ? 'border-warning/40 bg-warning/10 text-foreground'
+                : 'border-destructive/40 bg-destructive/10 text-foreground'
           }`}
           data-testid={
             rescheduleNotice.type === 'conflict'
               ? 'timeline-reschedule-conflict-banner'
-              : 'timeline-reschedule-error-banner'
+              : rescheduleNotice.type === 'warning'
+                ? 'timeline-parent-move-warning-banner'
+                : 'timeline-reschedule-error-banner'
           }
+          role={rescheduleNotice.type === 'error' ? 'alert' : 'status'}
+          aria-live={rescheduleNotice.type === 'error' ? 'assertive' : 'polite'}
         >
           {rescheduleNotice.message}
+        </div>
+      ) : null}
+      {timelineParentMoveUndo ? (
+        <div
+          className="fixed bottom-4 left-4 z-50 flex items-center gap-3 rounded-md border bg-background px-3 py-2 text-sm shadow-md"
+          data-testid="timeline-parent-move-undo-banner"
+          role="alert"
+          aria-live="assertive"
+        >
+          <span>
+            {t('timelineParentMoveWarning').replace(
+              '{count}',
+              String(timelineParentMoveUndo.descendantCount),
+            )}
+          </span>
+          <Button
+            ref={timelineParentMoveUndoActionRef}
+            size="sm"
+            variant="outline"
+            data-testid="timeline-parent-move-undo-action"
+            disabled={timelineMoveTask.isPending}
+            onClick={() => {
+              const latest =
+                queryClient.getQueryData<Task>(
+                  queryKeys.taskDetail(timelineParentMoveUndo.taskId),
+                ) ?? taskById.get(timelineParentMoveUndo.taskId);
+              timelineMoveTask.mutate({
+                taskId: timelineParentMoveUndo.taskId,
+                startAt: timelineParentMoveUndo.previousStartAt,
+                dueAt: timelineParentMoveUndo.previousDueAt,
+                assigneeUserId: timelineParentMoveUndo.previousAssigneeUserId,
+                sectionId: timelineParentMoveUndo.previousSectionId,
+                status: timelineParentMoveUndo.previousStatus,
+                version: latest?.version ?? timelineParentMoveUndo.version,
+                skipSubtaskNotice: true,
+              });
+              setTimelineParentMoveUndo(null);
+            }}
+          >
+            {timelineMoveTask.isPending ? t('restoring') : t('undo')}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            data-testid="timeline-parent-move-undo-dismiss"
+            onClick={() => setTimelineParentMoveUndo(null)}
+          >
+            {t('dismiss')}
+          </Button>
         </div>
       ) : null}
       <div className="space-y-3 rounded-lg border bg-card p-3">

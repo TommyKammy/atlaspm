@@ -110,6 +110,12 @@ export type TaskApproval = {
   } | null;
 };
 
+export type TimelineSubtaskMovePolicy = {
+  mode: 'preserve';
+  descendantCount: number;
+  largeImpact: boolean;
+};
+
 export type Task = {
   id: string;
   projectId: string;
@@ -135,6 +141,7 @@ export type Task = {
   deletedByUserId?: string | null;
   version: number;
   position: number;
+  subtaskMovePolicy?: TimelineSubtaskMovePolicy;
   customFieldValues?: TaskCustomFieldValue[];
   approval?: TaskApproval | null;
 };
