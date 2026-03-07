@@ -115,11 +115,7 @@ type TimelineLaneRail = {
 };
 
 type TimelineTaskMutationResult = Task & {
-  subtaskMovePolicy?: {
-    mode: 'preserve';
-    descendantCount: number;
-    largeImpact: boolean;
-  };
+  subtaskMovePolicy?: Task['subtaskMovePolicy'];
 };
 
 type TimelineParentMoveUndoState = {
@@ -882,6 +878,7 @@ export function ProjectScheduleCanvas({
   } | null>(null);
   const [timelineParentMoveUndo, setTimelineParentMoveUndo] =
     useState<TimelineParentMoveUndoState | null>(null);
+  const timelineParentMoveUndoActionRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     let timeoutId: number | undefined;
@@ -1950,6 +1947,7 @@ export function ProjectScheduleCanvas({
 
   useEffect(() => {
     if (!timelineParentMoveUndo) return;
+    timelineParentMoveUndoActionRef.current?.focus();
     const timer = window.setTimeout(() => setTimelineParentMoveUndo(null), 8000);
     return () => window.clearTimeout(timer);
   }, [timelineParentMoveUndo]);
@@ -2807,6 +2805,8 @@ export function ProjectScheduleCanvas({
                 ? 'timeline-parent-move-warning-banner'
                 : 'timeline-reschedule-error-banner'
           }
+          role={rescheduleNotice.type === 'error' ? 'alert' : 'status'}
+          aria-live={rescheduleNotice.type === 'error' ? 'assertive' : 'polite'}
         >
           {rescheduleNotice.message}
         </div>
@@ -2815,6 +2815,8 @@ export function ProjectScheduleCanvas({
         <div
           className="fixed bottom-4 left-4 z-50 flex items-center gap-3 rounded-md border bg-background px-3 py-2 text-sm shadow-md"
           data-testid="timeline-parent-move-undo-banner"
+          role="alert"
+          aria-live="assertive"
         >
           <span>
             {t('timelineParentMoveWarning').replace(
@@ -2823,6 +2825,7 @@ export function ProjectScheduleCanvas({
             )}
           </span>
           <Button
+            ref={timelineParentMoveUndoActionRef}
             size="sm"
             variant="outline"
             data-testid="timeline-parent-move-undo-action"

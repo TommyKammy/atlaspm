@@ -2943,19 +2943,23 @@ export class TasksController {
     rootTaskId: string,
     includeDeleted: boolean = false,
   ): Promise<string[]> {
-    const queue = [rootTaskId];
     const visited = new Set<string>();
-    while (queue.length) {
-      const currentId = queue.shift();
-      if (!currentId || visited.has(currentId)) continue;
-      visited.add(currentId);
+    let frontier = [rootTaskId];
+    while (frontier.length) {
+      const currentFrontier = frontier.filter((taskId) => taskId && !visited.has(taskId));
+      if (!currentFrontier.length) break;
+      for (const taskId of currentFrontier) {
+        visited.add(taskId);
+      }
       const children = await tx.task.findMany({
         where: includeDeleted
-          ? { parentId: currentId }
-          : { parentId: currentId, deletedAt: null },
+          ? { parentId: { in: currentFrontier } }
+          : { parentId: { in: currentFrontier }, deletedAt: null },
         select: { id: true },
       });
-      for (const child of children) queue.push(child.id);
+      frontier = children
+        .map((child) => child.id)
+        .filter((taskId, index, ids) => !visited.has(taskId) && ids.indexOf(taskId) === index);
     }
     return [...visited];
   }
