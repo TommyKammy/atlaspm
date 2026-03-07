@@ -132,7 +132,8 @@ const dictionaries: Record<Locale, Dictionary> = {
       'This task was updated elsewhere. Showing the latest timeline.',
     timelineMoveAndRescheduleFailed: 'Could not move and reschedule task. Changes were reverted.',
     timelineLaneOrderSaveFailed: 'Could not save lane order. Reverted to the latest order.',
-    timelineTaskOrderSaveFailed: 'Could not save manual task order. Reverted to the latest order.',
+    timelineManualLayoutSaveFailed:
+      'Could not save manual layout. Reverted to the latest layout.',
     timelineDependencyCreateFailed: 'Could not create dependency from the timeline.',
     timelineViewStateSaveFailed:
       'Could not save the default view. Your current view is still kept locally.',
@@ -621,7 +622,8 @@ const dictionaries: Record<Locale, Dictionary> = {
     timelineMoveAndRescheduleFailed:
       '移動とスケジュール更新に失敗しました。変更は取り消されました。',
     timelineLaneOrderSaveFailed: 'レーン順の保存に失敗しました。最新の順序に戻しました。',
-    timelineTaskOrderSaveFailed: '手動タスク順序の保存に失敗しました。最新の順序に戻しました。',
+    timelineManualLayoutSaveFailed:
+      '手動レイアウトの保存に失敗しました。最新のレイアウトに戻しました。',
     timelineDependencyCreateFailed: 'タイムラインから依存関係を作成できませんでした。',
     timelineViewStateSaveFailed:
       '既定の表示の保存に失敗しました。現在の表示はローカルに保持されています。',

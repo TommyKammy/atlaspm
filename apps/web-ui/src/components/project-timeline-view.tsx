@@ -17,6 +17,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const LEFT_RAIL_COL_WIDTH = 260;
 const TIMELINE_VIEW_STORAGE_PREFIX = 'atlaspm:timeline-view';
 const TIMELINE_LANE_ORDER_STORAGE_PREFIX = 'atlaspm:timeline-lane-order';
+const TIMELINE_MANUAL_LAYOUT_STORAGE_PREFIX = 'atlaspm:timeline-manual-layout';
 const SECTION_ROW_HEIGHT = 32;
 const TASK_ROW_HEIGHT = 40;
 const VIRTUALIZE_ROW_THRESHOLD = 120;
@@ -28,12 +29,12 @@ const UNSCHEDULED_TASK_DND_TYPE = 'application/x-atlaspm-unscheduled-task';
 type TimelineZoom = 'day' | 'week' | 'month';
 type TimelineMode = 'timeline' | 'gantt';
 type TimelineSwimlane = 'section' | 'assignee' | 'status';
-type TimelineTaskOrderGroupBy = TimelineSwimlane;
 type TimelineSortMode = 'manual' | 'startAt' | 'dueAt';
 type TimelineScheduleFilter = 'all' | 'scheduled' | 'unscheduled';
 type GanttRiskFilterMode = 'all' | 'risk';
 type TimelineLaneOrderGroupBy = Extract<TimelineSwimlane, 'section' | 'assignee'>;
-type TimelineTaskOrderMap = Record<string, string[]>;
+type TimelineManualLayoutByLane = Record<string, string[]>;
+type TimelineManualLayoutState = Record<TimelineSwimlane, TimelineManualLayoutByLane>;
 type TimelineViewState = {
   zoom?: TimelineZoom;
   anchorDate?: string;
@@ -57,9 +58,7 @@ type TimelinePreferences = {
   userId: string;
   laneOrderBySection: string[];
   laneOrderByAssignee: string[];
-  taskOrderBySection: TimelineTaskOrderMap;
-  taskOrderByAssignee: TimelineTaskOrderMap;
-  taskOrderByStatus: TimelineTaskOrderMap;
+  timelineManualLayout: TimelineManualLayoutState;
   timelineViewState: TimelineViewState | null;
   ganttViewState: TimelineViewState | null;
 };
@@ -97,6 +96,14 @@ function getLegacyTimelineStorageKey(
   projectId: string,
 ): string {
   return `atlaspm:timeline-view:${userId}:${projectId}:${mode}`;
+}
+
+function createEmptyTimelineManualLayoutState(): TimelineManualLayoutState {
+  return {
+    section: {},
+    assignee: {},
+    status: {},
+  };
 }
 
 const TIMELINE_ZOOM_CONFIG: Record<
@@ -440,50 +447,6 @@ function reorderLaneIds(laneIds: string[], draggingLaneId: string, overLaneId: s
   return next;
 }
 
-function moveItemBefore(itemIds: string[], itemId: string, beforeItemId: string | null): string[] {
-  const next = itemIds.filter((currentItemId) => currentItemId !== itemId);
-  if (!beforeItemId) {
-    next.push(itemId);
-    return next;
-  }
-  const targetIndex = next.indexOf(beforeItemId);
-  if (targetIndex < 0) {
-    next.push(itemId);
-    return next;
-  }
-  next.splice(targetIndex, 0, itemId);
-  return next;
-}
-
-function orderLaneTasksByPreference<TTask extends { id: string }>(
-  tasks: TTask[],
-  preferredTaskOrder: string[],
-): TTask[] {
-  if (!preferredTaskOrder.length) return tasks;
-  const rankByTaskId = new Map(preferredTaskOrder.map((taskId, index) => [taskId, index]));
-  return [...tasks]
-    .map((task, index) => ({ task, index }))
-    .sort((left, right) => {
-      const leftRank = rankByTaskId.get(left.task.id);
-      const rightRank = rankByTaskId.get(right.task.id);
-      if (leftRank === undefined && rightRank === undefined) return left.index - right.index;
-      if (leftRank === undefined) return 1;
-      if (rightRank === undefined) return -1;
-      return leftRank - rightRank;
-    })
-    .map(({ task }) => task);
-}
-
-function taskOrderMapForSwimlane(
-  preferences: TimelinePreferences | undefined,
-  swimlane: TimelineSwimlane,
-): TimelineTaskOrderMap {
-  if (!preferences) return {};
-  if (swimlane === 'assignee') return preferences.taskOrderByAssignee ?? {};
-  if (swimlane === 'status') return preferences.taskOrderByStatus ?? {};
-  return preferences.taskOrderBySection ?? {};
-}
-
 function applyTimelineViewState(
   parsed: TimelineViewState,
   setters: {
@@ -559,9 +522,7 @@ function buildViewStateForMode(
       };
 }
 
-function buildDefaultTimelineViewStateSnapshot(
-  anchorDate = startOfDay(new Date()),
-): LocalTimelineViewStateSnapshot {
+function buildDefaultTimelineViewStateSnapshot(anchorDate = startOfDay(new Date())): LocalTimelineViewStateSnapshot {
   return {
     zoom: 'week',
     anchorDate,
@@ -600,6 +561,52 @@ function getTimelineLaneOrderStorageKey(
     : `${TIMELINE_LANE_ORDER_STORAGE_PREFIX}:${projectId}:${groupBy}`;
 }
 
+function getTimelineManualLayoutStorageKey(
+  projectId: string,
+  groupBy: TimelineSwimlane,
+  userId?: string | null,
+): string {
+  return userId
+    ? `${TIMELINE_MANUAL_LAYOUT_STORAGE_PREFIX}:${projectId}:${groupBy}:${userId}`
+    : `${TIMELINE_MANUAL_LAYOUT_STORAGE_PREFIX}:${projectId}:${groupBy}`;
+}
+
+function normalizeTimelineManualLayoutByLane(value: unknown): TimelineManualLayoutByLane {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const next: TimelineManualLayoutByLane = {};
+  for (const [laneIdRaw, rawTaskIds] of Object.entries(value as Record<string, unknown>)) {
+    const laneId = laneIdRaw.trim();
+    if (!laneId || !Array.isArray(rawTaskIds)) continue;
+    const seenTaskIds = new Set<string>();
+    const normalizedTaskIds: string[] = [];
+    for (const taskId of rawTaskIds) {
+      if (typeof taskId !== 'string') continue;
+      const trimmedTaskId = taskId.trim();
+      if (!trimmedTaskId || seenTaskIds.has(trimmedTaskId)) continue;
+      seenTaskIds.add(trimmedTaskId);
+      normalizedTaskIds.push(trimmedTaskId);
+    }
+    if (normalizedTaskIds.length > 0) {
+      next[laneId] = normalizedTaskIds;
+    }
+  }
+  return next;
+}
+
+function normalizeTimelineManualLayoutState(value: unknown): TimelineManualLayoutState {
+  const next = createEmptyTimelineManualLayoutState();
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return next;
+  const candidate = value as Record<string, unknown>;
+  next.section = normalizeTimelineManualLayoutByLane(candidate.section);
+  next.assignee = normalizeTimelineManualLayoutByLane(candidate.assignee);
+  next.status = normalizeTimelineManualLayoutByLane(candidate.status);
+  return next;
+}
+
+function hasTimelineManualLayout(layout: TimelineManualLayoutByLane): boolean {
+  return Object.values(layout).some((laneTaskOrder) => laneTaskOrder.length > 0);
+}
+
 function readStoredTimelineLaneOrder(keys: Array<string | null | undefined>): string[] {
   if (typeof window === 'undefined') return [];
   for (const key of keys) {
@@ -623,6 +630,33 @@ function readStoredTimelineLaneOrder(keys: Array<string | null | undefined>): st
 function persistTimelineLaneOrder(laneOrder: string[], keys: Array<string | null | undefined>) {
   if (typeof window === 'undefined') return;
   const payload = JSON.stringify(laneOrder);
+  for (const key of keys) {
+    if (!key) continue;
+    window.localStorage.setItem(key, payload);
+  }
+}
+
+function readStoredTimelineManualLayout(keys: Array<string | null | undefined>): TimelineManualLayoutByLane {
+  if (typeof window === 'undefined') return {};
+  for (const key of keys) {
+    if (!key) continue;
+    const raw = window.localStorage.getItem(key);
+    if (!raw) continue;
+    try {
+      return normalizeTimelineManualLayoutByLane(JSON.parse(raw));
+    } catch {
+      // Ignore malformed local manual-layout state.
+    }
+  }
+  return {};
+}
+
+function persistTimelineManualLayout(
+  laneTaskOrder: TimelineManualLayoutByLane,
+  keys: Array<string | null | undefined>,
+) {
+  if (typeof window === 'undefined') return;
+  const payload = JSON.stringify(laneTaskOrder);
   for (const key of keys) {
     if (!key) continue;
     window.localStorage.setItem(key, payload);
@@ -771,6 +805,7 @@ export function ProjectScheduleCanvas({
     timelinePreferencesQuery.data?.timelineViewState,
   ]);
   const laneOrderGroupBy = mode === 'timeline' && isLaneOrderGroupBy(swimlane) ? swimlane : null;
+  const manualLayoutGroupBy = mode === 'timeline' ? swimlane : null;
   const laneOrderStorageBaseKey = useMemo(
     () =>
       projectId && laneOrderGroupBy
@@ -784,6 +819,20 @@ export function ProjectScheduleCanvas({
         ? getTimelineLaneOrderStorageKey(projectId, laneOrderGroupBy, meQuery.data.id)
         : null,
     [laneOrderGroupBy, meQuery.data?.id, projectId],
+  );
+  const manualLayoutStorageBaseKey = useMemo(
+    () =>
+      projectId && manualLayoutGroupBy
+        ? getTimelineManualLayoutStorageKey(projectId, manualLayoutGroupBy)
+        : null,
+    [manualLayoutGroupBy, projectId],
+  );
+  const manualLayoutStorageUserKey = useMemo(
+    () =>
+      projectId && meQuery.data?.id && manualLayoutGroupBy
+        ? getTimelineManualLayoutStorageKey(projectId, manualLayoutGroupBy, meQuery.data.id)
+        : null,
+    [manualLayoutGroupBy, meQuery.data?.id, projectId],
   );
   const hasRestoredTimelinePreferences = useRef(false);
 
@@ -917,9 +966,8 @@ export function ProjectScheduleCanvas({
           userId: previous?.userId ?? meQuery.data?.id ?? '',
           laneOrderBySection: previous?.laneOrderBySection ?? [],
           laneOrderByAssignee: previous?.laneOrderByAssignee ?? [],
-          taskOrderBySection: previous?.taskOrderBySection ?? {},
-          taskOrderByAssignee: previous?.taskOrderByAssignee ?? {},
-          taskOrderByStatus: previous?.taskOrderByStatus ?? {},
+          timelineManualLayout:
+            normalizeTimelineManualLayoutState(previous?.timelineManualLayout),
           timelineViewState:
             nextMode === 'timeline' ? viewState : (previous?.timelineViewState ?? null),
           ganttViewState: nextMode === 'gantt' ? viewState : (previous?.ganttViewState ?? null),
@@ -969,7 +1017,8 @@ export function ProjectScheduleCanvas({
   );
   const viewStateSaveBaseline = persistedDefaultViewState ?? fallbackViewState;
   const hasUnsavedDefaultViewStateChanges =
-    preferencesHydrated && !areTimelineViewStatesEqual(viewStateSaveBaseline, currentModeViewState);
+    preferencesHydrated &&
+    !areTimelineViewStatesEqual(viewStateSaveBaseline, currentModeViewState);
 
   const zoomConfig = TIMELINE_ZOOM_CONFIG[zoom];
   const effectiveSwimlane: TimelineSwimlane = mode === 'timeline' ? swimlane : 'section';
@@ -1098,22 +1147,34 @@ export function ProjectScheduleCanvas({
     timelinePreferencesQuery.data?.laneOrderByAssignee,
     timelinePreferencesQuery.data?.laneOrderBySection,
   ]);
+  const preferredManualLayout = useMemo(() => {
+    const storedLayout = readStoredTimelineManualLayout([
+      manualLayoutStorageUserKey,
+      manualLayoutStorageBaseKey,
+    ]);
+    const serverLayout = normalizeTimelineManualLayoutState(
+      timelinePreferencesQuery.data?.timelineManualLayout,
+    )[effectiveSwimlane];
+    return hasTimelineManualLayout(serverLayout) ? serverLayout : storedLayout;
+  }, [
+    effectiveSwimlane,
+    manualLayoutStorageBaseKey,
+    manualLayoutStorageUserKey,
+    timelinePreferencesQuery.data?.timelineManualLayout,
+  ]);
+  const hasActiveManualLayout = mode === 'timeline' && sortMode === 'manual'
+    ? hasTimelineManualLayout(preferredManualLayout)
+    : false;
 
-  const manualTaskOrderByLane = useMemo(
-    () =>
-      effectiveSortMode === 'manual'
-        ? taskOrderMapForSwimlane(timelinePreferencesQuery.data, effectiveSwimlane)
-        : {},
-    [effectiveSortMode, effectiveSwimlane, timelinePreferencesQuery.data],
-  );
-
-  const buildOrderedTimelineLanes = (tasks: TimelineTask[]) =>
-    buildTimelineLanes({
+  const timelineLanes = useMemo(() => {
+    const scheduledTimelineTasks = filteredTasks.filter((task) => task.hasSchedule);
+    const lanes = buildTimelineLanes({
       swimlane: effectiveSwimlane,
-      tasks,
+      tasks: scheduledTimelineTasks,
       sections: timeline.sections,
       membersById: timeline.membersById,
       preferredLaneOrder,
+      ...(hasActiveManualLayout ? { preferredTaskOrderByLane: preferredManualLayout } : {}),
       defaultSectionLabel: t('tasks'),
       unassignedLabel: t('unassigned'),
       statusLabels: {
@@ -1123,77 +1184,18 @@ export function ProjectScheduleCanvas({
         DONE: t('statusDone'),
       },
       unassignedLaneId: UNASSIGNED_LANE_ID,
-    }).map((lane) => ({
-      ...lane,
-      tasks: orderLaneTasksByPreference(lane.tasks, manualTaskOrderByLane[lane.id] ?? []),
-    }));
-
-  const timelineLanes = useMemo(() => {
-    const scheduledTimelineTasks = filteredTasks.filter((task) => task.hasSchedule);
-    return buildOrderedTimelineLanes(scheduledTimelineTasks);
+    });
+    return lanes;
   }, [
     effectiveSwimlane,
     filteredTasks,
-    manualTaskOrderByLane,
+    hasActiveManualLayout,
     preferredLaneOrder,
+    preferredManualLayout,
     t,
     timeline.membersById,
     timeline.sections,
   ]);
-  const allScheduledTimelineLanes = useMemo(
-    () => buildOrderedTimelineLanes(timeline.tasks.filter((task) => task.hasSchedule)),
-    [
-      effectiveSwimlane,
-      manualTaskOrderByLane,
-      preferredLaneOrder,
-      t,
-      timeline.membersById,
-      timeline.sections,
-      timeline.tasks,
-    ],
-  );
-  const manualTaskOrderLaneIds = useMemo(
-    () =>
-      timelineLanes
-        .filter((lane) => (manualTaskOrderByLane[lane.id] ?? []).length > 0)
-        .map((lane) => lane.id),
-    [manualTaskOrderByLane, timelineLanes],
-  );
-  const allScheduledTimelineLayout = useMemo(
-    () =>
-      buildTimelineLayout({
-        lanes: allScheduledTimelineLanes,
-        windowStart: timeline.window.start,
-        windowEnd: timeline.window.end,
-        dayColumnWidth: zoomConfig.dayColWidth,
-        sectionRowHeight: SECTION_ROW_HEIGHT,
-        taskRowHeight: TASK_ROW_HEIGHT,
-        compactRows: mode === 'timeline',
-        manualRowLaneIds: mode === 'timeline' ? manualTaskOrderLaneIds : [],
-        dependencyAwarePacking: mode === 'timeline' && dependencyAwarePacking,
-        dependencyEdges: timeline.dependencyEdges,
-      }),
-    [
-      allScheduledTimelineLanes,
-      dependencyAwarePacking,
-      manualTaskOrderLaneIds,
-      mode,
-      timeline.dependencyEdges,
-      timeline.window.end,
-      timeline.window.start,
-      zoomConfig.dayColWidth,
-    ],
-  );
-  const fullLaneTaskIdsById = useMemo(
-    () =>
-      new Map(
-        allScheduledTimelineLayout.lanesWithRows.map(({ lane, rows }) => [
-          lane.id,
-          rows.flatMap((row) => row.tasks.map((task) => task.id)),
-        ]),
-      ),
-    [allScheduledTimelineLayout],
-  );
   const laneTaskCountById = useMemo(
     () => new Map(timelineLanes.map((lane) => [lane.id, lane.tasks.length])),
     [timelineLanes],
@@ -1292,9 +1294,8 @@ export function ProjectScheduleCanvas({
             groupBy === 'section' ? laneOrder : (previous?.laneOrderBySection ?? []),
           laneOrderByAssignee:
             groupBy === 'assignee' ? laneOrder : (previous?.laneOrderByAssignee ?? []),
-          taskOrderBySection: previous?.taskOrderBySection ?? {},
-          taskOrderByAssignee: previous?.taskOrderByAssignee ?? {},
-          taskOrderByStatus: previous?.taskOrderByStatus ?? {},
+          timelineManualLayout:
+            normalizeTimelineManualLayoutState(previous?.timelineManualLayout),
           timelineViewState: previous?.timelineViewState ?? null,
           ganttViewState: previous?.ganttViewState ?? null,
         },
@@ -1328,28 +1329,33 @@ export function ProjectScheduleCanvas({
     },
   });
 
-  const saveTaskOrderMutation = useMutation({
+  const saveManualLayoutMutation = useMutation({
     mutationFn: async ({
       groupBy,
-      laneId,
-      taskOrder,
+      laneTaskOrder,
     }: {
-      groupBy: TimelineTaskOrderGroupBy;
-      laneId: string;
-      taskOrder: string[];
+      groupBy: TimelineSwimlane;
+      laneTaskOrder: TimelineManualLayoutByLane;
     }) =>
-      (await api(`/projects/${projectId}/timeline/preferences/task-order/${groupBy}`, {
+      (await api(`/projects/${projectId}/timeline/preferences/manual-layout/${groupBy}`, {
         method: 'PUT',
-        body: { laneId, taskOrder },
+        body: { laneTaskOrder },
       })) as TimelinePreferences,
-    onMutate: async ({ groupBy, laneId, taskOrder }) => {
-      setRescheduleNotice(null);
+    onMutate: async ({ groupBy, laneTaskOrder }) => {
       await queryClient.cancelQueries({
         queryKey: queryKeys.projectTimelinePreferences(projectId),
       });
       const previous = queryClient.getQueryData<TimelinePreferences>(
         queryKeys.projectTimelinePreferences(projectId),
       );
+      const storageKeys = [
+        getTimelineManualLayoutStorageKey(projectId, groupBy, meQuery.data?.id),
+        getTimelineManualLayoutStorageKey(projectId, groupBy),
+      ];
+      const previousStoredManualLayout = readStoredTimelineManualLayout(storageKeys);
+      persistTimelineManualLayout(laneTaskOrder, storageKeys);
+      const nextManualLayout = normalizeTimelineManualLayoutState(previous?.timelineManualLayout);
+      nextManualLayout[groupBy] = laneTaskOrder;
       queryClient.setQueryData<TimelinePreferences>(
         queryKeys.projectTimelinePreferences(projectId),
         {
@@ -1357,23 +1363,12 @@ export function ProjectScheduleCanvas({
           userId: previous?.userId ?? meQuery.data?.id ?? '',
           laneOrderBySection: previous?.laneOrderBySection ?? [],
           laneOrderByAssignee: previous?.laneOrderByAssignee ?? [],
-          taskOrderBySection:
-            groupBy === 'section'
-              ? { ...(previous?.taskOrderBySection ?? {}), [laneId]: taskOrder }
-              : (previous?.taskOrderBySection ?? {}),
-          taskOrderByAssignee:
-            groupBy === 'assignee'
-              ? { ...(previous?.taskOrderByAssignee ?? {}), [laneId]: taskOrder }
-              : (previous?.taskOrderByAssignee ?? {}),
-          taskOrderByStatus:
-            groupBy === 'status'
-              ? { ...(previous?.taskOrderByStatus ?? {}), [laneId]: taskOrder }
-              : (previous?.taskOrderByStatus ?? {}),
+          timelineManualLayout: nextManualLayout,
           timelineViewState: previous?.timelineViewState ?? null,
           ganttViewState: previous?.ganttViewState ?? null,
         },
       );
-      return { previous };
+      return { previous, previousStoredManualLayout, storageKeys };
     },
     onError: (_error, _variables, context) => {
       if (context?.previous) {
@@ -1382,7 +1377,22 @@ export function ProjectScheduleCanvas({
           context.previous,
         );
       }
-      setRescheduleNotice({ type: 'error', message: t('timelineTaskOrderSaveFailed') });
+      if (context?.storageKeys) {
+        persistTimelineManualLayout(
+          context.previousStoredManualLayout ?? {},
+          context.storageKeys,
+        );
+      }
+      setRescheduleNotice({ type: 'error', message: t('timelineManualLayoutSaveFailed') });
+    },
+    onSuccess: (result, variables) => {
+      persistTimelineManualLayout(
+        normalizeTimelineManualLayoutState(result.timelineManualLayout)[variables.groupBy],
+        [
+          getTimelineManualLayoutStorageKey(projectId, variables.groupBy, meQuery.data?.id),
+          getTimelineManualLayoutStorageKey(projectId, variables.groupBy),
+        ],
+      );
     },
     onSettled: async () => {
       await queryClient.invalidateQueries({
@@ -1822,14 +1832,13 @@ export function ProjectScheduleCanvas({
       dayColumnWidth: zoomConfig.dayColWidth,
       sectionRowHeight: SECTION_ROW_HEIGHT,
       taskRowHeight: TASK_ROW_HEIGHT,
-      compactRows: mode === 'timeline',
-      manualRowLaneIds: mode === 'timeline' ? manualTaskOrderLaneIds : [],
+      compactRows: mode === 'timeline' && !hasActiveManualLayout,
       dependencyAwarePacking: mode === 'timeline' && dependencyAwarePacking,
       dependencyEdges: timeline.dependencyEdges,
     });
   }, [
     dependencyAwarePacking,
-    manualTaskOrderLaneIds,
+    hasActiveManualLayout,
     mode,
     timeline.dependencyEdges,
     timeline.window.end,
@@ -1837,16 +1846,6 @@ export function ProjectScheduleCanvas({
     visibleTimelineLanes,
     zoomConfig.dayColWidth,
   ]);
-  const visibleLaneTaskIdsById = useMemo(
-    () =>
-      new Map(
-        timelineLayout.lanesWithRows.map(({ lane, rows }) => [
-          lane.id,
-          rows.flatMap((row) => row.tasks.map((task) => task.id)),
-        ]),
-      ),
-    [timelineLayout],
-  );
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -2094,113 +2093,52 @@ export function ProjectScheduleCanvas({
     return lane?.lane.id ?? null;
   };
 
-  const resolveTimelineTaskReorder = (
+  const buildNextManualLaneTaskOrder = (
     laneId: string,
     taskId: string,
-    originY: number,
-    clientX: number,
     clientY: number,
-  ): string[] | null => {
-    if (effectiveSortMode !== 'manual') return null;
-    const visibleLaneTaskIds = visibleLaneTaskIdsById.get(laneId) ?? [];
-    const fullLaneTaskIds = fullLaneTaskIdsById.get(laneId) ?? [];
-    if (visibleLaneTaskIds.length < 2 || fullLaneTaskIds.length < 2) return null;
+  ): TimelineManualLayoutByLane | null => {
+    if (mode !== 'timeline' || sortMode !== 'manual') return null;
+    const lane = timelineLanes.find((entry) => entry.id === laneId);
+    const layoutLane = timelineLayout.lanesWithRows.find((entry) => entry.lane.id === laneId);
+    const container = scrollContainerRef.current;
+    if (!lane || !layoutLane || !container || lane.tasks.length < 2) return null;
 
-    const visibleTaskIds = visibleLaneTaskIds.filter((currentTaskId) => currentTaskId !== taskId);
-    if (!visibleTaskIds.length) return null;
+    const currentOrder = layoutLane.rows.flatMap((row) => row.tasks.map((task) => task.id));
+    if (currentOrder.length !== lane.tasks.length) {
+      return null;
+    }
+    const currentIndex = currentOrder.indexOf(taskId);
+    if (currentIndex < 0) return null;
 
-    let beforeTaskId: string | null = null;
-    if (typeof document !== 'undefined') {
-      let hoveredTaskHost: HTMLElement | null = null;
-      for (const element of document.elementsFromPoint(clientX, clientY)) {
-        if (!(element instanceof HTMLElement)) continue;
-        hoveredTaskHost = element.closest<HTMLElement>('[data-timeline-task-id]');
-        if (hoveredTaskHost) break;
+    const stickyHeaderHeight = stickyHeaderRef.current?.offsetHeight ?? 0;
+    const bounds = container.getBoundingClientRect();
+    const relativeY = clientY - bounds.top + container.scrollTop - stickyHeaderHeight;
+
+    let insertAt = currentOrder.length;
+    let taskCountBeforeRow = 0;
+    for (const row of layoutLane.rows) {
+      const rowMidpoint = row.top + TASK_ROW_HEIGHT / 2;
+      if (relativeY < rowMidpoint) {
+        insertAt = taskCountBeforeRow;
+        break;
       }
-      const hoveredTaskId = hoveredTaskHost?.dataset.timelineTaskId;
-      const hoveredLaneId = hoveredTaskHost?.dataset.timelineLaneId;
-      if (hoveredTaskId && hoveredTaskId !== taskId && hoveredLaneId === laneId) {
-        const hoveredRect = hoveredTaskHost!.getBoundingClientRect();
-        if (clientY >= hoveredRect.top + hoveredRect.height / 2) {
-          const hoveredIndex = fullLaneTaskIds.indexOf(hoveredTaskId);
-          beforeTaskId =
-            hoveredIndex >= 0
-              ? (fullLaneTaskIds
-                  .slice(hoveredIndex + 1)
-                  .find((candidateTaskId) => candidateTaskId !== taskId) ?? null)
-              : null;
-        } else {
-          beforeTaskId = hoveredTaskId;
-        }
-      }
+      taskCountBeforeRow += row.tasks.length;
     }
 
-    if (beforeTaskId === null) {
-      const visibleTaskPositions = visibleTaskIds
-        .map((visibleTaskId) => {
-          if (typeof document === 'undefined') return null;
-          const element = document.querySelector<HTMLElement>(
-            `[data-testid="timeline-bar-${visibleTaskId}"]`,
-          );
-          const rect = element?.getBoundingClientRect();
-          return rect
-            ? {
-                taskId: visibleTaskId,
-                centerY: rect.top + rect.height / 2,
-              }
-            : null;
-        })
-        .filter(
-          (
-            entry,
-          ): entry is {
-            taskId: string;
-            centerY: number;
-          } => Boolean(entry),
-        );
-      beforeTaskId = visibleTaskPositions.find((entry) => clientY < entry.centerY)?.taskId ?? null;
+    const nextOrder = [...currentOrder];
+    nextOrder.splice(currentIndex, 1);
+    const adjustedInsertAt = currentIndex < insertAt ? insertAt - 1 : insertAt;
+    nextOrder.splice(Math.max(0, Math.min(nextOrder.length, adjustedInsertAt)), 0, taskId);
+
+    if (nextOrder.every((currentTaskId, index) => currentTaskId === currentOrder[index])) {
+      return null;
     }
 
-    const nextTaskOrder = moveItemBefore(fullLaneTaskIds, taskId, beforeTaskId);
-    if (nextTaskOrder.join('|') !== fullLaneTaskIds.join('|')) return nextTaskOrder;
-
-    const visibleTaskIndex = visibleLaneTaskIds.indexOf(taskId);
-    if (visibleTaskIndex < 0 || clientY === originY) return null;
-    if (clientY > originY) {
-      const nextVisibleTaskId = visibleLaneTaskIds[visibleTaskIndex + 1];
-      if (!nextVisibleTaskId) return null;
-      const nextVisibleTaskIndex = fullLaneTaskIds.indexOf(nextVisibleTaskId);
-      const nextBeforeTaskId =
-        nextVisibleTaskIndex >= 0
-          ? (fullLaneTaskIds
-              .slice(nextVisibleTaskIndex + 1)
-              .find((candidateTaskId) => candidateTaskId !== taskId) ?? null)
-          : null;
-      const fallbackTaskOrder = moveItemBefore(fullLaneTaskIds, taskId, nextBeforeTaskId);
-      return fallbackTaskOrder.join('|') === fullLaneTaskIds.join('|') ? null : fallbackTaskOrder;
-    }
-
-    const previousVisibleTaskId = visibleLaneTaskIds[visibleTaskIndex - 1];
-    if (!previousVisibleTaskId) return null;
-    const fallbackTaskOrder = moveItemBefore(fullLaneTaskIds, taskId, previousVisibleTaskId);
-    return fallbackTaskOrder.join('|') === fullLaneTaskIds.join('|') ? null : fallbackTaskOrder;
-  };
-
-  const commitTimelineVerticalReorder = (
-    taskId: string,
-    laneId: string,
-    originY: number,
-    clientX: number,
-    clientY: number,
-  ): boolean => {
-    const nextTaskOrder = resolveTimelineTaskReorder(laneId, taskId, originY, clientX, clientY);
-    if (!nextTaskOrder) return false;
-    saveTaskOrderMutation.mutate({
-      groupBy: effectiveSwimlane,
-      laneId,
-      taskOrder: nextTaskOrder,
-    });
-    return true;
+    return {
+      ...preferredManualLayout,
+      [laneId]: nextOrder,
+    };
   };
 
   const commitTimelineDrag = (
@@ -2403,29 +2341,6 @@ export function ProjectScheduleCanvas({
     setDragState(next);
   };
 
-  const beginTimelineBarDragIfAllowed = (
-    taskId: string,
-    pointerId: number,
-    clientX: number,
-    clientY: number,
-    originLaneId: string,
-    useCalendarDays: boolean,
-  ) => {
-    if (
-      (selectedTimelineTaskIdsRef.current.includes(taskId)
-        ? selectedTimelineTaskIdsRef.current
-        : [taskId]
-      ).some((selectedTaskId) => rescheduleInFlightTaskIdsRef.current.has(selectedTaskId))
-    ) {
-      return false;
-    }
-    if (!selectedTimelineTaskIdsRef.current.includes(taskId)) {
-      replaceSelectedTimelineTaskIds([taskId]);
-    }
-    beginBarDrag(taskId, pointerId, clientX, clientY, originLaneId, useCalendarDays);
-    return true;
-  };
-
   const updateBarDrag = (
     pointerId: number,
     clientX: number,
@@ -2472,28 +2387,29 @@ export function ProjectScheduleCanvas({
       clientX !== undefined && clientY !== undefined
         ? (resolveLaneIdAtClientPosition(clientX, clientY) ?? current.dropLaneId)
         : current.dropLaneId;
-    const hasVerticalReorderIntent =
-      current.taskIds.length === 1 &&
-      current.deltaDays === 0 &&
-      (!finalDropLaneId || finalDropLaneId === current.originLaneId) &&
-      clientX !== undefined &&
-      clientY !== undefined &&
-      Math.abs(clientY - current.originY) >= DRAG_START_THRESHOLD_PX;
     dragStateRef.current = null;
     setDragState(null);
-    if (!current.moved && !hasVerticalReorderIntent) return;
+    if (!current.moved) return;
     suppressClickTaskIdRef.current = current.taskId;
     if (
-      hasVerticalReorderIntent &&
-      commitTimelineVerticalReorder(
-        current.taskId,
-        current.originLaneId,
-        current.originY,
-        clientX,
-        clientY,
-      )
+      clientY !== undefined &&
+      current.taskIds.length === 1 &&
+      current.deltaDays === 0 &&
+      finalDropLaneId &&
+      finalDropLaneId === current.originLaneId
     ) {
-      return;
+      const nextManualLayout = buildNextManualLaneTaskOrder(
+        current.originLaneId,
+        current.taskId,
+        clientY,
+      );
+      if (nextManualLayout) {
+        saveManualLayoutMutation.mutate({
+          groupBy: effectiveSwimlane,
+          laneTaskOrder: nextManualLayout,
+        });
+        return;
+      }
     }
     commitTimelineDrag(
       current.taskId,
@@ -2505,52 +2421,28 @@ export function ProjectScheduleCanvas({
     );
   };
 
-  const updateBarDragRef = useRef(updateBarDrag);
-  const finishBarDragRef = useRef(finishBarDrag);
-
-  useEffect(() => {
-    updateBarDragRef.current = updateBarDrag;
-    finishBarDragRef.current = finishBarDrag;
-  }, [finishBarDrag, updateBarDrag]);
-
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
-      updateBarDragRef.current(event.pointerId, event.clientX, event.clientY, event.altKey);
+      updateBarDrag(event.pointerId, event.clientX, event.clientY, event.altKey);
     };
 
     const handlePointerUp = (event: PointerEvent) => {
-      finishBarDragRef.current(event.pointerId, event.clientX, event.clientY, event.altKey);
+      finishBarDrag(event.pointerId, event.clientX, event.clientY, event.altKey);
     };
 
     const handlePointerCancel = (event: PointerEvent) => {
-      finishBarDragRef.current(event.pointerId, event.clientX, event.clientY, event.altKey);
+      finishBarDrag(event.pointerId, event.clientX, event.clientY, event.altKey);
     };
 
-    const handleMouseMove = (event: MouseEvent) => {
-      const current = dragStateRef.current;
-      if (!current) return;
-      updateBarDragRef.current(current.pointerId, event.clientX, event.clientY, event.altKey);
-    };
-
-    const handleMouseUp = (event: MouseEvent) => {
-      const current = dragStateRef.current;
-      if (!current) return;
-      finishBarDragRef.current(current.pointerId, event.clientX, event.clientY, event.altKey);
-    };
-
-    window.addEventListener('pointermove', handlePointerMove, { capture: true });
-    window.addEventListener('pointerup', handlePointerUp, { capture: true });
-    window.addEventListener('pointercancel', handlePointerCancel, { capture: true });
-    window.addEventListener('mousemove', handleMouseMove, { capture: true });
-    window.addEventListener('mouseup', handleMouseUp, { capture: true });
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerCancel);
     return () => {
-      window.removeEventListener('pointermove', handlePointerMove, { capture: true });
-      window.removeEventListener('pointerup', handlePointerUp, { capture: true });
-      window.removeEventListener('pointercancel', handlePointerCancel, { capture: true });
-      window.removeEventListener('mousemove', handleMouseMove, { capture: true });
-      window.removeEventListener('mouseup', handleMouseUp, { capture: true });
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerCancel);
     };
-  }, []);
+  }, [finishBarDrag, updateBarDrag]);
 
   const handleLaneDrop = (draggingLaneId: string, overLaneId: string) => {
     const laneIds = timelineLanes.map((lane) => lane.id);
@@ -2580,14 +2472,7 @@ export function ProjectScheduleCanvas({
   }
 
   return (
-      <div
-        className="space-y-4"
-        data-testid="timeline-view"
-        data-view-mode={mode}
-        data-drag-active={dragState ? 'true' : 'false'}
-        data-drag-moved={dragState?.moved ? 'true' : 'false'}
-        data-drag-task-id={dragState?.taskId ?? ''}
-      >
+    <div className="space-y-4" data-testid="timeline-view" data-view-mode={mode}>
       {rescheduleNotice ? (
         <div
           className={`rounded-md border px-3 py-2 text-xs ${
@@ -3507,82 +3392,41 @@ export function ProjectScheduleCanvas({
                                               toggleTimelineTaskSelection(task.id);
                                               return;
                                             }
-                                            event.preventDefault();
-                                            event.stopPropagation();
                                             if (
-                                              !beginTimelineBarDragIfAllowed(
-                                                task.id,
-                                                event.pointerId,
-                                                event.clientX,
-                                                event.clientY,
-                                                lane.id,
-                                                event.altKey,
+                                              (selectedTimelineTaskIdsRef.current.includes(task.id)
+                                                ? selectedTimelineTaskIdsRef.current
+                                                : [task.id]
+                                              ).some((selectedTaskId) =>
+                                                rescheduleInFlightTaskIdsRef.current.has(
+                                                  selectedTaskId,
+                                                ),
                                               )
                                             )
                                               return;
-                                            event.currentTarget.setPointerCapture(event.pointerId);
-                                          }}
-                                          onMouseEnter={() => setHoveredTaskId(task.id)}
-                                          onMouseMove={(event) => {
-                                            const current = dragStateRef.current;
-                                            if (!current) return;
-                                            updateBarDrag(
-                                              current.pointerId,
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            if (
+                                              !selectedTimelineTaskIdsRef.current.includes(task.id)
+                                            ) {
+                                              replaceSelectedTimelineTaskIds([task.id]);
+                                            }
+                                            beginBarDrag(
+                                              task.id,
+                                              event.pointerId,
                                               event.clientX,
                                               event.clientY,
+                                              lane.id,
                                               event.altKey,
                                             );
                                           }}
+                                          onMouseEnter={() => setHoveredTaskId(task.id)}
                                           onMouseLeave={() =>
                                             setHoveredTaskId((current) =>
                                               current === task.id ? null : current,
                                             )
                                           }
-                                          onMouseUp={(event) => {
-                                            const current = dragStateRef.current;
-                                            if (!current) return;
-                                            finishBarDrag(
-                                              current.pointerId,
-                                              event.clientX,
-                                              event.clientY,
-                                              event.altKey,
-                                            );
-                                          }}
-                                          onPointerMove={(event) => {
-                                            const current = dragStateRef.current;
-                                            if (!current) return;
-                                            updateBarDrag(
-                                              current.pointerId,
-                                              event.clientX,
-                                              event.clientY,
-                                              event.altKey,
-                                            );
-                                          }}
-                                          onPointerUpCapture={(event) => {
-                                            finishBarDrag(
-                                              event.pointerId,
-                                              event.clientX,
-                                              event.clientY,
-                                              event.altKey,
-                                            );
-                                            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                                              event.currentTarget.releasePointerCapture(event.pointerId);
-                                            }
-                                          }}
-                                          onPointerCancelCapture={(event) => {
-                                            finishBarDrag(
-                                              event.pointerId,
-                                              event.clientX,
-                                              event.clientY,
-                                              event.altKey,
-                                            );
-                                            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                                              event.currentTarget.releasePointerCapture(event.pointerId);
-                                            }
-                                          }}
                                           data-testid={`timeline-bar-${task.id}`}
                                           data-timeline-task-id={task.id}
-                                          data-timeline-lane-id={lane.id}
                                           data-selected={isSelectedTimelineTask ? 'true' : 'false'}
                                           data-at-risk={taskRisk?.isAtRisk ? 'true' : 'false'}
                                           data-risk-kind={taskRiskLabel ?? 'none'}

@@ -135,40 +135,26 @@ async function timelineBarTop(page: Page, taskId: string) {
   return box.y;
 }
 
-async function dragTimelineBarToTaskPosition(
-  page: Page,
-  taskId: string,
-  targetTaskId: string,
-  placement: 'before' | 'after' = 'after',
-) {
-  const source = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
-  const target = page.locator(`[data-testid="timeline-bar-${targetTaskId}"]`);
-  await expect(source).toBeVisible();
-  await expect(target).toBeVisible();
-  await page.waitForTimeout(100);
-  const sourceBox = await source.boundingBox();
-  const targetBox = await target.boundingBox();
-  if (!sourceBox || !targetBox) {
-    throw new Error('Unable to resolve timeline bars for vertical reorder');
-  }
-  const sharedLeft = Math.max(sourceBox.x + 4, targetBox.x + 4);
-  const sharedRight = Math.min(sourceBox.x + sourceBox.width - 4, targetBox.x + targetBox.width - 4);
-  const dragX =
-    sharedRight > sharedLeft
-      ? sharedLeft + (sharedRight - sharedLeft) / 2
-      : sourceBox.x + Math.min(Math.max(8, sourceBox.width / 4), sourceBox.width - 4);
-  const startY = sourceBox.y + sourceBox.height / 2;
-  const rowGap = Math.max(targetBox.y - sourceBox.y, targetBox.height);
-  const targetY =
-    placement === 'before'
-      ? targetBox.y + Math.min(6, Math.max(3, targetBox.height * 0.2))
-      : targetBox.y + rowGap + targetBox.height / 2;
+async function orderedTaskIdsByTop(page: Page, taskIds: string[]) {
+  const positions = await Promise.all(
+    taskIds.map(async (taskId) => ({ taskId, top: await timelineBarTop(page, taskId) })),
+  );
+  return positions.sort((left, right) => left.top - right.top).map((entry) => entry.taskId);
+}
 
-  await page.mouse.move(dragX, startY);
+async function dragTimelineBarVertically(page: Page, taskId: string, deltaY: number) {
+  const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
+  await expect(bar).toBeVisible();
+  const box = await bar.boundingBox();
+  if (!box) throw new Error(`Unable to resolve bounds for timeline bar ${taskId}`);
+
+  const startX = box.x + Math.min(Math.max(8, box.width / 4), box.width - 4);
+  const startY = box.y + box.height / 2;
+
+  await page.mouse.move(startX, startY);
   await page.mouse.down();
-  await page.mouse.move(dragX, targetY, { steps: 16 });
+  await page.mouse.move(startX, startY + deltaY, { steps: 18 });
   await page.mouse.up();
-  await page.waitForTimeout(50);
 }
 
 test('timeline supports swimlane toggle and due-date sort without affecting gantt route', async ({
@@ -327,8 +313,7 @@ test('timeline uses local transient state before saved default and falls back to
   });
   const projectId = project.id as string;
   const sections = await api(`/projects/${projectId}/sections`, token);
-  const defaultSection =
-    sections.find((section: { isDefault?: boolean }) => section.isDefault) ?? sections[0];
+  const defaultSection = sections.find((section: { isDefault?: boolean }) => section.isDefault) ?? sections[0];
 
   await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: defaultSection.id,
@@ -369,11 +354,10 @@ test('timeline uses local transient state before saved default and falls back to
   await expect(freshPage.locator('[data-testid="timeline-save-default"]')).toBeDisabled();
 
   await freshPage.click('[data-testid="timeline-swimlane-status"]');
-  const saveResponse = freshPage.waitForResponse(
-    (response) =>
-      response.url().includes(`/projects/${projectId}/timeline/preferences/view-state/timeline`) &&
-      response.request().method() === 'PUT' &&
-      response.ok(),
+  const saveResponse = freshPage.waitForResponse((response) =>
+    response.url().includes(`/projects/${projectId}/timeline/preferences/view-state/timeline`) &&
+    response.request().method() === 'PUT' &&
+    response.ok(),
   );
   await freshPage.click('[data-testid="timeline-save-default"]');
   await saveResponse;
@@ -384,9 +368,10 @@ test('timeline uses local transient state before saved default and falls back to
   const savedDefaultPage = await savedDefaultContext.newPage();
   await login(savedDefaultPage, sub, email);
   await savedDefaultPage.goto(`/projects/${projectId}?view=timeline`);
-  await expect(
-    savedDefaultPage.locator('[data-testid="timeline-swimlane-status"]'),
-  ).toHaveAttribute('data-active', 'true');
+  await expect(savedDefaultPage.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
   await savedDefaultContext.close();
 });
 
@@ -445,11 +430,11 @@ test('timeline assignee swimlane reorder persists after reload', async ({ page }
   await expect.poll(() => laneOrder(page)).toEqual(expectedOrder);
 });
 
-test('timeline manual vertical reorder persists within section, assignee, and status lanes', async ({
+test('timeline manual row layout persists separately for section assignee and status swimlanes', async ({
   page,
 }) => {
   const now = Date.now();
-  const sub = `e2e-timeline-vertical-${now}`;
+  const sub = `e2e-timeline-manual-layout-${now}`;
   const email = `${sub}@example.com`;
 
   await login(page, sub, email);
@@ -460,141 +445,128 @@ test('timeline manual vertical reorder persists within section, assignee, and st
   const workspaceId = workspaces[0].id as string;
   const project = await api('/projects', token, 'POST', {
     workspaceId,
-    name: `Timeline Vertical Reorder ${now}`,
+    name: `Timeline Manual Layout ${now}`,
   });
   const projectId = project.id as string;
-  const sectionLane = await api(`/projects/${projectId}/sections`, token, 'POST', {
-    name: 'Section Lane',
+
+  const taskA = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    title: `Manual Layout A ${now}`,
+    assigneeUserId: sub,
+    startAt: dayIso(1),
+    dueAt: dayIso(5),
   });
-  const sharedSection = await api(`/projects/${projectId}/sections`, token, 'POST', {
-    name: 'Shared Lane',
+  const taskB = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    title: `Manual Layout B ${now}`,
+    assigneeUserId: sub,
+    startAt: dayIso(1),
+    dueAt: dayIso(5),
+  });
+  const taskC = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    title: `Manual Layout C ${now}`,
+    assigneeUserId: sub,
+    startAt: dayIso(1),
+    dueAt: dayIso(5),
   });
 
-  const sectionTopTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
-    sectionId: sectionLane.id,
-    title: `Section Top ${now}`,
-    status: 'TODO',
-    startAt: dayIso(1),
-    dueAt: dayIso(4),
-  });
-  const sectionBottomTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
-    sectionId: sectionLane.id,
-    title: `Section Bottom ${now}`,
-    status: 'DONE',
-    startAt: dayIso(2),
-    dueAt: dayIso(5),
-  });
-  const assigneeTopTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
-    sectionId: sharedSection.id,
-    title: `Assignee Top ${now}`,
-    assigneeUserId: sub,
-    status: 'BLOCKED',
-    startAt: dayIso(1),
-    dueAt: dayIso(4),
-  });
-  const assigneeBottomTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
-    sectionId: sharedSection.id,
-    title: `Assignee Bottom ${now}`,
-    assigneeUserId: sub,
-    status: 'DONE',
-    startAt: dayIso(2),
-    dueAt: dayIso(5),
-  });
-  const statusTopTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
-    sectionId: sharedSection.id,
-    title: `Status Top ${now}`,
-    status: 'IN_PROGRESS',
-    startAt: dayIso(1),
-    dueAt: dayIso(4),
-  });
-  const statusBottomTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
-    sectionId: sharedSection.id,
-    title: `Status Bottom ${now}`,
-    status: 'IN_PROGRESS',
-    startAt: dayIso(2),
-    dueAt: dayIso(5),
-  });
+  const taskIds = [taskA.id as string, taskB.id as string, taskC.id as string];
 
   await page.goto(`/projects/${projectId}?view=timeline`);
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await page.click('[data-testid="timeline-zoom-day"]');
+  await expect(page.locator('[data-testid="timeline-zoom-day"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await expect.poll(async () => [...(await orderedTaskIdsByTop(page, taskIds))].sort()).toEqual(
+    [...taskIds].sort(),
+  );
+  const sectionInitialOrder = await orderedTaskIdsByTop(page, taskIds);
+  const sectionExpectedOrder = [
+    sectionInitialOrder[2]!,
+    sectionInitialOrder[0]!,
+    sectionInitialOrder[1]!,
+  ];
 
-  await dragTimelineBarToTaskPosition(page, sectionTopTask.id, sectionBottomTask.id, 'after');
-  await expect
-    .poll(async () => {
-      const [topY, bottomY] = await Promise.all([
-        timelineBarTop(page, sectionTopTask.id),
-        timelineBarTop(page, sectionBottomTask.id),
-      ]);
-      return topY > bottomY;
-    })
-    .toBe(true);
+  const sectionSave = page.waitForResponse((response) =>
+    response.url().includes(`/projects/${projectId}/timeline/preferences/manual-layout/section`) &&
+    response.request().method() === 'PUT' &&
+    response.ok(),
+  );
+  await dragTimelineBarVertically(page, sectionExpectedOrder[0], -120);
+  await sectionSave;
+  await expect.poll(() => orderedTaskIdsByTop(page, taskIds)).toEqual(sectionExpectedOrder);
 
   await page.click('[data-testid="timeline-swimlane-assignee"]');
   await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute(
     'data-active',
     'true',
   );
-  await dragTimelineBarToTaskPosition(page, assigneeTopTask.id, assigneeBottomTask.id, 'after');
-  await expect
-    .poll(async () => {
-      const [topY, bottomY] = await Promise.all([
-        timelineBarTop(page, assigneeTopTask.id),
-        timelineBarTop(page, assigneeBottomTask.id),
-      ]);
-      return topY > bottomY;
-    })
-    .toBe(true);
+  await expect.poll(async () => [...(await orderedTaskIdsByTop(page, taskIds))].sort()).toEqual(
+    [...taskIds].sort(),
+  );
+  const assigneeInitialOrder = await orderedTaskIdsByTop(page, taskIds);
+  const assigneeExpectedOrder = [
+    assigneeInitialOrder[1]!,
+    assigneeInitialOrder[0]!,
+    assigneeInitialOrder[2]!,
+  ];
+
+  const assigneeSave = page.waitForResponse((response) =>
+    response.url().includes(`/projects/${projectId}/timeline/preferences/manual-layout/assignee`) &&
+    response.request().method() === 'PUT' &&
+    response.ok(),
+  );
+  await dragTimelineBarVertically(page, assigneeExpectedOrder[0], -80);
+  await assigneeSave;
+  await expect.poll(() => orderedTaskIdsByTop(page, taskIds)).toEqual(assigneeExpectedOrder);
 
   await page.click('[data-testid="timeline-swimlane-status"]');
   await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute(
     'data-active',
     'true',
   );
-  await dragTimelineBarToTaskPosition(page, statusTopTask.id, statusBottomTask.id, 'after');
-  await expect
-    .poll(async () => {
-      const [topY, bottomY] = await Promise.all([
-        timelineBarTop(page, statusTopTask.id),
-        timelineBarTop(page, statusBottomTask.id),
-      ]);
-      return topY > bottomY;
-    })
-    .toBe(true);
+  await expect.poll(async () => [...(await orderedTaskIdsByTop(page, taskIds))].sort()).toEqual(
+    [...taskIds].sort(),
+  );
+  const statusInitialOrder = await orderedTaskIdsByTop(page, taskIds);
+  const statusExpectedOrder = [
+    statusInitialOrder[1]!,
+    statusInitialOrder[2]!,
+    statusInitialOrder[0]!,
+  ];
+
+  const statusSave = page.waitForResponse((response) =>
+    response.url().includes(`/projects/${projectId}/timeline/preferences/manual-layout/status`) &&
+    response.request().method() === 'PUT' &&
+    response.ok(),
+  );
+  await dragTimelineBarVertically(page, statusInitialOrder[0]!, 100);
+  await statusSave;
+  await expect.poll(() => orderedTaskIdsByTop(page, taskIds)).toEqual(statusExpectedOrder);
 
   await page.reload();
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
 
-  await expect
-    .poll(async () => {
-      const [topY, bottomY] = await Promise.all([
-        timelineBarTop(page, statusTopTask.id),
-        timelineBarTop(page, statusBottomTask.id),
-      ]);
-      return topY > bottomY;
-    })
-    .toBe(true);
-
   await page.click('[data-testid="timeline-swimlane-section"]');
-  await expect
-    .poll(async () => {
-      const [topY, bottomY] = await Promise.all([
-        timelineBarTop(page, sectionTopTask.id),
-        timelineBarTop(page, sectionBottomTask.id),
-      ]);
-      return topY > bottomY;
-    })
-    .toBe(true);
+  await expect(page.locator('[data-testid="timeline-swimlane-section"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await expect.poll(() => orderedTaskIdsByTop(page, taskIds)).toEqual(sectionExpectedOrder);
 
   await page.click('[data-testid="timeline-swimlane-assignee"]');
-  await expect
-    .poll(async () => {
-      const [topY, bottomY] = await Promise.all([
-        timelineBarTop(page, assigneeTopTask.id),
-        timelineBarTop(page, assigneeBottomTask.id),
-      ]);
-      return topY > bottomY;
-    })
-    .toBe(true);
+  await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await expect.poll(() => orderedTaskIdsByTop(page, taskIds)).toEqual(assigneeExpectedOrder);
+
+  await page.click('[data-testid="timeline-swimlane-status"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-status"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await expect.poll(() => orderedTaskIdsByTop(page, taskIds)).toEqual(statusExpectedOrder);
 });
 
 test('timeline drag can move task across assignee lanes into unassigned', async ({ page }) => {
