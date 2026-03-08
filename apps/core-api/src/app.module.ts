@@ -27,6 +27,7 @@ import { DashboardsModule } from './dashboards/dashboards.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { CustomFieldsController } from './custom-fields/custom-fields.controller';
 import { ProjectStatusUpdatesController } from './projects/project-status-updates.controller';
+import { ProjectViewsController } from './projects/project-views.controller';
 import { RecurringTasksController } from './recurring-tasks/recurring-tasks.controller';
 import { RecurringTaskWorker } from './recurring-tasks/recurring-task.worker';
 import { FormsController } from './forms/forms.controller';
@@ -51,6 +52,7 @@ import { TaskProjectLinksModule } from './task-project-links/task-project-links.
     NotificationsController,
     CustomFieldsController,
     ProjectStatusUpdatesController,
+    ProjectViewsController,
     RecurringTasksController,
     FormsController,
     TaskApprovalController,
