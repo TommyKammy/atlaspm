@@ -28,6 +28,8 @@ import { queryKeys } from '@/lib/query-keys';
 import type {
   AuditEvent,
   ProjectMember,
+  RecurringFrequency,
+  RecurringRule,
   SectionTaskGroup,
   Task,
   TaskAttachment,
@@ -325,6 +327,65 @@ function MetadataRow({
   );
 }
 
+type RecurrenceDraft = {
+  frequency: RecurringFrequency;
+  interval: string;
+  daysOfWeek: number[];
+  dayOfMonth: string;
+  startDate: string;
+  endDate: string;
+};
+
+const RECURRENCE_WEEKDAY_KEYS = [
+  'weekdaySunShort',
+  'weekdayMonShort',
+  'weekdayTueShort',
+  'weekdayWedShort',
+  'weekdayThuShort',
+  'weekdayFriShort',
+  'weekdaySatShort',
+] as const;
+
+function recurrenceIntervalLabel(interval: number, frequency: RecurringFrequency, t: (key: string) => string) {
+  if (frequency === 'DAILY') return interval === 1 ? `Every ${t('recurrenceDaily').toLowerCase()}` : `Every ${interval} days`;
+  if (frequency === 'WEEKLY') return interval === 1 ? `Every week` : `Every ${interval} weeks`;
+  return interval === 1 ? `Every month` : `Every ${interval} months`;
+}
+
+function recurrenceSummary(rule: RecurringRule, locale: 'en' | 'ja', t: (key: string) => string) {
+  const parts = [recurrenceIntervalLabel(rule.interval, rule.frequency, t)];
+  if (rule.frequency === 'WEEKLY' && rule.daysOfWeek.length) {
+    parts.push(rule.daysOfWeek
+      .slice()
+      .sort((left, right) => left - right)
+      .map((day) => t(RECURRENCE_WEEKDAY_KEYS[day] ?? RECURRENCE_WEEKDAY_KEYS[0]))
+      .join(', '));
+  }
+  if (rule.frequency === 'MONTHLY' && rule.dayOfMonth) {
+    parts.push(`Day ${rule.dayOfMonth}`);
+  }
+  const startDate = dateOnlyInputToLocalDate(rule.startDate);
+  if (startDate) {
+    parts.push(startDate.toLocaleDateString(locale === 'ja' ? 'ja-JP' : 'en-US'));
+  }
+  if (!rule.isActive) {
+    parts.unshift(t('recurrenceDisabled'));
+  }
+  return parts.join(' • ');
+}
+
+function createRecurrenceDraft(task: Task | undefined, rule: RecurringRule | null): RecurrenceDraft {
+  const fallbackStartDate = dateOnlyInputValue(task?.startAt) || dateOnlyInputValue(task?.dueAt) || new Date().toISOString().slice(0, 10);
+  return {
+    frequency: rule?.frequency ?? 'DAILY',
+    interval: String(rule?.interval ?? 1),
+    daysOfWeek: rule?.daysOfWeek ?? [],
+    dayOfMonth: rule?.dayOfMonth ? String(rule.dayOfMonth) : '',
+    startDate: dateOnlyInputValue(rule?.startDate) || fallbackStartDate,
+    endDate: dateOnlyInputValue(rule?.endDate) || '',
+  };
+}
+
 export default function TaskDetailDrawer({
   taskId,
   open,
@@ -353,6 +414,9 @@ export default function TaskDetailDrawer({
   const [dueDateInput, setDueDateInput] = useState('');
   const [assigneeInput, setAssigneeInput] = useState<string>('unassigned');
   const [statusInput, setStatusInput] = useState<Task['status']>('TODO');
+  const [recurrenceDraft, setRecurrenceDraft] = useState<RecurrenceDraft>(createRecurrenceDraft(undefined, null));
+  const [isRecurrenceEditing, setIsRecurrenceEditing] = useState(false);
+  const [recurrenceError, setRecurrenceError] = useState<string | null>(null);
   const [undoComplete, setUndoComplete] = useState<{
     taskId: string;
     title: string;
@@ -423,6 +487,12 @@ export default function TaskDetailDrawer({
     queryKey: ['project', projectId],
     queryFn: () => api(`/projects/${projectId}`),
     enabled: enabled && !!projectId,
+  });
+
+  const recurringRulesQuery = useQuery<RecurringRule[]>({
+    queryKey: queryKeys.projectRecurringRules(projectId, { includeInactive: true }),
+    queryFn: () => api(`/projects/${projectId}/recurring-rules?includeInactive=true`),
+    enabled,
   });
 
   const projectsQuery = useProjects(projectQuery.data?.workspaceId ?? '');
@@ -572,6 +642,53 @@ export default function TaskDetailDrawer({
     },
   });
 
+  const createRecurrence = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      api(`/projects/${projectId}/recurring-rules`, {
+        method: 'POST',
+        body,
+      }) as Promise<RecurringRule>,
+    onSuccess: async (created) => {
+      setRecurrenceError(null);
+      setIsRecurrenceEditing(false);
+      queryClient.setQueryData<RecurringRule[]>(
+        queryKeys.projectRecurringRules(projectId, { includeInactive: true }),
+        (current = []) => [created, ...current.filter((rule) => rule.id !== created.id)],
+      );
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectRecurringRules(projectId, { includeInactive: true }) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
+    },
+    onError: (error) => {
+      setRecurrenceError(error instanceof Error ? error.message : t('recurrenceSaveFailed'));
+    },
+  });
+
+  const updateRecurrence = useMutation({
+    mutationFn: ({ ruleId, body }: { ruleId: string; body: Record<string, unknown> }) =>
+      api(`/recurring-rules/${ruleId}`, {
+        method: 'PUT',
+        body,
+      }) as Promise<RecurringRule>,
+    onSuccess: async (updated) => {
+      setRecurrenceError(null);
+      setIsRecurrenceEditing(false);
+      queryClient.setQueryData<RecurringRule[]>(
+        queryKeys.projectRecurringRules(projectId, { includeInactive: true }),
+        (current = []) => {
+          if (!current.some((rule) => rule.id === updated.id)) {
+            return [updated, ...current];
+          }
+          return current.map((rule) => (rule.id === updated.id ? { ...rule, ...updated } : rule));
+        },
+      );
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectRecurringRules(projectId, { includeInactive: true }) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
+    },
+    onError: (error) => {
+      setRecurrenceError(error instanceof Error ? error.message : t('recurrenceSaveFailed'));
+    },
+  });
+
   const members = membersQuery.data ?? [];
   const mentionCandidates = members.filter((member) => {
     const name = (member.user.displayName ?? member.user.email ?? member.user.id).toLowerCase();
@@ -604,6 +721,21 @@ export default function TaskDetailDrawer({
     return { ...counted, percent };
   }, [subtasksTreeQuery.data]);
 
+  const reminderLocal = reminderQuery.data?.remindAt
+    ? new Date(reminderQuery.data.remindAt).toISOString().slice(0, 16)
+    : '';
+  const reminderInput = reminderAtInput || reminderLocal;
+  const currentTask = taskQuery.data;
+  const currentRecurringRule = useMemo(() => {
+    if (!currentTask) return null;
+    const rules = recurringRulesQuery.data ?? [];
+    if (currentTask.recurringRuleId) {
+      const generatedRule = rules.find((rule) => rule.id === currentTask.recurringRuleId);
+      if (generatedRule) return generatedRule;
+    }
+    return rules.find((rule) => rule.sourceTaskId === currentTask.id) ?? null;
+  }, [currentTask, recurringRulesQuery.data]);
+
   useEffect(() => {
     return () => {
       if (undoCompleteTimerRef.current) {
@@ -623,12 +755,20 @@ export default function TaskDetailDrawer({
   }, [taskQuery.data]);
 
   useEffect(() => {
+    setRecurrenceDraft(createRecurrenceDraft(taskQuery.data, currentRecurringRule));
+    setRecurrenceError(null);
+    setIsRecurrenceEditing(false);
+  }, [currentRecurringRule?.id, currentRecurringRule?.updatedAt, taskQuery.data?.id]);
+
+  useEffect(() => {
     if (open) return;
     setPendingCompleteWarningCount(null);
     if (undoCompleteTimerRef.current) {
       clearTimeout(undoCompleteTimerRef.current);
     }
     setUndoComplete(null);
+    setIsRecurrenceEditing(false);
+    setRecurrenceError(null);
   }, [open]);
 
   const tryCommentMentionLookup = (text: string) => {
@@ -639,12 +779,6 @@ export default function TaskDetailDrawer({
     }
     setCommentMentionQuery(match[1] ?? '');
   };
-
-  const reminderLocal = reminderQuery.data?.remindAt
-    ? new Date(reminderQuery.data.remindAt).toISOString().slice(0, 16)
-    : '';
-  const reminderInput = reminderAtInput || reminderLocal;
-  const currentTask = taskQuery.data;
   const currentAssignee = assigneeLabel(currentTask, members, t);
   const isDone = currentTask?.status === 'DONE';
   const openSubtaskCount = useMemo(
@@ -742,6 +876,72 @@ export default function TaskDetailDrawer({
     const assigneeUserId = nextAssignee === 'unassigned' ? null : nextAssignee;
     if ((currentTask.assigneeUserId ?? null) === assigneeUserId) return;
     patchTask.mutate({ assigneeUserId, version: currentTask.version });
+  };
+
+  const toggleRecurrenceWeekday = (day: number) => {
+    setRecurrenceDraft((current) => ({
+      ...current,
+      daysOfWeek: current.daysOfWeek.includes(day)
+        ? current.daysOfWeek.filter((item) => item !== day)
+        : [...current.daysOfWeek, day].sort((left, right) => left - right),
+    }));
+  };
+
+  const saveRecurrence = () => {
+    if (!currentTask) return;
+
+    const parsedInterval = Number.parseInt(recurrenceDraft.interval, 10);
+    if (!Number.isFinite(parsedInterval) || parsedInterval < 1 || !recurrenceDraft.startDate) {
+      setRecurrenceError(t('recurrenceSaveFailed'));
+      return;
+    }
+
+    if (recurrenceDraft.frequency === 'WEEKLY' && recurrenceDraft.daysOfWeek.length === 0) {
+      setRecurrenceError(t('recurrenceWeeklyValidation'));
+      return;
+    }
+
+    const parsedDayOfMonth = Number.parseInt(recurrenceDraft.dayOfMonth, 10);
+    if (
+      recurrenceDraft.frequency === 'MONTHLY'
+      && (!Number.isFinite(parsedDayOfMonth) || parsedDayOfMonth < 1 || parsedDayOfMonth > 31)
+    ) {
+      setRecurrenceError(t('recurrenceMonthlyValidation'));
+      return;
+    }
+
+    const body = {
+      frequency: recurrenceDraft.frequency,
+      interval: parsedInterval,
+      daysOfWeek: recurrenceDraft.frequency === 'WEEKLY' ? recurrenceDraft.daysOfWeek : [],
+      dayOfMonth: recurrenceDraft.frequency === 'MONTHLY' ? parsedDayOfMonth : null,
+      startDate: normalizeDateOnlyUtcIso(recurrenceDraft.startDate),
+      endDate: recurrenceDraft.endDate ? normalizeDateOnlyUtcIso(recurrenceDraft.endDate) : null,
+    };
+
+    if (currentRecurringRule) {
+      updateRecurrence.mutate({ ruleId: currentRecurringRule.id, body });
+      return;
+    }
+
+    createRecurrence.mutate({
+      ...body,
+      title: currentTask.title.trim() || t('untitledTask'),
+      description: currentTask.descriptionText ?? currentTask.description ?? '',
+      sectionId: currentTask.sectionId,
+      sourceTaskId: currentTask.id,
+      assigneeUserId: currentTask.assigneeUserId ?? undefined,
+      priority: currentTask.priority ?? undefined,
+      tags: currentTask.tags ?? [],
+    });
+  };
+
+  const toggleRecurrenceActive = (nextActive: boolean) => {
+    if (!currentRecurringRule) return;
+    updateRecurrence.mutate({
+      ruleId: currentRecurringRule.id,
+      body: { isActive: nextActive },
+    });
   };
 
   return (
@@ -1042,6 +1242,200 @@ export default function TaskDetailDrawer({
                         {t('clearReminder')}
                       </Button>
                     </div>
+                  </section>
+
+                  <section
+                    className="space-y-3 rounded-lg border border-border/60 bg-card/50 p-3"
+                    data-testid="task-detail-recurrence-section"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                          {t('recurrence')}
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          {currentTask?.recurringRuleId ? t('recurrenceGeneratedHint') : t('recurrenceHelp')}
+                        </p>
+                      </div>
+                      {currentRecurringRule ? (
+                        <Badge variant="secondary">
+                          {currentRecurringRule.isActive ? t('recurrenceActive') : t('recurrenceDisabled')}
+                        </Badge>
+                      ) : null}
+                    </div>
+
+                    {recurrenceError ? (
+                      <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                        {recurrenceError}
+                      </div>
+                    ) : null}
+
+                    {!isRecurrenceEditing ? (
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div
+                          className="text-sm text-foreground"
+                          data-testid="task-detail-recurrence-summary"
+                        >
+                          {currentRecurringRule
+                            ? recurrenceSummary(currentRecurringRule, locale, t)
+                            : t('recurrenceEmpty')}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {currentRecurringRule ? (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                data-testid="task-detail-recurrence-edit"
+                                onClick={() => {
+                                  setRecurrenceDraft(createRecurrenceDraft(currentTask, currentRecurringRule));
+                                  setRecurrenceError(null);
+                                  setIsRecurrenceEditing(true);
+                                }}
+                              >
+                                {t('recurrenceEdit')}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                data-testid="task-detail-recurrence-disable"
+                                disabled={updateRecurrence.isPending}
+                                onClick={() => toggleRecurrenceActive(!currentRecurringRule.isActive)}
+                              >
+                                {currentRecurringRule.isActive ? t('recurrenceDisable') : t('recurrenceEnable')}
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              size="sm"
+                              data-testid="task-detail-recurrence-create"
+                              onClick={() => {
+                                setRecurrenceDraft(createRecurrenceDraft(currentTask, null));
+                                setRecurrenceError(null);
+                                setIsRecurrenceEditing(true);
+                              }}
+                            >
+                              {t('recurrenceCreate')}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <label className="space-y-1 text-sm">
+                            <span className="text-muted-foreground">{t('recurrenceFrequency')}</span>
+                            <select
+                              value={recurrenceDraft.frequency}
+                              onChange={(event) =>
+                                setRecurrenceDraft((current) => ({
+                                  ...current,
+                                  frequency: event.target.value as RecurringFrequency,
+                                }))
+                              }
+                              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                              data-testid="task-detail-recurrence-frequency"
+                            >
+                              <option value="DAILY">{t('recurrenceDaily')}</option>
+                              <option value="WEEKLY">{t('recurrenceWeekly')}</option>
+                              <option value="MONTHLY">{t('recurrenceMonthly')}</option>
+                            </select>
+                          </label>
+                          <label className="space-y-1 text-sm">
+                            <span className="text-muted-foreground">{t('recurrenceInterval')}</span>
+                            <Input
+                              type="number"
+                              min={1}
+                              value={recurrenceDraft.interval}
+                              onChange={(event) =>
+                                setRecurrenceDraft((current) => ({ ...current, interval: event.target.value }))
+                              }
+                              data-testid="task-detail-recurrence-interval"
+                            />
+                          </label>
+                          <label className="space-y-1 text-sm">
+                            <span className="text-muted-foreground">{t('recurrenceStartDate')}</span>
+                            <Input
+                              type="date"
+                              value={recurrenceDraft.startDate}
+                              onChange={(event) =>
+                                setRecurrenceDraft((current) => ({ ...current, startDate: event.target.value }))
+                              }
+                              data-testid="task-detail-recurrence-start-date"
+                            />
+                          </label>
+                          <label className="space-y-1 text-sm">
+                            <span className="text-muted-foreground">{t('recurrenceEndDate')}</span>
+                            <Input
+                              type="date"
+                              value={recurrenceDraft.endDate}
+                              onChange={(event) =>
+                                setRecurrenceDraft((current) => ({ ...current, endDate: event.target.value }))
+                              }
+                              data-testid="task-detail-recurrence-end-date"
+                            />
+                          </label>
+                        </div>
+
+                        {recurrenceDraft.frequency === 'WEEKLY' ? (
+                          <div className="space-y-2">
+                            <div className="text-sm text-muted-foreground">{t('recurrenceDays')}</div>
+                            <div className="flex flex-wrap gap-2">
+                              {RECURRENCE_WEEKDAY_KEYS.map((labelKey, day) => (
+                                <Button
+                                  key={labelKey}
+                                  type="button"
+                                  size="sm"
+                                  variant={recurrenceDraft.daysOfWeek.includes(day) ? 'default' : 'outline'}
+                                  data-testid={`task-detail-recurrence-weekday-${day}`}
+                                  onClick={() => toggleRecurrenceWeekday(day)}
+                                >
+                                  {t(labelKey)}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {recurrenceDraft.frequency === 'MONTHLY' ? (
+                          <label className="space-y-1 text-sm">
+                            <span className="text-muted-foreground">{t('recurrenceDayOfMonth')}</span>
+                            <Input
+                              type="number"
+                              min={1}
+                              max={31}
+                              value={recurrenceDraft.dayOfMonth}
+                              onChange={(event) =>
+                                setRecurrenceDraft((current) => ({ ...current, dayOfMonth: event.target.value }))
+                              }
+                              data-testid="task-detail-recurrence-day-of-month"
+                            />
+                          </label>
+                        ) : null}
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            size="sm"
+                            data-testid="task-detail-recurrence-save"
+                            disabled={createRecurrence.isPending || updateRecurrence.isPending}
+                            onClick={saveRecurrence}
+                          >
+                            {createRecurrence.isPending || updateRecurrence.isPending ? t('saving') : t('recurrenceSave')}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setRecurrenceDraft(createRecurrenceDraft(currentTask, currentRecurringRule));
+                              setRecurrenceError(null);
+                              setIsRecurrenceEditing(false);
+                            }}
+                          >
+                            {t('cancel')}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </section>
 
                   {taskId ? (

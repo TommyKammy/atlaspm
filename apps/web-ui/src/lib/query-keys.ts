@@ -12,6 +12,8 @@ export const queryKeys = {
   projectTasksDeletedGrouped: (projectId: string) =>
     ['project', projectId, 'tasks', { groupBy: 'section', deleted: true }] as const,
   projectRules: (projectId: string) => ['project', projectId, 'rules'] as const,
+  projectRecurringRules: (projectId: string, options?: { includeInactive?: boolean }) =>
+    ['project', projectId, 'recurring-rules', options?.includeInactive ? 'all' : 'active'] as const,
   projectMembers: (projectId: string) => ['project', projectId, 'members'] as const,
   projectTimelinePreferences: (projectId: string) => ['project', projectId, 'timeline', 'preferences'] as const,
   projectCustomFields: (projectId: string) => ['project', projectId, 'custom-fields'] as const,

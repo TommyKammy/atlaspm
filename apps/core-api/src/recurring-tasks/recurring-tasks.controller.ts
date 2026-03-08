@@ -25,6 +25,7 @@ import {
   Max,
   ArrayMinSize,
   ArrayMaxSize,
+  IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AuthGuard } from '../auth/auth.guard';
@@ -69,6 +70,10 @@ class CreateRecurringRuleDto {
 
   @IsString()
   sectionId: string;
+
+  @IsOptional()
+  @IsUUID()
+  sourceTaskId?: string;
 
   @IsOptional()
   @IsString()
@@ -188,6 +193,28 @@ export class RecurringTasksController {
       throw new NotFoundException('Section not found');
     }
 
+    if (body.sourceTaskId) {
+      const sourceTask = await this.prisma.task.findFirst({
+        where: {
+          id: body.sourceTaskId,
+          projectId,
+          deletedAt: null,
+        },
+        select: { id: true },
+      });
+      if (!sourceTask) {
+        throw new NotFoundException('Source task not found');
+      }
+
+      const existingRule = await this.prisma.recurringRule.findFirst({
+        where: { sourceTaskId: body.sourceTaskId },
+        select: { id: true },
+      });
+      if (existingRule) {
+        throw new ConflictException('Source task already has a recurring rule');
+      }
+    }
+
     this.validateRecurringConfig(body);
 
     const startDate = normalizeRecurringDate(body.startDate);
@@ -212,6 +239,7 @@ export class RecurringTasksController {
           daysOfWeek: body.daysOfWeek ?? [],
           dayOfMonth: body.dayOfMonth,
           sectionId: body.sectionId,
+          sourceTaskId: body.sourceTaskId,
           assigneeUserId: body.assigneeUserId,
           priority: body.priority,
           tags: body.tags ?? [],

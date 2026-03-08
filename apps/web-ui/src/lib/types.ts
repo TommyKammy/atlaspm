@@ -141,6 +141,8 @@ export type Task = {
   deletedByUserId?: string | null;
   version: number;
   position: number;
+  tags?: string[];
+  recurringRuleId?: string | null;
   subtaskMovePolicy?: TimelineSubtaskMovePolicy;
   customFieldValues?: TaskCustomFieldValue[];
   approval?: TaskApproval | null;
@@ -395,6 +397,7 @@ export type RecurringFrequency = 'DAILY' | 'WEEKLY' | 'MONTHLY';
 export type RecurringRule = {
   id: string;
   projectId: string;
+  sourceTaskId?: string | null;
   title: string;
   description?: string | null;
   frequency: RecurringFrequency;
