@@ -1,3 +1,4 @@
+import { normalizeDateOnlyUtcIso } from '@atlaspm/domain';
 import { RecurringFrequency } from '@prisma/client';
 
 type RecurrenceConfig = {
@@ -13,10 +14,14 @@ type DueRecurrenceConfig = RecurrenceConfig & {
   endDate?: Date | null;
 };
 
-const MAX_DUE_SLOTS_PER_SCAN = 366;
+const ONE_DAY_MS = 86_400_000;
 
-function toUtcDateOnly(date: Date): Date {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+function toDateOnlyDate(value: Date): Date {
+  const normalized = normalizeDateOnlyUtcIso(value);
+  if (!normalized) {
+    throw new Error('Expected a valid recurrence date');
+  }
+  return new Date(normalized);
 }
 
 function addUtcDays(date: Date, days: number): Date {
@@ -25,12 +30,16 @@ function addUtcDays(date: Date, days: number): Date {
   return next;
 }
 
-function startOfUtcWeek(date: Date): Date {
-  return addUtcDays(date, -date.getUTCDay());
+function addUtcWeeks(date: Date, weeks: number): Date {
+  return addUtcDays(date, weeks * 7);
+}
+
+function maxDate(left: Date, right: Date): Date {
+  return left >= right ? left : right;
 }
 
 function diffUtcDays(left: Date, right: Date): number {
-  return Math.round((toUtcDateOnly(left).getTime() - toUtcDateOnly(right).getTime()) / 86_400_000);
+  return Math.round((left.getTime() - right.getTime()) / ONE_DAY_MS);
 }
 
 function diffUtcMonths(left: Date, right: Date): number {
@@ -40,108 +49,138 @@ function diffUtcMonths(left: Date, right: Date): number {
   );
 }
 
-function lastDayOfUtcMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+function lastDayOfUtcMonth(year: number, monthIndex: number): number {
+  return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+}
+
+function startOfUtcWeek(date: Date): Date {
+  return addUtcDays(date, -date.getUTCDay());
 }
 
 function getEffectiveInterval(interval?: number | null): number {
   return Math.max(1, interval ?? 1);
 }
 
-function isScheduledOnDate(config: RecurrenceConfig, date: Date): boolean {
-  const candidate = toUtcDateOnly(date);
-  const startDate = toUtcDateOnly(config.startDate);
+function getSortedDaysOfWeek(daysOfWeek?: number[] | null): number[] {
+  return Array.from(new Set(daysOfWeek ?? [])).sort((left, right) => left - right);
+}
 
-  if (candidate < startDate) {
-    return false;
+function buildMonthlyCandidate(startDate: Date, monthOffset: number, dayOfMonth: number): Date {
+  const year = startDate.getUTCFullYear();
+  const monthIndex = startDate.getUTCMonth() + monthOffset;
+  const candidateYear = year + Math.floor(monthIndex / 12);
+  const candidateMonthIndex = ((monthIndex % 12) + 12) % 12;
+  const effectiveDay = Math.min(dayOfMonth, lastDayOfUtcMonth(candidateYear, candidateMonthIndex));
+  return new Date(Date.UTC(candidateYear, candidateMonthIndex, effectiveDay));
+}
+
+function nextDailyScheduledAt(config: RecurrenceConfig, fromDate: Date): Date {
+  const startDate = normalizeRecurringDate(config.startDate);
+  const from = maxDate(normalizeRecurringDate(fromDate), startDate);
+  const interval = getEffectiveInterval(config.interval);
+  const daysSinceStart = diffUtcDays(from, startDate);
+  const steps = Math.max(0, Math.ceil(daysSinceStart / interval));
+  return addUtcDays(startDate, steps * interval);
+}
+
+function nextWeeklyScheduledAt(config: RecurrenceConfig, fromDate: Date): Date {
+  const startDate = normalizeRecurringDate(config.startDate);
+  const from = maxDate(normalizeRecurringDate(fromDate), startDate);
+  const interval = getEffectiveInterval(config.interval);
+  const daysOfWeek = getSortedDaysOfWeek(config.daysOfWeek);
+
+  if (!daysOfWeek.length) {
+    const daysSinceStart = diffUtcDays(from, startDate);
+    const steps = Math.max(0, Math.ceil(daysSinceStart / (interval * 7)));
+    return addUtcDays(startDate, steps * interval * 7);
   }
 
-  const interval = getEffectiveInterval(config.interval);
+  const startWeek = startOfUtcWeek(startDate);
+  const fromWeek = startOfUtcWeek(from);
+  const baseWeekDiff = Math.max(0, diffUtcDays(fromWeek, startWeek) / 7);
+  const remainder = baseWeekDiff % interval;
+  let cycleWeekDiff = remainder === 0 ? baseWeekDiff : baseWeekDiff + (interval - remainder);
 
-  switch (config.frequency) {
-    case RecurringFrequency.DAILY: {
-      return diffUtcDays(candidate, startDate) % interval === 0;
-    }
-    case RecurringFrequency.WEEKLY: {
-      const daysOfWeek = [...(config.daysOfWeek ?? [])].sort((left, right) => left - right);
-      if (!daysOfWeek.length || !daysOfWeek.includes(candidate.getUTCDay())) {
-        return false;
+  while (true) {
+    const cycleWeekStart = addUtcWeeks(startWeek, cycleWeekDiff);
+    for (const dayOfWeek of daysOfWeek) {
+      const candidate = addUtcDays(cycleWeekStart, dayOfWeek);
+      if (candidate < startDate || candidate < from) {
+        continue;
       }
-
-      const weekDiff =
-        diffUtcDays(startOfUtcWeek(candidate), startOfUtcWeek(startDate)) / 7;
-      return Number.isInteger(weekDiff) && weekDiff % interval === 0;
+      return candidate;
     }
-    case RecurringFrequency.MONTHLY: {
-      const monthsDiff = diffUtcMonths(candidate, startDate);
-      if (monthsDiff < 0 || monthsDiff % interval !== 0) {
-        return false;
-      }
-
-      const configuredDay = config.dayOfMonth ?? startDate.getUTCDate();
-      const effectiveDay = Math.min(
-        configuredDay,
-        lastDayOfUtcMonth(candidate.getUTCFullYear(), candidate.getUTCMonth()),
-      );
-      return candidate.getUTCDate() === effectiveDay;
-    }
+    cycleWeekDiff += interval;
   }
 }
 
-function findScheduledAtOrAfter(config: RecurrenceConfig, fromDate: Date): Date {
-  const startDate = toUtcDateOnly(config.startDate);
-  let cursor = toUtcDateOnly(fromDate);
-  if (cursor < startDate) {
-    cursor = startDate;
+function nextMonthlyScheduledAt(config: RecurrenceConfig, fromDate: Date): Date {
+  const startDate = normalizeRecurringDate(config.startDate);
+  const from = maxDate(normalizeRecurringDate(fromDate), startDate);
+  const interval = getEffectiveInterval(config.interval);
+  const dayOfMonth = config.dayOfMonth ?? startDate.getUTCDate();
+  let monthOffset = Math.max(0, diffUtcMonths(from, startDate));
+  const remainder = monthOffset % interval;
+  if (remainder !== 0) {
+    monthOffset += interval - remainder;
   }
 
-  for (let offset = 0; offset <= MAX_DUE_SLOTS_PER_SCAN; offset += 1) {
-    const candidate = addUtcDays(cursor, offset);
-    if (isScheduledOnDate(config, candidate)) {
-      return candidate;
-    }
+  let candidate = buildMonthlyCandidate(startDate, monthOffset, dayOfMonth);
+  while (candidate < from) {
+    monthOffset += interval;
+    candidate = buildMonthlyCandidate(startDate, monthOffset, dayOfMonth);
   }
 
-  throw new Error('Failed to find a scheduled recurrence slot within scan window');
+  return candidate;
+}
+
+function nextScheduledAtOrAfter(config: RecurrenceConfig, fromDate: Date): Date {
+  switch (config.frequency) {
+    case RecurringFrequency.DAILY:
+      return nextDailyScheduledAt(config, fromDate);
+    case RecurringFrequency.WEEKLY:
+      return nextWeeklyScheduledAt(config, fromDate);
+    case RecurringFrequency.MONTHLY:
+      return nextMonthlyScheduledAt(config, fromDate);
+  }
 }
 
 export function calculateInitialNextScheduledAt(
   config: RecurrenceConfig & { now?: Date | null },
 ): Date {
-  const now = toUtcDateOnly(config.now ?? new Date());
-  return findScheduledAtOrAfter(config, now);
+  return nextScheduledAtOrAfter(config, normalizeRecurringDate(config.now ?? new Date()));
 }
 
 export function calculateNextScheduledAtAfter(
   config: RecurrenceConfig,
   previousScheduledAt: Date,
 ): Date {
-  return findScheduledAtOrAfter(config, addUtcDays(previousScheduledAt, 1));
+  return nextScheduledAtOrAfter(config, addUtcDays(normalizeRecurringDate(previousScheduledAt), 1));
 }
 
 export function collectDueScheduledAtTimes(
   config: DueRecurrenceConfig,
   now: Date,
 ): Date[] {
-  const today = toUtcDateOnly(now);
-  const endDate = config.endDate ? toUtcDateOnly(config.endDate) : null;
-  let cursor = toUtcDateOnly(
+  const today = normalizeRecurringDate(now);
+  const endDate = config.endDate ? normalizeRecurringDate(config.endDate) : null;
+  const dueUntil = endDate && endDate < today ? endDate : today;
+  const firstScheduledAt =
     config.nextScheduledAt ??
-      calculateInitialNextScheduledAt({
-        ...config,
-        now: today,
-      }),
-  );
+    calculateInitialNextScheduledAt({
+      ...config,
+      now: dueUntil,
+    });
+  let cursor = normalizeRecurringDate(firstScheduledAt);
+
+  if (cursor > dueUntil) {
+    return [];
+  }
 
   const due: Date[] = [];
-  for (let count = 0; count < MAX_DUE_SLOTS_PER_SCAN; count += 1) {
-    if (cursor > today) {
-      break;
-    }
-    if (endDate && cursor > endDate) {
-      break;
-    }
+  const maxIterations = Math.max(1, diffUtcDays(dueUntil, cursor) + 1);
 
+  for (let count = 0; count < maxIterations && cursor <= dueUntil; count += 1) {
     due.push(cursor);
     cursor = calculateNextScheduledAtAfter(config, cursor);
   }
@@ -150,5 +189,5 @@ export function collectDueScheduledAtTimes(
 }
 
 export function normalizeRecurringDate(date: Date): Date {
-  return toUtcDateOnly(date);
+  return toDateOnlyDate(date);
 }

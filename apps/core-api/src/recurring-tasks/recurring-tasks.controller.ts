@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -290,6 +291,10 @@ export class RecurringTasksController {
     @Body() body: UpdateRecurringRuleDto,
     @CurrentRequest() req: AppRequest,
   ) {
+    if (body.startDate === null) {
+      throw new BadRequestException('startDate cannot be null');
+    }
+
     const rule = await this.prisma.recurringRule.findFirst({
       where: { id: ruleId },
     });

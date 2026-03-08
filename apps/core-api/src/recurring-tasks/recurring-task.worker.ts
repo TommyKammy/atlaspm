@@ -8,6 +8,8 @@ import {
   normalizeRecurringDate,
 } from './recurrence-policy';
 
+type SlotProcessingResult = 'generated' | 'already-completed' | 'blocked-existing';
+
 @Injectable()
 export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RecurringTaskWorker.name);
@@ -81,8 +83,13 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
 
       for (const scheduledAt of dueScheduledAtTimes) {
         try {
-          await this.generateTaskForRule(rule, scheduledAt);
-          processed++;
+          const result = await this.processScheduledAt(rule, scheduledAt);
+          if (result === 'generated') {
+            processed++;
+          }
+          if (result === 'blocked-existing') {
+            break;
+          }
         } catch (error) {
           this.logger.error(
             `Failed to generate task for rule ${rule.id} at ${scheduledAt.toISOString()}:`,
@@ -96,6 +103,27 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
     }
 
     return { processed, errors };
+  }
+
+  private async processScheduledAt(
+    rule: Parameters<RecurringTaskWorker['generateTaskForRule']>[0],
+    scheduledAt: Date,
+  ): Promise<SlotProcessingResult> {
+    const normalizedScheduledAt = normalizeRecurringDate(scheduledAt);
+    const existingGeneration = await this.prisma.recurringTaskGeneration.findUnique({
+      where: {
+        ruleId_scheduledAt: {
+          ruleId: rule.id,
+          scheduledAt: normalizedScheduledAt,
+        },
+      },
+    });
+
+    if (existingGeneration) {
+      return this.handleExistingGeneration(rule, existingGeneration);
+    }
+
+    return this.generateTaskForRule(rule, normalizedScheduledAt);
   }
 
   private async generateTaskForRule(rule: {
@@ -113,7 +141,7 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
     dayOfMonth: number | null;
     startDate: Date;
     nextScheduledAt: Date | null;
-  }, scheduledAt: Date) {
+  }, scheduledAt: Date): Promise<SlotProcessingResult> {
     const normalizedScheduledAt = normalizeRecurringDate(scheduledAt);
 
     const maxPositionTask = await this.prisma.task.findFirst({
@@ -203,15 +231,91 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
           `Generated recurring task ${task.id} for rule ${rule.id} (generation ${generation.id})`,
         );
       });
+      return 'generated';
     } catch (error) {
       if (this.isUniqueConstraintError(error)) {
-        this.logger.log(
-          `Skipping duplicate generation for rule ${rule.id} at ${scheduledAt.toISOString()}`,
-        );
-        return;
+        const existingGeneration = await this.prisma.recurringTaskGeneration.findUnique({
+          where: {
+            ruleId_scheduledAt: {
+              ruleId: rule.id,
+              scheduledAt: normalizedScheduledAt,
+            },
+          },
+        });
+        if (existingGeneration) {
+          return this.handleExistingGeneration(rule, existingGeneration);
+        }
       }
       throw error;
     }
+  }
+
+  private async handleExistingGeneration(
+    rule: {
+      id: string;
+      frequency: RecurringFrequency;
+      interval: number;
+      daysOfWeek: number[];
+      dayOfMonth: number | null;
+      startDate: Date;
+      nextScheduledAt: Date | null;
+    },
+    generation: {
+      id: string;
+      scheduledAt: Date;
+      status: string;
+    },
+  ): Promise<SlotProcessingResult> {
+    const scheduledAt = normalizeRecurringDate(generation.scheduledAt);
+
+    if (generation.status === 'completed') {
+      await this.advanceRuleNextScheduledAt(rule, scheduledAt);
+      this.logger.log(
+        `Advanced stale recurring rule ${rule.id} past completed generation ${generation.id}`,
+      );
+      return 'already-completed';
+    }
+
+    this.logger.log(
+      `Blocking recurring rule ${rule.id} at ${scheduledAt.toISOString()} because generation ${generation.id} is ${generation.status}`,
+    );
+    return 'blocked-existing';
+  }
+
+  private async advanceRuleNextScheduledAt(
+    rule: {
+      id: string;
+      frequency: RecurringFrequency;
+      interval: number;
+      daysOfWeek: number[];
+      dayOfMonth: number | null;
+      startDate: Date;
+      nextScheduledAt: Date | null;
+    },
+    scheduledAt: Date,
+  ) {
+    const nextScheduledAt = calculateNextScheduledAtAfter(
+      {
+        frequency: rule.frequency,
+        interval: rule.interval,
+        daysOfWeek: rule.daysOfWeek,
+        dayOfMonth: rule.dayOfMonth,
+        startDate: rule.startDate,
+      },
+      scheduledAt,
+    );
+
+    await this.prisma.recurringRule.updateMany({
+      where: {
+        id: rule.id,
+        nextScheduledAt: {
+          lte: scheduledAt,
+        },
+      },
+      data: {
+        nextScheduledAt,
+      },
+    });
   }
 
   private isUniqueConstraintError(error: unknown): boolean {
