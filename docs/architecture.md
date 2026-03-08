@@ -121,6 +121,22 @@
   - `TASK_RETENTION_DAYS`
   - `TASK_RETENTION_BATCH_SIZE`
 
+## Recurring Tasks (MVP)
+- Schedule model:
+  - Recurrence is date-granular in MVP and persisted as UTC date-only values (`startDate`, `endDate`, `nextScheduledAt`).
+  - Supported frequencies: `DAILY`, `WEEKLY`, `MONTHLY`.
+  - Weekly rules require at least one `daysOfWeek` entry (`0=Sunday` ... `6=Saturday`).
+  - Monthly rules require `dayOfMonth`; months shorter than that clamp to the last day of the month.
+- Generation policy:
+  - Task generation is schedule-driven only. Completing a generated task does not create the next one.
+  - Rule creation/update computes `nextScheduledAt` from the first schedule slot on or after the later of `startDate` and the current UTC day.
+  - The worker processes every due schedule slot up to the current UTC day in ascending order so delayed workers catch up deterministically instead of depending on poll cadence.
+  - `endDate` is inclusive; slots after `endDate` are not generated.
+- Audit + outbox:
+  - Rule writes emit `recurring_rule.created|updated|deleted`.
+  - Worker slot outcomes emit `recurring_task.generated`, `recurring_task.failed`, and `recurring_task.retry_succeeded`.
+  - Completing or reopening a generated task emits the normal task lifecycle audit/outbox events only; it does not emit a recurrence-specific follow-up generation event.
+
 ## Task Internals (Phase 2)
 - Editor model:
   - Description authoring keeps ProseMirror JSON as the canonical representation.
