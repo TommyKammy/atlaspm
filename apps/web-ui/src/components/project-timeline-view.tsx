@@ -2215,6 +2215,67 @@ export function ProjectScheduleCanvas({
     zoomConfig.dayColWidth,
   ]);
 
+  const dragOverlay = useMemo(() => {
+    if (mode !== 'timeline' || !dragState?.moved) return null;
+    const primaryTask = taskById.get(dragState.taskId);
+    if (
+      !primaryTask ||
+      !primaryTask.hasSchedule ||
+      !primaryTask.inWindow ||
+      !primaryTask.timelineStart ||
+      !primaryTask.timelineEnd
+    ) {
+      return null;
+    }
+    const baseBar = timelineLayout.barsByTaskId[primaryTask.id];
+    if (!baseBar) return null;
+    const targetLaneId = dragState.dropLaneId ?? dragState.originLaneId;
+    const targetLane = timelineLayout.lanesWithRows.find(({ lane }) => lane.id === targetLaneId);
+    if (!targetLane) return null;
+    const previewStartAt = shiftTimelineIso(
+      primaryTask.startAt,
+      dragState.deltaDays,
+      workingDaysOnly,
+      dragState.useCalendarDays,
+    );
+    const previewDueAt = shiftTimelineIso(
+      primaryTask.dueAt,
+      dragState.deltaDays,
+      workingDaysOnly,
+      dragState.useCalendarDays,
+    );
+    const previewStartDate = previewStartAt ? startOfDay(new Date(previewStartAt)) : null;
+    const previewDueDate = previewDueAt ? startOfDay(new Date(previewDueAt)) : null;
+    const previewDeltaDays =
+      previewStartDate && primaryTask.timelineStart
+        ? dayDiff(primaryTask.timelineStart, previewStartDate)
+        : dragState.deltaDays;
+    const left = Math.max(
+      LEFT_RAIL_COL_WIDTH,
+      LEFT_RAIL_COL_WIDTH + baseBar.left + previewDeltaDays * zoomConfig.dayColWidth,
+    );
+    const width =
+      previewStartDate && previewDueDate
+        ? Math.max(1, dayDiff(previewStartDate, previewDueDate) + 1) * zoomConfig.dayColWidth
+        : baseBar.width;
+    const fallbackRowIndex =
+      targetLane.rows.find((row) => row.tasks.some((task) => task.id === primaryTask.id))?.index ?? 0;
+    const rowIndex = Math.max(0, dragState.dropRowIndex ?? fallbackRowIndex);
+    const top =
+      targetLane.top + SECTION_ROW_HEIGHT + rowIndex * TASK_ROW_HEIGHT + TASK_ROW_HEIGHT / 2;
+    return {
+      task: primaryTask,
+      left,
+      width,
+      top,
+      style: resolveTimelineBarStyle(primaryTask, today),
+      extraCount: Math.max(0, dragState.taskIds.length - 1),
+      isMilestone:
+        primaryTask.type === 'MILESTONE' ||
+        dayDiff(primaryTask.timelineStart, primaryTask.timelineEnd) === 0,
+    };
+  }, [dragState, mode, taskById, timelineLayout, today, workingDaysOnly, zoomConfig.dayColWidth]);
+
   const alignTimeline = () => {
     if (mode !== 'timeline') return;
     const expandedTimelineLanes = timelineLanes.filter((lane) => !collapsedLaneIds.has(lane.id));
@@ -3757,6 +3818,37 @@ export function ProjectScheduleCanvas({
                 data-testid="timeline-selection-box"
               />
             ) : null}
+            {mode === 'timeline' && dragOverlay ? (
+              <div
+                className="pointer-events-none absolute z-[70]"
+                style={{
+                  left: `${dragOverlay.left}px`,
+                  top: `${dragOverlay.top}px`,
+                  width: dragOverlay.isMilestone ? '14px' : `${dragOverlay.width}px`,
+                  height: dragOverlay.isMilestone ? '14px' : '20px',
+                  transform: dragOverlay.isMilestone
+                    ? 'translate(-50%, -50%) rotate(45deg) scale(1.01)'
+                    : 'translateY(-50%) scale(1.01)',
+                  opacity: 0.72,
+                  boxShadow: '0 12px 28px rgba(0, 0, 0, 0.18)',
+                  ...dragOverlay.style,
+                }}
+                data-testid="timeline-drag-overlay"
+              >
+                {!dragOverlay.isMilestone ? (
+                  <div className="flex h-full items-center overflow-hidden rounded px-2 text-[11px] text-current">
+                    <span className="truncate">
+                      {dragOverlay.task.title.trim() || t('untitledTask')}
+                    </span>
+                    {dragOverlay.extraCount > 0 ? (
+                      <span className="ml-2 inline-flex h-4 shrink-0 items-center rounded-full bg-background/85 px-1 text-[10px] text-foreground shadow-sm">
+                        +{dragOverlay.extraCount}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             {timelineLayout.lanesWithRows.map(({ lane, top, rows, footerHeight }) => {
               const sectionVisible =
                 !virtualizationEnabled ||
@@ -3785,6 +3877,10 @@ export function ProjectScheduleCanvas({
                     laneContentBottom - (visibleRows[visibleRows.length - 1]!.top + TASK_ROW_HEIGHT),
                   )
                 : rows.length * TASK_ROW_HEIGHT + footerHeight;
+              const laneDropActive =
+                mode === 'timeline' && dragState?.moved && dragState.dropLaneId === lane.id;
+              const footerDropActive =
+                laneDropActive && (dragState?.dropRowIndex ?? -1) >= rows.length;
 
               return (
                 <div
@@ -3909,7 +4005,7 @@ export function ProjectScheduleCanvas({
                   <div id={laneContentId} className="min-w-0">
                     {sectionVisible ? (
                       <div
-                        className={`h-8 border-b bg-muted/20 ${laneDragState?.overLaneId === lane.id ? 'ring-1 ring-inset ring-primary/40' : ''}`}
+                        className={`h-8 border-b bg-muted/20 ${laneDragState?.overLaneId === lane.id ? 'ring-1 ring-inset ring-primary/40' : ''} ${laneDropActive ? 'bg-primary/[0.06]' : ''}`}
                       />
                     ) : (
                       <div style={{ height: `${SECTION_ROW_HEIGHT}px` }} />
@@ -3928,10 +4024,12 @@ export function ProjectScheduleCanvas({
                           return (
                             <div
                               key={`${lane.id}-row-${row.top}`}
-                              className="h-10 border-b last:border-b-0"
+                              className={`h-10 border-b last:border-b-0 ${laneDropActive && dragState?.dropRowIndex === row.index ? 'bg-primary/[0.06] outline outline-1 outline-dashed outline-primary/35' : ''}`}
                               data-testid={`timeline-row-${normalizeTestIdSegment(lane.id)}-${row.index}`}
                             >
-                              <div className="relative h-full border-l">
+                              <div
+                                className={`relative h-full border-l ${laneDropActive && dragState?.dropRowIndex === row.index ? 'bg-primary/[0.03]' : ''}`}
+                              >
                                 <div className="pointer-events-none absolute right-2 top-1/2 z-[3] flex -translate-y-1/2 items-center gap-2">
                                   {mode === 'timeline' && row.tasks.length > 1 ? (
                                     <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
@@ -4121,11 +4219,15 @@ export function ProjectScheduleCanvas({
                                         ) : null}
                                         <button
                                           type="button"
-                                          className={`absolute top-1/2 text-left text-[11px] shadow-sm transition-[background-color,border-color,color,opacity] ${
+                                          className={`absolute top-1/2 text-left text-[11px] shadow-sm transition-[background-color,border-color,color,opacity,transform,box-shadow] ${
                                             isMilestone
                                               ? 'h-3.5 w-3.5 -translate-y-1/2 rotate-45 rounded-[2px]'
                                               : 'h-6 -translate-y-1/2 overflow-hidden rounded px-2'
-                                          } ${dragState?.taskIds.includes(task.id) && dragState.moved ? 'cursor-grabbing opacity-90' : 'cursor-grab'}`}
+                                          } ${
+                                            dragState?.taskIds.includes(task.id)
+                                              ? 'cursor-grabbing opacity-25 ring-1 ring-primary/30 shadow-md'
+                                              : 'cursor-grab'
+                                          } ${dragState?.taskIds.includes(task.id) ? 'scale-[0.98]' : ''}`}
                                           style={
                                             isMilestone
                                               ? {
@@ -4399,7 +4501,11 @@ export function ProjectScheduleCanvas({
                       : null}
 
                     {!isLaneCollapsed && bottomSpacer > 0 ? (
-                      <div style={{ height: `${bottomSpacer}px` }} />
+                      <div
+                        className={`${footerDropActive ? 'bg-primary/[0.08] outline outline-1 outline-dashed outline-primary/35' : ''}`}
+                        style={{ height: `${bottomSpacer}px` }}
+                        data-testid={`timeline-footer-row-${normalizeTestIdSegment(lane.id)}`}
+                      />
                     ) : null}
                   </div>
                 </div>
