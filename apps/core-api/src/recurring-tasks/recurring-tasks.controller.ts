@@ -33,7 +33,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
-import { ProjectRole, RecurringFrequency, Priority } from '@prisma/client';
+import { Prisma, ProjectRole, RecurringFrequency, Priority } from '@prisma/client';
 import {
   calculateInitialNextScheduledAt,
   normalizeRecurringDate,
@@ -205,14 +205,6 @@ export class RecurringTasksController {
       if (!sourceTask) {
         throw new NotFoundException('Source task not found');
       }
-
-      const existingRule = await this.prisma.recurringRule.findFirst({
-        where: { sourceTaskId: body.sourceTaskId },
-        select: { id: true },
-      });
-      if (existingRule) {
-        throw new ConflictException('Source task already has a recurring rule');
-      }
     }
 
     this.validateRecurringConfig(body);
@@ -228,41 +220,53 @@ export class RecurringTasksController {
       startDate,
     });
 
-    return this.prisma.$transaction(async (tx) => {
-      const rule = await tx.recurringRule.create({
-        data: {
-          projectId,
-          title: trimmedTitle,
-          description: body.description?.trim(),
-          frequency: body.frequency,
-          interval: body.interval ?? 1,
-          daysOfWeek: body.daysOfWeek ?? [],
-          dayOfMonth: body.dayOfMonth,
-          sectionId: body.sectionId,
-          sourceTaskId: body.sourceTaskId,
-          assigneeUserId: body.assigneeUserId,
-          priority: body.priority,
-          tags: body.tags ?? [],
-          startDate,
-          endDate,
-          nextScheduledAt,
-        },
-      });
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const rule = await tx.recurringRule.create({
+          data: {
+            projectId,
+            title: trimmedTitle,
+            description: body.description?.trim(),
+            frequency: body.frequency,
+            interval: body.interval ?? 1,
+            daysOfWeek: body.daysOfWeek ?? [],
+            dayOfMonth: body.dayOfMonth,
+            sectionId: body.sectionId,
+            sourceTaskId: body.sourceTaskId,
+            assigneeUserId: body.assigneeUserId,
+            priority: body.priority,
+            tags: body.tags ?? [],
+            startDate,
+            endDate,
+            nextScheduledAt,
+          },
+        });
 
-      await this.domain.appendAuditOutbox({
-        tx,
-        actor: req.user.sub,
-        entityType: 'RecurringRule',
-        entityId: rule.id,
-        action: 'recurring_rule.created',
-        afterJson: rule,
-        correlationId: req.correlationId,
-        outboxType: 'recurring_rule.created',
-        payload: { ruleId: rule.id, projectId },
-      });
+        await this.domain.appendAuditOutbox({
+          tx,
+          actor: req.user.sub,
+          entityType: 'RecurringRule',
+          entityId: rule.id,
+          action: 'recurring_rule.created',
+          afterJson: rule,
+          correlationId: req.correlationId,
+          outboxType: 'recurring_rule.created',
+          payload: { ruleId: rule.id, projectId },
+        });
 
-      return rule;
-    });
+        return rule;
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError
+        && error.code === 'P2002'
+        && Array.isArray(error.meta?.target)
+        && error.meta.target.includes('sourceTaskId')
+      ) {
+        throw new ConflictException('Source task already has a recurring rule');
+      }
+      throw error;
+    }
   }
 
   @Get('projects/:id/recurring-rules')

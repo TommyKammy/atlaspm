@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import { RecurringTasksController } from '../src/recurring-tasks/recurring-tasks.controller';
 
@@ -26,18 +27,20 @@ describe('RecurringTasksController', () => {
     expect(prisma.recurringRule.findFirst).not.toHaveBeenCalled();
   });
 
-  it('rejects creating a second recurring rule for the same source task', async () => {
+  it('translates source task uniqueness races into a conflict error', async () => {
+    const uniqueError = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002',
+      clientVersion: '5.22.0',
+      meta: { target: ['sourceTaskId'] },
+    });
     const prisma = {
       section: {
         findFirst: vi.fn().mockResolvedValue({ id: 'section-1' }),
       },
       task: {
-        findFirst: vi.fn().mockResolvedValue({ id: 'task-1' }),
+        findFirst: vi.fn().mockResolvedValue({ id: '00000000-0000-0000-0000-000000000001' }),
       },
-      recurringRule: {
-        findFirst: vi.fn().mockResolvedValue({ id: 'rule-1' }),
-      },
-      $transaction: vi.fn(),
+      $transaction: vi.fn().mockRejectedValue(uniqueError),
     };
     const domain = {
       requireProjectRole: vi.fn().mockResolvedValue(undefined),
@@ -52,7 +55,7 @@ describe('RecurringTasksController', () => {
           title: 'Recurring source',
           frequency: 'DAILY',
           sectionId: 'section-1',
-          sourceTaskId: 'task-1',
+          sourceTaskId: '00000000-0000-0000-0000-000000000001',
           startDate: new Date('2026-03-10T00:00:00.000Z'),
         } as any,
         { user: { sub: 'user-1' }, correlationId: 'corr-1' } as any,
@@ -60,10 +63,6 @@ describe('RecurringTasksController', () => {
     ).rejects.toThrow(ConflictException);
 
     expect(prisma.task.findFirst).toHaveBeenCalledTimes(1);
-    expect(prisma.recurringRule.findFirst).toHaveBeenCalledWith({
-      where: { sourceTaskId: 'task-1' },
-      select: { id: true },
-    });
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
   });
 });

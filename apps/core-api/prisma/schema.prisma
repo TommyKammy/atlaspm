@@ -731,7 +731,6 @@ model RecurringRule {
 
   @@index([projectId, isActive])
   @@index([isActive, nextScheduledAt])
-  @@index([sourceTaskId])
 }
 
 model RecurringTaskGeneration {

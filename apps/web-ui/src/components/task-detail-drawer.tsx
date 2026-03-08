@@ -347,9 +347,19 @@ const RECURRENCE_WEEKDAY_KEYS = [
 ] as const;
 
 function recurrenceIntervalLabel(interval: number, frequency: RecurringFrequency, t: (key: string) => string) {
-  if (frequency === 'DAILY') return interval === 1 ? `Every ${t('recurrenceDaily').toLowerCase()}` : `Every ${interval} days`;
-  if (frequency === 'WEEKLY') return interval === 1 ? `Every week` : `Every ${interval} weeks`;
-  return interval === 1 ? `Every month` : `Every ${interval} months`;
+  if (frequency === 'DAILY') {
+    return interval === 1
+      ? t('recurrenceEveryDay')
+      : t('recurrenceEveryDays').replace('{count}', String(interval));
+  }
+  if (frequency === 'WEEKLY') {
+    return interval === 1
+      ? t('recurrenceEveryWeek')
+      : t('recurrenceEveryWeeks').replace('{count}', String(interval));
+  }
+  return interval === 1
+    ? t('recurrenceEveryMonth')
+    : t('recurrenceEveryMonths').replace('{count}', String(interval));
 }
 
 function recurrenceSummary(rule: RecurringRule, locale: 'en' | 'ja', t: (key: string) => string) {
@@ -362,7 +372,7 @@ function recurrenceSummary(rule: RecurringRule, locale: 'en' | 'ja', t: (key: st
       .join(', '));
   }
   if (rule.frequency === 'MONTHLY' && rule.dayOfMonth) {
-    parts.push(`Day ${rule.dayOfMonth}`);
+    parts.push(t('recurrenceDayNumber').replace('{day}', String(rule.dayOfMonth)));
   }
   const startDate = dateOnlyInputToLocalDate(rule.startDate);
   if (startDate) {
@@ -374,8 +384,14 @@ function recurrenceSummary(rule: RecurringRule, locale: 'en' | 'ja', t: (key: st
   return parts.join(' • ');
 }
 
+function localDateInputToday() {
+  const now = new Date();
+  const localDateAsUtc = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  return localDateAsUtc.toISOString().slice(0, 10);
+}
+
 function createRecurrenceDraft(task: Task | undefined, rule: RecurringRule | null): RecurrenceDraft {
-  const fallbackStartDate = dateOnlyInputValue(task?.startAt) || dateOnlyInputValue(task?.dueAt) || new Date().toISOString().slice(0, 10);
+  const fallbackStartDate = dateOnlyInputValue(task?.startAt) || dateOnlyInputValue(task?.dueAt) || localDateInputToday();
   return {
     frequency: rule?.frequency ?? 'DAILY',
     interval: String(rule?.interval ?? 1),
