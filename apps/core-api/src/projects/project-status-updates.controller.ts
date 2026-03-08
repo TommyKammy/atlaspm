@@ -28,6 +28,8 @@ import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { NotificationsService } from '../notifications/notifications.service';
 
+const STATUS_UPDATE_MENTION_ID_PATTERN = '[-a-zA-Z0-9._:]+';
+
 class CreateStatusUpdateDto {
   @IsEnum(ProjectStatusHealth)
   health!: ProjectStatusHealth;
@@ -266,7 +268,7 @@ export class ProjectStatusUpdatesController {
 
   private extractMentionUserIdsFromText(value: string) {
     const ids = new Set<string>();
-    const serializedRegex = /@\[(?<id>[a-zA-Z0-9:_-]+)\|[^\]]+\]/g;
+    const serializedRegex = new RegExp(`@\\[(?<id>${STATUS_UPDATE_MENTION_ID_PATTERN})\\|[^\\]]+\\]`, 'g');
     let match = serializedRegex.exec(value);
     while (match) {
       const id = match.groups?.id?.trim();
@@ -274,7 +276,7 @@ export class ProjectStatusUpdatesController {
       match = serializedRegex.exec(value);
     }
 
-    const plainRegex = /(^|\s)@([a-zA-Z0-9._:|-]+)/g;
+    const plainRegex = new RegExp(`(^|\\s)@(${STATUS_UPDATE_MENTION_ID_PATTERN})`, 'g');
     let plainMatch = plainRegex.exec(value);
     while (plainMatch) {
       const id = plainMatch[2]?.trim();

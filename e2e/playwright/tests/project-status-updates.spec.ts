@@ -112,7 +112,7 @@ test('project status update mentions notify project members and open back into t
   const workspaces = await api('/workspaces', ownerToken);
   const workspaceId = workspaces[0].id as string;
 
-  const memberSub = `e2e-status-member-${now}`;
+  const memberSub = `e2e.status.member-${now}`;
   const memberEmail = `${memberSub}@example.com`;
   const memberContext = await browser.newContext();
   const memberPage = await memberContext.newPage();

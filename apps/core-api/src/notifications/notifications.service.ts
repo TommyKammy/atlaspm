@@ -38,8 +38,11 @@ export class NotificationsService {
     },
   ) {
     const sourceId =
-      input.sourceId ??
-      (input.sourceType === 'description' && input.taskId ? input.taskId : '');
+      input.sourceId !== undefined && input.sourceId !== ''
+        ? input.sourceId
+        : input.sourceType === 'description' && input.taskId
+          ? input.taskId
+          : '';
     const existing = await tx.inboxNotification.findUnique({
       where: {
         userId_projectId_type_sourceType_sourceId: {

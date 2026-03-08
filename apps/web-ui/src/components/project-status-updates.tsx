@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { queryKeys } from '@/lib/query-keys';
+import { parseStatusUpdateMentionText, serializeStatusUpdateMentions } from '@/lib/status-update-mentions';
 import type { ProjectMember, ProjectStatusHealth, ProjectStatusUpdate, ProjectStatusUpdateList } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -58,45 +59,8 @@ function authorLabel(statusUpdate: ProjectStatusUpdate) {
   return statusUpdate.author?.displayName ?? statusUpdate.author?.email ?? statusUpdate.authorUserId;
 }
 
-function serializeMentions(value: string, members: ProjectMember[]) {
-  if (!value.trim()) return value;
-  const idToLabel = new Map<string, string>();
-  for (const member of members) {
-    const label = member.user.displayName ?? member.user.email ?? member.user.id;
-    idToLabel.set(member.userId.toLowerCase(), label);
-  }
-  return value.replace(/(^|\s)@([a-zA-Z0-9._:|-]+)/g, (whole, prefix: string, mentionId: string) => {
-    const label = idToLabel.get(mentionId.toLowerCase());
-    if (!label) return whole;
-    return `${prefix}@[${mentionId}|${label}]`;
-  });
-}
-
-function parseMentionText(value: string) {
-  const regex = /@\[(?<id>[a-zA-Z0-9:_-]+)\|(?<label>[^\]]+)\]/g;
-  const output: Array<{ type: 'text' | 'mention'; value: string; id?: string }> = [];
-  let cursor = 0;
-  let match = regex.exec(value);
-  while (match) {
-    if (match.index > cursor) {
-      output.push({ type: 'text', value: value.slice(cursor, match.index) });
-    }
-    output.push({
-      type: 'mention',
-      id: match.groups?.id ?? '',
-      value: `@${match.groups?.label ?? match.groups?.id ?? ''}`,
-    });
-    cursor = match.index + match[0].length;
-    match = regex.exec(value);
-  }
-  if (cursor < value.length) {
-    output.push({ type: 'text', value: value.slice(cursor) });
-  }
-  return output;
-}
-
 function MentionText({ value }: { value: string }) {
-  return parseMentionText(value).map((chunk, index) =>
+  return parseStatusUpdateMentionText(value).map((chunk, index) =>
     chunk.type === 'mention' ? (
       <span
         key={`${chunk.id ?? 'mention'}-${index}`}
@@ -151,9 +115,9 @@ export function ProjectStatusUpdates({
         method: 'POST',
         body: {
           health,
-          summary: serializeMentions(summary.trim(), members),
-          blockers: splitListInput(serializeMentions(blockers, members)),
-          nextSteps: splitListInput(serializeMentions(nextSteps, members)),
+          summary: serializeStatusUpdateMentions(summary.trim(), members),
+          blockers: splitListInput(serializeStatusUpdateMentions(blockers, members)),
+          nextSteps: splitListInput(serializeStatusUpdateMentions(nextSteps, members)),
         },
       }) as Promise<ProjectStatusUpdate>,
     onSuccess: (created) => {

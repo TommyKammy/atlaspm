@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { notificationSummary } from '@/lib/notification-copy';
 import { queryKeys } from '@/lib/query-keys';
+import { replaceSerializedStatusUpdateMentions } from '@/lib/status-update-mentions';
 import type { InboxNotification } from '@/lib/types';
 import { useI18n } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
@@ -14,12 +15,6 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Badge } from '@/components/ui/badge';
 
 type UnreadCountResponse = { count: number };
-
-function renderTargetLabel(value: string) {
-  return value.replace(/@\[(?<id>[a-zA-Z0-9:_-]+)\|(?<label>[^\]]+)\]/g, (_whole, _id: string, label: string) => {
-    return `@${label}`;
-  });
-}
 
 export function NotificationCenter() {
   const router = useRouter();
@@ -122,7 +117,7 @@ export function NotificationCenter() {
               const targetHref = item.statusUpdate
                 ? `/projects/${item.project.id}?statusUpdate=${item.statusUpdate.id}`
                 : `/projects/${item.project.id}?task=${item.task?.id ?? ''}`;
-              const targetLabel = renderTargetLabel(
+              const targetLabel = replaceSerializedStatusUpdateMentions(
                 item.statusUpdate?.summary?.trim() || item.task?.title?.trim() || t('untitledTask'),
               );
               return (

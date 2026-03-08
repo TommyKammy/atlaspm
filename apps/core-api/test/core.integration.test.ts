@@ -3626,7 +3626,7 @@ describe('Core API Integration', () => {
       .expect(201);
     const projectId = projectRes.body.id as string;
 
-    const mentionedUserId = `status-mentioned-${projectId}`;
+    const mentionedUserId = `status.mentioned-${projectId}`;
     const mentionedEmail = `${mentionedUserId}@example.com`;
     await prisma.user.upsert({
       where: { id: mentionedUserId },
@@ -3663,12 +3663,12 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         health: 'AT_RISK',
-        summary: `Need input from @[${mentionedUserId}|Status Mentioned Member] before launch.`,
+        summary: `Need input from @${mentionedUserId} before launch.`,
         blockers: [
           `Waiting on @[${mentionedUserId}|Status Mentioned Member] to confirm the rollout checklist.`,
         ],
         nextSteps: [
-          `Review the mitigation plan with @[${mentionedUserId}|Status Mentioned Member].`,
+          `Review the mitigation plan with @${mentionedUserId}.`,
         ],
       })
       .expect(201);
@@ -3687,7 +3687,7 @@ describe('Core API Integration', () => {
       triggeredBy: { id: 'test-user' },
       statusUpdate: {
         id: createdRes.body.id,
-        summary: `Need input from @[${mentionedUserId}|Status Mentioned Member] before launch.`,
+        summary: `Need input from @${mentionedUserId} before launch.`,
       },
     });
 
@@ -3705,6 +3705,105 @@ describe('Core API Integration', () => {
       authorUserId: 'test-user',
       mentionedUserIds: [mentionedUserId],
     });
+  });
+
+  test('task description mention notifications stay distinct per task when sourceId is blank', async () => {
+    const auth = app.get(AuthService);
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Description Mention Notifications ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Backlog' })
+      .expect(201);
+
+    const mentionedUserId = `description.mention-${projectId}`;
+    const mentionedEmail = `${mentionedUserId}@example.com`;
+    await prisma.user.upsert({
+      where: { id: mentionedUserId },
+      create: {
+        id: mentionedUserId,
+        email: mentionedEmail,
+        displayName: 'Description Mention Member',
+        status: 'ACTIVE',
+      },
+      update: {
+        email: mentionedEmail,
+        displayName: 'Description Mention Member',
+        status: 'ACTIVE',
+      },
+    });
+    await prisma.workspaceMembership.upsert({
+      where: { workspaceId_userId: { workspaceId, userId: mentionedUserId } },
+      create: { workspaceId, userId: mentionedUserId, role: 'WS_MEMBER' },
+      update: { role: 'WS_MEMBER' },
+    });
+    await prisma.projectMembership.upsert({
+      where: { projectId_userId: { projectId, userId: mentionedUserId } },
+      create: { projectId, userId: mentionedUserId, role: 'MEMBER' },
+      update: { role: 'MEMBER' },
+    });
+    const mentionedToken = await auth.mintDevToken(
+      mentionedUserId,
+      mentionedEmail,
+      'Description Mention Member',
+    );
+
+    const firstTaskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sectionId: sectionRes.body.id, title: 'Mention Task One' })
+      .expect(201);
+    const secondTaskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sectionId: sectionRes.body.id, title: 'Mention Task Two' })
+      .expect(201);
+
+    for (const taskId of [firstTaskRes.body.id, secondTaskRes.body.id]) {
+      await request(app.getHttpServer())
+        .patch(`/tasks/${taskId}/description`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          descriptionDoc: {
+            type: 'doc',
+            content: [
+              {
+                type: 'paragraph',
+                content: [
+                  { type: 'text', text: 'Need feedback from ' },
+                  { type: 'mention', attrs: { id: mentionedUserId, label: 'Description Mention Member' } },
+                ],
+              },
+            ],
+          },
+          expectedVersion: 0,
+        })
+        .expect(200);
+    }
+
+    const memberNotifications = await request(app.getHttpServer())
+      .get('/notifications?status=unread')
+      .set('Authorization', `Bearer ${mentionedToken}`)
+      .expect(200);
+
+    const mentionTaskIds = memberNotifications.body
+      .filter((item: any) => item.type === 'mention' && item.sourceType === 'description')
+      .map((item: any) => item.taskId)
+      .sort();
+
+    expect(mentionTaskIds).toEqual([firstTaskRes.body.id, secondTaskRes.body.id].sort());
   });
 
   test('approval request notifications use the normalized inbox taxonomy and emit notification outbox events', async () => {

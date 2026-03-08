@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { notificationSummary } from '@/lib/notification-copy';
 import { queryKeys } from '@/lib/query-keys';
+import { replaceSerializedStatusUpdateMentions } from '@/lib/status-update-mentions';
 import type { InboxNotification } from '@/lib/types';
 import { useI18n } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
@@ -13,12 +14,6 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 type UnreadCountResponse = { count: number };
-
-function renderTargetLabel(value: string) {
-  return value.replace(/@\[(?<id>[a-zA-Z0-9:_-]+)\|(?<label>[^\]]+)\]/g, (_whole, _id: string, label: string) => {
-    return `@${label}`;
-  });
-}
 
 export default function InboxPage() {
   const { t } = useI18n();
@@ -97,7 +92,7 @@ export default function InboxPage() {
           ) : (
             notifications.map((item) => {
               const unread = !item.readAt;
-              const targetLabel = renderTargetLabel(
+              const targetLabel = replaceSerializedStatusUpdateMentions(
                 item.statusUpdate?.summary?.trim() || item.task?.title?.trim() || t('untitledTask'),
               );
               const targetHref = item.statusUpdate
