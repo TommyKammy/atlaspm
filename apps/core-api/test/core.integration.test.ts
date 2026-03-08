@@ -3096,6 +3096,14 @@ describe('Core API Integration', () => {
       })
       .expect(400);
 
+    await request(app.getHttpServer())
+      .put(`/projects/${projectId}/timeline/preferences/view-state/gantt`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        scheduleFilter: 'scheduled',
+      })
+      .expect(400);
+
     const persistedPrefsRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/timeline/preferences`)
       .set('Authorization', `Bearer ${token}`)

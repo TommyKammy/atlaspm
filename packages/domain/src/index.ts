@@ -8,6 +8,7 @@ export * from './ports/task-repository.js';
 export * from './ports/unit-of-work.js';
 export * from './services/complete-task-lifecycle.js';
 export * from './services/date-only.js';
+export * from './services/project-view-state.js';
 export * from './services/timeline-interaction.js';
 export * from './services/timeline-layout.js';
 export * from './services/task-completion-transition.js';

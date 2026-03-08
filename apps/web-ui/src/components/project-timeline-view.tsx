@@ -5,8 +5,12 @@ import {
   buildTimelineLanes,
   buildTimelineLayout,
   buildTimelineTaskOrderByLane,
+  createProjectViewFallbackState,
   dateOnlyInputToLocalDate,
   localDateToDateOnlyUtcIso,
+  normalizeProjectViewState,
+  resolveProjectViewState,
+  type ProjectViewState as SavedProjectViewState,
 } from '@atlaspm/domain';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -609,6 +613,23 @@ function applyTimelineViewState(
   }
 }
 
+function applySavedProjectViewState(
+  mode: TimelineMode,
+  parsed: SavedProjectViewState,
+  setters: {
+    setZoom: (value: TimelineZoom) => void;
+    setAnchorDate: (value: Date) => void;
+    setSwimlane: (value: TimelineSwimlane) => void;
+    setSortMode: (value: TimelineSortMode) => void;
+    setScheduleFilter: (value: TimelineScheduleFilter) => void;
+    setWorkingDaysOnly: (value: boolean) => void;
+    setGanttRiskFilterMode: (value: GanttRiskFilterMode) => void;
+    setGanttStrictMode: (value: boolean) => void;
+  },
+) {
+  applyTimelineViewState(savedProjectViewStateToTimelineViewState(mode, parsed), setters);
+}
+
 function buildViewStateForMode(
   mode: TimelineMode,
   snapshot: LocalTimelineViewStateSnapshot,
@@ -630,33 +651,128 @@ function buildViewStateForMode(
       };
 }
 
-function buildDefaultTimelineViewStateSnapshot(anchorDate = startOfDay(new Date())): LocalTimelineViewStateSnapshot {
+function buildSavedProjectViewStateForMode(
+  mode: TimelineMode,
+  snapshot: LocalTimelineViewStateSnapshot,
+): SavedProjectViewState {
+  return normalizeProjectViewState(mode, {
+    ...(mode === 'timeline' ? { grouping: { field: snapshot.swimlane } } : {}),
+    ...(mode === 'timeline' ? { sorting: { field: snapshot.sortMode, direction: 'asc' as const } } : {}),
+    filters: {
+      schedule: mode === 'timeline' ? snapshot.scheduleFilter : 'all',
+    },
+    zoom: {
+      unit: snapshot.zoom,
+      anchorDate: snapshot.anchorDate.toISOString(),
+      ...(mode === 'timeline' ? { workingDaysOnly: snapshot.workingDaysOnly } : {}),
+      ...(mode === 'gantt'
+        ? {
+            ganttRiskFilterMode: snapshot.ganttRiskFilterMode,
+            ganttStrictMode: snapshot.ganttStrictMode,
+          }
+        : {}),
+    },
+  });
+}
+
+function savedProjectViewStateToTimelineViewState(
+  mode: TimelineMode,
+  state: SavedProjectViewState,
+): TimelineViewState {
+  if (mode === 'timeline') {
+    return {
+      ...(state.zoom?.unit ? { zoom: state.zoom.unit } : {}),
+      ...(state.zoom?.anchorDate ? { anchorDate: state.zoom.anchorDate } : {}),
+      ...(state.grouping?.field ? { swimlane: state.grouping.field as TimelineSwimlane } : {}),
+      ...(state.sorting?.field ? { sortMode: state.sorting.field as TimelineSortMode } : {}),
+      ...(state.filters?.schedule ? { scheduleFilter: state.filters.schedule } : {}),
+      ...(typeof state.zoom?.workingDaysOnly === 'boolean'
+        ? { workingDaysOnly: state.zoom.workingDaysOnly }
+        : {}),
+    };
+  }
+
   return {
-    zoom: 'week',
-    anchorDate,
-    swimlane: 'section',
-    sortMode: 'manual',
-    scheduleFilter: 'all',
-    workingDaysOnly: false,
-    ganttRiskFilterMode: 'all',
-    ganttStrictMode: false,
+    ...(state.zoom?.unit ? { zoom: state.zoom.unit } : {}),
+    ...(state.zoom?.anchorDate ? { anchorDate: state.zoom.anchorDate } : {}),
+    ...(state.zoom?.ganttRiskFilterMode
+      ? { ganttRiskFilterMode: state.zoom.ganttRiskFilterMode }
+      : {}),
+    ...(typeof state.zoom?.ganttStrictMode === 'boolean'
+      ? { ganttStrictMode: state.zoom.ganttStrictMode }
+      : {}),
   };
 }
 
-function areTimelineViewStatesEqual(
-  left: TimelineViewState | null | undefined,
-  right: TimelineViewState,
+function parseSavedProjectViewState(
+  mode: TimelineMode,
+  raw: unknown,
+): SavedProjectViewState | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+
+  const normalizedGeneric = normalizeProjectViewState(mode, record as SavedProjectViewState);
+  if (Object.keys(normalizedGeneric).length > 0) {
+    return normalizedGeneric;
+  }
+
+  const legacyState: SavedProjectViewState = {};
+  if (
+    record.zoom !== undefined ||
+    record.anchorDate !== undefined ||
+    record.workingDaysOnly !== undefined ||
+    record.ganttRiskFilterMode !== undefined ||
+    record.ganttStrictMode !== undefined
+  ) {
+    legacyState.zoom = {
+      unit:
+        record.zoom === 'day' || record.zoom === 'week' || record.zoom === 'month'
+          ? record.zoom
+          : 'week',
+      ...(typeof record.anchorDate === 'string' ? { anchorDate: record.anchorDate } : {}),
+      ...(typeof record.workingDaysOnly === 'boolean'
+        ? { workingDaysOnly: record.workingDaysOnly }
+        : {}),
+      ...(record.ganttRiskFilterMode === 'all' || record.ganttRiskFilterMode === 'risk'
+        ? { ganttRiskFilterMode: record.ganttRiskFilterMode }
+        : {}),
+      ...(typeof record.ganttStrictMode === 'boolean'
+        ? { ganttStrictMode: record.ganttStrictMode }
+        : {}),
+    };
+  }
+  if (
+    record.swimlane === 'section' ||
+    record.swimlane === 'assignee' ||
+    record.swimlane === 'status'
+  ) {
+    legacyState.grouping = { field: record.swimlane };
+  }
+  if (
+    record.sortMode === 'manual' ||
+    record.sortMode === 'startAt' ||
+    record.sortMode === 'dueAt'
+  ) {
+    legacyState.sorting = { field: record.sortMode, direction: 'asc' };
+  }
+  if (
+    record.scheduleFilter === 'all' ||
+    record.scheduleFilter === 'scheduled' ||
+    record.scheduleFilter === 'unscheduled'
+  ) {
+    legacyState.filters = { schedule: record.scheduleFilter };
+  }
+
+  const normalizedLegacy = normalizeProjectViewState(mode, legacyState);
+  return Object.keys(normalizedLegacy).length > 0 ? normalizedLegacy : null;
+}
+
+function areSavedProjectViewStatesEqual(
+  mode: TimelineMode,
+  left: SavedProjectViewState | null | undefined,
+  right: SavedProjectViewState,
 ): boolean {
-  const leftKeys = Object.keys(left ?? {}).sort();
-  const rightKeys = Object.keys(right).sort();
-  if (leftKeys.length !== rightKeys.length) return false;
-  return leftKeys.every((key, index) => {
-    if (rightKeys[index] !== key) return false;
-    return (
-      (left as Record<string, unknown> | null | undefined)?.[key] ===
-      (right as Record<string, unknown>)[key]
-    );
-  });
+  return JSON.stringify(normalizeProjectViewState(mode, left)) === JSON.stringify(normalizeProjectViewState(mode, right));
 }
 
 function getTimelineLaneOrderStorageKey(
@@ -1023,7 +1139,7 @@ export function ProjectScheduleCanvas({
     };
   }, []);
   const rescheduleInFlightTaskIdsRef = useRef(new Set<string>());
-  const timelineViewStateRef = useRef<TimelineViewState | null>(null);
+  const timelineViewStateRef = useRef<SavedProjectViewState | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
   const timelineCanvasRef = useRef<HTMLDivElement | null>(null);
@@ -1048,15 +1164,15 @@ export function ProjectScheduleCanvas({
     [meQuery.data?.id, timelineStorageBaseKey],
   );
   const fallbackViewState = useMemo(
-    () => buildViewStateForMode(mode, buildDefaultTimelineViewStateSnapshot()),
-    [mode, projectId],
+    () => createProjectViewFallbackState(mode, startOfDay(new Date()).toISOString()),
+    [mode],
   );
   const persistedDefaultViewState = useMemo(() => {
     const candidate =
       mode === 'timeline'
         ? timelinePreferencesQuery.data?.timelineViewState
         : timelinePreferencesQuery.data?.ganttViewState;
-    return candidate && Object.keys(candidate).length > 0 ? candidate : null;
+    return parseSavedProjectViewState(mode, candidate);
   }, [
     mode,
     timelinePreferencesQuery.data?.ganttViewState,
@@ -1102,7 +1218,7 @@ export function ProjectScheduleCanvas({
     if (hasRestoredTimelinePreferences.current) return;
     if (!timelineStorageBaseKey || !timelinePreferencesQuery.isFetched) return;
     setPreferencesHydrated(false);
-    let restoredLocalState: TimelineViewState | null = null;
+    let restoredLocalState: SavedProjectViewState | null = null;
     if (typeof window !== 'undefined') {
       const preferenceKeys = [
         timelineStorageUserKey,
@@ -1113,7 +1229,8 @@ export function ProjectScheduleCanvas({
         const raw = window.localStorage.getItem(key);
         if (!raw) continue;
         try {
-          const parsedLocalState = JSON.parse(raw) as TimelineViewState;
+          const parsedLocalState = parseSavedProjectViewState(mode, JSON.parse(raw));
+          if (!parsedLocalState) continue;
           restoredLocalState = parsedLocalState;
           break;
         } catch {
@@ -1122,8 +1239,13 @@ export function ProjectScheduleCanvas({
       }
     }
 
-    const preferredViewState = restoredLocalState ?? persistedDefaultViewState ?? fallbackViewState;
-    applyTimelineViewState(preferredViewState, {
+    const preferredViewState = resolveProjectViewState({
+      mode,
+      fallbackState: fallbackViewState,
+      savedDefaultState: persistedDefaultViewState,
+      workingState: restoredLocalState,
+    }).state;
+    applySavedProjectViewState(mode, preferredViewState, {
       setZoom,
       setAnchorDate,
       setSwimlane,
@@ -1146,14 +1268,16 @@ export function ProjectScheduleCanvas({
   ]);
 
   timelineViewStateRef.current = {
-    zoom,
-    anchorDate: anchorDate.toISOString(),
-    swimlane,
-    sortMode,
-    scheduleFilter,
-    workingDaysOnly,
-    ganttRiskFilterMode,
-    ganttStrictMode,
+    ...buildSavedProjectViewStateForMode(mode, {
+      zoom,
+      anchorDate,
+      swimlane,
+      sortMode,
+      scheduleFilter,
+      workingDaysOnly,
+      ganttRiskFilterMode,
+      ganttStrictMode,
+    }),
   };
 
   useEffect(() => {
@@ -1273,10 +1397,34 @@ export function ProjectScheduleCanvas({
       zoom,
     ],
   );
+  const currentModeSavedViewState = useMemo(
+    () =>
+      buildSavedProjectViewStateForMode(mode, {
+        zoom,
+        anchorDate,
+        swimlane,
+        sortMode,
+        scheduleFilter,
+        workingDaysOnly,
+        ganttRiskFilterMode,
+        ganttStrictMode,
+      }),
+    [
+      anchorDate,
+      ganttRiskFilterMode,
+      ganttStrictMode,
+      mode,
+      scheduleFilter,
+      sortMode,
+      swimlane,
+      workingDaysOnly,
+      zoom,
+    ],
+  );
   const viewStateSaveBaseline = persistedDefaultViewState ?? fallbackViewState;
   const hasUnsavedDefaultViewStateChanges =
     preferencesHydrated &&
-    !areTimelineViewStatesEqual(viewStateSaveBaseline, currentModeViewState);
+    !areSavedProjectViewStatesEqual(mode, viewStateSaveBaseline, currentModeSavedViewState);
 
   const zoomConfig = TIMELINE_ZOOM_CONFIG[zoom];
   const effectiveSwimlane: TimelineSwimlane = mode === 'timeline' ? swimlane : 'section';
