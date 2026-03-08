@@ -81,8 +81,7 @@ export function ProjectStatusUpdates({
   });
 
   const hasUpdates = (statusUpdatesQuery.data?.items.length ?? 0) > 0;
-  const shouldAutoOpen = statusUpdatesQuery.isSuccess && !hasUpdates;
-  const shouldShowComposer = canEdit && (composerOpen || shouldAutoOpen);
+  const shouldShowComposer = canEdit && composerOpen;
 
   const createStatusUpdate = useMutation({
     mutationFn: () =>
@@ -175,7 +174,7 @@ export function ProjectStatusUpdates({
           <h2 className="text-lg font-semibold leading-none">{t('statusUpdates')}</h2>
           <p className="text-sm text-muted-foreground">{t('statusUpdatesDescription')}</p>
         </div>
-        {canEdit && hasUpdates ? (
+        {canEdit ? (
           <Button
             type="button"
             size="sm"
