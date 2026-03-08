@@ -25,7 +25,7 @@
     "type-check:collab-server": "pnpm --filter @atlaspm/collab-server type-check",
     "e2e:up": "./scripts/e2e-up.sh",
     "e2e": "./scripts/run-e2e.sh",
-    "e2e:timeline-gantt-rollout": "./scripts/run-e2e.sh tests/timeline-gantt-boundary.spec.ts tests/timeline-route.spec.ts tests/timeline-swimlane.spec.ts tests/gantt-risk.spec.ts tests/gantt-baseline.spec.ts tests/list-deadline-sort.spec.ts tests/rules.spec.ts tests/admin.spec.ts tests/collab.spec.ts",
+    "e2e:timeline-gantt-rollout": "./scripts/run-e2e.sh tests/timeline-gantt-boundary.spec.ts tests/timeline-route.spec.ts tests/timeline-swimlane.spec.ts tests/timeline-gantt-root-cause-fixtures.spec.ts tests/gantt-risk.spec.ts tests/gantt-baseline.spec.ts tests/list-deadline-sort.spec.ts tests/rules.spec.ts tests/admin.spec.ts tests/collab.spec.ts",
     "e2e:stability": "./scripts/e2e-stability.sh",
     "e2e:down": "./scripts/e2e-down.sh",
     "e2e:rebuild": "E2E_REBUILD=1 ./scripts/run-e2e.sh",
