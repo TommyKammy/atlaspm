@@ -28,7 +28,7 @@ function dayIso(deltaDays: number) {
   const date = new Date();
   date.setHours(0, 0, 0, 0);
   date.setDate(date.getDate() + deltaDays);
-  return date.toISOString();
+  return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}T00:00:00.000Z`;
 }
 
 function laneRailTestId(laneTestId: string) {
@@ -212,4 +212,53 @@ test('timeline grouped rails ignore unscheduled subtasks when visible lanes stay
     unscheduledChild.title,
   ]);
   await expectTaskRailHidden(page, [parentTask.id]);
+});
+
+test('timeline subtask detail navigation preserves the timeline view query', async ({ page }) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-subtask-route-${now}`;
+  const email = `${sub}@example.com`;
+
+  await login(page, sub, email);
+
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Subtask Route ${now}`,
+  });
+  const projectId = project.id as string;
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Timeline Section',
+  });
+
+  const parentTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    title: `Route Parent ${now}`,
+    assigneeUserId: sub,
+    startAt: dayIso(0),
+    dueAt: dayIso(3),
+  });
+  const childTask = await api(`/tasks/${parentTask.id}/subtasks`, token, 'POST', {
+    title: `Route Child ${now}`,
+    startAt: dayIso(1),
+    dueAt: dayIso(2),
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline&task=${childTask.id}`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}\\?view=timeline&task=${childTask.id}`));
+  await expect(page.locator('[data-testid="task-detail-title-input"]')).toHaveValue(childTask.title);
+
+  await page
+    .getByTestId('subtasks-section')
+    .getByRole('button', { name: parentTask.title })
+    .click();
+
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}\\?view=timeline&task=${parentTask.id}`));
+  await expect(page.locator('[data-testid="task-detail-title-input"]')).toHaveValue(parentTask.title);
 });

@@ -58,7 +58,7 @@ function addCalendarDays(base: Date, delta: number): Date {
 function toDateOrNull(value: string | null | undefined): Date | null {
   if (!value) return null;
   const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf()) ? null : parsed;
+  return Number.isNaN(parsed.valueOf()) ? null : startOfDay(parsed);
 }
 
 function dateRange(startRaw: string | null | undefined, dueRaw: string | null | undefined): { start: Date | null; end: Date | null } {

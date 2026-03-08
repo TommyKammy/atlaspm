@@ -8,6 +8,7 @@ type ProjectTimelineShellProps = {
   search: string;
   statusFilter: 'ALL' | Task['status'];
   priorityFilter: 'ALL' | NonNullable<Task['priority']>;
+  initialTaskId?: string | null;
 };
 
 export function ProjectTimelineShell(props: ProjectTimelineShellProps) {

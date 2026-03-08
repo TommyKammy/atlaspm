@@ -21,7 +21,7 @@ function dayIso(deltaDays: number) {
   const date = new Date();
   date.setHours(0, 0, 0, 0);
   date.setDate(date.getDate() + deltaDays);
-  return date.toISOString();
+  return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}T00:00:00.000Z`;
 }
 
 async function login(page: Page, sub: string, email: string) {

@@ -2,6 +2,7 @@
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   Activity,
   CalendarDays,
@@ -324,6 +325,9 @@ export default function TaskDetailDrawer({
   onOpenChange: (open: boolean) => void;
   projectId: string;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { t, locale } = useI18n();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<'details' | 'comments' | 'activity'>('details');
@@ -1076,7 +1080,9 @@ export default function TaskDetailDrawer({
                         projectId={projectId}
                         onTaskClick={(newTaskId) => {
                           queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(newTaskId) });
-                          window.location.href = `/projects/${projectId}?task=${newTaskId}`;
+                          const next = new URLSearchParams(searchParams.toString());
+                          next.set('task', newTaskId);
+                          router.push(`${pathname}?${next.toString()}`, { scroll: false });
                         }}
                       />
                       <DependencyManager taskId={taskId} />
