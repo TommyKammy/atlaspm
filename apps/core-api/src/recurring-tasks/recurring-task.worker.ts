@@ -2,6 +2,11 @@ import { Injectable, Inject, Logger, OnModuleInit, OnModuleDestroy } from '@nest
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { RecurringFrequency, TaskStatus } from '@prisma/client';
+import {
+  calculateNextScheduledAtAfter,
+  collectDueScheduledAtTimes,
+  normalizeRecurringDate,
+} from './recurrence-policy';
 
 @Injectable()
 export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
@@ -56,7 +61,7 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   async processDueRecurringTasks(): Promise<{ processed: number; errors: number }> {
-    const now = new Date();
+    const now = normalizeRecurringDate(new Date());
 
     const rules = await this.prisma.recurringRule.findMany({
       where: {
@@ -72,13 +77,21 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
     let errors = 0;
 
     for (const rule of rules) {
-      try {
-        await this.generateTaskForRule(rule);
-        processed++;
-      } catch (error) {
-        this.logger.error(`Failed to generate task for rule ${rule.id}:`, error);
-        await this.recordGenerationError(rule.id, error as Error, rule.nextScheduledAt ?? now);
-        errors++;
+      const dueScheduledAtTimes = collectDueScheduledAtTimes(rule, now);
+
+      for (const scheduledAt of dueScheduledAtTimes) {
+        try {
+          await this.generateTaskForRule(rule, scheduledAt);
+          processed++;
+        } catch (error) {
+          this.logger.error(
+            `Failed to generate task for rule ${rule.id} at ${scheduledAt.toISOString()}:`,
+            error,
+          );
+          await this.recordGenerationError(rule.id, error as Error, scheduledAt);
+          errors++;
+          break;
+        }
       }
     }
 
@@ -98,9 +111,10 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
     interval: number;
     daysOfWeek: number[];
     dayOfMonth: number | null;
+    startDate: Date;
     nextScheduledAt: Date | null;
-  }) {
-    const scheduledAt = rule.nextScheduledAt ?? new Date();
+  }, scheduledAt: Date) {
+    const normalizedScheduledAt = normalizeRecurringDate(scheduledAt);
 
     const maxPositionTask = await this.prisma.task.findFirst({
       where: { sectionId: rule.sectionId, deletedAt: null },
@@ -114,7 +128,7 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
         const generation = await tx.recurringTaskGeneration.create({
           data: {
             ruleId: rule.id,
-            scheduledAt,
+            scheduledAt: normalizedScheduledAt,
             status: 'pending',
           },
         });
@@ -143,12 +157,15 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
           },
         });
 
-        const nextScheduledAt = this.calculateNextOccurrence(
-          rule.frequency,
-          rule.interval,
-          rule.daysOfWeek,
-          rule.dayOfMonth,
-          scheduledAt,
+        const nextScheduledAt = calculateNextScheduledAtAfter(
+          {
+            frequency: rule.frequency,
+            interval: rule.interval,
+            daysOfWeek: rule.daysOfWeek,
+            dayOfMonth: rule.dayOfMonth,
+            startDate: rule.startDate,
+          },
+          normalizedScheduledAt,
         );
 
         await tx.recurringRule.update({
@@ -165,14 +182,19 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
           entityType: 'RecurringTaskGeneration',
           entityId: generation.id,
           action: 'recurring_task.generated',
-          afterJson: { taskId: task.id, ruleId: rule.id, scheduledAt, generationId: generation.id },
+          afterJson: {
+            taskId: task.id,
+            ruleId: rule.id,
+            scheduledAt: normalizedScheduledAt,
+            generationId: generation.id,
+          },
           correlationId: `recurring-${rule.id}-${Date.now()}`,
           outboxType: 'recurring_task.generated',
           payload: {
             taskId: task.id,
             ruleId: rule.id,
             projectId: rule.projectId,
-            scheduledAt,
+            scheduledAt: normalizedScheduledAt,
             generationId: generation.id,
           },
         });
@@ -306,6 +328,25 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
             },
           });
 
+          const nextScheduledAt = calculateNextScheduledAtAfter(
+            {
+              frequency: rule.frequency,
+              interval: rule.interval,
+              daysOfWeek: rule.daysOfWeek,
+              dayOfMonth: rule.dayOfMonth,
+              startDate: rule.startDate,
+            },
+            normalizeRecurringDate(generation.scheduledAt),
+          );
+
+          await tx.recurringRule.update({
+            where: { id: rule.id },
+            data: {
+              lastGeneratedAt: new Date(),
+              nextScheduledAt,
+            },
+          });
+
           await this.domain.appendAuditOutbox({
             tx,
             actor: 'system:recurring-worker',
@@ -345,62 +386,4 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
     return { retried, succeeded };
   }
 
-  private calculateNextOccurrence(
-    frequency: RecurringFrequency,
-    interval: number,
-    daysOfWeek: number[],
-    dayOfMonth: number | null,
-    fromDate: Date,
-  ): Date {
-    const nextDate = new Date(fromDate);
-
-    switch (frequency) {
-      case RecurringFrequency.DAILY:
-        nextDate.setDate(nextDate.getDate() + interval);
-        break;
-
-      case RecurringFrequency.WEEKLY:
-        if (daysOfWeek.length > 0) {
-          const currentDay = nextDate.getDay();
-          const sortedDays = [...daysOfWeek].sort((a, b) => a - b);
-          const firstDay = sortedDays[0]!;
-
-          let daysUntilNext = -1;
-          for (const day of sortedDays) {
-            if (day > currentDay) {
-              daysUntilNext = day - currentDay;
-              break;
-            }
-          }
-
-          if (daysUntilNext === -1) {
-            daysUntilNext = 7 - currentDay + firstDay;
-            if (interval > 1) {
-              daysUntilNext += 7 * (interval - 1);
-            }
-          }
-
-          nextDate.setDate(nextDate.getDate() + daysUntilNext);
-        } else {
-          nextDate.setDate(nextDate.getDate() + 7 * interval);
-        }
-        break;
-
-      case RecurringFrequency.MONTHLY:
-        if (dayOfMonth) {
-          nextDate.setMonth(nextDate.getMonth() + interval);
-          const lastDayOfMonth = new Date(
-            nextDate.getFullYear(),
-            nextDate.getMonth() + 1,
-            0,
-          ).getDate();
-          nextDate.setDate(Math.min(dayOfMonth, lastDayOfMonth));
-        } else {
-          nextDate.setMonth(nextDate.getMonth() + interval);
-        }
-        break;
-    }
-
-    return nextDate;
-  }
 }

@@ -32,6 +32,10 @@ import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { ProjectRole, RecurringFrequency, Priority } from '@prisma/client';
+import {
+  calculateInitialNextScheduledAt,
+  normalizeRecurringDate,
+} from './recurrence-policy';
 
 class CreateRecurringRuleDto {
   @IsString()
@@ -185,7 +189,16 @@ export class RecurringTasksController {
 
     this.validateRecurringConfig(body);
 
-    const nextScheduledAt = this.calculateNextOccurrence(body);
+    const startDate = normalizeRecurringDate(body.startDate);
+    const endDate = body.endDate ? normalizeRecurringDate(body.endDate) : undefined;
+    this.validateDateWindow(startDate, endDate);
+    const nextScheduledAt = calculateInitialNextScheduledAt({
+      frequency: body.frequency,
+      interval: body.interval,
+      daysOfWeek: body.daysOfWeek,
+      dayOfMonth: body.dayOfMonth,
+      startDate,
+    });
 
     return this.prisma.$transaction(async (tx) => {
       const rule = await tx.recurringRule.create({
@@ -201,8 +214,8 @@ export class RecurringTasksController {
           assigneeUserId: body.assigneeUserId,
           priority: body.priority,
           tags: body.tags ?? [],
-          startDate: body.startDate,
-          endDate: body.endDate,
+          startDate,
+          endDate,
           nextScheduledAt,
         },
       });
@@ -309,6 +322,15 @@ export class RecurringTasksController {
       dayOfMonth: body.dayOfMonth ?? rule.dayOfMonth,
     } as CreateRecurringRuleDto);
 
+    const effectiveStartDate = normalizeRecurringDate(body.startDate ?? rule.startDate);
+    const effectiveEndDate =
+      body.endDate !== undefined
+        ? body.endDate
+          ? normalizeRecurringDate(body.endDate)
+          : null
+        : rule.endDate;
+    this.validateDateWindow(effectiveStartDate, effectiveEndDate ?? undefined);
+
     const scheduleChanged = 
       body.frequency !== undefined ||
       body.interval !== undefined ||
@@ -329,20 +351,18 @@ export class RecurringTasksController {
       if (body.assigneeUserId !== undefined) data.assigneeUserId = body.assigneeUserId ?? null;
       if (body.priority !== undefined) data.priority = body.priority ?? null;
       if (body.tags !== undefined) data.tags = body.tags;
-      if (body.startDate !== undefined) data.startDate = body.startDate;
-      if (body.endDate !== undefined) data.endDate = body.endDate ?? null;
+      if (body.startDate !== undefined) data.startDate = effectiveStartDate;
+      if (body.endDate !== undefined) data.endDate = effectiveEndDate ?? null;
       if (body.isActive !== undefined) data.isActive = body.isActive;
 
       if (scheduleChanged) {
-        const updatedRule = {
-          ...rule,
-          ...(body.frequency !== undefined && { frequency: body.frequency }),
-          ...(body.interval !== undefined && { interval: body.interval }),
-          ...(body.daysOfWeek !== undefined && { daysOfWeek: body.daysOfWeek }),
-          ...(body.dayOfMonth !== undefined && { dayOfMonth: body.dayOfMonth }),
-          ...(body.startDate !== undefined && { startDate: body.startDate }),
-        };
-        data.nextScheduledAt = this.calculateNextOccurrence(updatedRule as CreateRecurringRuleDto);
+        data.nextScheduledAt = calculateInitialNextScheduledAt({
+          frequency: body.frequency ?? rule.frequency,
+          interval: body.interval ?? rule.interval,
+          daysOfWeek: body.daysOfWeek ?? rule.daysOfWeek,
+          dayOfMonth: body.dayOfMonth ?? rule.dayOfMonth,
+          startDate: effectiveStartDate,
+        });
       }
 
       const updated = await tx.recurringRule.update({
@@ -365,6 +385,12 @@ export class RecurringTasksController {
 
       return updated;
     });
+  }
+
+  private validateDateWindow(startDate: Date, endDate?: Date | null) {
+    if (endDate && normalizeRecurringDate(endDate) < normalizeRecurringDate(startDate)) {
+      throw new ConflictException('endDate must be on or after startDate');
+    }
   }
 
   @Delete('recurring-rules/:id')
@@ -423,64 +449,5 @@ export class RecurringTasksController {
         throw new ConflictException('Day of month must be between 1 and 31');
       }
     }
-  }
-
-  private calculateNextOccurrence(body: CreateRecurringRuleDto): Date {
-    const now = new Date();
-    const startDate = new Date(body.startDate);
-    
-    if (startDate > now) {
-      return startDate;
-    }
-
-    const nextDate = new Date(now);
-    nextDate.setHours(0, 0, 0, 0);
-
-    switch (body.frequency) {
-      case RecurringFrequency.DAILY:
-        nextDate.setDate(nextDate.getDate() + (body.interval ?? 1));
-        break;
-      
-      case RecurringFrequency.WEEKLY:
-        if (body.daysOfWeek && body.daysOfWeek.length > 0) {
-          const currentDay = nextDate.getDay();
-          const sortedDays = [...body.daysOfWeek].sort((a, b) => a - b);
-          const firstDay = sortedDays[0]!;
-
-          let daysUntilNext = -1;
-          for (const day of sortedDays) {
-            if (day > currentDay) {
-              daysUntilNext = day - currentDay;
-              break;
-            }
-          }
-
-          if (daysUntilNext === -1) {
-            daysUntilNext = 7 - currentDay + firstDay;
-            if ((body.interval ?? 1) > 1) {
-              daysUntilNext += 7 * ((body.interval ?? 1) - 1);
-            }
-          }
-
-          nextDate.setDate(nextDate.getDate() + daysUntilNext);
-        } else {
-          nextDate.setDate(nextDate.getDate() + 7 * (body.interval ?? 1));
-        }
-        break;
-
-      case RecurringFrequency.MONTHLY:
-        if (body.dayOfMonth) {
-          nextDate.setMonth(nextDate.getMonth() + (body.interval ?? 1));
-          const lastDayOfMonth = new Date(
-            nextDate.getFullYear(),
-            nextDate.getMonth() + 1,
-            0,
-          ).getDate();
-          nextDate.setDate(Math.min(body.dayOfMonth, lastDayOfMonth));
-        }
-        break;
-    }
-
-    return nextDate;
   }
 }
