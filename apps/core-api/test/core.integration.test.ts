@@ -3479,16 +3479,6 @@ describe('Core API Integration', () => {
       })
       .expect(201);
 
-    const grandchildTaskRes = await request(app.getHttpServer())
-      .post(`/tasks/${childTaskRes.body.id}/subtasks`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({
-        title: 'Timeline grandchild preserved',
-        startAt: '2026-04-12T00:00:00.000Z',
-        dueAt: '2026-04-12T00:00:00.000Z',
-      })
-      .expect(201);
-
     const rescheduleRes = await request(app.getHttpServer())
       .patch(`/tasks/${parentTaskId}/reschedule`)
       .set('Authorization', `Bearer ${token}`)
@@ -3503,7 +3493,7 @@ describe('Core API Integration', () => {
     expect(rescheduleRes.body.dueAt).toContain('2026-04-16');
     expect(rescheduleRes.body.subtaskMovePolicy).toEqual({
       mode: 'preserve',
-      descendantCount: 2,
+      descendantCount: 1,
       largeImpact: false,
     });
 
@@ -3514,12 +3504,56 @@ describe('Core API Integration', () => {
     expect(childDetailRes.body.startAt).toContain('2026-04-11');
     expect(childDetailRes.body.dueAt).toContain('2026-04-11');
 
-    const grandchildDetailRes = await request(app.getHttpServer())
-      .get(`/tasks/${grandchildTaskRes.body.id}`)
+  });
+
+  test('POST /tasks/:id/subtasks rejects nested subtasks', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    expect(grandchildDetailRes.body.startAt).toContain('2026-04-12');
-    expect(grandchildDetailRes.body.dueAt).toContain('2026-04-12');
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Nested Subtask Rejection Project' })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSection = sectionsRes.body.find((section: any) => section.isDefault);
+    expect(defaultSection?.id).toBeTruthy();
+
+    const parentTaskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Nested parent target',
+        sectionId: defaultSection.id,
+      })
+      .expect(201);
+
+    const childTaskRes = await request(app.getHttpServer())
+      .post(`/tasks/${parentTaskRes.body.id}/subtasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Nested child target',
+      })
+      .expect(201);
+
+    const nestedRes = await request(app.getHttpServer())
+      .post(`/tasks/${childTaskRes.body.id}/subtasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Should fail',
+      })
+      .expect(400);
+
+    const errorMessage = nestedRes.body?.error?.message ?? nestedRes.body?.message ?? '';
+    expect(String(errorMessage)).toContain('Nested subtasks are not supported');
   });
 
   test('timeline move marks large subtask impact when a parent has many descendants', async () => {

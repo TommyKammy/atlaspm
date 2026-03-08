@@ -227,10 +227,12 @@ function CreateSubtaskDialog({
 export function SubtaskList({
   taskId,
   projectId,
+  canCreateSubtask = true,
   onTaskClick,
 }: {
   taskId: string;
   projectId: string;
+  canCreateSubtask?: boolean;
   onTaskClick: (taskId: string) => void;
 }) {
   const { t } = useI18n();
@@ -283,17 +285,19 @@ export function SubtaskList({
 
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium">{t('subtasks')}</h3>
-        <CreateSubtaskDialog parentTaskId={taskId} projectId={projectId}>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-auto px-1 py-0.5 text-sm font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
-            data-testid="subtasks-add-btn"
-          >
-            <Plus className="mr-1 h-3 w-3" />
-            {t('addSubtaskInline')}
-          </Button>
-        </CreateSubtaskDialog>
+        {canCreateSubtask ? (
+          <CreateSubtaskDialog parentTaskId={taskId} projectId={projectId}>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-auto px-1 py-0.5 text-sm font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
+              data-testid="subtasks-add-btn"
+            >
+              <Plus className="mr-1 h-3 w-3" />
+              {t('addSubtaskInline')}
+            </Button>
+          </CreateSubtaskDialog>
+        ) : null}
       </div>
 
       {subtasksQuery.isLoading ? (

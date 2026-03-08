@@ -2518,6 +2518,9 @@ export class TasksController {
   async createSubtask(@Param('id') parentId: string, @Body() body: CreateSubtaskDto, @CurrentRequest() req: AppRequest) {
     const parentTask = await this.prisma.task.findFirstOrThrow({ where: { id: parentId, deletedAt: null } });
     await this.domain.requireProjectRole(parentTask.projectId, req.user.sub, ProjectRole.MEMBER);
+    if (parentTask.parentId) {
+      throw new BadRequestException('Nested subtasks are not supported');
+    }
     assertValidDateRange(body.startAt, body.dueAt);
 
     const topTask = await this.prisma.task.findFirst({

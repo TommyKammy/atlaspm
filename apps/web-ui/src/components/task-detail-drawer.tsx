@@ -1078,6 +1078,7 @@ export default function TaskDetailDrawer({
                       <SubtaskList
                         taskId={taskId}
                         projectId={projectId}
+                        canCreateSubtask={!currentTask?.parentId}
                         onTaskClick={(newTaskId) => {
                           queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(newTaskId) });
                           const next = new URLSearchParams(searchParams.toString());
