@@ -201,13 +201,23 @@ export type TaskReminder = {
   sentAt?: string | null;
 };
 
+export type InboxNotificationType =
+  | 'mention'
+  | 'assignment'
+  | 'due_date'
+  | 'status'
+  | 'comment'
+  | 'approval_requested'
+  | 'approval_approved'
+  | 'approval_rejected';
+
 export type InboxNotification = {
   id: string;
   userId: string;
   projectId: string;
   taskId: string;
-  type: 'mention' | string;
-  sourceType: 'description' | 'comment' | string;
+  type: InboxNotificationType;
+  sourceType: 'description' | 'comment' | 'task';
   sourceId: string;
   readAt?: string | null;
   createdAt: string;

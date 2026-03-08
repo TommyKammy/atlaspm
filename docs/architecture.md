@@ -147,8 +147,23 @@
   - Comments use token syntax `@[userId|label]` in Phase 2.
   - Server normalizes mentions into `task_mentions` (`task_id`, `mentioned_user_id`, `source_type`, `source_id`).
   - Mention sync runs on description save and comment create/update/delete.
-- Inbox notifications for mentions:
-  - Mention create events upsert `inbox_notifications` rows (dedup key: `user_id + task_id + type + source_type + source_id`).
+- Inbox notifications:
+  - Canonical inbox notification types:
+    - `mention`
+    - `assignment`
+    - `due_date`
+    - `status`
+    - `comment`
+    - `approval_requested`
+    - `approval_approved`
+    - `approval_rejected`
+  - Canonical source types:
+    - `description`
+    - `comment`
+    - `task`
+  - Dedup/reopen key: `user_id + task_id + type + source_type + source_id`.
+  - The shared notification service owns inbox row creation/reopen behavior and emits `notification.created` / `notification.reopened`.
+  - Approval request notifications are cleared when the pending request is replaced, resolved, or cancelled so stale approver inbox items do not linger.
   - Notification center/inbox read APIs:
     - `GET /notifications`
     - `GET /notifications/unread-count`
@@ -166,7 +181,7 @@
 - Audit/outbox additions:
   - `task.mention.created`, `task.mention.deleted`
   - `task.attachment.initiated`, `task.attachment.created`, `task.attachment.deleted`
-  - `notification.created`, `notification.reopened`, `notification.read`, `notification.read_all`
+  - `notification.created`, `notification.reopened`, `notification.read`, `notification.unread`, `notification.read_all`
 
 ## Future readiness
 - `packages/domain` and `packages/rule-engine` provide extraction boundaries for phase 2.

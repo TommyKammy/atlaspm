@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { notificationSummary } from '@/lib/notification-copy';
 import { queryKeys } from '@/lib/query-keys';
 import type { InboxNotification } from '@/lib/types';
 import { useI18n } from '@/lib/i18n';
@@ -12,15 +13,6 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 type UnreadCountResponse = { count: number };
-
-function actorLabel(notification: InboxNotification) {
-  return (
-    notification.triggeredBy?.displayName ??
-    notification.triggeredBy?.email ??
-    notification.triggeredBy?.id ??
-    'Someone'
-  );
-}
 
 export default function InboxPage() {
   const { t } = useI18n();
@@ -109,7 +101,7 @@ export default function InboxPage() {
                     <div className="flex items-center gap-2">
                       {unread ? <span className="h-2 w-2 rounded-full bg-primary" /> : null}
                       <p className="truncate text-sm font-medium">
-                        {actorLabel(item)} {t('mentionedYou')}
+                        {notificationSummary(item, t)}
                       </p>
                       {unread ? <Badge variant="secondary">{t('unread')}</Badge> : null}
                     </div>

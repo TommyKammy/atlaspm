@@ -3612,6 +3612,106 @@ describe('Core API Integration', () => {
       .expect(403);
   });
 
+  test('approval request notifications use the normalized inbox taxonomy and emit notification outbox events', async () => {
+    const auth = app.get(AuthService);
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Approval Notification Project ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const approverId = `approval-approver-${projectId}`;
+    const approverEmail = `${approverId}@example.com`;
+    await prisma.user.upsert({
+      where: { id: approverId },
+      create: {
+        id: approverId,
+        email: approverEmail,
+        displayName: 'Approval Approver',
+        status: 'ACTIVE',
+      },
+      update: {
+        email: approverEmail,
+        displayName: 'Approval Approver',
+        status: 'ACTIVE',
+      },
+    });
+    await prisma.workspaceMembership.upsert({
+      where: { workspaceId_userId: { workspaceId, userId: approverId } },
+      create: { workspaceId, userId: approverId, role: 'WS_MEMBER' },
+      update: { role: 'WS_MEMBER' },
+    });
+    await prisma.projectMembership.upsert({
+      where: { projectId_userId: { projectId, userId: approverId } },
+      create: { projectId, userId: approverId, role: 'MEMBER' },
+      update: { role: 'MEMBER' },
+    });
+    const approverToken = await auth.mintDevToken(approverId, approverEmail, 'Approval Approver');
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSectionId = sectionsRes.body[0].id as string;
+
+    const approvalTask = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Needs approval',
+        type: 'APPROVAL',
+        sectionId: defaultSectionId,
+        assigneeUserId: 'test-user',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/tasks/${approvalTask.body.id}/request-approval`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ approverUserId: approverId, comment: 'Please review this approval task.' })
+      .expect(201);
+
+    const approverNotifications = await request(app.getHttpServer())
+      .get('/notifications?status=unread')
+      .set('Authorization', `Bearer ${approverToken}`)
+      .expect(200);
+    const approvalRequestNotification = approverNotifications.body.find(
+      (item: any) => item.taskId === approvalTask.body.id,
+    );
+
+    expect(approvalRequestNotification).toBeTruthy();
+    expect(approvalRequestNotification).toEqual(
+      expect.objectContaining({
+        taskId: approvalTask.body.id,
+        type: 'approval_requested',
+        sourceType: 'task',
+        sourceId: approvalTask.body.id,
+      }),
+    );
+
+    const notificationCreatedOutbox = await prisma.outboxEvent.findMany({
+      where: { type: 'notification.created' },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    const matchingOutbox = notificationCreatedOutbox.find((event) => {
+      const payload = event.payload as Record<string, unknown> | null;
+      return (
+        payload?.taskId === approvalTask.body.id &&
+        payload?.userId === approverId &&
+        payload?.type === 'approval_requested'
+      );
+    });
+    expect(matchingOutbox).toBeTruthy();
+  });
+
   test('saved view APIs persist per-user defaults and named views and reject invalid project references', async () => {
     const workspaceRes = await request(app.getHttpServer())
       .get('/workspaces')

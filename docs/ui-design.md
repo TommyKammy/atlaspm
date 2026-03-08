@@ -127,12 +127,13 @@
 ## Mention Notifications (P1)
 - Header notification center:
   - bell trigger with unread badge
-  - latest mention notifications
+  - latest inbox notifications with taxonomy-aware copy
   - one-click navigation to `/projects/:id?task=:taskId`
 - Inbox page:
   - route: `/inbox`
   - filters: `All` / `Unread`
   - actions: mark read/unread, mark all read, open target task
+  - summaries cover mention, assignment, due date, status, comment, and approval events
 - Caching:
   - targeted invalidation for notifications list and unread count after read/read-all mutations
   - no hard refresh required

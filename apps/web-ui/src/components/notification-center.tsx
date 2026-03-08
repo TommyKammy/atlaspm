@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { notificationSummary } from '@/lib/notification-copy';
 import { queryKeys } from '@/lib/query-keys';
 import type { InboxNotification } from '@/lib/types';
 import { useI18n } from '@/lib/i18n';
@@ -13,15 +14,6 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Badge } from '@/components/ui/badge';
 
 type UnreadCountResponse = { count: number };
-
-function actorLabel(notification: InboxNotification) {
-  return (
-    notification.triggeredBy?.displayName ??
-    notification.triggeredBy?.email ??
-    notification.triggeredBy?.id ??
-    'Someone'
-  );
-}
 
 export function NotificationCenter() {
   const router = useRouter();
@@ -135,7 +127,7 @@ export function NotificationCenter() {
                   <div className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" style={{ opacity: unread ? 1 : 0 }} />
                   <div className="min-w-0 space-y-0.5">
                     <p className="truncate text-xs font-medium">
-                      {actorLabel(item)} {t('mentionedYou')}
+                      {notificationSummary(item, t)}
                     </p>
                     <p className="truncate text-xs text-muted-foreground">
                       {item.project.name} · {item.task.title.trim() || t('untitledTask')}

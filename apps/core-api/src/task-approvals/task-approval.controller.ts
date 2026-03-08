@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Param, Body, UseGuards, NotFoundException, ConflictException } from '@nestjs/common';
+import { Controller, Post, Get, Param, Body, UseGuards, NotFoundException, ConflictException, Inject } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
@@ -6,6 +6,8 @@ import { DomainService } from '../common/domain.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, ProjectRole, TaskStatus, TaskType } from '@prisma/client';
 import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NOTIFICATION_TYPE_APPROVAL_REQUESTED } from '../notifications/notification-taxonomy';
 
 class RequestApprovalDto {
   @IsString()
@@ -29,8 +31,9 @@ class RespondApprovalDto {
 @UseGuards(AuthGuard)
 export class TaskApprovalController {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly domain: DomainService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(NotificationsService) private readonly notifications: NotificationsService,
   ) {}
 
   @Get('tasks/:id/approval')
@@ -121,27 +124,21 @@ export class TaskApprovalController {
 
       await tx.inboxNotification.deleteMany({
         where: {
-          userId: body.approverUserId,
           taskId,
-          type: 'APPROVAL_REQUESTED',
+          type: NOTIFICATION_TYPE_APPROVAL_REQUESTED,
           sourceType: 'task',
           sourceId: taskId,
         },
       });
 
-      await tx.inboxNotification.create({
-        data: {
-          userId: body.approverUserId,
-          projectId: task.projectId,
-          taskId,
-          type: 'APPROVAL_REQUESTED',
-          sourceType: 'task',
-          sourceId: taskId,
-          triggeredByUserId: req.user.sub,
-          readAt: null,
-        },
+      await this.notifications.createApprovalRequestedNotification(tx, {
+        userId: body.approverUserId,
+        projectId: task.projectId,
+        taskId,
+        triggeredByUserId: req.user.sub,
+        actor: req.user.sub,
+        correlationId: req.correlationId,
       });
-
       return upserted;
     });
 
@@ -224,30 +221,24 @@ export class TaskApprovalController {
         });
       }
 
-      const notificationType = body.status === 'APPROVED' ? 'APPROVAL_APPROVED' : 'APPROVAL_REJECTED';
-      
-      if (task.assigneeUserId) {
-        await tx.inboxNotification.deleteMany({
-          where: {
-            userId: task.assigneeUserId,
-            taskId,
-            type: notificationType,
-            sourceType: 'task',
-            sourceId: taskId,
-          },
-        });
+      await tx.inboxNotification.deleteMany({
+        where: {
+          taskId,
+          type: NOTIFICATION_TYPE_APPROVAL_REQUESTED,
+          sourceType: 'task',
+          sourceId: taskId,
+        },
+      });
 
-        await tx.inboxNotification.create({
-          data: {
-            userId: task.assigneeUserId,
-            projectId: task.projectId,
-            taskId,
-            type: notificationType,
-            sourceType: 'task',
-            sourceId: taskId,
-            triggeredByUserId: req.user.sub,
-            readAt: null,
-          },
+      if (task.assigneeUserId) {
+        await this.notifications.createApprovalResponseNotification(tx, {
+          userId: task.assigneeUserId,
+          projectId: task.projectId,
+          taskId,
+          status: body.status,
+          triggeredByUserId: req.user.sub,
+          actor: req.user.sub,
+          correlationId: req.correlationId,
         });
       }
 
@@ -293,6 +284,15 @@ export class TaskApprovalController {
         correlationId: req.correlationId,
         outboxType: 'approval.cancelled',
         payload: { taskId, approvalId: deletedApproval.id },
+      });
+
+      await tx.inboxNotification.deleteMany({
+        where: {
+          taskId,
+          type: NOTIFICATION_TYPE_APPROVAL_REQUESTED,
+          sourceType: 'task',
+          sourceId: taskId,
+        },
       });
 
       return deletedApproval;
