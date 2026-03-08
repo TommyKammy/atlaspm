@@ -2854,7 +2854,9 @@ describe('Core API Integration', () => {
       })
       .expect(200);
     expect(sectionManualLayoutRes.body.timelineManualLayout.section).toEqual({
-      [`section:${defaultSectionId}`]: [timelineTaskC.body.id, timelineTaskA.body.id],
+      [`section:${defaultSectionId}`]: {
+        orderedTaskIds: [timelineTaskC.body.id, timelineTaskA.body.id],
+      },
     });
     expect(sectionManualLayoutRes.body.timelineManualLayout.assignee).toEqual({});
     expect(sectionManualLayoutRes.body.timelineManualLayout.status).toEqual({});
@@ -2869,10 +2871,14 @@ describe('Core API Integration', () => {
       })
       .expect(200);
     expect(assigneeManualLayoutRes.body.timelineManualLayout.section).toEqual({
-      [`section:${defaultSectionId}`]: [timelineTaskC.body.id, timelineTaskA.body.id],
+      [`section:${defaultSectionId}`]: {
+        orderedTaskIds: [timelineTaskC.body.id, timelineTaskA.body.id],
+      },
     });
     expect(assigneeManualLayoutRes.body.timelineManualLayout.assignee).toEqual({
-      [`assignee:${timelineAssigneeId}`]: [timelineTaskB.body.id, timelineTaskA.body.id],
+      [`assignee:${timelineAssigneeId}`]: {
+        orderedTaskIds: [timelineTaskB.body.id, timelineTaskA.body.id],
+      },
     });
 
     const statusManualLayoutRes = await request(app.getHttpServer())
@@ -2885,13 +2891,19 @@ describe('Core API Integration', () => {
       })
       .expect(200);
     expect(statusManualLayoutRes.body.timelineManualLayout.section).toEqual({
-      [`section:${defaultSectionId}`]: [timelineTaskC.body.id, timelineTaskA.body.id],
+      [`section:${defaultSectionId}`]: {
+        orderedTaskIds: [timelineTaskC.body.id, timelineTaskA.body.id],
+      },
     });
     expect(statusManualLayoutRes.body.timelineManualLayout.assignee).toEqual({
-      [`assignee:${timelineAssigneeId}`]: [timelineTaskB.body.id, timelineTaskA.body.id],
+      [`assignee:${timelineAssigneeId}`]: {
+        orderedTaskIds: [timelineTaskB.body.id, timelineTaskA.body.id],
+      },
     });
     expect(statusManualLayoutRes.body.timelineManualLayout.status).toEqual({
-      [timelineStatusLaneId]: [timelineTaskA.body.id, timelineTaskB.body.id, timelineTaskC.body.id],
+      [timelineStatusLaneId]: {
+        orderedTaskIds: [timelineTaskA.body.id, timelineTaskB.body.id, timelineTaskC.body.id],
+      },
     });
 
     await request(app.getHttpServer())
@@ -2991,13 +3003,19 @@ describe('Core API Integration', () => {
     });
     expect(persistedPrefsRes.body.timelineManualLayout).toEqual({
       section: {
-        [`section:${defaultSectionId}`]: [timelineTaskC.body.id, timelineTaskA.body.id],
+        [`section:${defaultSectionId}`]: {
+          orderedTaskIds: [timelineTaskC.body.id, timelineTaskA.body.id],
+        },
       },
       assignee: {
-        [`assignee:${timelineAssigneeId}`]: [timelineTaskB.body.id, timelineTaskA.body.id],
+        [`assignee:${timelineAssigneeId}`]: {
+          orderedTaskIds: [timelineTaskB.body.id, timelineTaskA.body.id],
+        },
       },
       status: {
-        [timelineStatusLaneId]: [timelineTaskA.body.id, timelineTaskB.body.id, timelineTaskC.body.id],
+        [timelineStatusLaneId]: {
+          orderedTaskIds: [timelineTaskA.body.id, timelineTaskB.body.id, timelineTaskC.body.id],
+        },
       },
     });
 
@@ -3161,8 +3179,12 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(legacyPrefsRes.body.timelineManualLayout).toEqual({
-      section: legacySectionLayout,
-      assignee: legacyAssigneeLayout,
+      section: Object.fromEntries(
+        Object.entries(legacySectionLayout).map(([laneId, orderedTaskIds]) => [laneId, { orderedTaskIds }]),
+      ),
+      assignee: Object.fromEntries(
+        Object.entries(legacyAssigneeLayout).map(([laneId, orderedTaskIds]) => [laneId, { orderedTaskIds }]),
+      ),
       status: {},
     });
 
@@ -3180,14 +3202,16 @@ describe('Core API Integration', () => {
       })
       .expect(200);
     expect(statusManualLayoutRes.body.timelineManualLayout).toEqual({
-      section: legacySectionLayout,
-      assignee: legacyAssigneeLayout,
+      section: Object.fromEntries(
+        Object.entries(legacySectionLayout).map(([laneId, orderedTaskIds]) => [laneId, { orderedTaskIds }]),
+      ),
+      assignee: Object.fromEntries(
+        Object.entries(legacyAssigneeLayout).map(([laneId, orderedTaskIds]) => [laneId, { orderedTaskIds }]),
+      ),
       status: {
-        [legacyStatusLaneId]: [
-          timelineTaskARes.body.id,
-          timelineTaskBRes.body.id,
-          timelineTaskCRes.body.id,
-        ],
+        [legacyStatusLaneId]: {
+          orderedTaskIds: [timelineTaskARes.body.id, timelineTaskBRes.body.id, timelineTaskCRes.body.id],
+        },
       },
     });
 
@@ -3196,14 +3220,16 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(persistedPrefsRes.body.timelineManualLayout).toEqual({
-      section: legacySectionLayout,
-      assignee: legacyAssigneeLayout,
+      section: Object.fromEntries(
+        Object.entries(legacySectionLayout).map(([laneId, orderedTaskIds]) => [laneId, { orderedTaskIds }]),
+      ),
+      assignee: Object.fromEntries(
+        Object.entries(legacyAssigneeLayout).map(([laneId, orderedTaskIds]) => [laneId, { orderedTaskIds }]),
+      ),
       status: {
-        [legacyStatusLaneId]: [
-          timelineTaskARes.body.id,
-          timelineTaskBRes.body.id,
-          timelineTaskCRes.body.id,
-        ],
+        [legacyStatusLaneId]: {
+          orderedTaskIds: [timelineTaskARes.body.id, timelineTaskBRes.body.id, timelineTaskCRes.body.id],
+        },
       },
     });
   });
@@ -3606,6 +3632,65 @@ describe('Core API Integration', () => {
       .expect((res) => {
         expect(res.body).toBeDefined();
         expect(res.body.message).toContain('Unknown or archived custom field definition');
+      });
+  });
+
+  test('timeline move blocks subtasks from crossing grouping lanes', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Timeline Subtask Lane Guard Project' })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSection = sectionsRes.body.find((section: any) => section.isDefault);
+    const secondSectionRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Timeline child target' })
+      .expect(201);
+
+    const parentRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Timeline child parent',
+        sectionId: defaultSection.id,
+        startAt: '2026-05-01T00:00:00.000Z',
+        dueAt: '2026-05-02T00:00:00.000Z',
+      })
+      .expect(201);
+
+    const childRes = await request(app.getHttpServer())
+      .post(`/tasks/${parentRes.body.id}/subtasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Timeline child guarded',
+        startAt: '2026-05-01T00:00:00.000Z',
+        dueAt: '2026-05-01T00:00:00.000Z',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/tasks/${childRes.body.id}/timeline-move`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        sectionId: secondSectionRes.body.id,
+        version: childRes.body.version,
+      })
+      .expect(409)
+      .expect((res) => {
+        expect(res.body.message).toContain('Subtasks must stay in the same timeline group as their parent');
       });
   });
 

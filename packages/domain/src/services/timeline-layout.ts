@@ -92,6 +92,7 @@ export type BuildTimelineLayoutInput<TTask extends TimelineLayoutTaskInput> = {
   laneFooterHeight?: number;
   compactRows?: boolean;
   manualRowLaneIds?: string[];
+  manualRowHintsByLane?: Record<string, Record<string, number>>;
   expandedRowLaneIds?: string[];
   dependencyAwarePacking?: boolean;
   dependencyEdges?: Array<{ source: string; target: string; type?: string }>;
@@ -153,6 +154,7 @@ function buildCompactRowPlacement<TTask extends TimelineLayoutTaskInput>(
   tasks: TTask[],
   dependencyAwarePacking: boolean | undefined,
   dependencyEdges: Array<{ source: string; target: string; type?: string }> | undefined,
+  manualRowByTaskId: Record<string, number> | undefined,
   preserveInputOrder: boolean = false,
 ): CompactRowPlacement {
   const rowIndexByTaskId: Record<string, number> = {};
@@ -261,8 +263,13 @@ function buildCompactRowPlacement<TTask extends TimelineLayoutTaskInput>(
     if (task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd) {
       const taskStartDay = dayNumber(task.timelineStart);
       const taskEndDay = dayNumber(task.timelineEnd);
+      const preferredRowIndex = Math.max(0, manualRowByTaskId?.[task.id] ?? 0);
       rowIndex = -1;
-      for (let candidateRowIndex = 0; candidateRowIndex < occupiedRangesByRow.length; candidateRowIndex += 1) {
+      for (
+        let candidateRowIndex = preferredRowIndex;
+        candidateRowIndex < occupiedRangesByRow.length;
+        candidateRowIndex += 1
+      ) {
         const occupiedRanges = occupiedRangesByRow[candidateRowIndex] ?? [];
         const overlapsExistingTask = occupiedRanges.some(
           (range) => !(range.endDay < taskStartDay || range.startDay > taskEndDay),
@@ -274,11 +281,13 @@ function buildCompactRowPlacement<TTask extends TimelineLayoutTaskInput>(
         }
       }
       if (rowIndex < 0) {
-        rowIndex = nextRowIndex++;
+        rowIndex = Math.max(nextRowIndex, preferredRowIndex);
+        nextRowIndex = rowIndex + 1;
         occupiedRangesByRow[rowIndex] = [{ startDay: taskStartDay, endDay: taskEndDay }];
       }
     } else {
-      rowIndex = nextRowIndex++;
+      rowIndex = Math.max(nextRowIndex, Math.max(0, manualRowByTaskId?.[task.id] ?? nextRowIndex));
+      nextRowIndex = rowIndex + 1;
     }
 
     rowIndexByTaskId[task.id] = rowIndex;
@@ -415,6 +424,7 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
           lane.tasks,
           input.dependencyAwarePacking,
           input.dependencyEdges,
+          laneUsesManualRows ? input.manualRowHintsByLane?.[lane.id] : undefined,
           laneUsesManualRows,
         ).rowIndexByTaskId,
       );
@@ -493,6 +503,7 @@ export function buildTimelineTaskOrderByLane<TTask extends TimelineLayoutTaskInp
       lane.tasks,
       input.dependencyAwarePacking,
       input.dependencyEdges,
+      input.manualRowHintsByLane?.[lane.id],
     );
     laneTaskOrder[lane.id] = [...lane.tasks]
       .sort((left, right) => {
