@@ -1261,8 +1261,12 @@ export class TasksController {
     let nextStartAt: Date | null = task.startAt;
     let nextDueAt: Date | null = task.dueAt;
     if (hasDrop) {
+      const dropAt = toDateOnlyDate(rawDropAt);
+      if (!dropAt) {
+        throw new BadRequestException('dropAt must be a valid ISO8601 date string');
+      }
       const dropSchedule = this.domain.deriveTimelineDropSchedule({
-        dropAt: toDateOnlyDate(rawDropAt)!,
+        dropAt,
         currentStartAt: task.startAt,
         currentDueAt: task.dueAt,
         durationDays: body.durationDays,
