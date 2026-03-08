@@ -526,7 +526,6 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
 
   private async runProcessingTick(trigger: 'startup' | 'interval') {
     if (this.processingInFlight) {
-      this.logStructuredEvent('recurring.worker.process.skipped_in_flight', { trigger }, 'warn');
       return;
     }
 
@@ -560,7 +559,6 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
 
   private async runRetryTick(trigger: 'interval') {
     if (this.retryInFlight) {
-      this.logStructuredEvent('recurring.worker.retry.skipped_in_flight', { trigger }, 'warn');
       return;
     }
 
