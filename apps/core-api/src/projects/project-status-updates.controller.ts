@@ -9,19 +9,15 @@ import {
   UseGuards,
   Inject,
   NotFoundException,
-  UsePipes,
-  ValidationPipe,
 } from '@nestjs/common';
 import { ProjectRole, ProjectStatusHealth } from '@prisma/client';
 import {
-  ArrayMaxSize,
   IsArray,
   IsEnum,
   IsInt,
   IsOptional,
   IsString,
   Max,
-  MaxLength,
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -36,21 +32,16 @@ class CreateStatusUpdateDto {
   health!: ProjectStatusHealth;
 
   @IsString()
-  @MaxLength(5000)
   summary!: string;
 
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(50)
   @IsString({ each: true })
-  @MaxLength(500, { each: true })
   blockers?: string[];
 
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(50)
   @IsString({ each: true })
-  @MaxLength(500, { each: true })
   nextSteps?: string[];
 }
 
@@ -69,7 +60,6 @@ class ListStatusUpdatesQuery {
 
 @Controller()
 @UseGuards(AuthGuard)
-@UsePipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }))
 export class ProjectStatusUpdatesController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -86,11 +76,7 @@ export class ProjectStatusUpdatesController {
       throw new BadRequestException('Invalid status update health');
     }
 
-    if (typeof body.summary !== 'string') {
-      throw new BadRequestException('Status update summary is required');
-    }
-
-    const summary = body.summary.trim();
+    const summary = typeof body.summary === 'string' ? body.summary.trim() : '';
     if (!summary) {
       throw new BadRequestException('Status update summary cannot be empty');
     }
@@ -239,28 +225,21 @@ export class ProjectStatusUpdatesController {
     return statusUpdate;
   }
 
-  private normalizeListItems(items: unknown, fieldName: string) {
-    if (items === undefined) {
-      return [];
-    }
-    if (!Array.isArray(items)) {
-      throw new BadRequestException(`${fieldName} must be an array of strings`);
-    }
-    if (items.length > 50) {
+  private normalizeListItems(items: string[] | undefined, fieldName: string) {
+    const normalized = (items ?? [])
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+
+    if (normalized.length > 50) {
       throw new BadRequestException(`${fieldName} cannot contain more than 50 items`);
     }
 
-    return items
-      .map((item) => {
-        if (typeof item !== 'string') {
-          throw new BadRequestException(`${fieldName} must be an array of strings`);
-        }
-        const trimmed = item.trim();
-        if (trimmed.length > 500) {
-          throw new BadRequestException(`${fieldName} items cannot exceed 500 characters`);
-        }
-        return trimmed;
-      })
-      .filter((item) => item.length > 0);
+    for (const item of normalized) {
+      if (item.length > 500) {
+        throw new BadRequestException(`${fieldName} items cannot exceed 500 characters`);
+      }
+    }
+
+    return normalized;
   }
 }

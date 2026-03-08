@@ -1,5 +1,5 @@
 import { beforeAll, afterAll, describe, expect, test, vi } from 'vitest';
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { createServer } from 'node:http';
@@ -44,6 +44,9 @@ describe('Core API Integration', () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     app.use(new CorrelationIdMiddleware().use);
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
+    );
     await app.init();
     prisma = moduleRef.get(PrismaService);
     reminderWorker = moduleRef.get(ReminderDeliveryService);
@@ -3557,6 +3560,23 @@ describe('Core API Integration', () => {
     const viewerToken = await app
       .get(AuthService)
       .mintDevToken(viewerId, `${viewerId}@example.com`, 'Status Viewer');
+
+    const paddedSummary = ` ${'x'.repeat(5000)} `;
+    const trimmedSummary = 'x'.repeat(5000);
+
+    const trimmedCreateRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/status-updates`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        health: 'ON_TRACK',
+        summary: paddedSummary,
+        blockers: [' blocker still open ', '   '],
+        nextSteps: [' next step ', ''],
+      })
+      .expect(201);
+    expect(trimmedCreateRes.body.summary).toBe(trimmedSummary);
+    expect(trimmedCreateRes.body.blockers).toEqual(['blocker still open']);
+    expect(trimmedCreateRes.body.nextSteps).toEqual(['next step']);
 
     await request(app.getHttpServer())
       .post(`/projects/${projectId}/status-updates`)
