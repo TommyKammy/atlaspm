@@ -81,7 +81,8 @@ export function ProjectStatusUpdates({
   });
 
   const hasUpdates = (statusUpdatesQuery.data?.items.length ?? 0) > 0;
-  const shouldShowComposer = canEdit && (composerOpen || !hasUpdates);
+  const shouldAutoOpen = statusUpdatesQuery.isSuccess && !hasUpdates;
+  const shouldShowComposer = canEdit && (composerOpen || shouldAutoOpen);
 
   const createStatusUpdate = useMutation({
     mutationFn: () =>
@@ -200,7 +201,7 @@ export function ProjectStatusUpdates({
               {errorMessage(statusUpdatesQuery.error, t('statusUpdateLoadFailed'))}
             </p>
           ) : null}
-          {!statusUpdatesQuery.isLoading && !hasUpdates ? (
+          {statusUpdatesQuery.isSuccess && !hasUpdates ? (
             <div className="rounded-lg border border-dashed bg-background/70 px-4 py-6 text-sm text-muted-foreground">
               {t('statusUpdateEmpty')}
             </div>
