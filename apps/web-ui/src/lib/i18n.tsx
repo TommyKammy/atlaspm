@@ -132,6 +132,7 @@ const dictionaries: Record<Locale, Dictionary> = {
       'This task was updated elsewhere. Showing the latest timeline.',
     timelineMoveAndRescheduleFailed: 'Could not move and reschedule task. Changes were reverted.',
     timelineParentMoveWarning: 'Moved parent only. {count} subtasks stayed in place.',
+    timelineSubtaskLaneMoveBlocked: 'Subtasks must stay in the same group as their parent.',
     timelineLaneOrderSaveFailed: 'Could not save lane order. Reverted to the latest order.',
     timelineManualLayoutSaveFailed:
       'Could not save manual layout. Reverted to the latest layout.',
@@ -624,6 +625,7 @@ const dictionaries: Record<Locale, Dictionary> = {
       '移動とスケジュール更新に失敗しました。変更は取り消されました。',
     timelineParentMoveWarning:
       '親タスクのみを移動しました。{count} 件のサブタスクは元の位置のままです。',
+    timelineSubtaskLaneMoveBlocked: 'サブタスクは親タスクと同じグループ内でのみ移動できます。',
     timelineLaneOrderSaveFailed: 'レーン順の保存に失敗しました。最新の順序に戻しました。',
     timelineManualLayoutSaveFailed:
       '手動レイアウトの保存に失敗しました。最新のレイアウトに戻しました。',

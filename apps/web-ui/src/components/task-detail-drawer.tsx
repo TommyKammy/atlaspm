@@ -2,6 +2,7 @@
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   Activity,
   CalendarDays,
@@ -324,6 +325,9 @@ export default function TaskDetailDrawer({
   onOpenChange: (open: boolean) => void;
   projectId: string;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { t, locale } = useI18n();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<'details' | 'comments' | 'activity'>('details');
@@ -347,6 +351,7 @@ export default function TaskDetailDrawer({
   const [pendingCompleteWarningCount, setPendingCompleteWarningCount] = useState<number | null>(null);
   const attachmentsSectionRef = useRef<HTMLElement | null>(null);
   const undoCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingScheduleDraftRef = useRef<{ startDate: string; dueDate: string } | null>(null);
 
   const enabled = Boolean(taskId && open);
 
@@ -425,6 +430,42 @@ export default function TaskDetailDrawer({
     mutationFn: (body: Record<string, unknown>) => api(`/tasks/${taskId}`, { method: 'PATCH', body }) as Promise<Task>,
     onSuccess: async (updated) => {
       syncTaskCaches(updated);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(updated.id) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+    },
+  });
+
+  const patchSchedule = useMutation({
+    mutationFn: ({
+      version,
+      startDate,
+      dueDate,
+    }: {
+      version: number;
+      startDate: string;
+      dueDate: string;
+    }) =>
+      api(`/tasks/${taskId}`, {
+        method: 'PATCH',
+        body: {
+          version,
+          startAt: startDate ? `${startDate}T00:00:00.000Z` : null,
+          dueAt: dueDate ? `${dueDate}T00:00:00.000Z` : null,
+        },
+      }) as Promise<Task>,
+    onSuccess: async (updated) => {
+      syncTaskCaches(updated);
+      const pending = pendingScheduleDraftRef.current;
+      const persistedStartDate = updated.startAt ? String(updated.startAt).slice(0, 10) : '';
+      const persistedDueDate = updated.dueAt ? String(updated.dueAt).slice(0, 10) : '';
+      if (pending && (pending.startDate !== persistedStartDate || pending.dueDate !== persistedDueDate)) {
+        pendingScheduleDraftRef.current = null;
+        patchSchedule.mutate({
+          version: updated.version,
+          startDate: pending.startDate,
+          dueDate: pending.dueDate,
+        });
+      }
       await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(updated.id) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
     },
@@ -661,21 +702,24 @@ export default function TaskDetailDrawer({
     patchTask.mutate({ progressPercent: normalized, version: currentTask.version });
   };
 
-  const commitStartDate = () => {
+  const commitSchedule = (nextStartDate: string, nextDueDate: string) => {
     if (!currentTask) return;
-    const nextStartAt = startDateInput ? `${startDateInput}T00:00:00.000Z` : null;
     const currentStartAt = currentTask.startAt ? String(currentTask.startAt).slice(0, 10) : '';
-    if (currentStartAt === startDateInput) return;
-    patchTask.mutate({ startAt: nextStartAt, version: currentTask.version });
+    const currentDueAt = currentTask.dueAt ? String(currentTask.dueAt).slice(0, 10) : '';
+    if (currentStartAt === nextStartDate && currentDueAt === nextDueDate) return;
+    pendingScheduleDraftRef.current = { startDate: nextStartDate, dueDate: nextDueDate };
+    if (patchSchedule.isPending) return;
+    pendingScheduleDraftRef.current = null;
+    patchSchedule.mutate({
+      version: currentTask.version,
+      startDate: nextStartDate,
+      dueDate: nextDueDate,
+    });
   };
 
-  const commitDueDate = () => {
-    if (!currentTask) return;
-    const nextDueAt = dueDateInput ? `${dueDateInput}T00:00:00.000Z` : null;
-    const currentDueAt = currentTask.dueAt ? String(currentTask.dueAt).slice(0, 10) : '';
-    if (currentDueAt === dueDateInput) return;
-    patchTask.mutate({ dueAt: nextDueAt, version: currentTask.version });
-  };
+  const commitStartDate = (nextValue: string = startDateInput) => commitSchedule(nextValue, dueDateInput);
+
+  const commitDueDate = (nextValue: string = dueDateInput) => commitSchedule(startDateInput, nextValue);
 
   const commitStatus = (nextStatus: Task['status']) => {
     if (!currentTask || currentTask.status === nextStatus) return;
@@ -829,8 +873,11 @@ export default function TaskDetailDrawer({
                       <Input
                         type="date"
                         value={startDateInput}
-                        onChange={(event) => setStartDateInput(event.target.value)}
-                        onBlur={commitStartDate}
+                        onChange={(event) => {
+                          setStartDateInput(event.target.value);
+                          commitStartDate(event.target.value);
+                        }}
+                        onBlur={() => commitStartDate()}
                         className="h-8 w-[220px] border-transparent bg-transparent px-2 shadow-none hover:bg-muted/30 focus-visible:border-border"
                         data-testid="task-detail-start-date"
                       />
@@ -840,8 +887,11 @@ export default function TaskDetailDrawer({
                       <Input
                         type="date"
                         value={dueDateInput}
-                        onChange={(event) => setDueDateInput(event.target.value)}
-                        onBlur={commitDueDate}
+                        onChange={(event) => {
+                          setDueDateInput(event.target.value);
+                          commitDueDate(event.target.value);
+                        }}
+                        onBlur={() => commitDueDate()}
                         className="h-8 w-[220px] border-transparent bg-transparent px-2 shadow-none hover:bg-muted/30 focus-visible:border-border"
                         data-testid="task-detail-due-date"
                       />
@@ -1028,9 +1078,12 @@ export default function TaskDetailDrawer({
                       <SubtaskList
                         taskId={taskId}
                         projectId={projectId}
+                        canCreateSubtask={!currentTask?.parentId}
                         onTaskClick={(newTaskId) => {
                           queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(newTaskId) });
-                          window.location.href = `/projects/${projectId}?task=${newTaskId}`;
+                          const next = new URLSearchParams(searchParams.toString());
+                          next.set('task', newTaskId);
+                          router.push(`${pathname}?${next.toString()}`, { scroll: false });
                         }}
                       />
                       <DependencyManager taskId={taskId} />

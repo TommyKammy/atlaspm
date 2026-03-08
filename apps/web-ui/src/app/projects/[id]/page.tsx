@@ -222,12 +222,6 @@ export default function ProjectPage() {
   }, [dispatchQuickAddIntent, pendingQuickAdd, unsectionedQuickAddSectionId]);
 
   useEffect(() => {
-    if (openTaskId && view !== 'list') {
-      setProjectQueryParam('view', 'list');
-    }
-  }, [openTaskId, setProjectQueryParam, view]);
-
-  useEffect(() => {
     if (!showAddSectionInput) return;
     setTimeout(() => addSectionInputRef.current?.focus(), 0);
   }, [showAddSectionInput]);
@@ -464,6 +458,7 @@ export default function ProjectPage() {
           search={search}
           statusFilter={statusFilter}
           priorityFilter={priorityFilter}
+          initialTaskId={openTaskId}
         />
       ) : view === 'gantt' ? (
         <ProjectGanttShell
@@ -471,6 +466,7 @@ export default function ProjectPage() {
           search={search}
           statusFilter={statusFilter}
           priorityFilter={priorityFilter}
+          initialTaskId={openTaskId}
         />
       ) : view === 'files' ? (
         <ProjectFilesView

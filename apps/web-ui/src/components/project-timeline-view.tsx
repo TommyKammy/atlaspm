@@ -27,6 +27,7 @@ const TASK_ROW_HEIGHT = 40;
 const VIRTUALIZE_ROW_THRESHOLD = 120;
 const VIRTUAL_OVERSCAN_PX = 320;
 const DRAG_START_THRESHOLD_PX = 6;
+const LANE_CHANGE_HORIZONTAL_THRESHOLD_PX = 8;
 const UNASSIGNED_LANE_ID = '__unassigned__';
 const UNSCHEDULED_TASK_DND_TYPE = 'application/x-atlaspm-unscheduled-task';
 
@@ -37,8 +38,18 @@ type TimelineSortMode = 'manual' | 'startAt' | 'dueAt';
 type TimelineScheduleFilter = 'all' | 'scheduled' | 'unscheduled';
 type GanttRiskFilterMode = 'all' | 'risk';
 type TimelineLaneOrderGroupBy = Extract<TimelineSwimlane, 'section' | 'assignee'>;
-type TimelineManualLayoutByLane = Record<string, string[]>;
+type TimelineManualLaneLayout = {
+  orderedTaskIds: string[];
+  rowByTaskId?: Record<string, number>;
+};
+type TimelineManualLayoutByLane = Record<string, TimelineManualLaneLayout>;
 type TimelineManualLayoutState = Record<TimelineSwimlane, TimelineManualLayoutByLane>;
+type TimelineLaneSubtaskMeta = {
+  visibleTaskIds: string[];
+  childIdsByParentId: Record<string, string[]>;
+  depthByTaskId: Record<string, number>;
+  rowHintByTaskId: Record<string, number>;
+};
 type TimelineViewState = {
   zoom?: TimelineZoom;
   anchorDate?: string;
@@ -94,16 +105,6 @@ type TimelineSelectionDraft = {
   currentY: number;
 };
 
-type TimelineRailNode = {
-  task: TimelineTask;
-  children: TimelineRailNode[];
-};
-
-type TimelineLaneRail = {
-  orderedTasks: TimelineTask[];
-  usesHierarchicalTaskOrder: boolean;
-};
-
 type TimelineTaskMutationResult = Task & {
   subtaskMovePolicy?: Task['subtaskMovePolicy'];
 };
@@ -140,13 +141,37 @@ const TIMELINE_ZOOM_CONFIG: Record<
   TimelineZoom,
   { beforeDays: number; afterDays: number; stepDays: number; dayColWidth: number }
 > = {
-  day: { beforeDays: 1, afterDays: 5, stepDays: 1, dayColWidth: 64 },
-  week: { beforeDays: 7, afterDays: 21, stepDays: 7, dayColWidth: 36 },
-  month: { beforeDays: 31, afterDays: 92, stepDays: 30, dayColWidth: 24 },
+  day: { beforeDays: 3, afterDays: 10, stepDays: 1, dayColWidth: 64 },
+  week: { beforeDays: 21, afterDays: 42, stepDays: 7, dayColWidth: 36 },
+  month: { beforeDays: 62, afterDays: 184, stepDays: 30, dayColWidth: 24 },
 };
 
 function startOfDay(value: Date): Date {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}
+
+function toUtcDateOnlyIsoFromLocalDate(value: Date): string {
+  const year = value.getFullYear();
+  const month = `${value.getMonth() + 1}`.padStart(2, '0');
+  const day = `${value.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}T00:00:00.000Z`;
+}
+
+function utcDateOnlyToLocalDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) return null;
+  return new Date(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate());
+}
+
+function shiftUtcDateOnlyIsoByDays(value: string | null | undefined, days: number): string | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) return null;
+  const shifted = new Date(
+    Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate() + days, 0, 0, 0, 0),
+  );
+  return shifted.toISOString();
 }
 
 function addDays(base: Date, delta: number): Date {
@@ -176,16 +201,19 @@ function shiftIsoByBusinessDays(
   if (!value) return null;
   const parsed = new Date(value);
   if (Number.isNaN(parsed.valueOf())) return null;
-  if (!businessDays) return parsed.toISOString();
+  const normalized = new Date(
+    Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate(), 0, 0, 0, 0),
+  );
+  if (!businessDays) return normalized.toISOString();
   const step = businessDays > 0 ? 1 : -1;
   let remaining = Math.abs(businessDays);
   while (remaining > 0) {
-    parsed.setUTCDate(parsed.getUTCDate() + step);
-    if (!isWeekend(parsed)) {
+    normalized.setUTCDate(normalized.getUTCDate() + step);
+    if (!isWeekend(normalized)) {
       remaining -= 1;
     }
   }
-  return parsed.toISOString();
+  return normalized.toISOString();
 }
 
 function shiftTimelineIso(
@@ -198,6 +226,46 @@ function shiftTimelineIso(
     return shiftIsoByDays(value, deltaDays);
   }
   return shiftIsoByBusinessDays(value, deltaDays);
+}
+
+function resizeTimelineRange(
+  task: TimelineTask,
+  edge: 'start' | 'end',
+  deltaDays: number,
+  workingDaysOnly: boolean,
+  useCalendarDays: boolean,
+): { startAt: string | null; dueAt: string | null } {
+  const currentStartAt = task.startAt;
+  const currentDueAt = task.dueAt;
+  if (!currentStartAt || !currentDueAt) {
+    return { startAt: currentStartAt ?? null, dueAt: currentDueAt ?? null };
+  }
+
+  if (edge === 'start') {
+    const nextStartAt = shiftTimelineIso(
+      currentStartAt,
+      deltaDays,
+      workingDaysOnly,
+      useCalendarDays,
+    );
+    if (!nextStartAt) return { startAt: currentStartAt, dueAt: currentDueAt };
+    if (new Date(nextStartAt) > new Date(currentDueAt)) {
+      return { startAt: currentDueAt, dueAt: currentDueAt };
+    }
+    return { startAt: nextStartAt, dueAt: currentDueAt };
+  }
+
+  const nextDueAt = shiftTimelineIso(
+    currentDueAt,
+    deltaDays,
+    workingDaysOnly,
+    useCalendarDays,
+  );
+  if (!nextDueAt) return { startAt: currentStartAt, dueAt: currentDueAt };
+  if (new Date(nextDueAt) < new Date(currentStartAt)) {
+    return { startAt: currentStartAt, dueAt: currentStartAt };
+  }
+  return { startAt: currentStartAt, dueAt: nextDueAt };
 }
 
 function colorFromProjectId(projectId: string): {
@@ -315,65 +383,22 @@ function compareTimelineTasks(
   return left.title.localeCompare(right.title);
 }
 
-function buildTimelineLaneRail(
-  tasks: TimelineTask[],
-  childTaskCountByParentId: Map<string, number>,
-): TimelineLaneRail {
-  const usesHierarchicalTaskOrder = tasks.some(
-    (task) => Boolean(task.parentId) || (childTaskCountByParentId.get(task.id) ?? 0) > 0,
-  );
-  if (!usesHierarchicalTaskOrder) {
-    return {
-      orderedTasks: tasks,
-      usesHierarchicalTaskOrder: false,
-    };
+function timelineTasksOverlap(left: TimelineTask, right: TimelineTask): boolean {
+  if (
+    !left.hasSchedule ||
+    !right.hasSchedule ||
+    !left.timelineStart ||
+    !left.timelineEnd ||
+    !right.timelineStart ||
+    !right.timelineEnd
+  ) {
+    return false;
   }
-
-  const byId = new Map<string, TimelineRailNode>();
-  const orderByTaskId = new Map(tasks.map((task, index) => [task.id, index]));
-  for (const task of tasks) {
-    byId.set(task.id, { task, children: [] });
-  }
-
-  const roots: TimelineRailNode[] = [];
-  for (const task of tasks) {
-    const node = byId.get(task.id);
-    if (!node) continue;
-    const parentNode = task.parentId ? byId.get(task.parentId) : undefined;
-    if (parentNode) {
-      parentNode.children.push(node);
-      continue;
-    }
-    roots.push(node);
-  }
-
-  const sortNodes = (nodes: TimelineRailNode[]) => {
-    nodes.sort(
-      (left, right) => (orderByTaskId.get(left.task.id) ?? 0) - (orderByTaskId.get(right.task.id) ?? 0),
-    );
-    for (const node of nodes) {
-      sortNodes(node.children);
-    }
-  };
-  sortNodes(roots);
-
-  const orderedTasks: TimelineTask[] = [];
-  const walk = (
-    nodes: TimelineRailNode[],
-  ) => {
-    nodes.forEach((node) => {
-      orderedTasks.push(node.task);
-      if (node.children.length > 0) {
-        walk(node.children);
-      }
-    });
-  };
-  walk(roots);
-
-  return {
-    orderedTasks,
-    usesHierarchicalTaskOrder: true,
-  };
+  const leftStart = dayNumber(left.timelineStart);
+  const leftEnd = dayNumber(left.timelineEnd);
+  const rightStart = dayNumber(right.timelineStart);
+  const rightEnd = dayNumber(right.timelineEnd);
+  return !(leftEnd < rightStart || rightEnd < leftStart);
 }
 
 function baselineVarianceDays(task: TimelineTask): number | null {
@@ -399,11 +424,7 @@ function isApiConflictError(error: unknown): boolean {
 }
 
 function shiftIsoByDays(value: string | null | undefined, days: number): string | null {
-  if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.valueOf())) return null;
-  parsed.setUTCDate(parsed.getUTCDate() + days);
-  return parsed.toISOString();
+  return shiftUtcDateOnlyIsoByDays(value, days);
 }
 
 function applyTaskScheduleInGroups(
@@ -675,10 +696,33 @@ function normalizeTimelineManualLayoutByLane(value: unknown): TimelineManualLayo
   const next: TimelineManualLayoutByLane = {};
   for (const [laneIdRaw, rawTaskIds] of Object.entries(value as Record<string, unknown>)) {
     const laneId = laneIdRaw.trim();
-    if (!laneId || !Array.isArray(rawTaskIds)) continue;
+    if (!laneId) continue;
+    const candidate =
+      Array.isArray(rawTaskIds)
+        ? { orderedTaskIds: rawTaskIds, rowByTaskId: {} as Record<string, unknown> }
+        : rawTaskIds && typeof rawTaskIds === 'object' && !Array.isArray(rawTaskIds)
+          ? {
+              orderedTaskIds: Array.isArray((rawTaskIds as Record<string, unknown>).orderedTaskIds)
+                ? ((rawTaskIds as Record<string, unknown>).orderedTaskIds as unknown[])
+                : Array.isArray((rawTaskIds as Record<string, unknown>).taskIds)
+                  ? ((rawTaskIds as Record<string, unknown>).taskIds as unknown[])
+                  : [],
+              rowByTaskId:
+                (rawTaskIds as Record<string, unknown>).rowByTaskId &&
+                typeof (rawTaskIds as Record<string, unknown>).rowByTaskId === 'object' &&
+                !Array.isArray((rawTaskIds as Record<string, unknown>).rowByTaskId)
+                  ? ((rawTaskIds as Record<string, unknown>).rowByTaskId as Record<string, unknown>)
+                  : (rawTaskIds as Record<string, unknown>).rowHints &&
+                      typeof (rawTaskIds as Record<string, unknown>).rowHints === 'object' &&
+                      !Array.isArray((rawTaskIds as Record<string, unknown>).rowHints)
+                    ? ((rawTaskIds as Record<string, unknown>).rowHints as Record<string, unknown>)
+                    : {},
+            }
+          : null;
+    if (!candidate) continue;
     const seenTaskIds = new Set<string>();
     const normalizedTaskIds: string[] = [];
-    for (const taskId of rawTaskIds) {
+    for (const taskId of candidate.orderedTaskIds) {
       if (typeof taskId !== 'string') continue;
       const trimmedTaskId = taskId.trim();
       if (!trimmedTaskId || seenTaskIds.has(trimmedTaskId)) continue;
@@ -686,7 +730,19 @@ function normalizeTimelineManualLayoutByLane(value: unknown): TimelineManualLayo
       normalizedTaskIds.push(trimmedTaskId);
     }
     if (normalizedTaskIds.length > 0) {
-      next[laneId] = normalizedTaskIds;
+      const rowByTaskId: Record<string, number> = {};
+      const maxRowIndex = Math.max(normalizedTaskIds.length - 1, 0);
+      for (const [taskIdRaw, rowIndex] of Object.entries(candidate.rowByTaskId)) {
+        const taskId = taskIdRaw.trim();
+        if (!taskId || !normalizedTaskIds.includes(taskId)) continue;
+        const numericRowIndex = Number(rowIndex);
+        if (!Number.isInteger(numericRowIndex) || numericRowIndex < 0) continue;
+        rowByTaskId[taskId] = Math.min(numericRowIndex, maxRowIndex);
+      }
+      next[laneId] =
+        Object.keys(rowByTaskId).length > 0
+          ? { orderedTaskIds: normalizedTaskIds, rowByTaskId }
+          : { orderedTaskIds: normalizedTaskIds };
     }
   }
   return next;
@@ -703,18 +759,86 @@ function normalizeTimelineManualLayoutState(value: unknown): TimelineManualLayou
 }
 
 function hasTimelineManualLayout(layout: TimelineManualLayoutByLane): boolean {
-  return Object.values(layout).some((laneTaskOrder) => laneTaskOrder.length > 0);
+  return Object.values(layout).some((laneTaskOrder) => laneTaskOrder.orderedTaskIds.length > 0);
 }
 
 function mergeTimelineManualLaneTaskOrder(
-  existingTaskOrder: string[] | undefined,
+  existingLaneLayout: TimelineManualLaneLayout | undefined,
   nextTaskOrder: string[],
-): string[] {
+  nextRowByTaskId?: Record<string, number>,
+): TimelineManualLaneLayout {
   const seenTaskIds = new Set(nextTaskOrder);
-  return [
+  const orderedTaskIds = [
     ...nextTaskOrder,
-    ...(existingTaskOrder ?? []).filter((taskId) => !seenTaskIds.has(taskId)),
+    ...(existingLaneLayout?.orderedTaskIds ?? []).filter((taskId) => !seenTaskIds.has(taskId)),
   ];
+  const rowByTaskId = {
+    ...(existingLaneLayout?.rowByTaskId ?? {}),
+    ...(nextRowByTaskId ?? {}),
+  };
+  for (const taskId of Object.keys(rowByTaskId)) {
+    if (!orderedTaskIds.includes(taskId)) delete rowByTaskId[taskId];
+  }
+  return Object.keys(rowByTaskId).length > 0 ? { orderedTaskIds, rowByTaskId } : { orderedTaskIds };
+}
+
+function getTimelineManualOrderedTaskIdsByLane(layout: TimelineManualLayoutByLane): Record<string, string[]> {
+  return Object.fromEntries(
+    Object.entries(layout)
+      .filter(([, laneLayout]) => laneLayout.orderedTaskIds.length > 0)
+      .map(([laneId, laneLayout]) => [laneId, laneLayout.orderedTaskIds]),
+  );
+}
+
+function getTimelineManualRowByTaskIdByLane(
+  layout: TimelineManualLayoutByLane,
+): Record<string, Record<string, number>> {
+  return Object.fromEntries(
+    Object.entries(layout)
+      .filter(([, laneLayout]) => Boolean(laneLayout.rowByTaskId && Object.keys(laneLayout.rowByTaskId).length))
+      .map(([laneId, laneLayout]) => [laneId, laneLayout.rowByTaskId ?? {}]),
+  );
+}
+
+function buildTimelineLaneSubtaskMeta<TTask extends { id: string; parentId?: string | null }>(
+  tasks: TTask[],
+  collapsedParentIds: Set<string>,
+  baseRowByTaskId?: Record<string, number>,
+): TimelineLaneSubtaskMeta {
+  const taskById = new Map(tasks.map((task) => [task.id, task] as const));
+  const laneTaskIds = new Set(tasks.map((task) => task.id));
+  const childIdsByParentId: Record<string, string[]> = {};
+  for (const task of tasks) {
+    const parentId = task.parentId ?? null;
+    if (!parentId || !laneTaskIds.has(parentId)) continue;
+    (childIdsByParentId[parentId] ??= []).push(task.id);
+  }
+
+  const roots = tasks.filter((task) => !task.parentId || !laneTaskIds.has(task.parentId));
+  const visibleTaskIds: string[] = [];
+  const depthByTaskId: Record<string, number> = {};
+  const rowHintByTaskId: Record<string, number> = {};
+
+  const visit = (taskId: string, depth: number, inheritedRowHint: number) => {
+    const task = taskById.get(taskId);
+    if (!task) return;
+    depthByTaskId[taskId] = depth;
+    const ownRowHint = Math.max(baseRowByTaskId?.[taskId] ?? 0, inheritedRowHint);
+    rowHintByTaskId[taskId] = ownRowHint;
+    visibleTaskIds.push(taskId);
+    if (collapsedParentIds.has(taskId)) return;
+    const childIds = childIdsByParentId[taskId] ?? [];
+    childIds.forEach((childId) => visit(childId, depth + 1, ownRowHint + 1));
+  };
+
+  roots.forEach((task) => visit(task.id, 0, baseRowByTaskId?.[task.id] ?? 0));
+
+  return {
+    visibleTaskIds,
+    childIdsByParentId,
+    depthByTaskId,
+    rowHintByTaskId,
+  };
 }
 
 function readStoredTimelineLaneOrder(keys: Array<string | null | undefined>): string[] {
@@ -779,12 +903,14 @@ export function ProjectScheduleCanvas({
   statusFilter,
   priorityFilter,
   mode,
+  initialTaskId,
 }: {
   projectId: string;
   search: string;
   statusFilter: 'ALL' | Task['status'];
   priorityFilter: 'ALL' | NonNullable<Task['priority']>;
   mode: TimelineMode;
+  initialTaskId?: string | null;
 }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
@@ -815,6 +941,7 @@ export function ProjectScheduleCanvas({
     originY: number;
     originLaneId: string;
     dropLaneId: string | null;
+    dropRowIndex: number | null;
     deltaDays: number;
     useCalendarDays: boolean;
     moved: boolean;
@@ -827,11 +954,30 @@ export function ProjectScheduleCanvas({
     originY: number;
     originLaneId: string;
     dropLaneId: string | null;
+    dropRowIndex: number | null;
     deltaDays: number;
     useCalendarDays: boolean;
     moved: boolean;
   } | null>(null);
   const dragPointerTargetRef = useRef<HTMLElement | null>(null);
+  const [resizeState, setResizeState] = useState<{
+    taskId: string;
+    pointerId: number;
+    originX: number;
+    edge: 'start' | 'end';
+    deltaDays: number;
+    moved: boolean;
+    useCalendarDays: boolean;
+  } | null>(null);
+  const resizeStateRef = useRef<{
+    taskId: string;
+    pointerId: number;
+    originX: number;
+    edge: 'start' | 'end';
+    deltaDays: number;
+    moved: boolean;
+    useCalendarDays: boolean;
+  } | null>(null);
   const [laneDragState, setLaneDragState] = useState<{
     draggingLaneId: string;
     overLaneId: string | null;
@@ -843,7 +989,11 @@ export function ProjectScheduleCanvas({
   const [unscheduledDragTaskId, setUnscheduledDragTaskId] = useState<string | null>(null);
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
+  const [collapsedTimelineParentIds, setCollapsedTimelineParentIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [dependencyDraft, setDependencyDraft] = useState<TimelineDependencyDraft | null>(null);
+  const dependencyDraftRef = useRef<TimelineDependencyDraft | null>(null);
   const [selectedTimelineTaskIds, setSelectedTimelineTaskIds] = useState<string[]>([]);
   const selectedTimelineTaskIdsRef = useRef<string[]>([]);
   const [selectionDraft, setSelectionDraft] = useState<TimelineSelectionDraft | null>(null);
@@ -856,6 +1006,12 @@ export function ProjectScheduleCanvas({
   const [timelineParentMoveUndo, setTimelineParentMoveUndo] =
     useState<TimelineParentMoveUndoState | null>(null);
   const timelineParentMoveUndoActionRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (initialTaskId) {
+      setSelectedTaskId(initialTaskId);
+    }
+  }, [initialTaskId]);
 
   useEffect(() => {
     let timeoutId: number | undefined;
@@ -1243,15 +1399,6 @@ export function ProjectScheduleCanvas({
     () => filteredTasks.filter((task) => task.hasSchedule),
     [filteredTasks],
   );
-  const childTaskCountByParentId = useMemo(() => {
-    const next = new Map<string, number>();
-    for (const task of scheduledTimelineTasks) {
-      if (!task.parentId) continue;
-      next.set(task.parentId, (next.get(task.parentId) ?? 0) + 1);
-    }
-    return next;
-  }, [scheduledTimelineTasks]);
-
   const preferredLaneOrder = useMemo(() => {
     const storedLaneOrder = readStoredTimelineLaneOrder([
       laneOrderStorageUserKey,
@@ -1291,6 +1438,14 @@ export function ProjectScheduleCanvas({
   const hasActiveManualLayout = mode === 'timeline' && sortMode === 'manual'
     ? hasTimelineManualLayout(preferredManualLayout)
     : false;
+  const preferredManualTaskOrderByLane = useMemo(
+    () => getTimelineManualOrderedTaskIdsByLane(preferredManualLayout),
+    [preferredManualLayout],
+  );
+  const preferredManualRowByTaskIdByLane = useMemo(
+    () => getTimelineManualRowByTaskIdByLane(preferredManualLayout),
+    [preferredManualLayout],
+  );
 
   const baseTimelineLanes = useMemo(() => {
     const lanes = buildTimelineLanes({
@@ -1299,7 +1454,7 @@ export function ProjectScheduleCanvas({
       sections: timeline.sections,
       membersById: timeline.membersById,
       preferredLaneOrder,
-      ...(hasActiveManualLayout ? { preferredTaskOrderByLane: preferredManualLayout } : {}),
+      ...(hasActiveManualLayout ? { preferredTaskOrderByLane: preferredManualTaskOrderByLane } : {}),
       defaultSectionLabel: t('tasks'),
       unassignedLabel: t('unassigned'),
       statusLabels: {
@@ -1315,31 +1470,38 @@ export function ProjectScheduleCanvas({
     effectiveSwimlane,
     hasActiveManualLayout,
     preferredLaneOrder,
-    preferredManualLayout,
+    preferredManualTaskOrderByLane,
     scheduledTimelineTasks,
     t,
     timeline.membersById,
     timeline.sections,
   ]);
-  const timelineLaneRailByLaneId = useMemo(() => {
-    const next = new Map<string, TimelineLaneRail>();
-    if (mode !== 'timeline') return next;
-    for (const lane of baseTimelineLanes) {
-      next.set(lane.id, buildTimelineLaneRail(lane.tasks, childTaskCountByParentId));
+  const timelineLanes = baseTimelineLanes;
+  const timelineLaneSubtaskMetaById = useMemo(() => {
+    const next: Record<string, TimelineLaneSubtaskMeta> = {};
+    for (const lane of timelineLanes) {
+      next[lane.id] = buildTimelineLaneSubtaskMeta(
+        lane.tasks,
+        collapsedTimelineParentIds,
+        preferredManualRowByTaskIdByLane[lane.id],
+      );
     }
     return next;
-  }, [baseTimelineLanes, childTaskCountByParentId, mode]);
-  const timelineLanes = useMemo(
+  }, [collapsedTimelineParentIds, preferredManualRowByTaskIdByLane, timelineLanes]);
+  const treeAwareManualRowByTaskIdByLane = useMemo(
     () =>
-      baseTimelineLanes.map((lane) => {
-        const rail = timelineLaneRailByLaneId.get(lane.id);
-        if (!rail?.usesHierarchicalTaskOrder) return lane;
-        return {
-          ...lane,
-          tasks: rail.orderedTasks,
-        };
-      }),
-    [baseTimelineLanes, timelineLaneRailByLaneId],
+      Object.fromEntries(
+        Object.entries(timelineLaneSubtaskMetaById).map(([laneId, meta]) => [
+          laneId,
+          Object.keys(meta.rowHintByTaskId).length > 0
+            ? {
+                ...(preferredManualRowByTaskIdByLane[laneId] ?? {}),
+                ...meta.rowHintByTaskId,
+              }
+            : (preferredManualRowByTaskIdByLane[laneId] ?? {}),
+        ]),
+      ),
+    [preferredManualRowByTaskIdByLane, timelineLaneSubtaskMetaById],
   );
   const laneTaskCountById = useMemo(
     () => new Map(timelineLanes.map((lane) => [lane.id, lane.tasks.length])),
@@ -1347,28 +1509,31 @@ export function ProjectScheduleCanvas({
   );
   const visibleTimelineLanes = useMemo(
     () =>
-      timelineLanes.map((lane) => (collapsedLaneIds.has(lane.id) ? { ...lane, tasks: [] } : lane)),
-    [collapsedLaneIds, timelineLanes],
+      timelineLanes.map((lane) => {
+        if (collapsedLaneIds.has(lane.id)) return { ...lane, tasks: [] };
+        const subtaskMeta = timelineLaneSubtaskMetaById[lane.id];
+        if (!subtaskMeta) return lane;
+        const taskById = new Map(lane.tasks.map((task) => [task.id, task] as const));
+        return {
+          ...lane,
+          tasks: subtaskMeta.visibleTaskIds
+            .map((taskId) => taskById.get(taskId))
+            .filter((task): task is TimelineTask => Boolean(task)),
+        };
+      }),
+    [collapsedLaneIds, timelineLaneSubtaskMetaById, timelineLanes],
   );
   const manualOrderLaneIds = useMemo(
     () => {
       return mode === 'timeline' && sortMode === 'manual'
         ? visibleTimelineLanes
-            .filter((lane) => (preferredManualLayout[lane.id] ?? []).length > 0)
+            .filter((lane) => (preferredManualLayout[lane.id]?.orderedTaskIds ?? []).length > 0)
             .map((lane) => lane.id)
         : [];
     },
     [mode, preferredManualLayout, sortMode, visibleTimelineLanes],
   );
-  const expandedRowLaneIds = useMemo(
-    () =>
-      mode === 'timeline'
-        ? visibleTimelineLanes
-            .filter((lane) => timelineLaneRailByLaneId.get(lane.id)?.usesHierarchicalTaskOrder)
-            .map((lane) => lane.id)
-        : [],
-    [mode, timelineLaneRailByLaneId, visibleTimelineLanes],
-  );
+  const expandedRowLaneIds = useMemo(() => [] as string[], []);
 
   useEffect(() => {
     const availableLaneIds = new Set(timelineLanes.map((lane) => lane.id));
@@ -1924,49 +2089,71 @@ export function ProjectScheduleCanvas({
     return () => window.clearTimeout(timer);
   }, [timelineParentMoveUndo]);
 
-  useEffect(() => {
-    if (!dependencyDraft) return;
+  const replaceDependencyDraft = (nextDependencyDraft: TimelineDependencyDraft | null) => {
+    dependencyDraftRef.current = nextDependencyDraft;
+    setDependencyDraft(nextDependencyDraft);
+  };
 
-    const updateDraftTarget = (clientX: number, clientY: number) => {
-      let nextTargetTaskId: string | null = null;
-      if (typeof document !== 'undefined') {
-        const hoveredElements = document.elementsFromPoint(clientX, clientY);
-        for (const element of hoveredElements) {
-          if (!(element instanceof HTMLElement)) continue;
-          const taskHost = element.closest<HTMLElement>('[data-timeline-task-id]');
-          const taskId = taskHost?.dataset.timelineTaskId;
-          if (taskId && taskId !== dependencyDraft.sourceTaskId) {
-            nextTargetTaskId = taskId;
-            break;
-          }
+  useEffect(() => {
+    const resolveDependencyDraftTarget = (
+      clientX: number,
+      clientY: number,
+      sourceTaskId: string,
+    ) => {
+      if (typeof document === 'undefined') return null;
+      const taskNodes = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-timeline-task-id]'),
+      );
+      for (const taskNode of taskNodes) {
+        const taskId = taskNode.dataset.timelineTaskId;
+        if (!taskId || taskId === sourceTaskId) continue;
+        const rect = taskNode.getBoundingClientRect();
+        if (
+          clientX >= rect.left &&
+          clientX <= rect.right &&
+          clientY >= rect.top &&
+          clientY <= rect.bottom
+        ) {
+          return taskId;
         }
       }
-      setDependencyDraft((current) =>
-        current
-          ? {
-              ...current,
-              pointerX: clientX,
-              pointerY: clientY,
-              targetTaskId: nextTargetTaskId,
-            }
-          : current,
+      return null;
+    };
+
+    const updateDraftTarget = (clientX: number, clientY: number) => {
+      const current = dependencyDraftRef.current;
+      if (!current) return;
+      const nextTargetTaskId = resolveDependencyDraftTarget(
+        clientX,
+        clientY,
+        current.sourceTaskId,
       );
+      replaceDependencyDraft({
+        ...current,
+        pointerX: clientX,
+        pointerY: clientY,
+        targetTaskId: nextTargetTaskId,
+      });
     };
 
     const handlePointerMove = (event: PointerEvent) => {
+      if (!dependencyDraftRef.current) return;
       updateDraftTarget(event.clientX, event.clientY);
     };
 
-    const handlePointerUp = () => {
-      setDependencyDraft((current) => {
-        if (current?.targetTaskId) {
-          createTimelineDependency.mutate({
-            sourceTaskId: current.sourceTaskId,
-            targetTaskId: current.targetTaskId,
-          });
-        }
-        return null;
-      });
+    const handlePointerUp = (event: PointerEvent) => {
+      const current = dependencyDraftRef.current;
+      if (!current) return;
+      const nextTargetTaskId =
+        current.targetTaskId ??
+        resolveDependencyDraftTarget(event.clientX, event.clientY, current.sourceTaskId);
+      if (nextTargetTaskId) {
+        createTimelineDependency.mutate({
+          sourceTaskId: current.sourceTaskId,
+          targetTaskId: nextTargetTaskId,
+        });
+      }
+      replaceDependencyDraft(null);
     };
 
     window.addEventListener('pointermove', handlePointerMove);
@@ -1975,7 +2162,7 @@ export function ProjectScheduleCanvas({
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, [createTimelineDependency, dependencyDraft]);
+  }, [createTimelineDependency]);
 
   useEffect(() => {
     const updateSelection = (clientX: number, clientY: number) => {
@@ -1995,7 +2182,8 @@ export function ProjectScheduleCanvas({
       updateSelection(event.clientX, event.clientY);
     };
 
-    const handlePointerUp = () => {
+    const handlePointerUp = (event: PointerEvent) => {
+      updateSelection(event.clientX, event.clientY);
       finalizeSelectionDraft(selectionDraftRef.current);
     };
 
@@ -2048,8 +2236,10 @@ export function ProjectScheduleCanvas({
       dayColumnWidth: zoomConfig.dayColWidth,
       sectionRowHeight: SECTION_ROW_HEIGHT,
       taskRowHeight: TASK_ROW_HEIGHT,
+      laneFooterHeight: mode === 'timeline' ? TASK_ROW_HEIGHT : 0,
       compactRows: mode === 'timeline',
       manualRowLaneIds: mode === 'timeline' ? manualOrderLaneIds : [],
+      ...(mode === 'timeline' ? { manualRowHintsByLane: treeAwareManualRowByTaskIdByLane } : {}),
       expandedRowLaneIds: mode === 'timeline' ? expandedRowLaneIds : [],
       dependencyEdges: timeline.dependencyEdges,
     });
@@ -2057,12 +2247,74 @@ export function ProjectScheduleCanvas({
     expandedRowLaneIds,
     manualOrderLaneIds,
     mode,
+    treeAwareManualRowByTaskIdByLane,
     timeline.dependencyEdges,
     timeline.window.end,
     timeline.window.start,
     visibleTimelineLanes,
     zoomConfig.dayColWidth,
   ]);
+
+  const dragOverlay = useMemo(() => {
+    if (mode !== 'timeline' || !dragState?.moved) return null;
+    const primaryTask = taskById.get(dragState.taskId);
+    if (
+      !primaryTask ||
+      !primaryTask.hasSchedule ||
+      !primaryTask.inWindow ||
+      !primaryTask.timelineStart ||
+      !primaryTask.timelineEnd
+    ) {
+      return null;
+    }
+    const baseBar = timelineLayout.barsByTaskId[primaryTask.id];
+    if (!baseBar) return null;
+    const targetLaneId = dragState.dropLaneId ?? dragState.originLaneId;
+    const targetLane = timelineLayout.lanesWithRows.find(({ lane }) => lane.id === targetLaneId);
+    if (!targetLane) return null;
+    const previewStartAt = shiftTimelineIso(
+      primaryTask.startAt,
+      dragState.deltaDays,
+      workingDaysOnly,
+      dragState.useCalendarDays,
+    );
+    const previewDueAt = shiftTimelineIso(
+      primaryTask.dueAt,
+      dragState.deltaDays,
+      workingDaysOnly,
+      dragState.useCalendarDays,
+    );
+    const previewStartDate = utcDateOnlyToLocalDate(previewStartAt);
+    const previewDueDate = utcDateOnlyToLocalDate(previewDueAt);
+    const previewDeltaDays =
+      previewStartDate && primaryTask.timelineStart
+        ? dayDiff(primaryTask.timelineStart, previewStartDate)
+        : dragState.deltaDays;
+    const left = Math.max(
+      LEFT_RAIL_COL_WIDTH,
+      LEFT_RAIL_COL_WIDTH + baseBar.left + previewDeltaDays * zoomConfig.dayColWidth,
+    );
+    const width =
+      previewStartDate && previewDueDate
+        ? Math.max(1, dayDiff(previewStartDate, previewDueDate) + 1) * zoomConfig.dayColWidth
+        : baseBar.width;
+    const fallbackRowIndex =
+      targetLane.rows.find((row) => row.tasks.some((task) => task.id === primaryTask.id))?.index ?? 0;
+    const rowIndex = Math.max(0, dragState.dropRowIndex ?? fallbackRowIndex);
+    const top =
+      targetLane.top + SECTION_ROW_HEIGHT + rowIndex * TASK_ROW_HEIGHT + TASK_ROW_HEIGHT / 2;
+    return {
+      task: primaryTask,
+      left,
+      width,
+      top,
+      style: resolveTimelineBarStyle(primaryTask, today),
+      extraCount: Math.max(0, dragState.taskIds.length - 1),
+      isMilestone:
+        primaryTask.type === 'MILESTONE' ||
+        dayDiff(primaryTask.timelineStart, primaryTask.timelineEnd) === 0,
+    };
+  }, [dragState, mode, taskById, timelineLayout, today, workingDaysOnly, zoomConfig.dayColWidth]);
 
   const alignTimeline = () => {
     if (mode !== 'timeline') return;
@@ -2090,6 +2342,10 @@ export function ProjectScheduleCanvas({
         preferredManualLayout[lane.id],
         alignedTaskOrder,
       );
+      const alignedLaneLayout = nextManualLayout[lane.id];
+      if (alignedLaneLayout) {
+        delete alignedLaneLayout.rowByTaskId;
+      }
     }
 
     if (JSON.stringify(nextManualLayout) === JSON.stringify(preferredManualLayout)) {
@@ -2262,6 +2518,18 @@ export function ProjectScheduleCanvas({
     });
   };
 
+  const toggleTimelineParentCollapsed = (taskId: string) => {
+    setCollapsedTimelineParentIds((current) => {
+      const next = new Set(current);
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+      return next;
+    });
+  };
+
   const replaceSelectionDraft = (nextSelectionDraft: TimelineSelectionDraft | null) => {
     selectionDraftRef.current = nextSelectionDraft;
     setSelectionDraft(nextSelectionDraft);
@@ -2367,10 +2635,39 @@ export function ProjectScheduleCanvas({
     return lane?.lane.id ?? null;
   };
 
+  const resolveLaneRowIndexAtClientPosition = (
+    laneId: string,
+    clientY: number,
+  ): number | null => {
+    const container = scrollContainerRef.current;
+    const layoutLane = timelineLayout.lanesWithRows.find((entry) => entry.lane.id === laneId);
+    if (!container || !layoutLane) return null;
+    const stickyHeaderHeight = stickyHeaderRef.current?.offsetHeight ?? 0;
+    const bounds = container.getBoundingClientRect();
+    const relativeY = clientY - bounds.top + container.scrollTop - stickyHeaderHeight;
+    const laneRowsTop = layoutLane.top + SECTION_ROW_HEIGHT;
+    const slotCount = Math.max(1, layoutLane.rows.length + 1);
+    const slotCenters = Array.from({ length: slotCount }, (_, rowIndex) => ({
+      rowIndex,
+      centerY: laneRowsTop + rowIndex * TASK_ROW_HEIGHT + TASK_ROW_HEIGHT / 2,
+    }));
+    let bestRowIndex = slotCenters[0]?.rowIndex ?? 0;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const slot of slotCenters) {
+      const distance = Math.abs(relativeY - slot.centerY);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestRowIndex = slot.rowIndex;
+      }
+    }
+    return bestRowIndex;
+  };
+
   const buildNextManualLaneTaskOrder = (
     laneId: string,
     taskId: string,
     clientY: number,
+    explicitTargetRowIndex?: number | null,
   ): TimelineManualLayoutByLane | null => {
     if (mode !== 'timeline' || sortMode !== 'manual') return null;
     const lane = timelineLanes.find((entry) => entry.id === laneId);
@@ -2378,40 +2675,81 @@ export function ProjectScheduleCanvas({
     const container = scrollContainerRef.current;
     if (!lane || !layoutLane || !container || lane.tasks.length < 2) return null;
 
-    const currentOrder = layoutLane.rows.flatMap((row) => row.tasks.map((task) => task.id));
+    const currentOrder = lane.tasks.map((task) => task.id);
+    const currentRows = layoutLane.rows.map((row) => row.tasks.map((task) => task.id));
+    const currentRowByTaskId = Object.fromEntries(
+      layoutLane.rows.flatMap((row) => row.tasks.map((task) => [task.id, row.index] as const)),
+    );
     if (currentOrder.length !== lane.tasks.length) {
       return null;
     }
-    const currentIndex = currentOrder.indexOf(taskId);
-    if (currentIndex < 0) return null;
+    if (!currentOrder.includes(taskId)) return null;
+    const movingTask = taskById.get(taskId);
+    if (!movingTask) return null;
 
     const stickyHeaderHeight = stickyHeaderRef.current?.offsetHeight ?? 0;
     const bounds = container.getBoundingClientRect();
     const relativeY = clientY - bounds.top + container.scrollTop - stickyHeaderHeight;
+    const laneRowsTop = layoutLane.top + SECTION_ROW_HEIGHT;
+    const laneRowsBottom = laneRowsTop + layoutLane.rows.length * TASK_ROW_HEIGHT;
+    const targetRowIndex =
+      explicitTargetRowIndex ??
+      (relativeY >= laneRowsBottom
+        ? layoutLane.rows.length
+        : Math.max(
+            0,
+            Math.min(
+              layoutLane.rows.length - 1,
+              Math.floor((relativeY - laneRowsTop) / TASK_ROW_HEIGHT),
+            ),
+          ));
+    const currentRowIndex = currentRowByTaskId[taskId] ?? 0;
+    const rowsWithoutTask = currentRows
+      .map((row) => row.filter((currentTaskId) => currentTaskId !== taskId))
+      .filter((row) => row.length > 0);
+    const insertionRowIndex = Math.max(0, Math.min(targetRowIndex, rowsWithoutTask.length));
+    const destinationRow = rowsWithoutTask[insertionRowIndex] ?? [];
+    const shouldSplitIntoDedicatedRow =
+      insertionRowIndex >= rowsWithoutTask.length ||
+      destinationRow.some((existingTaskId) => {
+        const existingTask = taskById.get(existingTaskId);
+        return existingTask ? timelineTasksOverlap(movingTask, existingTask) : false;
+      });
 
-    let insertAt = currentOrder.length;
-    let taskCountBeforeRow = 0;
-    for (const row of layoutLane.rows) {
-      const rowMidpoint = row.top + TASK_ROW_HEIGHT / 2;
-      if (relativeY < rowMidpoint) {
-        insertAt = taskCountBeforeRow;
-        break;
-      }
-      taskCountBeforeRow += row.tasks.length;
+    if (shouldSplitIntoDedicatedRow) {
+      rowsWithoutTask.splice(insertionRowIndex, 0, [taskId]);
+    } else {
+      const nextDestinationRow = [...destinationRow, taskId].sort((leftTaskId, rightTaskId) => {
+        const leftTask = taskById.get(leftTaskId);
+        const rightTask = taskById.get(rightTaskId);
+        if (!leftTask || !rightTask) return leftTaskId.localeCompare(rightTaskId);
+        return compareTimelineTasks(leftTask, rightTask, 'startAt');
+      });
+      rowsWithoutTask[insertionRowIndex] = nextDestinationRow;
     }
 
-    const nextOrder = [...currentOrder];
-    nextOrder.splice(currentIndex, 1);
-    const adjustedInsertAt = currentIndex < insertAt ? insertAt - 1 : insertAt;
-    nextOrder.splice(Math.max(0, Math.min(nextOrder.length, adjustedInsertAt)), 0, taskId);
-
-    if (nextOrder.every((currentTaskId, index) => currentTaskId === currentOrder[index])) {
+    const nextOrderedTaskIds = rowsWithoutTask.flat();
+    const nextRowByTaskId = Object.fromEntries(
+      rowsWithoutTask.flatMap((rowTaskIds, rowIndex) =>
+        rowTaskIds.map((rowTaskId) => [rowTaskId, rowIndex] as const),
+      ),
+    );
+    const nextLaneLayout = mergeTimelineManualLaneTaskOrder(
+      preferredManualLayout[laneId],
+      nextOrderedTaskIds,
+      nextRowByTaskId,
+    );
+    if (
+      currentRowIndex === targetRowIndex &&
+      JSON.stringify(nextLaneLayout) ===
+        JSON.stringify(preferredManualLayout[laneId] ?? { orderedTaskIds: currentOrder })
+    ) {
       return null;
     }
 
     return {
       ...preferredManualLayout,
-      [laneId]: nextOrder,
+      [laneId]: nextLaneLayout,
     };
   };
 
@@ -2490,6 +2828,11 @@ export function ProjectScheduleCanvas({
     const hasAssigneeMove = assigneeUserId !== undefined && assigneeUserId !== task.assigneeUserId;
     const hasSectionMove = sectionId !== undefined && sectionId !== task.sectionId;
     const hasStatusMove = status !== undefined && status !== task.status;
+    if (task.parentId && (hasAssigneeMove || hasSectionMove || hasStatusMove)) {
+      rescheduleInFlightTaskIdsRef.current.delete(taskId);
+      setRescheduleNotice({ type: 'warning', message: t('timelineSubtaskLaneMoveBlocked') });
+      return;
+    }
     if (!hasScheduleMove && !hasAssigneeMove && !hasSectionMove && !hasStatusMove) return;
 
     rescheduleInFlightTaskIdsRef.current.add(taskId);
@@ -2555,7 +2898,13 @@ export function ProjectScheduleCanvas({
     const status = effectiveSwimlane === 'status' ? parseStatusLaneId(dropLaneId) : undefined;
     const durationDays =
       task.startAt && task.dueAt
-        ? Math.max(0, dayDiff(startOfDay(new Date(task.startAt)), startOfDay(new Date(task.dueAt))))
+        ? Math.max(
+            0,
+            dayDiff(
+              utcDateOnlyToLocalDate(task.startAt) ?? new Date(task.startAt),
+              utcDateOnlyToLocalDate(task.dueAt) ?? new Date(task.dueAt),
+            ),
+          )
         : 0;
 
     const timelineMovePayload: {
@@ -2568,8 +2917,8 @@ export function ProjectScheduleCanvas({
       version: number;
     } = {
       taskId,
-      startAt: startDate.toISOString(),
-      dueAt: addDays(startDate, durationDays).toISOString(),
+      startAt: toUtcDateOnlyIsoFromLocalDate(startDate),
+      dueAt: toUtcDateOnlyIsoFromLocalDate(addDays(startDate, durationDays)),
       version: task.version,
     };
     if (assigneeUserId !== undefined) {
@@ -2607,12 +2956,33 @@ export function ProjectScheduleCanvas({
       originY,
       originLaneId,
       dropLaneId: originLaneId,
+      dropRowIndex: null,
       deltaDays: 0,
       useCalendarDays,
       moved: false,
     };
     dragStateRef.current = next;
     setDragState(next);
+  };
+
+  const beginBarResize = (
+    taskId: string,
+    pointerId: number,
+    originX: number,
+    edge: 'start' | 'end',
+    useCalendarDays: boolean,
+  ) => {
+    const next = {
+      taskId,
+      pointerId,
+      originX,
+      edge,
+      deltaDays: 0,
+      moved: false,
+      useCalendarDays,
+    };
+    resizeStateRef.current = next;
+    setResizeState(next);
   };
 
   const updateBarDrag = (
@@ -2631,20 +3001,28 @@ export function ProjectScheduleCanvas({
       Math.abs(deltaPx) >= DRAG_START_THRESHOLD_PX ||
       Math.abs(deltaY) >= DRAG_START_THRESHOLD_PX;
     let dropLaneId = current.dropLaneId;
+    let dropRowIndex = current.dropRowIndex;
     if (moved) {
       const resolvedLaneId = resolveLaneIdAtClientPosition(clientX, clientY);
-      if (resolvedLaneId) {
-        dropLaneId = resolvedLaneId;
+      const preferOriginLane =
+        resolvedLaneId &&
+        resolvedLaneId !== current.originLaneId &&
+        Math.abs(clientX - current.originX) < LANE_CHANGE_HORIZONTAL_THRESHOLD_PX;
+      const effectiveLaneId = preferOriginLane ? current.originLaneId : resolvedLaneId;
+      if (effectiveLaneId) {
+        dropLaneId = effectiveLaneId;
+        dropRowIndex = resolveLaneRowIndexAtClientPosition(effectiveLaneId, clientY);
       }
     }
     if (
       deltaDays === current.deltaDays &&
       moved === current.moved &&
       dropLaneId === current.dropLaneId &&
+      dropRowIndex === current.dropRowIndex &&
       useCalendarDays === current.useCalendarDays
     )
       return;
-    const next = { ...current, deltaDays, moved, dropLaneId, useCalendarDays };
+    const next = { ...current, deltaDays, moved, dropLaneId, dropRowIndex, useCalendarDays };
     dragStateRef.current = next;
     setDragState(next);
   };
@@ -2666,10 +3044,25 @@ export function ProjectScheduleCanvas({
     } catch {
       // Ignore release failures if the target unmounted mid-drag.
     }
-    const finalDropLaneId =
+    const resolvedDropLaneId =
       clientX !== undefined && clientY !== undefined
-        ? (resolveLaneIdAtClientPosition(clientX, clientY) ?? current.dropLaneId)
-        : current.dropLaneId;
+        ? resolveLaneIdAtClientPosition(clientX, clientY)
+        : null;
+    const preferOriginLaneOnDrop =
+      resolvedDropLaneId &&
+      resolvedDropLaneId !== current.originLaneId &&
+      clientX !== undefined &&
+      Math.abs(clientX - current.originX) < LANE_CHANGE_HORIZONTAL_THRESHOLD_PX;
+    const effectiveResolvedDropLaneId = preferOriginLaneOnDrop
+      ? current.originLaneId
+      : resolvedDropLaneId;
+    const finalDropLaneId =
+      current.dropLaneId ?? effectiveResolvedDropLaneId ?? current.originLaneId;
+    const finalDropRowIndex =
+      current.dropRowIndex ??
+      (clientY !== undefined
+        ? resolveLaneRowIndexAtClientPosition(finalDropLaneId, clientY)
+        : null);
     dragStateRef.current = null;
     setDragState(null);
     if (!current.moved) return;
@@ -2685,6 +3078,7 @@ export function ProjectScheduleCanvas({
         current.originLaneId,
         current.taskId,
         clientY,
+        finalDropRowIndex,
       );
       if (nextManualLayout) {
         saveManualLayoutMutation.mutate({
@@ -2704,25 +3098,79 @@ export function ProjectScheduleCanvas({
     );
   };
 
+  const updateBarResize = (
+    pointerId: number,
+    clientX: number,
+    useCalendarDays: boolean,
+  ) => {
+    const current = resizeStateRef.current;
+    if (!current || current.pointerId !== pointerId) return;
+    const deltaPx = clientX - current.originX;
+    const deltaDays = Math.round(deltaPx / zoomConfig.dayColWidth);
+    const moved = current.moved || Math.abs(deltaPx) >= DRAG_START_THRESHOLD_PX;
+    if (
+      deltaDays === current.deltaDays &&
+      moved === current.moved &&
+      useCalendarDays === current.useCalendarDays
+    ) {
+      return;
+    }
+    const next = { ...current, deltaDays, moved, useCalendarDays };
+    resizeStateRef.current = next;
+    setResizeState(next);
+  };
+
+  const finishBarResize = (pointerId: number, useCalendarDays?: boolean) => {
+    const current = resizeStateRef.current;
+    if (!current || current.pointerId !== pointerId) return;
+    resizeStateRef.current = null;
+    setResizeState(null);
+    if (!current.moved || current.deltaDays === 0) return;
+    const task = taskById.get(current.taskId);
+    if (!task) return;
+    const nextRange = resizeTimelineRange(
+      task,
+      current.edge,
+      current.deltaDays,
+      workingDaysOnly,
+      useCalendarDays ?? current.useCalendarDays,
+    );
+    if (nextRange.startAt === task.startAt && nextRange.dueAt === task.dueAt) return;
+    rescheduleInFlightTaskIdsRef.current.add(current.taskId);
+    rescheduleTask.mutate({
+      taskId: current.taskId,
+      startAt: nextRange.startAt,
+      dueAt: nextRange.dueAt,
+      version: task.version,
+    });
+  };
+
   const updateBarDragRef = useRef(updateBarDrag);
   const finishBarDragRef = useRef(finishBarDrag);
+  const updateBarResizeRef = useRef(updateBarResize);
+  const finishBarResizeRef = useRef(finishBarResize);
 
   useEffect(() => {
     updateBarDragRef.current = updateBarDrag;
     finishBarDragRef.current = finishBarDrag;
+    updateBarResizeRef.current = updateBarResize;
+    finishBarResizeRef.current = finishBarResize;
   });
 
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
       updateBarDragRef.current(event.pointerId, event.clientX, event.clientY, event.altKey);
+      updateBarResizeRef.current(event.pointerId, event.clientX, event.altKey);
     };
 
     const handlePointerUp = (event: PointerEvent) => {
       finishBarDragRef.current(event.pointerId, event.clientX, event.clientY, event.altKey);
+      finishBarResizeRef.current(event.pointerId, event.altKey);
     };
 
     const handlePointerCancel = (event: PointerEvent) => {
       finishBarDragRef.current(event.pointerId, event.clientX, event.clientY, event.altKey);
+      finishBarResizeRef.current(event.pointerId, event.altKey);
     };
 
     window.addEventListener('pointermove', handlePointerMove, { capture: true });
@@ -3335,6 +3783,8 @@ export function ProjectScheduleCanvas({
 
           <div
             className="relative z-[1]"
+            data-testid="timeline-selection-surface"
+            style={{ width: `${LEFT_RAIL_COL_WIDTH + gridWidth}px` }}
             onPointerDown={(event) => {
               if (mode !== 'timeline' || event.button !== 0) return;
               const target = event.target as HTMLElement | null;
@@ -3372,12 +3822,34 @@ export function ProjectScheduleCanvas({
               replaceSelectionDraft(next);
             }}
             onPointerUp={(event) => {
+              if (selectionDraftRef.current) {
+                const next = {
+                  ...selectionDraftRef.current,
+                  currentX: event.clientX,
+                  currentY: event.clientY,
+                };
+                selectTimelineTasksInRect({
+                  left: Math.min(next.originX, next.currentX),
+                  top: Math.min(next.originY, next.currentY),
+                  right: Math.max(next.originX, next.currentX),
+                  bottom: Math.max(next.originY, next.currentY),
+                });
+                replaceSelectionDraft(next);
+              }
               finalizeSelectionDraft(selectionDraftRef.current);
               if (event.currentTarget.hasPointerCapture(event.pointerId)) {
                 event.currentTarget.releasePointerCapture(event.pointerId);
               }
             }}
             onPointerCancel={(event) => {
+              if (selectionDraftRef.current) {
+                const next = {
+                  ...selectionDraftRef.current,
+                  currentX: event.clientX,
+                  currentY: event.clientY,
+                };
+                replaceSelectionDraft(next);
+              }
               finalizeSelectionDraft(selectionDraftRef.current);
               if (event.currentTarget.hasPointerCapture(event.pointerId)) {
                 event.currentTarget.releasePointerCapture(event.pointerId);
@@ -3416,7 +3888,38 @@ export function ProjectScheduleCanvas({
                 data-testid="timeline-selection-box"
               />
             ) : null}
-            {timelineLayout.lanesWithRows.map(({ lane, top, rows }) => {
+            {mode === 'timeline' && dragOverlay ? (
+              <div
+                className="pointer-events-none absolute z-[70]"
+                style={{
+                  left: `${dragOverlay.left}px`,
+                  top: `${dragOverlay.top}px`,
+                  width: dragOverlay.isMilestone ? '14px' : `${dragOverlay.width}px`,
+                  height: dragOverlay.isMilestone ? '14px' : '20px',
+                  transform: dragOverlay.isMilestone
+                    ? 'translate(-50%, -50%) rotate(45deg) scale(1.01)'
+                    : 'translateY(-50%) scale(1.01)',
+                  opacity: 0.72,
+                  boxShadow: '0 12px 28px rgba(0, 0, 0, 0.18)',
+                  ...dragOverlay.style,
+                }}
+                data-testid="timeline-drag-overlay"
+              >
+                {!dragOverlay.isMilestone ? (
+                  <div className="flex h-full items-center overflow-hidden rounded px-2 text-[11px] text-current">
+                    <span className="truncate">
+                      {dragOverlay.task.title.trim() || t('untitledTask')}
+                    </span>
+                    {dragOverlay.extraCount > 0 ? (
+                      <span className="ml-2 inline-flex h-4 shrink-0 items-center rounded-full bg-background/85 px-1 text-[10px] text-foreground shadow-sm">
+                        +{dragOverlay.extraCount}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            {timelineLayout.lanesWithRows.map(({ lane, top, rows, footerHeight }) => {
               const sectionVisible =
                 !virtualizationEnabled ||
                 (top + SECTION_ROW_HEIGHT >= visibleRange.start && top <= visibleRange.end);
@@ -3430,20 +3933,24 @@ export function ProjectScheduleCanvas({
               if (!sectionVisible && visibleRows.length === 0) return null;
               const isLaneCollapsed = collapsedLaneIds.has(lane.id);
               const laneTaskCount = laneTaskCountById.get(lane.id) ?? 0;
+              const laneSubtaskMeta = timelineLaneSubtaskMetaById[lane.id];
               const laneContentId = `timeline-lane-content-${normalizeTestIdSegment(lane.id)}`;
               const laneRowsTop = top + SECTION_ROW_HEIGHT;
+              const laneRowsBottom = top + SECTION_ROW_HEIGHT + rows.length * TASK_ROW_HEIGHT;
+              const laneContentBottom = laneRowsBottom + footerHeight;
               const topSpacer = visibleRows.length
                 ? Math.max(0, visibleRows[0]!.top - laneRowsTop)
                 : 0;
               const bottomSpacer = visibleRows.length
                 ? Math.max(
                     0,
-                    top +
-                      SECTION_ROW_HEIGHT +
-                      rows.length * TASK_ROW_HEIGHT -
-                      (visibleRows[visibleRows.length - 1]!.top + TASK_ROW_HEIGHT),
+                    laneContentBottom - (visibleRows[visibleRows.length - 1]!.top + TASK_ROW_HEIGHT),
                   )
-                : rows.length * TASK_ROW_HEIGHT;
+                : rows.length * TASK_ROW_HEIGHT + footerHeight;
+              const laneDropActive =
+                mode === 'timeline' && dragState?.moved && dragState.dropLaneId === lane.id;
+              const footerDropActive =
+                laneDropActive && (dragState?.dropRowIndex ?? -1) >= rows.length;
 
               return (
                 <div
@@ -3568,7 +4075,7 @@ export function ProjectScheduleCanvas({
                   <div id={laneContentId} className="min-w-0">
                     {sectionVisible ? (
                       <div
-                        className={`h-8 border-b bg-muted/20 ${laneDragState?.overLaneId === lane.id ? 'ring-1 ring-inset ring-primary/40' : ''}`}
+                        className={`h-8 border-b bg-muted/20 ${laneDragState?.overLaneId === lane.id ? 'ring-1 ring-inset ring-primary/40' : ''} ${laneDropActive ? 'bg-primary/[0.06]' : ''}`}
                       />
                     ) : (
                       <div style={{ height: `${SECTION_ROW_HEIGHT}px` }} />
@@ -3582,21 +4089,16 @@ export function ProjectScheduleCanvas({
                       ? visibleRows.map((row) => {
                           const primaryTask = row.tasks[0];
                           if (!primaryTask) return null;
-                          const primaryTaskRisk = ganttRiskByTaskId.get(primaryTask.id);
-                          const primaryTaskRiskLabel = describeTaskRisk(primaryTaskRisk);
                           return (
                             <div
                               key={`${lane.id}-row-${row.top}`}
-                              className="h-10 border-b last:border-b-0"
+                              className={`h-10 border-b last:border-b-0 ${laneDropActive && dragState?.dropRowIndex === row.index ? 'bg-primary/[0.06] outline outline-1 outline-dashed outline-primary/35' : ''}`}
                               data-testid={`timeline-row-${normalizeTestIdSegment(lane.id)}-${row.index}`}
                             >
-                              <div className="relative h-full border-l">
+                              <div
+                                className={`relative h-full border-l ${laneDropActive && dragState?.dropRowIndex === row.index ? 'bg-primary/[0.03]' : ''}`}
+                              >
                                 <div className="pointer-events-none absolute right-2 top-1/2 z-[3] flex -translate-y-1/2 items-center gap-2">
-                                  {mode === 'timeline' && row.tasks.length > 1 ? (
-                                    <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                                      +{row.tasks.length - 1}
-                                    </Badge>
-                                  ) : null}
                                   {mode === 'gantt' &&
                                   row.tasks.length === 1 &&
                                   (ganttVarianceByTaskId.get(primaryTask.id) ?? null) !== null ? (
@@ -3630,18 +4132,6 @@ export function ProjectScheduleCanvas({
                                           : t('ganttRiskLateDependency')}
                                     </Badge>
                                   ) : null}
-                                  {mode === 'timeline' &&
-                                  row.tasks.length === 1 &&
-                                  primaryTaskRiskLabel ? (
-                                    <Badge
-                                      variant="destructive"
-                                      className="h-5 px-1.5 text-[10px]"
-                                      data-testid={`timeline-risk-badge-${primaryTask.id}`}
-                                      title={primaryTaskRiskLabel}
-                                    >
-                                      {primaryTaskRiskLabel}
-                                    </Badge>
-                                  ) : null}
                                 </div>
                                 {row.tasks.map((task) => {
                                   const fallbackTaskName = task.title.trim() || t('untitledTask');
@@ -3649,6 +4139,10 @@ export function ProjectScheduleCanvas({
                                   const isCompleted = task.status === 'DONE';
                                   const taskRisk = ganttRiskByTaskId.get(task.id);
                                   const taskRiskLabel = describeTaskRisk(taskRisk);
+                                  const taskDepth = laneSubtaskMeta?.depthByTaskId[task.id] ?? 0;
+                                  const childTaskIds = laneSubtaskMeta?.childIdsByParentId[task.id] ?? [];
+                                  const hasVisibleChildren = childTaskIds.length > 0;
+                                  const isTaskCollapsed = collapsedTimelineParentIds.has(task.id);
                                   const isSelectedTimelineTask = selectedTimelineTaskIds.includes(
                                     task.id,
                                   );
@@ -3668,18 +4162,38 @@ export function ProjectScheduleCanvas({
                                     task.timelineEnd
                                   ) {
                                     if (!barLayout) return null;
-                                    const taskWidth = barLayout.width;
-                                    const previewStartAt = shiftTimelineIso(
-                                      task.startAt,
-                                      dragState?.taskIds.includes(task.id)
-                                        ? dragState.deltaDays
-                                        : 0,
-                                      workingDaysOnly,
-                                      dragState?.useCalendarDays ?? false,
-                                    );
-                                    const previewStartDate = previewStartAt
-                                      ? startOfDay(new Date(previewStartAt))
-                                      : null;
+                                    const resizePreview =
+                                      resizeState?.taskId === task.id
+                                        ? resizeTimelineRange(
+                                            task,
+                                            resizeState.edge,
+                                            resizeState.deltaDays,
+                                            workingDaysOnly,
+                                            resizeState.useCalendarDays,
+                                          )
+                                        : null;
+                                    const previewStartAt =
+                                      resizePreview?.startAt ??
+                                      shiftTimelineIso(
+                                        task.startAt,
+                                        dragState?.taskIds.includes(task.id)
+                                          ? dragState.deltaDays
+                                          : 0,
+                                        workingDaysOnly,
+                                        dragState?.useCalendarDays ?? false,
+                                      );
+                                    const previewDueAt =
+                                      resizePreview?.dueAt ??
+                                      shiftTimelineIso(
+                                        task.dueAt,
+                                        dragState?.taskIds.includes(task.id)
+                                          ? dragState.deltaDays
+                                          : 0,
+                                        workingDaysOnly,
+                                        dragState?.useCalendarDays ?? false,
+                                      );
+                                    const previewStartDate = utcDateOnlyToLocalDate(previewStartAt);
+                                    const previewDueDate = utcDateOnlyToLocalDate(previewDueAt);
                                     const previewDeltaDays =
                                       previewStartDate && task.timelineStart
                                         ? dayDiff(task.timelineStart, previewStartDate)
@@ -3690,6 +4204,13 @@ export function ProjectScheduleCanvas({
                                       0,
                                       barLayout.left + previewDeltaDays * zoomConfig.dayColWidth,
                                     );
+                                    const taskWidth =
+                                      previewStartDate && previewDueDate
+                                        ? Math.max(
+                                            1,
+                                            dayDiff(previewStartDate, previewDueDate) + 1,
+                                          ) * zoomConfig.dayColWidth
+                                        : barLayout.width;
                                     const isMilestone =
                                       task.type === 'MILESTONE' ||
                                       dayDiff(task.timelineStart, task.timelineEnd) === 0;
@@ -3745,11 +4266,15 @@ export function ProjectScheduleCanvas({
                                         ) : null}
                                         <button
                                           type="button"
-                                          className={`absolute top-1/2 text-left text-[11px] shadow-sm transition-[background-color,border-color,color,opacity] ${
+                                          className={`absolute top-1/2 text-left text-[11px] shadow-sm transition-[background-color,border-color,color,opacity,transform,box-shadow] ${
                                             isMilestone
                                               ? 'h-3.5 w-3.5 -translate-y-1/2 rotate-45 rounded-[2px]'
                                               : 'h-6 -translate-y-1/2 overflow-hidden rounded px-2'
-                                          } ${dragState?.taskIds.includes(task.id) && dragState.moved ? 'cursor-grabbing opacity-90' : 'cursor-grab'}`}
+                                          } ${
+                                            dragState?.taskIds.includes(task.id)
+                                              ? 'cursor-grabbing opacity-25 ring-1 ring-primary/30 shadow-md'
+                                              : 'cursor-grab'
+                                          } ${dragState?.taskIds.includes(task.id) ? 'scale-[0.98]' : ''}`}
                                           style={
                                             isMilestone
                                               ? {
@@ -3849,12 +4374,103 @@ export function ProjectScheduleCanvas({
                                           ) : null}
                                           {!isMilestone ? (
                                             <span
-                                              className={`relative z-[1] block truncate ${usesExternalLabel ? 'sr-only' : ''} ${isCompleted ? 'line-through' : ''}`}
+                                              className={`relative z-[1] flex items-center gap-1 truncate ${isCompleted ? 'line-through' : ''}`}
                                             >
-                                              {fallbackTaskName}
+                                              {hasVisibleChildren ? (
+                                                <span
+                                                  className="inline-flex shrink-0"
+                                                  onPointerDown={(event) => {
+                                                    event.preventDefault();
+                                                    event.stopPropagation();
+                                                  }}
+                                                  onClick={(event) => {
+                                                    event.preventDefault();
+                                                    event.stopPropagation();
+                                                    toggleTimelineParentCollapsed(task.id);
+                                                  }}
+                                                  data-testid={`timeline-subtask-toggle-${task.id}`}
+                                                >
+                                                  {isTaskCollapsed ? (
+                                                    <ChevronRight className="h-3 w-3" />
+                                                  ) : (
+                                                    <ChevronDown className="h-3 w-3" />
+                                                  )}
+                                                </span>
+                                              ) : taskDepth > 0 ? (
+                                                <span
+                                                  className="inline-flex h-3 w-3 shrink-0 items-center justify-center text-[10px] text-muted-foreground/80"
+                                                  aria-hidden="true"
+                                                >
+                                                  ↳
+                                                </span>
+                                              ) : null}
+                                              <span className={usesExternalLabel ? 'sr-only' : 'truncate'}>
+                                                {fallbackTaskName}
+                                              </span>
                                             </span>
                                           ) : null}
                                         </button>
+                                        {taskDepth > 0 ? (
+                                          <div
+                                            className="pointer-events-none absolute top-1/2 z-[1] -translate-y-1/2"
+                                            style={{
+                                              left: `${Math.max(0, taskLeft - 10)}px`,
+                                              width: '10px',
+                                              height: `${TASK_ROW_HEIGHT}px`,
+                                            }}
+                                          >
+                                            <div className="absolute left-1 top-0 h-1/2 w-px bg-border/70" />
+                                            <div className="absolute left-1 top-1/2 h-px w-3 bg-border/70" />
+                                          </div>
+                                        ) : null}
+                                        {mode === 'timeline' && !isMilestone ? (
+                                          <>
+                                            <button
+                                              type="button"
+                                              className="absolute top-1/2 z-[5] h-6 w-2 -translate-y-1/2 rounded-full bg-background/85 opacity-0 shadow-sm ring-1 ring-border transition group-hover/timeline-bar:opacity-100"
+                                              style={{ left: `${Math.max(0, taskLeft - 4)}px` }}
+                                              onPointerDown={(event) => {
+                                                if (event.button !== 0) return;
+                                                event.preventDefault();
+                                                event.stopPropagation();
+                                                if (rescheduleInFlightTaskIdsRef.current.has(task.id))
+                                                  return;
+                                                beginBarResize(
+                                                  task.id,
+                                                  event.pointerId,
+                                                  event.clientX,
+                                                  'start',
+                                                  event.altKey,
+                                                );
+                                              }}
+                                              data-testid={`timeline-resize-start-${task.id}`}
+                                              title={t('startDate')}
+                                            />
+                                            <button
+                                              type="button"
+                                              className="absolute top-1/2 z-[5] h-6 w-2 -translate-y-1/2 rounded-full bg-background/85 opacity-0 shadow-sm ring-1 ring-border transition group-hover/timeline-bar:opacity-100"
+                                              style={{
+                                                left: `${Math.max(0, taskLeft + taskWidth - 4)}px`,
+                                              }}
+                                              onPointerDown={(event) => {
+                                                if (event.button !== 0) return;
+                                                event.preventDefault();
+                                                event.stopPropagation();
+                                                if (rescheduleInFlightTaskIdsRef.current.has(task.id))
+                                                  return;
+                                                beginBarResize(
+                                                  task.id,
+                                                  event.pointerId,
+                                                  event.clientX,
+                                                  'end',
+                                                  event.altKey,
+                                                );
+                                              }}
+                                              data-testid={`timeline-resize-end-${task.id}`}
+                                              title={t('dueDate')}
+                                            />
+                                          </>
+                                        ) : null}
                                         {mode === 'timeline' ? (
                                           <button
                                             type="button"
@@ -3873,7 +4489,7 @@ export function ProjectScheduleCanvas({
                                               event.stopPropagation();
                                               const rect =
                                                 event.currentTarget.getBoundingClientRect();
-                                              setDependencyDraft({
+                                              replaceDependencyDraft({
                                                 sourceTaskId: task.id,
                                                 sourceX: rect.left + rect.width / 2,
                                                 sourceY: rect.top + rect.height / 2,
@@ -3932,7 +4548,11 @@ export function ProjectScheduleCanvas({
                       : null}
 
                     {!isLaneCollapsed && bottomSpacer > 0 ? (
-                      <div style={{ height: `${bottomSpacer}px` }} />
+                      <div
+                        className={`${footerDropActive ? 'bg-primary/[0.08] outline outline-1 outline-dashed outline-primary/35' : ''}`}
+                        style={{ height: `${bottomSpacer}px` }}
+                        data-testid={`timeline-footer-row-${normalizeTestIdSegment(lane.id)}`}
+                      />
                     ) : null}
                   </div>
                 </div>

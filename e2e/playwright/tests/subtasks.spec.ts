@@ -73,17 +73,6 @@ async function openSubtaskDialog(page: Page) {
   await expect(page.getByRole('dialog', { name: 'Create Subtask' })).toBeVisible();
 }
 
-async function expandSubtaskNode(page: Page, title: string) {
-  const section = subtasksSection(page);
-  const row = section.locator('[data-testid^="subtask-row-"]').filter({ hasText: title }).first();
-  const toggleButton = row.locator('[data-testid^="subtask-toggle-"]').first();
-  await expect(toggleButton).toBeVisible();
-  await toggleButton.scrollIntoViewIfNeeded();
-  await toggleButton.evaluate((element) => {
-    (element as HTMLButtonElement).click();
-  });
-}
-
 test.describe('Subtasks Feature', () => {
   test('should create and display subtasks', async ({ page }) => {
     const { projectId, token } = await loginAndCreateProject(page);
@@ -108,10 +97,10 @@ test.describe('Subtasks Feature', () => {
     await expect(subtaskRow.getByText('TODO')).toBeVisible();
   });
 
-  test('should expand and collapse subtask tree', async ({ page }) => {
+  test('should prevent creating nested subtasks', async ({ page }) => {
     const { projectId, token } = await loginAndCreateProject(page);
     
-    const parentTaskTitle = 'Parent Task with Tree';
+    const parentTaskTitle = 'Parent Task with Child';
     const parentTaskId = await createTaskViaAPI(token, projectId, parentTaskTitle);
     await page.goto(`/projects/${projectId}`);
     await openTaskDetail(page, parentTaskTitle);
@@ -123,16 +112,21 @@ test.describe('Subtasks Feature', () => {
     await expect(subtasksSection(page).locator('[data-testid^="subtask-row-"]').filter({ hasText: childTaskTitle }).first()).toBeVisible();
     const childTask = (await api(`/tasks/${parentTaskId}/subtasks`, token)).find((task: any) => task.title === childTaskTitle);
     expect(childTask?.id).toBeTruthy();
-    await api(`/tasks/${childTask.id}/subtasks`, token, 'POST', {
-      title: 'Nested Subtask',
-    });
 
-    await page.reload();
-    await openTaskDetail(page, parentTaskTitle);
-    await expect(subtasksSection(page).locator('[data-testid^="subtask-row-"]').filter({ hasText: childTaskTitle }).first()).toBeVisible();
-    await expect(subtasksSection(page).locator('[data-testid^="subtask-row-"]').filter({ hasText: 'Nested Subtask' }).first()).not.toBeVisible();
-    await expandSubtaskNode(page, childTaskTitle);
-    await expect(subtasksSection(page).locator('[data-testid^="subtask-row-"]').filter({ hasText: 'Nested Subtask' }).first()).toBeVisible();
+    await page.goto(`/projects/${projectId}?task=${childTask.id}`);
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(subtasksSection(page).getByTestId('subtasks-add-btn')).toHaveCount(0);
+
+    let nestedCreateError: Error | null = null;
+    try {
+      await api(`/tasks/${childTask.id}/subtasks`, token, 'POST', {
+        title: 'Nested Subtask',
+      });
+    } catch (error) {
+      nestedCreateError = error as Error;
+    }
+    expect(nestedCreateError).toBeTruthy();
+    expect(String(nestedCreateError)).toContain('Nested subtasks are not supported');
   });
 
   test('should delete subtask', async ({ page }) => {

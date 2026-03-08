@@ -516,7 +516,11 @@ const TIMELINE_PARENT_MOVE_LARGE_IMPACT_THRESHOLD = 5;
 type TimelineGroupBy = (typeof TIMELINE_GROUP_BY_VALUES)[number];
 type TimelineViewMode = (typeof TIMELINE_VIEW_MODE_VALUES)[number];
 type TimelineSwimlane = (typeof TIMELINE_SWIMLANE_VALUES)[number];
-type TimelineManualLayoutByLane = Record<string, string[]>;
+type TimelineManualLaneLayout = {
+  orderedTaskIds: string[];
+  rowByTaskId?: Record<string, number>;
+};
+type TimelineManualLayoutByLane = Record<string, TimelineManualLaneLayout>;
 type TimelineManualLayoutState = Record<TimelineSwimlane, TimelineManualLayoutByLane>;
 type TimelineManualLayoutPreferenceRecord = {
   timelineManualLayout?: Prisma.JsonValue | null;
@@ -1194,6 +1198,7 @@ export class TasksController {
     const hasStatusPatch = body.status !== undefined;
     const hasCustomFieldPatch = body.customFieldMove !== undefined;
     const hasDrop = rawDropAt !== undefined && rawDropAt !== null;
+    const hasGroupingPatch = hasAssigneePatch || hasSectionPatch || hasStatusPatch || hasCustomFieldPatch;
     if (body.sectionId === null) {
       throw new BadRequestException('sectionId must not be null');
     }
@@ -1235,6 +1240,19 @@ export class TasksController {
     if (body.version !== task.version) {
       throw new ConflictException({
         message: 'Version conflict',
+        latest: {
+          version: task.version,
+          assigneeUserId: task.assigneeUserId,
+          sectionId: task.sectionId,
+          status: task.status,
+          startAt: task.startAt,
+          dueAt: task.dueAt,
+        },
+      });
+    }
+    if (task.parentId && hasGroupingPatch) {
+      throw new ConflictException({
+        message: 'Subtasks must stay in the same timeline group as their parent',
         latest: {
           version: task.version,
           assigneeUserId: task.assigneeUserId,
@@ -2500,6 +2518,9 @@ export class TasksController {
   async createSubtask(@Param('id') parentId: string, @Body() body: CreateSubtaskDto, @CurrentRequest() req: AppRequest) {
     const parentTask = await this.prisma.task.findFirstOrThrow({ where: { id: parentId, deletedAt: null } });
     await this.domain.requireProjectRole(parentTask.projectId, req.user.sub, ProjectRole.MEMBER);
+    if (parentTask.parentId) {
+      throw new BadRequestException('Nested subtasks are not supported');
+    }
     assertValidDateRange(body.startAt, body.dueAt);
 
     const topTask = await this.prisma.task.findFirst({
@@ -3268,9 +3289,32 @@ export class TasksController {
     for (const [laneIdRaw, rawTaskIds] of Object.entries(value as Record<string, unknown>)) {
       if (Object.keys(next).length >= maxLaneCount || seenTaskIds.size >= maxTaskCount) break;
       const laneId = laneIdRaw.trim();
-      if (!laneId || !laneId.startsWith(`${groupBy}:`) || !Array.isArray(rawTaskIds)) continue;
+      if (!laneId || !laneId.startsWith(`${groupBy}:`)) continue;
+      const laneLayout =
+        Array.isArray(rawTaskIds)
+          ? { orderedTaskIds: rawTaskIds, rowByTaskId: {} as Record<string, unknown> }
+          : rawTaskIds && typeof rawTaskIds === 'object' && !Array.isArray(rawTaskIds)
+            ? {
+                orderedTaskIds: Array.isArray((rawTaskIds as Record<string, unknown>).orderedTaskIds)
+                  ? ((rawTaskIds as Record<string, unknown>).orderedTaskIds as unknown[])
+                  : Array.isArray((rawTaskIds as Record<string, unknown>).taskIds)
+                    ? ((rawTaskIds as Record<string, unknown>).taskIds as unknown[])
+                    : [],
+                rowByTaskId:
+                  (rawTaskIds as Record<string, unknown>).rowByTaskId &&
+                  typeof (rawTaskIds as Record<string, unknown>).rowByTaskId === 'object' &&
+                  !Array.isArray((rawTaskIds as Record<string, unknown>).rowByTaskId)
+                    ? ((rawTaskIds as Record<string, unknown>).rowByTaskId as Record<string, unknown>)
+                    : (rawTaskIds as Record<string, unknown>).rowHints &&
+                        typeof (rawTaskIds as Record<string, unknown>).rowHints === 'object' &&
+                        !Array.isArray((rawTaskIds as Record<string, unknown>).rowHints)
+                      ? ((rawTaskIds as Record<string, unknown>).rowHints as Record<string, unknown>)
+                      : {},
+              }
+            : null;
+      if (!laneLayout) continue;
       const normalizedTaskIds: string[] = [];
-      for (const rawTaskId of rawTaskIds) {
+      for (const rawTaskId of laneLayout.orderedTaskIds) {
         if (seenTaskIds.size >= maxTaskCount) break;
         if (typeof rawTaskId !== 'string') continue;
         const taskId = rawTaskId.trim();
@@ -3279,7 +3323,19 @@ export class TasksController {
         normalizedTaskIds.push(taskId);
       }
       if (normalizedTaskIds.length > 0) {
-        next[laneId] = normalizedTaskIds;
+        const rowByTaskId: Record<string, number> = {};
+        const maxRowIndex = Math.max(normalizedTaskIds.length - 1, 0);
+        for (const [taskIdRaw, rowIndex] of Object.entries(laneLayout.rowByTaskId)) {
+          const taskId = taskIdRaw.trim();
+          if (!taskId || !normalizedTaskIds.includes(taskId)) continue;
+          const rowIndexNum = Number(rowIndex);
+          if (!Number.isInteger(rowIndexNum) || rowIndexNum < 0) continue;
+          rowByTaskId[taskId] = Math.min(rowIndexNum, maxRowIndex);
+        }
+        next[laneId] =
+          Object.keys(rowByTaskId).length > 0
+            ? { orderedTaskIds: normalizedTaskIds, rowByTaskId }
+            : { orderedTaskIds: normalizedTaskIds };
       }
     }
     return next;
@@ -3309,13 +3365,37 @@ export class TasksController {
     for (const [laneIdRaw, rawTaskIds] of entries) {
       const laneId = laneIdRaw.trim();
       this.assertTimelineManualLayoutLane(groupBy, laneId);
-      if (!Array.isArray(rawTaskIds)) {
-        throw new BadRequestException('laneTaskOrder values must be arrays of task ids');
+      const laneLayout =
+        Array.isArray(rawTaskIds)
+          ? { orderedTaskIds: rawTaskIds, rowByTaskId: {} as Record<string, unknown> }
+          : rawTaskIds && typeof rawTaskIds === 'object' && !Array.isArray(rawTaskIds)
+            ? {
+                orderedTaskIds: Array.isArray((rawTaskIds as Record<string, unknown>).orderedTaskIds)
+                  ? ((rawTaskIds as Record<string, unknown>).orderedTaskIds as unknown[])
+                  : Array.isArray((rawTaskIds as Record<string, unknown>).taskIds)
+                    ? ((rawTaskIds as Record<string, unknown>).taskIds as unknown[])
+                    : null,
+                rowByTaskId:
+                  (rawTaskIds as Record<string, unknown>).rowByTaskId &&
+                  typeof (rawTaskIds as Record<string, unknown>).rowByTaskId === 'object' &&
+                  !Array.isArray((rawTaskIds as Record<string, unknown>).rowByTaskId)
+                    ? ((rawTaskIds as Record<string, unknown>).rowByTaskId as Record<string, unknown>)
+                    : (rawTaskIds as Record<string, unknown>).rowHints &&
+                        typeof (rawTaskIds as Record<string, unknown>).rowHints === 'object' &&
+                        !Array.isArray((rawTaskIds as Record<string, unknown>).rowHints)
+                      ? ((rawTaskIds as Record<string, unknown>).rowHints as Record<string, unknown>)
+                      : {},
+              }
+            : null;
+      if (!laneLayout?.orderedTaskIds) {
+        throw new BadRequestException(
+          'laneTaskOrder values must be arrays of task ids or objects with orderedTaskIds',
+        );
       }
 
       const laneSeenTaskIds = new Set<string>();
       const normalizedTaskIds: string[] = [];
-      for (const rawTaskId of rawTaskIds) {
+      for (const rawTaskId of laneLayout.orderedTaskIds) {
         if (typeof rawTaskId !== 'string') {
           throw new BadRequestException('laneTaskOrder values must contain task id strings');
         }
@@ -3329,7 +3409,25 @@ export class TasksController {
       }
 
       if (normalizedTaskIds.length > 0) {
-        normalized[laneId] = normalizedTaskIds;
+        const rowByTaskId: Record<string, number> = {};
+        for (const [taskIdRaw, rowIndex] of Object.entries(laneLayout.rowByTaskId)) {
+          const taskId = taskIdRaw.trim();
+          if (!taskId || !normalizedTaskIds.includes(taskId)) continue;
+          const rowIndexNum = Number(rowIndex);
+          if (!Number.isInteger(rowIndexNum) || rowIndexNum < 0) {
+            throw new BadRequestException('laneTaskOrder rowByTaskId must be non-negative integers');
+          }
+          if (rowIndexNum >= normalizedTaskIds.length) {
+            throw new BadRequestException(
+              'laneTaskOrder rowByTaskId indices must be less than the number of tasks in the lane',
+            );
+          }
+          rowByTaskId[taskId] = rowIndexNum;
+        }
+        normalized[laneId] =
+          Object.keys(rowByTaskId).length > 0
+            ? { orderedTaskIds: normalizedTaskIds, rowByTaskId }
+            : { orderedTaskIds: normalizedTaskIds };
         laneTaskIds.set(laneId, normalizedTaskIds);
       }
     }

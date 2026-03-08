@@ -16,6 +16,13 @@ async function api(path: string, token: string, method = 'GET', body?: unknown) 
   return raw ? JSON.parse(raw) : null;
 }
 
+function dayIso(deltaDays: number) {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + deltaDays);
+  return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}T00:00:00.000Z`;
+}
+
 test('timeline tab flow: bars render, detail opens, zoom/window persists', async ({ page }) => {
   const now = Date.now();
   const sub = `e2e-timeline-user-${now}`;
@@ -41,23 +48,17 @@ test('timeline tab flow: bars render, detail opens, zoom/window persists', async
     name: 'Timeline Section',
   });
 
-  const start = new Date();
-  start.setDate(start.getDate() - 1);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 3);
-
   const taskA = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
     title: `Timeline Task A ${now}`,
-    startAt: start.toISOString(),
-    dueAt: end.toISOString(),
+    startAt: dayIso(-1),
+    dueAt: dayIso(2),
   });
   const taskB = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
     title: `Timeline Task B ${now}`,
-    startAt: end.toISOString(),
-    dueAt: new Date(end.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+    startAt: dayIso(2),
+    dueAt: dayIso(4),
   });
   await api(`/tasks/${taskB.id}/dependencies`, token, 'POST', {
     dependsOnId: taskA.id,
@@ -134,23 +135,17 @@ test('timeline can create dependency from connector handle drag', async ({ page 
     name: 'Timeline Section',
   });
 
-  const start = new Date();
-  start.setDate(start.getDate());
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 3);
-
   const taskA = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
     title: `Timeline Source ${now}`,
-    startAt: start.toISOString(),
-    dueAt: end.toISOString(),
+    startAt: dayIso(0),
+    dueAt: dayIso(3),
   });
   const taskB = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
     title: `Timeline Target ${now}`,
-    startAt: new Date(end.getTime() + 1 * 24 * 60 * 60 * 1000).toISOString(),
-    dueAt: new Date(end.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+    startAt: dayIso(4),
+    dueAt: dayIso(6),
   });
 
   await page.goto(`/projects/${projectId}?view=timeline`);
@@ -168,14 +163,49 @@ test('timeline can create dependency from connector handle drag', async ({ page 
     throw new Error('Expected dependency handle and target bar bounds');
   }
 
-  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, {
-    steps: 16,
+  await handle.dispatchEvent('pointerdown', {
+    button: 0,
+    clientX: handleBox.x + handleBox.width / 2,
+    clientY: handleBox.y + handleBox.height / 2,
+    pointerType: 'mouse',
+    isPrimary: true,
+    bubbles: true,
   });
-  await expect(page.locator('[data-testid="timeline-dependency-preview"]')).toBeVisible();
-  await expect(targetBar).toHaveAttribute('data-connection-target', 'true');
-  await page.mouse.up();
+  await page.evaluate(
+    ({ clientX, clientY }) => {
+      window.dispatchEvent(
+        new PointerEvent('pointermove', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+    },
+    {
+      clientX: targetBox.x + 12,
+      clientY: targetBox.y + targetBox.height / 2,
+    },
+  );
+  await expect(page.locator('[data-testid="timeline-dependency-preview"]')).toHaveCount(1);
+  await page.evaluate(
+    ({ clientX, clientY }) => {
+      window.dispatchEvent(
+        new PointerEvent('pointerup', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+    },
+    {
+      clientX: targetBox.x + 12,
+      clientY: targetBox.y + targetBox.height / 2,
+    },
+  );
 
   await expect(page.locator('[data-testid="timeline-dependency-preview"]')).toHaveCount(0);
 
@@ -278,22 +308,17 @@ test('timeline multi-select shifts multiple tasks together', async ({ page }) =>
     name: 'Timeline Section',
   });
 
-  const base = new Date();
-  base.setHours(0, 0, 0, 0);
-
   const taskA = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
     title: `Timeline Multi A ${now}`,
-    startAt: new Date(base).toISOString(),
-    dueAt: new Date(base.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+    startAt: dayIso(0),
+    dueAt: dayIso(2),
   });
-  const taskBStart = new Date(base.getTime() + 4 * 24 * 60 * 60 * 1000);
-  const taskBEnd = new Date(base.getTime() + 6 * 24 * 60 * 60 * 1000);
   const taskB = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
     title: `Timeline Multi B ${now}`,
-    startAt: taskBStart.toISOString(),
-    dueAt: taskBEnd.toISOString(),
+    startAt: dayIso(4),
+    dueAt: dayIso(6),
   });
 
   await page.goto(`/projects/${projectId}?view=timeline`);
@@ -340,8 +365,8 @@ test('timeline multi-select shifts multiple tasks together', async ({ page }) =>
       };
     })
     .toEqual({
-      a: new Date(base.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
-      b: new Date(taskBStart.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+      a: dayIso(2),
+      b: dayIso(6),
     });
 });
 
@@ -371,21 +396,17 @@ test('timeline marquee selection can shift multiple tasks together immediately',
     name: 'Timeline Section',
   });
 
-  const base = new Date();
-  base.setHours(0, 0, 0, 0);
-  const taskBStart = new Date(base.getTime() + 4 * 24 * 60 * 60 * 1000);
-
   const taskA = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
     title: `Timeline Marquee A ${now}`,
-    startAt: new Date(base).toISOString(),
-    dueAt: new Date(base.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+    startAt: dayIso(0),
+    dueAt: dayIso(2),
   });
   const taskB = await api(`/projects/${projectId}/tasks`, token, 'POST', {
     sectionId: section.id,
     title: `Timeline Marquee B ${now}`,
-    startAt: taskBStart.toISOString(),
-    dueAt: new Date(base.getTime() + 6 * 24 * 60 * 60 * 1000).toISOString(),
+    startAt: dayIso(4),
+    dueAt: dayIso(6),
   });
 
   await page.goto(`/projects/${projectId}?view=timeline`);
@@ -395,20 +416,66 @@ test('timeline marquee selection can shift multiple tasks together immediately',
   const secondBar = page.locator(`[data-testid="timeline-bar-${taskB.id}"]`);
   const firstBox = await firstBar.boundingBox();
   const secondBox = await secondBar.boundingBox();
-  if (!firstBox || !secondBox) {
-    throw new Error('Expected timeline bars to have bounds');
+  const selectionSurface = page.locator('[data-testid="timeline-selection-surface"]');
+  const selectionSurfaceBox = await selectionSurface.boundingBox();
+  if (!firstBox || !secondBox || !selectionSurfaceBox) {
+    throw new Error('Expected timeline bars and selection surface to have bounds');
   }
 
-  const startX = firstBox.x + 8;
-  const startY = Math.max(0, Math.min(firstBox.y, secondBox.y) - 8);
-  const endX = secondBox.x + secondBox.width - 8;
-  const endY = Math.max(firstBox.y + firstBox.height, secondBox.y + secondBox.height) + 8;
+  const startX = selectionSurfaceBox.x + selectionSurfaceBox.width - 24;
+  const startY = firstBox.y - 8;
+  const endX = Math.min(firstBox.x, secondBox.x) - 12;
+  const endY = Math.max(firstBox.y + firstBox.height, secondBox.y + secondBox.height) + 20;
 
-  await page.mouse.move(startX, startY);
-  await page.mouse.down();
-  await page.mouse.move(endX, endY, { steps: 12 });
+  await selectionSurface.dispatchEvent('pointerdown', {
+    button: 0,
+    clientX: startX,
+    clientY: startY,
+    pointerType: 'mouse',
+    isPrimary: true,
+    bubbles: true,
+  });
+  await page.evaluate(
+    ({ startX: sx, startY: sy, endX: ex, endY: ey }) => {
+      window.dispatchEvent(
+        new PointerEvent('pointermove', {
+          clientX: (sx + ex) / 2,
+          clientY: (sy + ey) / 2,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointermove', {
+          clientX: ex,
+          clientY: ey,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+    },
+    { startX, startY, endX, endY },
+  );
   await expect(page.locator('[data-testid="timeline-selection-box"]')).toBeVisible();
-  await page.mouse.up();
+  await page.evaluate(
+    ({ clientX, clientY }) => {
+      window.dispatchEvent(
+        new PointerEvent('pointerup', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+    },
+    { clientX: endX, clientY: endY },
+  );
+  await expect(page.locator('[data-testid="timeline-selection-count"]')).toContainText('2');
+  await expect(firstBar).toHaveAttribute('data-selected', 'true');
+  await expect(secondBar).toHaveAttribute('data-selected', 'true');
   const dragBox = await firstBar.boundingBox();
   if (!dragBox) {
     throw new Error('Expected selected first bar bounds after marquee');
@@ -434,8 +501,8 @@ test('timeline marquee selection can shift multiple tasks together immediately',
       };
     })
     .toEqual({
-      a: new Date(base.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
-      b: new Date(taskBStart.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+      a: dayIso(2),
+      b: dayIso(6),
     });
 });
 

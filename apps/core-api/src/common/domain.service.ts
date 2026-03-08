@@ -18,6 +18,7 @@ import type { AuthUser } from './types';
 @Injectable()
 export class DomainService {
   private static readonly defaultRuleTemplateKeys = ['progress_to_done', 'progress_to_in_progress'] as const;
+  private static readonly defaultWorkspaceRetryDelaysMs = [10, 25, 50, 100, 200, 400];
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
@@ -69,7 +70,7 @@ export class DomainService {
   }
 
   async ensureDefaultWorkspaceForUser(sub: string) {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; attempt < DomainService.defaultWorkspaceRetryDelaysMs.length; attempt += 1) {
       try {
         return await this.prisma.$transaction(async (tx) => {
           let membership = await tx.workspaceMembership.findFirst({
@@ -99,7 +100,7 @@ export class DomainService {
           maybePrismaError.message?.includes('deadlock') ||
           maybePrismaError.message?.includes('serialization');
 
-        if (!isRetryableTxnConflict || attempt === 2) {
+        if (!isRetryableTxnConflict || attempt === DomainService.defaultWorkspaceRetryDelaysMs.length - 1) {
           const membership = await this.prisma.workspaceMembership.findFirst({
             where: { userId: sub },
             include: { workspace: true },
@@ -109,6 +110,17 @@ export class DomainService {
           }
           throw error;
         }
+
+        const membership = await this.prisma.workspaceMembership.findFirst({
+          where: { userId: sub },
+          include: { workspace: true },
+        });
+        if (membership) {
+          return membership.workspace;
+        }
+
+        const delayMs = DomainService.defaultWorkspaceRetryDelaysMs[attempt];
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
     }
 
