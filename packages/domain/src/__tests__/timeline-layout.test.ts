@@ -517,6 +517,17 @@ test('buildTimelineLayout keeps manual task order authoritative over dependency 
         label: 'Design',
         tasks: [
           {
+            id: 'task-chain-b',
+            title: 'Chain follow-up',
+            sectionId: 'design',
+            assigneeUserId: 'user-1',
+            status: 'TODO',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-07'),
+            timelineEnd: utcDate('2026-03-08'),
+          },
+          {
             id: 'task-blocker',
             title: 'Manual blocker first',
             sectionId: 'design',
@@ -538,17 +549,6 @@ test('buildTimelineLayout keeps manual task order authoritative over dependency 
             timelineStart: utcDate('2026-03-05'),
             timelineEnd: utcDate('2026-03-06'),
           },
-          {
-            id: 'task-chain-b',
-            title: 'Chain follow-up',
-            sectionId: 'design',
-            assigneeUserId: 'user-1',
-            status: 'TODO',
-            hasSchedule: true,
-            inWindow: true,
-            timelineStart: utcDate('2026-03-07'),
-            timelineEnd: utcDate('2026-03-08'),
-          },
         ],
       },
     ],
@@ -558,7 +558,11 @@ test('buildTimelineLayout keeps manual task order authoritative over dependency 
     sectionRowHeight: 32,
     taskRowHeight: 40,
     compactRows: true,
-    manualRowLaneIds: ['section:design'],
+    manualPlacementByLane: {
+      'section:design': {
+        orderedTaskIds: ['task-blocker', 'task-chain-a', 'task-chain-b'],
+      },
+    },
     dependencyAwarePacking: true,
     dependencyEdges: [{ source: 'task-chain-a', target: 'task-chain-b', type: 'BLOCKS' }],
   });
@@ -579,17 +583,6 @@ test('buildTimelineLayout keeps manual task order authoritative over dependency 
 
 test('buildTimelineLayout preserves manual vertical order while still compacting non-overlapping tasks', () => {
   const manualOrderTasks: TaskInput[] = [
-    {
-      id: 'task-late',
-      title: 'Manual top, late dates',
-      sectionId: 'design',
-      assigneeUserId: 'user-1',
-      status: 'TODO',
-      hasSchedule: true,
-      inWindow: true,
-      timelineStart: utcDate('2026-03-05'),
-      timelineEnd: utcDate('2026-03-06'),
-    },
     {
       id: 'task-early',
       title: 'Manual second, early dates',
@@ -612,6 +605,17 @@ test('buildTimelineLayout preserves manual vertical order while still compacting
       timelineStart: utcDate('2026-03-03'),
       timelineEnd: utcDate('2026-03-05'),
     },
+    {
+      id: 'task-late',
+      title: 'Manual top, late dates',
+      sectionId: 'design',
+      assigneeUserId: 'user-1',
+      status: 'TODO',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-05'),
+      timelineEnd: utcDate('2026-03-06'),
+    },
   ];
 
   const layout = buildTimelineLayout({
@@ -622,7 +626,11 @@ test('buildTimelineLayout preserves manual vertical order while still compacting
     sectionRowHeight: 32,
     taskRowHeight: 40,
     compactRows: true,
-    manualRowLaneIds: ['section:design'],
+    manualPlacementByLane: {
+      'section:design': {
+        orderedTaskIds: ['task-late', 'task-early', 'task-overlap'],
+      },
+    },
   });
 
   const designLane = layout.lanesWithRows[0];
@@ -648,17 +656,6 @@ test('buildTimelineLayout respects manual order for overlapping tasks even when 
         label: 'Design',
         tasks: [
           {
-            id: 'task-late-first',
-            title: 'Manual top despite later start',
-            sectionId: 'design',
-            assigneeUserId: 'user-1',
-            status: 'TODO',
-            hasSchedule: true,
-            inWindow: true,
-            timelineStart: utcDate('2026-03-04'),
-            timelineEnd: utcDate('2026-03-07'),
-          },
-          {
             id: 'task-early-second',
             title: 'Manual second despite earlier start',
             sectionId: 'design',
@@ -669,6 +666,17 @@ test('buildTimelineLayout respects manual order for overlapping tasks even when 
             timelineStart: utcDate('2026-03-02'),
             timelineEnd: utcDate('2026-03-05'),
           },
+          {
+            id: 'task-late-first',
+            title: 'Manual top despite later start',
+            sectionId: 'design',
+            assigneeUserId: 'user-1',
+            status: 'TODO',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-04'),
+            timelineEnd: utcDate('2026-03-07'),
+          },
         ],
       },
     ],
@@ -678,7 +686,11 @@ test('buildTimelineLayout respects manual order for overlapping tasks even when 
     sectionRowHeight: 32,
     taskRowHeight: 40,
     compactRows: true,
-    manualRowLaneIds: ['section:design'],
+    manualPlacementByLane: {
+      'section:design': {
+        orderedTaskIds: ['task-late-first', 'task-early-second'],
+      },
+    },
   });
 
   assert.deepEqual(
@@ -898,10 +910,12 @@ test('buildTimelineLayout clamps oversized manual row hints to lane size', () =>
     sectionRowHeight: 32,
     taskRowHeight: 40,
     compactRows: true,
-    manualRowLaneIds: ['section:design'],
-    manualRowHintsByLane: {
+    manualPlacementByLane: {
       'section:design': {
-        'task-a': 100000,
+        orderedTaskIds: tasks.map((task) => task.id),
+        rowByTaskId: {
+          'task-a': 100000,
+        },
       },
     },
   });

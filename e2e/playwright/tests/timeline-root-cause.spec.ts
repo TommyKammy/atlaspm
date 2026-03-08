@@ -337,6 +337,120 @@ test('timeline manual row placement remains stable with overlapping tasks in the
     .toBeLessThanOrEqual(2);
 });
 
+test('timeline grouped assignee lane footer drops persist when moving down and back up', async ({
+  page,
+}) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-root-assignee-${now}`;
+  const email = `${sub}@example.com`;
+
+  await login(page, sub, email);
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Root Assignee ${now}`,
+  });
+  const projectId = project.id as string;
+  const section = await api(`/projects/${projectId}/sections`, token, 'POST', {
+    name: 'Assignee Section',
+  });
+
+  const longTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    assigneeUserId: sub,
+    title: `Assignee Long ${now}`,
+    startAt: dayIso(1),
+    dueAt: dayIso(7),
+  });
+  const earlyTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    assigneeUserId: sub,
+    title: `Assignee Early ${now}`,
+    startAt: dayIso(1),
+    dueAt: dayIso(2),
+  });
+  const lateTask = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: section.id,
+    assigneeUserId: sub,
+    title: `Assignee Late ${now}`,
+    startAt: dayIso(9),
+    dueAt: dayIso(10),
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await page.click('[data-testid="timeline-swimlane-assignee"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+
+  await expect
+    .poll(async () => Math.abs((await timelineBarTop(page, earlyTask.id)) - (await timelineBarTop(page, lateTask.id))))
+    .toBeLessThanOrEqual(2);
+  await expect
+    .poll(async () => Math.abs((await timelineBarTop(page, longTask.id)) - (await timelineBarTop(page, earlyTask.id))))
+    .toBeGreaterThan(24);
+
+  const moveDownSave = page.waitForResponse((response) =>
+    response.url().includes(`/projects/${projectId}/timeline/preferences/manual-layout/assignee`) &&
+    response.request().method() === 'PUT' &&
+    response.ok(),
+  );
+  await dragTimelineBarToTarget(page, lateTask.id, `timeline-footer-row-assignee-${sub}`);
+  await moveDownSave;
+  await waitForTimelineTask(page, earlyTask.id);
+  await waitForTimelineTask(page, lateTask.id);
+  await expect
+    .poll(async () => (await timelineBarTop(page, lateTask.id)) - (await timelineBarTop(page, earlyTask.id)))
+    .toBeGreaterThan(24);
+
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await page.click('[data-testid="timeline-swimlane-assignee"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await waitForTimelineTask(page, earlyTask.id);
+  await waitForTimelineTask(page, lateTask.id);
+  await expect
+    .poll(async () => (await timelineBarTop(page, lateTask.id)) - (await timelineBarTop(page, earlyTask.id)))
+    .toBeGreaterThan(24);
+
+  const moveUpSave = page.waitForResponse((response) =>
+    response.url().includes(`/projects/${projectId}/timeline/preferences/manual-layout/assignee`) &&
+    response.request().method() === 'PUT' &&
+    response.ok(),
+  );
+  await dragTimelineBarToTarget(page, lateTask.id, `timeline-row-assignee-${sub}-0`);
+  await moveUpSave;
+  await waitForTimelineTask(page, earlyTask.id);
+  await waitForTimelineTask(page, lateTask.id);
+  await expect
+    .poll(async () => Math.abs((await timelineBarTop(page, lateTask.id)) - (await timelineBarTop(page, earlyTask.id))))
+    .toBeLessThanOrEqual(2);
+
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+  await page.click('[data-testid="timeline-swimlane-assignee"]');
+  await expect(page.locator('[data-testid="timeline-swimlane-assignee"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await waitForTimelineTask(page, earlyTask.id);
+  await waitForTimelineTask(page, lateTask.id);
+  await expect
+    .poll(async () => Math.abs((await timelineBarTop(page, lateTask.id)) - (await timelineBarTop(page, earlyTask.id))))
+    .toBeLessThanOrEqual(2);
+});
+
 test('timeline blocks subtasks from crossing section lanes in the UI', async ({ page }) => {
   const now = Date.now();
   const sub = `e2e-timeline-root-subtask-${now}`;

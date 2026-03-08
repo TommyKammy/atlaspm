@@ -2928,18 +2928,26 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         laneTaskOrder: {
-          [`section:${defaultSectionId}`]: [
-            timelineTaskC.body.id,
-            ` ${timelineTaskA.body.id} `,
-            timelineTaskC.body.id,
-            '',
-          ],
+          [`section:${defaultSectionId}`]: {
+            orderedTaskIds: [
+              timelineTaskC.body.id,
+              ` ${timelineTaskA.body.id} `,
+              timelineTaskC.body.id,
+              '',
+            ],
+            rowByTaskId: {
+              [timelineTaskA.body.id]: 1,
+            },
+          },
         },
       })
       .expect(200);
     expect(sectionManualLayoutRes.body.timelineManualLayout.section).toEqual({
       [`section:${defaultSectionId}`]: {
         orderedTaskIds: [timelineTaskC.body.id, timelineTaskA.body.id],
+        rowByTaskId: {
+          [timelineTaskA.body.id]: 1,
+        },
       },
     });
     expect(sectionManualLayoutRes.body.timelineManualLayout.assignee).toEqual({});
@@ -2957,6 +2965,9 @@ describe('Core API Integration', () => {
     expect(assigneeManualLayoutRes.body.timelineManualLayout.section).toEqual({
       [`section:${defaultSectionId}`]: {
         orderedTaskIds: [timelineTaskC.body.id, timelineTaskA.body.id],
+        rowByTaskId: {
+          [timelineTaskA.body.id]: 1,
+        },
       },
     });
     expect(assigneeManualLayoutRes.body.timelineManualLayout.assignee).toEqual({
@@ -2977,6 +2988,9 @@ describe('Core API Integration', () => {
     expect(statusManualLayoutRes.body.timelineManualLayout.section).toEqual({
       [`section:${defaultSectionId}`]: {
         orderedTaskIds: [timelineTaskC.body.id, timelineTaskA.body.id],
+        rowByTaskId: {
+          [timelineTaskA.body.id]: 1,
+        },
       },
     });
     expect(statusManualLayoutRes.body.timelineManualLayout.assignee).toEqual({
@@ -3104,6 +3118,9 @@ describe('Core API Integration', () => {
       section: {
         [`section:${defaultSectionId}`]: {
           orderedTaskIds: [timelineTaskC.body.id, timelineTaskA.body.id],
+          rowByTaskId: {
+            [timelineTaskA.body.id]: 1,
+          },
         },
       },
       assignee: {
