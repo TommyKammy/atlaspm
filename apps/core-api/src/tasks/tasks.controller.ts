@@ -3324,11 +3324,13 @@ export class TasksController {
       }
       if (normalizedTaskIds.length > 0) {
         const rowByTaskId: Record<string, number> = {};
+        const maxRowIndex = Math.max(normalizedTaskIds.length - 1, 0);
         for (const [taskIdRaw, rowIndex] of Object.entries(laneLayout.rowByTaskId)) {
           const taskId = taskIdRaw.trim();
           if (!taskId || !normalizedTaskIds.includes(taskId)) continue;
-          if (!Number.isInteger(rowIndex) || Number(rowIndex) < 0) continue;
-          rowByTaskId[taskId] = Number(rowIndex);
+          const rowIndexNum = Number(rowIndex);
+          if (!Number.isInteger(rowIndexNum) || rowIndexNum < 0) continue;
+          rowByTaskId[taskId] = Math.min(rowIndexNum, maxRowIndex);
         }
         next[laneId] =
           Object.keys(rowByTaskId).length > 0
@@ -3411,10 +3413,16 @@ export class TasksController {
         for (const [taskIdRaw, rowIndex] of Object.entries(laneLayout.rowByTaskId)) {
           const taskId = taskIdRaw.trim();
           if (!taskId || !normalizedTaskIds.includes(taskId)) continue;
-          if (!Number.isInteger(rowIndex) || Number(rowIndex) < 0) {
+          const rowIndexNum = Number(rowIndex);
+          if (!Number.isInteger(rowIndexNum) || rowIndexNum < 0) {
             throw new BadRequestException('laneTaskOrder rowByTaskId must be non-negative integers');
           }
-          rowByTaskId[taskId] = Number(rowIndex);
+          if (rowIndexNum >= normalizedTaskIds.length) {
+            throw new BadRequestException(
+              'laneTaskOrder rowByTaskId indices must be less than the number of tasks in the lane',
+            );
+          }
+          rowByTaskId[taskId] = rowIndexNum;
         }
         normalized[laneId] =
           Object.keys(rowByTaskId).length > 0

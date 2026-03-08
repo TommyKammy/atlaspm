@@ -2926,6 +2926,21 @@ describe('Core API Integration', () => {
       })
       .expect(400);
 
+    await request(app.getHttpServer())
+      .put(`/projects/${projectId}/timeline/preferences/manual-layout/section`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        laneTaskOrder: {
+          [`section:${defaultSectionId}`]: {
+            orderedTaskIds: [timelineTaskA.body.id, timelineTaskC.body.id],
+            rowByTaskId: {
+              [timelineTaskA.body.id]: 9999,
+            },
+          },
+        },
+      })
+      .expect(400);
+
     const timelineViewStateRes = await request(app.getHttpServer())
       .put(`/projects/${projectId}/timeline/preferences/view-state/timeline`)
       .set('Authorization', `Bearer ${token}`)

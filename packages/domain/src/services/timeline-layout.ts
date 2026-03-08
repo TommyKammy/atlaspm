@@ -260,10 +260,14 @@ function buildCompactRowPlacement<TTask extends TimelineLayoutTaskInput>(
 
   for (const task of tasksForPacking) {
     let rowIndex: number;
+    const maxPreferredRowIndex = Math.max(tasksForPacking.length - 1, 0);
     if (task.hasSchedule && task.inWindow && task.timelineStart && task.timelineEnd) {
       const taskStartDay = dayNumber(task.timelineStart);
       const taskEndDay = dayNumber(task.timelineEnd);
-      const preferredRowIndex = Math.max(0, manualRowByTaskId?.[task.id] ?? 0);
+      const preferredRowIndex = Math.min(
+        Math.max(0, manualRowByTaskId?.[task.id] ?? 0),
+        maxPreferredRowIndex,
+      );
       rowIndex = -1;
       for (
         let candidateRowIndex = preferredRowIndex;
@@ -286,7 +290,10 @@ function buildCompactRowPlacement<TTask extends TimelineLayoutTaskInput>(
         occupiedRangesByRow[rowIndex] = [{ startDay: taskStartDay, endDay: taskEndDay }];
       }
     } else {
-      rowIndex = Math.max(nextRowIndex, Math.max(0, manualRowByTaskId?.[task.id] ?? nextRowIndex));
+      rowIndex = Math.max(
+        nextRowIndex,
+        Math.min(Math.max(0, manualRowByTaskId?.[task.id] ?? nextRowIndex), maxPreferredRowIndex),
+      );
       nextRowIndex = rowIndex + 1;
     }
 

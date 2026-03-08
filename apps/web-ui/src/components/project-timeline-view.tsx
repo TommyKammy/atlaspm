@@ -157,6 +157,23 @@ function toUtcDateOnlyIsoFromLocalDate(value: Date): string {
   return `${year}-${month}-${day}T00:00:00.000Z`;
 }
 
+function utcDateOnlyToLocalDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) return null;
+  return new Date(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate());
+}
+
+function shiftUtcDateOnlyIsoByDays(value: string | null | undefined, days: number): string | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) return null;
+  const shifted = new Date(
+    Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate() + days, 0, 0, 0, 0),
+  );
+  return shifted.toISOString();
+}
+
 function addDays(base: Date, delta: number): Date {
   const result = startOfDay(base);
   result.setDate(result.getDate() + delta);
@@ -173,7 +190,7 @@ function dayDiff(from: Date, to: Date): number {
 }
 
 function isWeekend(date: Date): boolean {
-  const day = date.getDay();
+  const day = date.getUTCDay();
   return day === 0 || day === 6;
 }
 
@@ -184,17 +201,19 @@ function shiftIsoByBusinessDays(
   if (!value) return null;
   const parsed = new Date(value);
   if (Number.isNaN(parsed.valueOf())) return null;
-  const normalized = startOfDay(parsed);
-  if (!businessDays) return toUtcDateOnlyIsoFromLocalDate(normalized);
+  const normalized = new Date(
+    Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate(), 0, 0, 0, 0),
+  );
+  if (!businessDays) return normalized.toISOString();
   const step = businessDays > 0 ? 1 : -1;
   let remaining = Math.abs(businessDays);
   while (remaining > 0) {
-    normalized.setDate(normalized.getDate() + step);
+    normalized.setUTCDate(normalized.getUTCDate() + step);
     if (!isWeekend(normalized)) {
       remaining -= 1;
     }
   }
-  return toUtcDateOnlyIsoFromLocalDate(normalized);
+  return normalized.toISOString();
 }
 
 function shiftTimelineIso(
@@ -405,12 +424,7 @@ function isApiConflictError(error: unknown): boolean {
 }
 
 function shiftIsoByDays(value: string | null | undefined, days: number): string | null {
-  if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.valueOf())) return null;
-  const normalized = startOfDay(parsed);
-  normalized.setDate(normalized.getDate() + days);
-  return toUtcDateOnlyIsoFromLocalDate(normalized);
+  return shiftUtcDateOnlyIsoByDays(value, days);
 }
 
 function applyTaskScheduleInGroups(
@@ -717,11 +731,13 @@ function normalizeTimelineManualLayoutByLane(value: unknown): TimelineManualLayo
     }
     if (normalizedTaskIds.length > 0) {
       const rowByTaskId: Record<string, number> = {};
+      const maxRowIndex = Math.max(normalizedTaskIds.length - 1, 0);
       for (const [taskIdRaw, rowIndex] of Object.entries(candidate.rowByTaskId)) {
         const taskId = taskIdRaw.trim();
         if (!taskId || !normalizedTaskIds.includes(taskId)) continue;
-        if (!Number.isInteger(rowIndex) || Number(rowIndex) < 0) continue;
-        rowByTaskId[taskId] = Number(rowIndex);
+        const numericRowIndex = Number(rowIndex);
+        if (!Number.isInteger(numericRowIndex) || numericRowIndex < 0) continue;
+        rowByTaskId[taskId] = Math.min(numericRowIndex, maxRowIndex);
       }
       next[laneId] =
         Object.keys(rowByTaskId).length > 0
@@ -2268,8 +2284,8 @@ export function ProjectScheduleCanvas({
       workingDaysOnly,
       dragState.useCalendarDays,
     );
-    const previewStartDate = previewStartAt ? startOfDay(new Date(previewStartAt)) : null;
-    const previewDueDate = previewDueAt ? startOfDay(new Date(previewDueAt)) : null;
+    const previewStartDate = utcDateOnlyToLocalDate(previewStartAt);
+    const previewDueDate = utcDateOnlyToLocalDate(previewDueAt);
     const previewDeltaDays =
       previewStartDate && primaryTask.timelineStart
         ? dayDiff(primaryTask.timelineStart, previewStartDate)
@@ -2882,7 +2898,13 @@ export function ProjectScheduleCanvas({
     const status = effectiveSwimlane === 'status' ? parseStatusLaneId(dropLaneId) : undefined;
     const durationDays =
       task.startAt && task.dueAt
-        ? Math.max(0, dayDiff(startOfDay(new Date(task.startAt)), startOfDay(new Date(task.dueAt))))
+        ? Math.max(
+            0,
+            dayDiff(
+              utcDateOnlyToLocalDate(task.startAt) ?? new Date(task.startAt),
+              utcDateOnlyToLocalDate(task.dueAt) ?? new Date(task.dueAt),
+            ),
+          )
         : 0;
 
     const timelineMovePayload: {
@@ -4170,12 +4192,8 @@ export function ProjectScheduleCanvas({
                                         workingDaysOnly,
                                         dragState?.useCalendarDays ?? false,
                                       );
-                                    const previewStartDate = previewStartAt
-                                      ? startOfDay(new Date(previewStartAt))
-                                      : null;
-                                    const previewDueDate = previewDueAt
-                                      ? startOfDay(new Date(previewDueAt))
-                                      : null;
+                                    const previewStartDate = utcDateOnlyToLocalDate(previewStartAt);
+                                    const previewDueDate = utcDateOnlyToLocalDate(previewDueAt);
                                     const previewDeltaDays =
                                       previewStartDate && task.timelineStart
                                         ? dayDiff(task.timelineStart, previewStartDate)

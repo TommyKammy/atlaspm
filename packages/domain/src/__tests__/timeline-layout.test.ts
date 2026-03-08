@@ -863,3 +863,49 @@ test('buildTimelineTaskOrderByLane returns explicit aligned order for visible la
     'section:design': ['task-chain-a', 'task-chain-b', 'task-blocker'],
   });
 });
+
+test('buildTimelineLayout clamps oversized manual row hints to lane size', () => {
+  const tasks: TaskInput[] = [
+    {
+      id: 'task-a',
+      title: 'Task A',
+      sectionId: 'design',
+      assigneeUserId: null,
+      status: 'TODO',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-01'),
+      timelineEnd: utcDate('2026-03-02'),
+    },
+    {
+      id: 'task-b',
+      title: 'Task B',
+      sectionId: 'design',
+      assigneeUserId: null,
+      status: 'TODO',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-03'),
+      timelineEnd: utcDate('2026-03-04'),
+    },
+  ];
+
+  const layout = buildTimelineLayout({
+    lanes: [{ id: 'section:design', label: 'Design', tasks }],
+    windowStart: utcDate('2026-03-01'),
+    windowEnd: utcDate('2026-03-10'),
+    dayColumnWidth: 20,
+    sectionRowHeight: 32,
+    taskRowHeight: 40,
+    compactRows: true,
+    manualRowLaneIds: ['section:design'],
+    manualRowHintsByLane: {
+      'section:design': {
+        'task-a': 100000,
+      },
+    },
+  });
+
+  assert.equal(layout.lanesWithRows[0]?.rows.length, 2);
+  assert.equal(layout.taskRowsById['task-a']?.top, 72);
+});
