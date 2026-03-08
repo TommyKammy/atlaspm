@@ -3844,6 +3844,65 @@ describe('Core API Integration', () => {
       });
   });
 
+  test('timeline move blocks parents with subtasks from crossing grouping lanes', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Timeline Parent Lane Guard Project' })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSection = sectionsRes.body.find((section: any) => section.isDefault);
+    const secondSectionRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Timeline parent target' })
+      .expect(201);
+
+    const parentRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Timeline parent guarded',
+        sectionId: defaultSection.id,
+        startAt: '2026-05-01T00:00:00.000Z',
+        dueAt: '2026-05-02T00:00:00.000Z',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/tasks/${parentRes.body.id}/subtasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Timeline child preserved',
+        startAt: '2026-05-01T00:00:00.000Z',
+        dueAt: '2026-05-01T00:00:00.000Z',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/tasks/${parentRes.body.id}/timeline-move`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        sectionId: secondSectionRes.body.id,
+        version: parentRes.body.version,
+      })
+      .expect(409)
+      .expect((res) => {
+        expect(res.body.message).toContain('Subtasks must stay in the same timeline group as their parent');
+      });
+  });
+
   test('timeline move conflict payload includes section and status server truth', async () => {
     const workspaceRes = await request(app.getHttpServer())
       .get('/workspaces')

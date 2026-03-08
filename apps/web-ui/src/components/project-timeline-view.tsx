@@ -1542,6 +1542,15 @@ export function ProjectScheduleCanvas({
     () => new Set(filteredTasks.map((task) => task.id)),
     [filteredTasks],
   );
+  const taskHasSubtasksById = useMemo(() => {
+    const next = new Map<string, boolean>();
+    for (const task of timeline.tasks) {
+      const parentId = task.parentId ?? null;
+      if (!parentId) continue;
+      next.set(parentId, true);
+    }
+    return next;
+  }, [timeline.tasks]);
   const taskById = useMemo(
     () => new Map(filteredTasks.map((task) => [task.id, task])),
     [filteredTasks],
@@ -2822,7 +2831,7 @@ export function ProjectScheduleCanvas({
     const hasAssigneeMove = assigneeUserId !== undefined && assigneeUserId !== task.assigneeUserId;
     const hasSectionMove = sectionId !== undefined && sectionId !== task.sectionId;
     const hasStatusMove = status !== undefined && status !== task.status;
-    if (task.parentId && (hasAssigneeMove || hasSectionMove || hasStatusMove)) {
+    if ((task.parentId || taskHasSubtasksById.get(taskId)) && (hasAssigneeMove || hasSectionMove || hasStatusMove)) {
       rescheduleInFlightTaskIdsRef.current.delete(taskId);
       setRescheduleNotice({ type: 'warning', message: t('timelineSubtaskLaneMoveBlocked') });
       return;

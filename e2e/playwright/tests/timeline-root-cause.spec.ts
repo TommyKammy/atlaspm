@@ -498,6 +498,55 @@ test('timeline blocks subtasks from crossing section lanes in the UI', async ({ 
     .toBe(sectionA.id);
 });
 
+test('timeline blocks parent lane changes when subtasks would cross section lanes', async ({
+  page,
+}) => {
+  const now = Date.now();
+  const sub = `e2e-timeline-root-parent-${now}`;
+  const email = `${sub}@example.com`;
+
+  await login(page, sub, email);
+  const token = await page.evaluate(() => localStorage.getItem('atlaspm_token') || '');
+  expect(token).toBeTruthy();
+
+  const workspaces = await api('/workspaces', token);
+  const workspaceId = workspaces[0].id as string;
+  const project = await api('/projects', token, 'POST', {
+    workspaceId,
+    name: `Timeline Root Parent ${now}`,
+  });
+  const projectId = project.id as string;
+  const sectionA = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Section A' });
+  const sectionB = await api(`/projects/${projectId}/sections`, token, 'POST', { name: 'Section B' });
+
+  const parent = await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: sectionA.id,
+    title: `Parent ${now}`,
+    startAt: dayIso(1),
+    dueAt: dayIso(4),
+  });
+  await api(`/tasks/${parent.id}/subtasks`, token, 'POST', {
+    title: `Child ${now}`,
+    startAt: dayIso(2),
+    dueAt: dayIso(2),
+  });
+
+  await page.goto(`/projects/${projectId}?view=timeline`);
+  await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
+
+  await dragTimelineBarToLane(page, parent.id, `timeline-lane-section-${sectionB.id}`);
+
+  await expect(page.locator('[data-testid="timeline-parent-move-warning-banner"]')).toContainText(
+    /同じグループ|same group/i,
+  );
+  await expect
+    .poll(async () => {
+      const latest = await api(`/tasks/${parent.id}`, token);
+      return latest.sectionId as string | null;
+    })
+    .toBe(sectionA.id);
+});
+
 test('task detail date inputs persist immediately without requiring blur', async ({ page }) => {
   const now = Date.now();
   const sub = `e2e-timeline-root-dates-${now}`;
