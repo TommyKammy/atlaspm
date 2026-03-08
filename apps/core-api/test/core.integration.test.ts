@@ -2090,6 +2090,39 @@ describe('Core API Integration', () => {
     expect((dateCreateOutbox?.payload as any)?.dueAt).toBeTruthy();
   });
 
+  test('POST /projects/:id/tasks normalizes offset datetime payloads to UTC date-only values', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Date Only Normalization ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const createRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Task with offset datetime payload',
+        startAt: '2026-03-10T00:00:00+14:00',
+        dueAt: '2026-03-12T00:00:00+14:00',
+      })
+      .expect(201);
+
+    expect(createRes.body.startAt).toBe('2026-03-10T00:00:00.000Z');
+    expect(createRes.body.dueAt).toBe('2026-03-12T00:00:00.000Z');
+
+    const detailRes = await request(app.getHttpServer())
+      .get(`/tasks/${createRes.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(detailRes.body.startAt).toBe('2026-03-10T00:00:00.000Z');
+    expect(detailRes.body.dueAt).toBe('2026-03-12T00:00:00.000Z');
+  });
+
   test('POST /projects/:id/tasks accepts open-ended date ranges', async () => {
     const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
     const workspaceId = wsRes.body[0].id;
@@ -2279,6 +2312,49 @@ describe('Core API Integration', () => {
     expect(rescheduleOutbox).toBeTruthy();
     expect((rescheduleOutbox?.payload as any)?.projectId).toBe(projectId);
     expect((rescheduleOutbox?.payload as any)?.dueAt).toBeTruthy();
+  });
+
+  test('PATCH /tasks/:id/reschedule normalizes offset datetime payloads to UTC date-only values', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Reschedule Date Only ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Task to normalize on reschedule',
+        startAt: '2026-03-10T00:00:00.000Z',
+        dueAt: '2026-03-12T00:00:00.000Z',
+      })
+      .expect(201);
+
+    const rescheduleRes = await request(app.getHttpServer())
+      .patch(`/tasks/${taskRes.body.id}/reschedule`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        startAt: '2026-03-14T00:00:00+14:00',
+        dueAt: '2026-03-16T00:00:00+14:00',
+        version: taskRes.body.version,
+      })
+      .expect(200);
+
+    expect(rescheduleRes.body.startAt).toBe('2026-03-14T00:00:00.000Z');
+    expect(rescheduleRes.body.dueAt).toBe('2026-03-16T00:00:00.000Z');
+
+    const detailRes = await request(app.getHttpServer())
+      .get(`/tasks/${taskRes.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(detailRes.body.startAt).toBe('2026-03-14T00:00:00.000Z');
+    expect(detailRes.body.dueAt).toBe('2026-03-16T00:00:00.000Z');
   });
 
   test('PATCH /tasks/:id/reschedule returns 409 with latest server truth on version conflict', async () => {

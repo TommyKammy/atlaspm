@@ -39,7 +39,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
-import { assertValidDateRange } from '../common/date-validation';
+import {
+  assertValidDateRange,
+  normalizeOptionalDateOnlyIsoString,
+  normalizeStoredDateOnly,
+  parseOptionalDateOnlyIsoString,
+} from '../common/date-validation';
 import { Prisma, Priority, ProjectRole, TaskStatus, TaskType, DependencyType, CustomFieldType } from '@prisma/client';
 import { completeTaskLifecycle, DomainConflictError, DomainNotFoundError } from '@atlaspm/domain';
 import { SubtaskService } from './subtask.service';
@@ -893,6 +898,10 @@ export class TasksController {
       startField: 'baselineStartAt',
       dueField: 'baselineDueAt',
     });
+    const normalizedStartAt = parseOptionalDateOnlyIsoString(body.startAt);
+    const normalizedDueAt = parseOptionalDateOnlyIsoString(body.dueAt);
+    const normalizedBaselineStartAt = parseOptionalDateOnlyIsoString(body.baselineStartAt);
+    const normalizedBaselineDueAt = parseOptionalDateOnlyIsoString(body.baselineDueAt);
 
     let sectionId = body.sectionId;
     if (!sectionId) {
@@ -932,10 +941,10 @@ export class TasksController {
           progressPercent: progress,
           priority: body.priority,
           assigneeUserId: body.assigneeUserId,
-          startAt: body.startAt ? new Date(body.startAt) : null,
-          dueAt: body.dueAt ? new Date(body.dueAt) : null,
-          baselineStartAt: body.baselineStartAt ? new Date(body.baselineStartAt) : null,
-          baselineDueAt: body.baselineDueAt ? new Date(body.baselineDueAt) : null,
+          startAt: normalizedStartAt ?? null,
+          dueAt: normalizedDueAt ?? null,
+          baselineStartAt: normalizedBaselineStartAt ?? null,
+          baselineDueAt: normalizedBaselineDueAt ?? null,
           tags: body.tags ?? [],
           completedAt,
           position,
@@ -953,7 +962,7 @@ export class TasksController {
         payload: task,
       });
       await this.applyProgressRules(tx, task.id, req.correlationId);
-      return task;
+      return this.normalizeTaskDateFields(task);
     }).then((task) => {
       void this.indexTaskWithCustomFields(task);
       return task;
@@ -981,6 +990,10 @@ export class TasksController {
       startField: 'baselineStartAt',
       dueField: 'baselineDueAt',
     });
+    const normalizedBodyStartAt = normalizeOptionalDateOnlyIsoString(body.startAt);
+    const normalizedBodyDueAt = normalizeOptionalDateOnlyIsoString(body.dueAt);
+    const normalizedBodyBaselineStartAt = normalizeOptionalDateOnlyIsoString(body.baselineStartAt);
+    const normalizedBodyBaselineDueAt = normalizeOptionalDateOnlyIsoString(body.baselineDueAt);
 
     const newType = body.type ?? task.type;
     const requestedStatus = body.status ?? task.status;
@@ -1012,26 +1025,29 @@ export class TasksController {
           progressPercent: progress,
           priority: body.priority,
           assigneeUserId: body.assigneeUserId,
-          startAt: body.startAt ? new Date(body.startAt) : body.startAt === null ? null : undefined,
-          dueAt: body.dueAt ? new Date(body.dueAt) : body.dueAt === null ? null : undefined,
+          startAt:
+            normalizedBodyStartAt !== undefined
+              ? parseOptionalDateOnlyIsoString(normalizedBodyStartAt)
+              : undefined,
+          dueAt:
+            normalizedBodyDueAt !== undefined
+              ? parseOptionalDateOnlyIsoString(normalizedBodyDueAt)
+              : undefined,
           baselineStartAt:
-            body.baselineStartAt
-              ? new Date(body.baselineStartAt)
-              : body.baselineStartAt === null
-                ? null
-                : undefined,
+            normalizedBodyBaselineStartAt !== undefined
+              ? parseOptionalDateOnlyIsoString(normalizedBodyBaselineStartAt)
+              : undefined,
           baselineDueAt:
-            body.baselineDueAt
-              ? new Date(body.baselineDueAt)
-              : body.baselineDueAt === null
-                ? null
-                : undefined,
+            normalizedBodyBaselineDueAt !== undefined
+              ? parseOptionalDateOnlyIsoString(normalizedBodyBaselineDueAt)
+              : undefined,
           tags: body.tags,
           sectionId: body.sectionId,
           completedAt,
           version: { increment: 1 },
         },
       });
+      const normalizedUpdated = this.normalizeTaskDateFields(updated);
       await this.domain.appendAuditOutbox({
         tx,
         actor: req.user.sub,
@@ -1039,10 +1055,10 @@ export class TasksController {
         entityId: id,
         action: 'task.updated',
         beforeJson: task,
-        afterJson: updated,
+        afterJson: normalizedUpdated,
         correlationId: req.correlationId,
         outboxType: 'task.updated',
-        payload: updated,
+        payload: normalizedUpdated,
       });
       await this.applyProgressRules(tx, id, req.correlationId);
 
@@ -1065,9 +1081,8 @@ export class TasksController {
         if (body.dueAt === null) {
           dueDateChanged = task.dueAt !== null;
         } else {
-          const newDueDate = new Date(body.dueAt).getTime();
-          const oldDueDate = task.dueAt ? task.dueAt.getTime() : null;
-          dueDateChanged = newDueDate !== oldDueDate;
+          const oldDueDate = task.dueAt ? task.dueAt.toISOString() : null;
+          dueDateChanged = normalizedBodyDueAt !== oldDueDate;
         }
       }
       if (dueDateChanged && postUpdateAssigneeId) {
@@ -1094,7 +1109,7 @@ export class TasksController {
         });
       }
 
-      return updated;
+      return normalizedUpdated;
     }).then((updated) => {
       void this.indexTaskWithCustomFields(updated);
       return updated;
@@ -1122,13 +1137,21 @@ export class TasksController {
     const effectiveStartAt = body.startAt === undefined ? task.startAt?.toISOString() : body.startAt;
     const effectiveDueAt = body.dueAt === undefined ? task.dueAt?.toISOString() : body.dueAt;
     assertValidDateRange(effectiveStartAt, effectiveDueAt);
+    const normalizedBodyStartAt = normalizeOptionalDateOnlyIsoString(body.startAt);
+    const normalizedBodyDueAt = normalizeOptionalDateOnlyIsoString(body.dueAt);
 
     return this.prisma.$transaction(async (tx) => {
       const updatedRows = await tx.task.updateMany({
         where: { id, deletedAt: null, version: body.version },
         data: {
-          startAt: body.startAt ? new Date(body.startAt) : body.startAt === null ? null : undefined,
-          dueAt: body.dueAt ? new Date(body.dueAt) : body.dueAt === null ? null : undefined,
+          startAt:
+            normalizedBodyStartAt !== undefined
+              ? parseOptionalDateOnlyIsoString(normalizedBodyStartAt)
+              : undefined,
+          dueAt:
+            normalizedBodyDueAt !== undefined
+              ? parseOptionalDateOnlyIsoString(normalizedBodyDueAt)
+              : undefined,
           version: { increment: 1 },
         },
       });
@@ -1145,7 +1168,9 @@ export class TasksController {
         });
       }
 
-      const updated = await tx.task.findFirstOrThrow({ where: { id, deletedAt: null } });
+      const updated = this.normalizeTaskDateFields(
+        await tx.task.findFirstOrThrow({ where: { id, deletedAt: null } }),
+      );
       const subtaskMovePolicy = await this.buildTimelineSubtaskMovePolicy(tx, id);
       await this.domain.appendAuditOutbox({
         tx,
@@ -1264,6 +1289,14 @@ export class TasksController {
       });
     }
 
+    if (!hasDrop) {
+      const effectiveStartAt = body.startAt === undefined ? task.startAt?.toISOString() : body.startAt;
+      const effectiveDueAt = body.dueAt === undefined ? task.dueAt?.toISOString() : body.dueAt;
+      assertValidDateRange(effectiveStartAt, effectiveDueAt);
+    }
+
+    const normalizedBodyStartAt = normalizeOptionalDateOnlyIsoString(body.startAt);
+    const normalizedBodyDueAt = normalizeOptionalDateOnlyIsoString(body.dueAt);
     let nextStartAt: Date | null = task.startAt;
     let nextDueAt: Date | null = task.dueAt;
     if (hasDrop) {
@@ -1276,11 +1309,11 @@ export class TasksController {
       nextStartAt = dropSchedule.startAt;
       nextDueAt = dropSchedule.dueAt;
     } else {
-      if (body.startAt !== undefined) {
-        nextStartAt = body.startAt ? new Date(body.startAt) : null;
+      if (normalizedBodyStartAt !== undefined) {
+        nextStartAt = parseOptionalDateOnlyIsoString(normalizedBodyStartAt) ?? null;
       }
-      if (body.dueAt !== undefined) {
-        nextDueAt = body.dueAt ? new Date(body.dueAt) : null;
+      if (normalizedBodyDueAt !== undefined) {
+        nextDueAt = parseOptionalDateOnlyIsoString(normalizedBodyDueAt) ?? null;
       }
     }
     this.domain.assertTimelineScheduleRange(nextStartAt, nextDueAt);
@@ -1426,7 +1459,9 @@ export class TasksController {
         }
       }
 
-      const updated = await tx.task.findFirstOrThrow({ where: { id, deletedAt: null } });
+      const updated = this.normalizeTaskDateFields(
+        await tx.task.findFirstOrThrow({ where: { id, deletedAt: null } }),
+      );
       const subtaskMovePolicy = await this.buildTimelineSubtaskMovePolicy(tx, id);
       let serializedCurrentCustomFieldValues: SerializedTaskCustomFieldValue[] | undefined;
       if (parsedCustomFieldMove) {
@@ -2522,6 +2557,8 @@ export class TasksController {
       throw new BadRequestException('Nested subtasks are not supported');
     }
     assertValidDateRange(body.startAt, body.dueAt);
+    const normalizedStartAt = parseOptionalDateOnlyIsoString(body.startAt);
+    const normalizedDueAt = parseOptionalDateOnlyIsoString(body.dueAt);
 
     const topTask = await this.prisma.task.findFirst({
       where: { projectId: parentTask.projectId, sectionId: parentTask.sectionId, deletedAt: null },
@@ -2534,31 +2571,40 @@ export class TasksController {
       projectId: parentTask.projectId,
       sectionId: parentTask.sectionId,
       position,
-      startAt: body.startAt ? new Date(body.startAt) : null,
-      dueAt: body.dueAt ? new Date(body.dueAt) : null,
+      startAt: normalizedStartAt ?? null,
+      dueAt: normalizedDueAt ?? null,
     };
-    return this.subtaskService.createSubtask(parentId, taskData);
+    return this.normalizeTaskDateFields(await this.subtaskService.createSubtask(parentId, taskData));
   }
 
   @Get('tasks/:id/subtasks')
   async getSubtasks(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
-    return this.subtaskService.getSubtasks(taskId);
+    return (await this.subtaskService.getSubtasks(taskId)).map((subtask) =>
+      this.normalizeTaskDateFields(subtask),
+    );
   }
 
   @Get('tasks/:id/subtasks/tree')
   async getSubtaskTree(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
-    return this.subtaskService.getSubtaskTree(taskId);
+    const normalizeTree = (nodes: Awaited<ReturnType<SubtaskService['getSubtaskTree']>>): typeof nodes =>
+      nodes.map((node) => ({
+        ...this.normalizeTaskDateFields(node),
+        children: normalizeTree(node.children),
+      }));
+    return normalizeTree(await this.subtaskService.getSubtaskTree(taskId));
   }
 
   @Get('tasks/:id/breadcrumbs')
   async getBreadcrumbs(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
-    return this.subtaskService.getBreadcrumbPath(taskId);
+    return (await this.subtaskService.getBreadcrumbPath(taskId)).map((breadcrumb) =>
+      this.normalizeTaskDateFields(breadcrumb),
+    );
   }
 
   // Dependency endpoints
@@ -2698,7 +2744,12 @@ export class TasksController {
   private async hydrateTasksWithCustomFieldValues(
     tasks: Array<Record<string, unknown> & { id: string }>,
   ): Promise<Array<Record<string, unknown> & { id: string; customFieldValues: SerializedTaskCustomFieldValue[] }>> {
-    if (!tasks.length) return tasks.map((task) => ({ ...task, customFieldValues: [] }));
+    if (!tasks.length) {
+      return tasks.map((task) => ({
+        ...this.normalizeTaskDateFields(task),
+        customFieldValues: [],
+      }));
+    }
     const taskIds = tasks.map((task) => task.id);
     const values = await this.prisma.taskCustomFieldValue.findMany({
       where: {
@@ -2730,9 +2781,25 @@ export class TasksController {
       });
     }
     return tasks.map((task) => ({
-      ...task,
+      ...this.normalizeTaskDateFields(task),
       customFieldValues: byTaskId.get(task.id) ?? [],
     }));
+  }
+
+  private normalizeTaskDateFields<T extends object>(task: T): T {
+    const candidate = task as {
+      startAt?: Date | null;
+      dueAt?: Date | null;
+      baselineStartAt?: Date | null;
+      baselineDueAt?: Date | null;
+    };
+    return {
+      ...task,
+      startAt: normalizeStoredDateOnly(candidate.startAt),
+      dueAt: normalizeStoredDateOnly(candidate.dueAt),
+      baselineStartAt: normalizeStoredDateOnly(candidate.baselineStartAt),
+      baselineDueAt: normalizeStoredDateOnly(candidate.baselineDueAt),
+    };
   }
 
   private serializeTaskCustomFieldValue(value: TaskCustomFieldValueWithRelations): SerializedTaskCustomFieldValue {
