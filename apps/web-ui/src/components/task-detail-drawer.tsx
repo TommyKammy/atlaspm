@@ -1,6 +1,7 @@
 'use client';
 
 import * as Dialog from '@radix-ui/react-dialog';
+import { dateOnlyInputToLocalDate, dateOnlyInputValue, normalizeDateOnlyUtcIso } from '@atlaspm/domain';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -189,7 +190,18 @@ function formatAuditValue(
   if (typeof value === 'number') return String(value);
   if (typeof value === 'string') {
     if (field === 'status') return statusLabel(value as Task['status'], t);
-    if (field.endsWith('At') || field === 'startAt' || field === 'dueAt') {
+    if (
+      field === 'startAt'
+      || field === 'dueAt'
+      || field === 'baselineStartAt'
+      || field === 'baselineDueAt'
+    ) {
+      const date = dateOnlyInputToLocalDate(value);
+      if (date) {
+        return date.toLocaleDateString(locale === 'ja' ? 'ja-JP' : 'en-US');
+      }
+    }
+    if (field.endsWith('At')) {
       const date = new Date(value);
       if (!Number.isNaN(date.getTime())) {
         return date.toLocaleString(locale === 'ja' ? 'ja-JP' : 'en-US');
@@ -278,8 +290,7 @@ function initials(value: string) {
 }
 
 function toDateInputValue(value?: string | null) {
-  if (!value) return '';
-  return String(value).slice(0, 10);
+  return dateOnlyInputValue(value);
 }
 
 function countOpenSubtasks(nodes: TaskTree[]) {
@@ -449,15 +460,15 @@ export default function TaskDetailDrawer({
         method: 'PATCH',
         body: {
           version,
-          startAt: startDate ? `${startDate}T00:00:00.000Z` : null,
-          dueAt: dueDate ? `${dueDate}T00:00:00.000Z` : null,
+          startAt: normalizeDateOnlyUtcIso(startDate),
+          dueAt: normalizeDateOnlyUtcIso(dueDate),
         },
       }) as Promise<Task>,
     onSuccess: async (updated) => {
       syncTaskCaches(updated);
       const pending = pendingScheduleDraftRef.current;
-      const persistedStartDate = updated.startAt ? String(updated.startAt).slice(0, 10) : '';
-      const persistedDueDate = updated.dueAt ? String(updated.dueAt).slice(0, 10) : '';
+      const persistedStartDate = dateOnlyInputValue(updated.startAt);
+      const persistedDueDate = dateOnlyInputValue(updated.dueAt);
       if (pending && (pending.startDate !== persistedStartDate || pending.dueDate !== persistedDueDate)) {
         pendingScheduleDraftRef.current = null;
         patchSchedule.mutate({
@@ -704,8 +715,8 @@ export default function TaskDetailDrawer({
 
   const commitSchedule = (nextStartDate: string, nextDueDate: string) => {
     if (!currentTask) return;
-    const currentStartAt = currentTask.startAt ? String(currentTask.startAt).slice(0, 10) : '';
-    const currentDueAt = currentTask.dueAt ? String(currentTask.dueAt).slice(0, 10) : '';
+    const currentStartAt = dateOnlyInputValue(currentTask.startAt);
+    const currentDueAt = dateOnlyInputValue(currentTask.dueAt);
     if (currentStartAt === nextStartDate && currentDueAt === nextDueDate) return;
     pendingScheduleDraftRef.current = { startDate: nextStartDate, dueDate: nextDueDate };
     if (patchSchedule.isPending) return;

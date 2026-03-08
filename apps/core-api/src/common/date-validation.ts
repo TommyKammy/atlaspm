@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { normalizeDateOnlyUtcIso, type DateOnlyInput } from '@atlaspm/domain';
 
 export interface DateRangeValidationResult {
   valid: boolean;
@@ -13,6 +14,19 @@ export interface DateRangeFieldNames {
   dueField: string;
 }
 
+export function normalizeDateOnlyField(value: DateOnlyInput): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return normalizeDateOnlyUtcIso(value);
+}
+
+export function toDateOnlyDate(value: DateOnlyInput): Date | null | undefined {
+  const normalized = normalizeDateOnlyField(value);
+  if (normalized === undefined) return undefined;
+  if (normalized === null) return null;
+  return new Date(normalized);
+}
+
 export function validateDateRange(
   startAt: string | null | undefined,
   dueAt: string | null | undefined,
@@ -22,10 +36,10 @@ export function validateDateRange(
     return { valid: true };
   }
 
-  const start = new Date(startAt);
-  const due = new Date(dueAt);
+  const normalizedStart = normalizeDateOnlyField(startAt);
+  const normalizedDue = normalizeDateOnlyField(dueAt);
 
-  if (isNaN(start.getTime())) {
+  if (!normalizedStart) {
     return {
       valid: false,
       error: {
@@ -35,7 +49,7 @@ export function validateDateRange(
     };
   }
 
-  if (isNaN(due.getTime())) {
+  if (!normalizedDue) {
     return {
       valid: false,
       error: {
@@ -45,7 +59,7 @@ export function validateDateRange(
     };
   }
 
-  if (start.getTime() > due.getTime()) {
+  if (normalizedStart > normalizedDue) {
     return {
       valid: false,
       error: {

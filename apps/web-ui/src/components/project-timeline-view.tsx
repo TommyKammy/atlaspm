@@ -5,6 +5,8 @@ import {
   buildTimelineLanes,
   buildTimelineLayout,
   buildTimelineTaskOrderByLane,
+  dateOnlyInputToLocalDate,
+  localDateToDateOnlyUtcIso,
 } from '@atlaspm/domain';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -148,20 +150,6 @@ const TIMELINE_ZOOM_CONFIG: Record<
 
 function startOfDay(value: Date): Date {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate());
-}
-
-function toUtcDateOnlyIsoFromLocalDate(value: Date): string {
-  const year = value.getFullYear();
-  const month = `${value.getMonth() + 1}`.padStart(2, '0');
-  const day = `${value.getDate()}`.padStart(2, '0');
-  return `${year}-${month}-${day}T00:00:00.000Z`;
-}
-
-function utcDateOnlyToLocalDate(value: string | null | undefined): Date | null {
-  if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.valueOf())) return null;
-  return new Date(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate());
 }
 
 function shiftUtcDateOnlyIsoByDays(value: string | null | undefined, days: number): string | null {
@@ -2284,8 +2272,8 @@ export function ProjectScheduleCanvas({
       workingDaysOnly,
       dragState.useCalendarDays,
     );
-    const previewStartDate = utcDateOnlyToLocalDate(previewStartAt);
-    const previewDueDate = utcDateOnlyToLocalDate(previewDueAt);
+    const previewStartDate = dateOnlyInputToLocalDate(previewStartAt);
+    const previewDueDate = dateOnlyInputToLocalDate(previewDueAt);
     const previewDeltaDays =
       previewStartDate && primaryTask.timelineStart
         ? dayDiff(primaryTask.timelineStart, previewStartDate)
@@ -2901,8 +2889,8 @@ export function ProjectScheduleCanvas({
         ? Math.max(
             0,
             dayDiff(
-              utcDateOnlyToLocalDate(task.startAt) ?? new Date(task.startAt),
-              utcDateOnlyToLocalDate(task.dueAt) ?? new Date(task.dueAt),
+              dateOnlyInputToLocalDate(task.startAt) ?? new Date(task.startAt),
+              dateOnlyInputToLocalDate(task.dueAt) ?? new Date(task.dueAt),
             ),
           )
         : 0;
@@ -2917,8 +2905,8 @@ export function ProjectScheduleCanvas({
       version: number;
     } = {
       taskId,
-      startAt: toUtcDateOnlyIsoFromLocalDate(startDate),
-      dueAt: toUtcDateOnlyIsoFromLocalDate(addDays(startDate, durationDays)),
+      startAt: localDateToDateOnlyUtcIso(startDate),
+      dueAt: localDateToDateOnlyUtcIso(addDays(startDate, durationDays)),
       version: task.version,
     };
     if (assigneeUserId !== undefined) {
@@ -4192,8 +4180,8 @@ export function ProjectScheduleCanvas({
                                         workingDaysOnly,
                                         dragState?.useCalendarDays ?? false,
                                       );
-                                    const previewStartDate = utcDateOnlyToLocalDate(previewStartAt);
-                                    const previewDueDate = utcDateOnlyToLocalDate(previewDueAt);
+                                    const previewStartDate = dateOnlyInputToLocalDate(previewStartAt);
+                                    const previewDueDate = dateOnlyInputToLocalDate(previewDueAt);
                                     const previewDeltaDays =
                                       previewStartDate && task.timelineStart
                                         ? dayDiff(task.timelineStart, previewStartDate)

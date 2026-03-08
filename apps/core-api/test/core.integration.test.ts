@@ -2090,6 +2090,90 @@ describe('Core API Integration', () => {
     expect((dateCreateOutbox?.payload as any)?.dueAt).toBeTruthy();
   });
 
+  test('schedule APIs normalize mixed timestamps to UTC date-only persistence', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Date Only Normalization ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSection = sectionsRes.body.find((section: any) => section.isDefault);
+    expect(defaultSection?.id).toBeTruthy();
+
+    const createRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Date only normalization task',
+        sectionId: defaultSection.id,
+        startAt: '2026-03-10T23:00:00.000Z',
+        dueAt: '2026-03-12T05:30:00.000Z',
+        baselineStartAt: '2026-03-09T18:45:00.000Z',
+        baselineDueAt: '2026-03-11T22:15:00.000Z',
+      })
+      .expect(201);
+
+    expect(createRes.body.startAt).toBe('2026-03-10T00:00:00.000Z');
+    expect(createRes.body.dueAt).toBe('2026-03-12T00:00:00.000Z');
+    expect(createRes.body.baselineStartAt).toBe('2026-03-09T00:00:00.000Z');
+    expect(createRes.body.baselineDueAt).toBe('2026-03-11T00:00:00.000Z');
+
+    const taskId = createRes.body.id as string;
+
+    const patchRes = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        dueAt: '2026-03-14T18:20:00.000Z',
+        baselineDueAt: '2026-03-15T03:40:00.000Z',
+        version: createRes.body.version,
+      })
+      .expect(200);
+
+    expect(patchRes.body.dueAt).toBe('2026-03-14T00:00:00.000Z');
+    expect(patchRes.body.baselineDueAt).toBe('2026-03-15T00:00:00.000Z');
+
+    const rescheduleRes = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/reschedule`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        startAt: '2026-03-11T21:10:00.000Z',
+        dueAt: '2026-03-16T22:50:00.000Z',
+        version: patchRes.body.version,
+      })
+      .expect(200);
+
+    expect(rescheduleRes.body.startAt).toBe('2026-03-11T00:00:00.000Z');
+    expect(rescheduleRes.body.dueAt).toBe('2026-03-16T00:00:00.000Z');
+
+    const moveRes = await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}/timeline-move`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        startAt: '2026-03-20T23:59:00.000Z',
+        dueAt: '2026-03-22T04:10:00.000Z',
+        version: rescheduleRes.body.version,
+      })
+      .expect(200);
+
+    expect(moveRes.body.startAt).toBe('2026-03-20T00:00:00.000Z');
+    expect(moveRes.body.dueAt).toBe('2026-03-22T00:00:00.000Z');
+
+    const storedTask = await prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    expect(storedTask.startAt?.toISOString()).toBe('2026-03-20T00:00:00.000Z');
+    expect(storedTask.dueAt?.toISOString()).toBe('2026-03-22T00:00:00.000Z');
+    expect(storedTask.baselineStartAt?.toISOString()).toBe('2026-03-09T00:00:00.000Z');
+    expect(storedTask.baselineDueAt?.toISOString()).toBe('2026-03-15T00:00:00.000Z');
+  });
+
   test('POST /projects/:id/tasks accepts open-ended date ranges', async () => {
     const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
     const workspaceId = wsRes.body[0].id;
