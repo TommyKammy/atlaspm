@@ -44,7 +44,7 @@ type TimelineManualLaneLayout = {
 };
 type TimelineManualLayoutByLane = Record<string, TimelineManualLaneLayout>;
 type TimelineManualLayoutState = Record<TimelineSwimlane, TimelineManualLayoutByLane>;
-type TimelineLaneSubtaskMeta<TTask extends { id: string; parentId?: string | null }> = {
+type TimelineLaneSubtaskMeta = {
   visibleTaskIds: string[];
   childIdsByParentId: Record<string, string[]>;
   depthByTaskId: Record<string, number>;
@@ -788,7 +788,7 @@ function buildTimelineLaneSubtaskMeta<TTask extends { id: string; parentId?: str
   tasks: TTask[],
   collapsedParentIds: Set<string>,
   baseRowByTaskId?: Record<string, number>,
-): TimelineLaneSubtaskMeta<TTask> {
+): TimelineLaneSubtaskMeta {
   const taskById = new Map(tasks.map((task) => [task.id, task] as const));
   const laneTaskIds = new Set(tasks.map((task) => task.id));
   const childIdsByParentId: Record<string, string[]> = {};
@@ -1461,7 +1461,7 @@ export function ProjectScheduleCanvas({
   ]);
   const timelineLanes = baseTimelineLanes;
   const timelineLaneSubtaskMetaById = useMemo(() => {
-    const next: Record<string, TimelineLaneSubtaskMeta<TimelineTask>> = {};
+    const next: Record<string, TimelineLaneSubtaskMeta> = {};
     for (const lane of timelineLanes) {
       next[lane.id] = buildTimelineLaneSubtaskMeta(
         lane.tasks,
@@ -4019,8 +4019,6 @@ export function ProjectScheduleCanvas({
                       ? visibleRows.map((row) => {
                           const primaryTask = row.tasks[0];
                           if (!primaryTask) return null;
-                          const primaryTaskRisk = ganttRiskByTaskId.get(primaryTask.id);
-                          const primaryTaskRiskLabel = describeTaskRisk(primaryTaskRisk);
                           return (
                             <div
                               key={`${lane.id}-row-${row.top}`}
