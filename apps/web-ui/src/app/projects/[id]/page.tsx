@@ -7,6 +7,7 @@ import { ChevronDown, Plus } from 'lucide-react';
 import ProjectBoard from '@/components/project-board';
 import { ProjectBoardView, ProjectCalendarView, ProjectFilesView } from '@/components/project-alt-views';
 import { ProjectGanttShell } from '@/components/project-gantt-shell';
+import { ProjectStatusUpdates } from '@/components/project-status-updates';
 import { ProjectTimelineShell } from '@/components/project-timeline-shell';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
@@ -294,6 +295,8 @@ export default function ProjectPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <ProjectStatusUpdates projectId={projectId} canEdit={canEditProject} />
 
       {view === 'list' ? (
         <>

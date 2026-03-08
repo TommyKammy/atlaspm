@@ -421,11 +421,13 @@ export type RecurringRule = {
   };
 };
 
+export type ProjectStatusHealth = 'ON_TRACK' | 'AT_RISK' | 'OFF_TRACK';
+
 export type ProjectStatusUpdate = {
   id: string;
   projectId: string;
   authorUserId: string;
-  health: 'ON_TRACK' | 'AT_RISK' | 'OFF_TRACK';
+  health: ProjectStatusHealth;
   summary: string;
   blockers: string[];
   nextSteps: string[];
@@ -436,6 +438,12 @@ export type ProjectStatusUpdate = {
     displayName?: string | null;
     email?: string | null;
   };
+};
+
+export type ProjectStatusUpdateList = {
+  items: ProjectStatusUpdate[];
+  nextCursor: string | null;
+  hasNextPage: boolean;
 };
 
 export type FormQuestionType = 'TEXT' | 'TEXTAREA' | 'NUMBER' | 'EMAIL' | 'SELECT' | 'MULTI_SELECT' | 'DATE' | 'CHECKBOX';
