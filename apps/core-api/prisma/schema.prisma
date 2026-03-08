@@ -13,6 +13,12 @@ enum ProjectRole {
   VIEWER
 }
 
+enum ProjectStatusHealth {
+  ON_TRACK
+  AT_RISK
+  OFF_TRACK
+}
+
 enum WorkspaceRole {
   WS_ADMIN
   WS_MEMBER
@@ -159,7 +165,10 @@ model ProjectStatusUpdate {
   id          String   @id @default(uuid())
   projectId   String   @map("project_id")
   authorUserId String  @map("author_user_id")
-  body        String
+  health      ProjectStatusHealth
+  summary     String
+  blockers    String[] @default([])
+  nextSteps   String[] @default([]) @map("next_steps")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 

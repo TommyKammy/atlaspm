@@ -3353,6 +3353,245 @@ describe('Core API Integration', () => {
       .expect(409);
   });
 
+  test('project status update APIs persist structured updates with authorship, history, read access, and audit/outbox', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Project Status Update Contract Project' })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const memberId = `status-member-${projectId}`;
+    await prisma.user.upsert({
+      where: { id: memberId },
+      create: {
+        id: memberId,
+        email: `${memberId}@example.com`,
+        displayName: 'Status Member',
+        status: 'ACTIVE',
+      },
+      update: {},
+    });
+    await prisma.workspaceMembership.upsert({
+      where: { workspaceId_userId: { workspaceId, userId: memberId } },
+      create: { workspaceId, userId: memberId, role: 'WS_MEMBER' },
+      update: {},
+    });
+    await prisma.projectMembership.upsert({
+      where: { projectId_userId: { projectId, userId: memberId } },
+      create: { projectId, userId: memberId, role: 'VIEWER' },
+      update: {},
+    });
+
+    const memberToken = await app
+      .get(AuthService)
+      .mintDevToken(memberId, `${memberId}@example.com`, 'Status Member');
+
+    const createStart = new Date();
+    const firstCreateRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/status-updates`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        health: 'ON_TRACK',
+        summary: 'Milestone delivery remains on track.',
+        blockers: ['Awaiting vendor confirmation'],
+        nextSteps: ['Finalize launch checklist', 'Confirm support coverage'],
+      })
+      .expect(201);
+
+    expect(firstCreateRes.body).toMatchObject({
+      projectId,
+      authorUserId: 'test-user',
+      health: 'ON_TRACK',
+      summary: 'Milestone delivery remains on track.',
+      blockers: ['Awaiting vendor confirmation'],
+      nextSteps: ['Finalize launch checklist', 'Confirm support coverage'],
+      author: {
+        id: 'test-user',
+        displayName: 'Test User',
+        email: 'test@example.com',
+      },
+    });
+    expect(firstCreateRes.body.id).toEqual(expect.any(String));
+    expect(firstCreateRes.body.createdAt).toEqual(expect.any(String));
+    expect(firstCreateRes.body.updatedAt).toEqual(expect.any(String));
+
+    const secondCreateRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/status-updates`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        health: 'AT_RISK',
+        summary: 'Integration testing found two release blockers.',
+        blockers: ['Staging deploy is flaky', 'Open schema migration review'],
+        nextSteps: ['Stabilize staging deploy', 'Complete migration review'],
+      })
+      .expect(201);
+
+    const listRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/status-updates`)
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(200);
+    expect(listRes.body).toEqual({
+      items: [
+        expect.objectContaining({
+          id: secondCreateRes.body.id,
+          projectId,
+          authorUserId: 'test-user',
+          health: 'AT_RISK',
+          summary: 'Integration testing found two release blockers.',
+          blockers: ['Staging deploy is flaky', 'Open schema migration review'],
+          nextSteps: ['Stabilize staging deploy', 'Complete migration review'],
+          author: {
+            id: 'test-user',
+            displayName: 'Test User',
+            email: 'test@example.com',
+          },
+        }),
+        expect.objectContaining({
+          id: firstCreateRes.body.id,
+          health: 'ON_TRACK',
+          summary: 'Milestone delivery remains on track.',
+        }),
+      ],
+      nextCursor: null,
+      hasNextPage: false,
+    });
+
+    const detailRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/status-updates/${secondCreateRes.body.id}`)
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(200);
+    expect(detailRes.body).toMatchObject({
+      id: secondCreateRes.body.id,
+      projectId,
+      authorUserId: 'test-user',
+      health: 'AT_RISK',
+      summary: 'Integration testing found two release blockers.',
+      blockers: ['Staging deploy is flaky', 'Open schema migration review'],
+      nextSteps: ['Stabilize staging deploy', 'Complete migration review'],
+      author: {
+        id: 'test-user',
+        displayName: 'Test User',
+        email: 'test@example.com',
+      },
+    });
+
+    const createAudit = await prisma.auditEvent.findFirst({
+      where: {
+        entityType: 'ProjectStatusUpdate',
+        entityId: firstCreateRes.body.id,
+        action: 'project_status_update.created',
+        createdAt: { gte: createStart },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(createAudit).toBeTruthy();
+    expect(createAudit?.afterJson).toMatchObject({
+      id: firstCreateRes.body.id,
+      projectId,
+      authorUserId: 'test-user',
+      health: 'ON_TRACK',
+      summary: 'Milestone delivery remains on track.',
+      blockers: ['Awaiting vendor confirmation'],
+      nextSteps: ['Finalize launch checklist', 'Confirm support coverage'],
+    });
+
+    const createOutbox = await prisma.outboxEvent.findFirst({
+      where: {
+        type: 'project_status_update.created',
+        createdAt: { gte: createStart },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(createOutbox).toBeTruthy();
+    expect(createOutbox?.payload).toMatchObject({
+      statusUpdateId: expect.any(String),
+      projectId,
+      authorUserId: 'test-user',
+      health: expect.any(String),
+    });
+  });
+
+  test('project status update APIs validate structured payloads and permissions', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Project Status Update Validation Project' })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const viewerId = `status-viewer-${projectId}`;
+    await prisma.user.upsert({
+      where: { id: viewerId },
+      create: {
+        id: viewerId,
+        email: `${viewerId}@example.com`,
+        displayName: 'Status Viewer',
+        status: 'ACTIVE',
+      },
+      update: {},
+    });
+    await prisma.workspaceMembership.upsert({
+      where: { workspaceId_userId: { workspaceId, userId: viewerId } },
+      create: { workspaceId, userId: viewerId, role: 'WS_MEMBER' },
+      update: {},
+    });
+    await prisma.projectMembership.upsert({
+      where: { projectId_userId: { projectId, userId: viewerId } },
+      create: { projectId, userId: viewerId, role: 'VIEWER' },
+      update: {},
+    });
+
+    const viewerToken = await app
+      .get(AuthService)
+      .mintDevToken(viewerId, `${viewerId}@example.com`, 'Status Viewer');
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/status-updates`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        health: 'NOT_A_REAL_HEALTH',
+        summary: 'This should be rejected.',
+        blockers: [],
+        nextSteps: [],
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/status-updates`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        health: 'OFF_TRACK',
+        summary: '   ',
+        blockers: [],
+        nextSteps: [],
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/status-updates`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({
+        health: 'ON_TRACK',
+        summary: 'Viewer should not be able to create status updates.',
+        blockers: [],
+        nextSteps: [],
+      })
+      .expect(403);
+  });
+
   test('saved view APIs persist per-user defaults and named views and reject invalid project references', async () => {
     const workspaceRes = await request(app.getHttpServer())
       .get('/workspaces')
