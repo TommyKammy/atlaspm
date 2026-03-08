@@ -123,13 +123,21 @@ async function dragTimelineBarToLane(page: Page, taskId: string, laneTestId: str
 
   await page.mouse.move(startX, startY);
   await page.mouse.down();
-  await page.mouse.move(startX + DAY_COLUMN_WIDTH * 0.1, targetY, { steps: 16 });
+  await page.waitForTimeout(50);
+  await page.mouse.move(startX + Math.max(16, DAY_COLUMN_WIDTH * 0.35), targetY, { steps: 16 });
   await page.mouse.up();
 }
 
 async function timelineBarTop(page: Page, taskId: string) {
-  const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
-  await expect(bar).toBeVisible();
+  await expect
+    .poll(async () => {
+      const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`).first();
+      if ((await bar.count()) === 0) return null;
+      const box = await bar.boundingBox();
+      return box ? { x: box.x, y: box.y, width: box.width, height: box.height } : null;
+    })
+    .not.toBeNull();
+  const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`).first();
   const box = await bar.boundingBox();
   if (!box) throw new Error(`Unable to resolve timeline bar bounds for ${taskId}`);
   return box.y;
@@ -153,6 +161,7 @@ async function dragTimelineBarVertically(page: Page, taskId: string, deltaY: num
 
   await page.mouse.move(startX, startY);
   await page.mouse.down();
+  await page.waitForTimeout(50);
   await page.mouse.move(startX, startY + deltaY, { steps: 18 });
   await page.mouse.up();
 }
@@ -168,6 +177,7 @@ async function dragTimelineBarHorizontally(page: Page, taskId: string, deltaDays
 
   await page.mouse.move(startX, startY);
   await page.mouse.down();
+  await page.waitForTimeout(50);
   await page.mouse.move(startX + deltaDays * DAY_COLUMN_WIDTH, startY, { steps: 18 });
   await page.mouse.up();
 }

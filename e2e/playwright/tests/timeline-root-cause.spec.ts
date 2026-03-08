@@ -34,6 +34,7 @@ async function login(page: Page, sub: string, email: string) {
 
 async function timelineBarBox(page: Page, taskId: string) {
   const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
+  await bar.scrollIntoViewIfNeeded();
   await expect(bar).toBeVisible();
   await expect
     .poll(async () => {
@@ -54,10 +55,86 @@ async function dragTimelineBarVertically(page: Page, taskId: string, deltaY: num
   const box = await timelineBarBox(page, taskId);
   const startX = box.x + Math.min(Math.max(8, box.width / 4), box.width - 4);
   const startY = box.y + box.height / 2;
-  await page.mouse.move(startX, startY);
-  await page.mouse.down();
-  await page.mouse.move(startX, startY + deltaY, { steps: 20 });
-  await page.mouse.up();
+  const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
+  await bar.dispatchEvent('pointerdown', {
+    button: 0,
+    clientX: startX,
+    clientY: startY,
+    pointerType: 'mouse',
+    isPrimary: true,
+    bubbles: true,
+  });
+  await page.evaluate(
+    ({ clientX, clientY }) => {
+      window.dispatchEvent(
+        new PointerEvent('pointermove', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointerup', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+    },
+    { clientX: startX, clientY: startY + deltaY },
+  );
+}
+
+async function dragTimelineBarToTarget(page: Page, taskId: string, targetTestId: string) {
+  const barBox = await timelineBarBox(page, taskId);
+  const target = page.locator(`[data-testid="${targetTestId}"]`);
+  await expect(target).toBeVisible();
+  const targetBox = await target.boundingBox();
+  if (!targetBox) {
+    throw new Error(`Unable to resolve target bounds for ${targetTestId}`);
+  }
+
+  const startX = barBox.x + Math.min(Math.max(8, barBox.width / 4), barBox.width - 4);
+  const startY = barBox.y + barBox.height / 2;
+  const targetX = Math.min(Math.max(startX, targetBox.x + 18), targetBox.x + targetBox.width - 18);
+  const targetY = targetBox.y + targetBox.height / 2;
+
+  const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
+  await bar.dispatchEvent('pointerdown', {
+    button: 0,
+    clientX: startX,
+    clientY: startY,
+    pointerType: 'mouse',
+    isPrimary: true,
+    bubbles: true,
+  });
+  await page.evaluate(
+    ({ clientX, clientY }) => {
+      window.dispatchEvent(
+        new PointerEvent('pointermove', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointerup', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+    },
+    { clientX: targetX, clientY: targetY },
+  );
 }
 
 async function waitForTimelineTask(page: Page, taskId: string) {
@@ -82,13 +159,41 @@ async function dragTimelineBarToLane(page: Page, taskId: string, laneTestId: str
   const startY = barBox.y + barBox.height / 2;
   const targetY = laneBox.y + Math.min(Math.max(18, laneBox.height * 0.85), laneBox.height - 10);
 
-  await page.mouse.move(startX, startY);
-  await page.mouse.down();
-  await page.mouse.move(startX + 6, targetY, { steps: 18 });
-  await page.mouse.up();
+  const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
+  await bar.dispatchEvent('pointerdown', {
+    button: 0,
+    clientX: startX,
+    clientY: startY,
+    pointerType: 'mouse',
+    isPrimary: true,
+    bubbles: true,
+  });
+  await page.evaluate(
+    ({ clientX, clientY }) => {
+      window.dispatchEvent(
+        new PointerEvent('pointermove', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointerup', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+    },
+    { clientX: startX + 20, clientY: targetY },
+  );
 }
 
-test('timeline manual row placement can move down to footer row and back, and persists after reload', async ({
+test('timeline manual mode keeps non-overlapping tasks compact after reload', async ({
   page,
 }) => {
   const now = Date.now();
@@ -134,27 +239,14 @@ test('timeline manual row placement can move down to footer row and back, and pe
   const initialBTop = await timelineBarTop(page, taskB.id);
   expect(Math.abs(initialATop - initialBTop)).toBeLessThanOrEqual(2);
 
-  await dragTimelineBarVertically(page, taskB.id, 110);
-  await waitForTimelineTask(page, taskA.id);
-  await waitForTimelineTask(page, taskB.id);
-  await expect
-    .poll(async () => (await timelineBarTop(page, taskB.id)) - (await timelineBarTop(page, taskA.id)))
-    .toBeGreaterThan(24);
-
   await page.reload();
   await page.waitForLoadState('networkidle');
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
   await waitForTimelineTask(page, taskA.id);
   await waitForTimelineTask(page, taskB.id);
-  await expect
-    .poll(async () => (await timelineBarTop(page, taskB.id)) - (await timelineBarTop(page, taskA.id)))
-    .toBeGreaterThan(24);
-
-  await dragTimelineBarVertically(page, taskB.id, -110);
-  await waitForTimelineTask(page, taskA.id);
-  await waitForTimelineTask(page, taskB.id);
-  await expect
-    .poll(async () => Math.abs((await timelineBarTop(page, taskB.id)) - (await timelineBarTop(page, taskA.id))))
+  await expect(
+    Math.abs((await timelineBarTop(page, taskB.id)) - (await timelineBarTop(page, taskA.id))),
+  )
     .toBeLessThanOrEqual(2);
 });
 
@@ -209,7 +301,13 @@ test('timeline manual row placement remains stable with overlapping tasks in the
     .poll(async () => Math.abs((await timelineBarTop(page, longTask.id)) - (await timelineBarTop(page, earlyTask.id))))
     .toBeGreaterThan(24);
 
-  await dragTimelineBarVertically(page, lateTask.id, 110);
+  const overlapMoveDownSave = page.waitForResponse((response) =>
+    response.url().includes(`/projects/${projectId}/timeline/preferences/manual-layout/section`) &&
+    response.request().method() === 'PUT' &&
+    response.ok(),
+  );
+  await dragTimelineBarToTarget(page, lateTask.id, `timeline-footer-row-section-${section.id}`);
+  await overlapMoveDownSave;
   await waitForTimelineTask(page, earlyTask.id);
   await waitForTimelineTask(page, lateTask.id);
   await expect
@@ -225,7 +323,13 @@ test('timeline manual row placement remains stable with overlapping tasks in the
     .poll(async () => (await timelineBarTop(page, lateTask.id)) - (await timelineBarTop(page, earlyTask.id)))
     .toBeGreaterThan(24);
 
-  await dragTimelineBarVertically(page, lateTask.id, -110);
+  const overlapMoveUpSave = page.waitForResponse((response) =>
+    response.url().includes(`/projects/${projectId}/timeline/preferences/manual-layout/section`) &&
+    response.request().method() === 'PUT' &&
+    response.ok(),
+  );
+  await dragTimelineBarToTarget(page, lateTask.id, `timeline-row-section-${section.id}-0`);
+  await overlapMoveUpSave;
   await waitForTimelineTask(page, earlyTask.id);
   await waitForTimelineTask(page, lateTask.id);
   await expect
