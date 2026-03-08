@@ -41,7 +41,13 @@ import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { assertValidDateRange, normalizeDateOnlyField, toDateOnlyDate } from '../common/date-validation';
 import { Prisma, Priority, ProjectRole, TaskStatus, TaskType, DependencyType, CustomFieldType } from '@prisma/client';
-import { completeTaskLifecycle, DomainConflictError, DomainNotFoundError } from '@atlaspm/domain';
+import {
+  completeTaskLifecycle,
+  DomainConflictError,
+  DomainNotFoundError,
+  normalizeProjectViewState,
+  type ProjectViewState,
+} from '@atlaspm/domain';
 import { SubtaskService } from './subtask.service';
 import { SearchService } from '../search/search.service';
 import { createTaskLifecycleUnitOfWorkFromTx } from './task-lifecycle-prisma.adapter';
@@ -3520,72 +3526,116 @@ export class TasksController {
   }
 
   private normalizeTimelineViewState(mode: TimelineViewMode, body: PutTimelineViewStateDto): Prisma.JsonObject {
-    const normalized: Record<string, boolean | string> = {};
-
-    if (body.zoom !== undefined) {
-      if (!TIMELINE_ZOOM_VALUES.includes(body.zoom as (typeof TIMELINE_ZOOM_VALUES)[number])) {
-        throw new BadRequestException(`zoom must be one of: ${TIMELINE_ZOOM_VALUES.join(', ')}`);
-      }
-      normalized.zoom = body.zoom;
-    }
-    if (body.anchorDate) {
-      const parsed = new Date(body.anchorDate);
-      if (!Number.isNaN(parsed.valueOf())) {
-        normalized.anchorDate = parsed.toISOString();
-      }
-    }
-
-    if (mode === 'timeline') {
-      if (body.swimlane !== undefined) {
-        if (!TIMELINE_SWIMLANE_VALUES.includes(body.swimlane as (typeof TIMELINE_SWIMLANE_VALUES)[number])) {
-          throw new BadRequestException(`swimlane must be one of: ${TIMELINE_SWIMLANE_VALUES.join(', ')}`);
-        }
-        normalized.swimlane = body.swimlane;
-      }
-      if (body.sortMode !== undefined) {
-        if (!TIMELINE_SORT_MODE_VALUES.includes(body.sortMode as (typeof TIMELINE_SORT_MODE_VALUES)[number])) {
-          throw new BadRequestException(`sortMode must be one of: ${TIMELINE_SORT_MODE_VALUES.join(', ')}`);
-        }
-        normalized.sortMode = body.sortMode;
-      }
-      if (body.scheduleFilter !== undefined) {
-        if (
-          !TIMELINE_SCHEDULE_FILTER_VALUES.includes(
-            body.scheduleFilter as (typeof TIMELINE_SCHEDULE_FILTER_VALUES)[number],
-          )
-        ) {
-          throw new BadRequestException(`scheduleFilter must be one of: ${TIMELINE_SCHEDULE_FILTER_VALUES.join(', ')}`);
-        }
-        normalized.scheduleFilter = body.scheduleFilter;
-      }
-      if (typeof body.workingDaysOnly === 'boolean') {
-        normalized.workingDaysOnly = body.workingDaysOnly;
-      }
-    }
-
-    if (mode === 'gantt') {
-      if (body.ganttRiskFilterMode !== undefined) {
-        if (
-          !GANTT_RISK_FILTER_MODE_VALUES.includes(
-            body.ganttRiskFilterMode as (typeof GANTT_RISK_FILTER_MODE_VALUES)[number],
-          )
-        ) {
-          throw new BadRequestException(
-            `ganttRiskFilterMode must be one of: ${GANTT_RISK_FILTER_MODE_VALUES.join(', ')}`,
-          );
-        }
-        normalized.ganttRiskFilterMode = body.ganttRiskFilterMode;
-      }
-      if (typeof body.ganttStrictMode === 'boolean') {
-        normalized.ganttStrictMode = body.ganttStrictMode;
-      }
-    }
+    const normalized = normalizeProjectViewState(
+      mode,
+      this.buildProjectViewStateFromTimelineBody(mode, body),
+    );
 
     if (Object.keys(normalized).length === 0) {
       throw new BadRequestException('At least one valid timeline view state field must be provided');
     }
 
-    return normalized;
+    return this.flattenProjectViewStateForTimelineMode(mode, normalized);
+  }
+
+  private buildProjectViewStateFromTimelineBody(
+    mode: TimelineViewMode,
+    body: PutTimelineViewStateDto,
+  ): ProjectViewState {
+    const state: ProjectViewState = {};
+
+    if (mode === 'timeline' && body.swimlane) {
+      state.grouping = { field: body.swimlane };
+    }
+
+    if (mode === 'timeline' && body.sortMode) {
+      state.sorting = { field: body.sortMode, direction: 'asc' };
+    }
+
+    if (body.scheduleFilter) {
+      state.filters = { ...(state.filters ?? {}), schedule: body.scheduleFilter };
+    }
+
+    if (body.zoom) {
+      state.zoom = {
+        ...(state.zoom ?? {}),
+        unit: body.zoom,
+      };
+    }
+
+    if (body.anchorDate) {
+      state.zoom = {
+        ...(state.zoom ?? {}),
+        unit: state.zoom?.unit ?? 'week',
+        anchorDate: body.anchorDate,
+      };
+    }
+
+    if (mode === 'timeline' && typeof body.workingDaysOnly === 'boolean') {
+      state.zoom = {
+        ...(state.zoom ?? {}),
+        unit: state.zoom?.unit ?? 'week',
+        workingDaysOnly: body.workingDaysOnly,
+      };
+    }
+
+    if (mode === 'gantt' && body.ganttRiskFilterMode) {
+      state.zoom = {
+        ...(state.zoom ?? {}),
+        unit: state.zoom?.unit ?? 'week',
+        ganttRiskFilterMode: body.ganttRiskFilterMode,
+      };
+    }
+
+    if (mode === 'gantt' && typeof body.ganttStrictMode === 'boolean') {
+      state.zoom = {
+        ...(state.zoom ?? {}),
+        unit: state.zoom?.unit ?? 'week',
+        ganttStrictMode: body.ganttStrictMode,
+      };
+    }
+
+    return state;
+  }
+
+  private flattenProjectViewStateForTimelineMode(
+    mode: TimelineViewMode,
+    state: ProjectViewState,
+  ): Prisma.JsonObject {
+    const flattened: Record<string, boolean | string> = {};
+
+    if (state.zoom?.unit) {
+      flattened.zoom = state.zoom.unit;
+    }
+    if (state.zoom?.anchorDate) {
+      flattened.anchorDate = state.zoom.anchorDate;
+    }
+
+    if (mode === 'timeline') {
+      if (state.grouping?.field) {
+        flattened.swimlane = state.grouping.field;
+      }
+      if (state.sorting?.field) {
+        flattened.sortMode = state.sorting.field;
+      }
+      if (state.filters?.schedule) {
+        flattened.scheduleFilter = state.filters.schedule;
+      }
+      if (typeof state.zoom?.workingDaysOnly === 'boolean') {
+        flattened.workingDaysOnly = state.zoom.workingDaysOnly;
+      }
+    }
+
+    if (mode === 'gantt') {
+      if (state.zoom?.ganttRiskFilterMode) {
+        flattened.ganttRiskFilterMode = state.zoom.ganttRiskFilterMode;
+      }
+      if (typeof state.zoom?.ganttStrictMode === 'boolean') {
+        flattened.ganttStrictMode = state.zoom.ganttStrictMode;
+      }
+    }
+
+    return flattened;
   }
 
   private resolveRuleDefinition(rule: { definition: unknown; templateKey: string }): RuleDefinition {
