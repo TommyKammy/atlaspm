@@ -959,7 +959,7 @@ test('timeline grouped bars stay in sync with drawer date edits after drag resch
   const extendedDueDate = dayIso(5).slice(0, 10);
   const dueDateInput = page.locator('[data-testid="task-detail-due-date"]');
   await dueDateInput.fill(extendedDueDate);
-  await dueDateInput.blur();
+  await expect(dueDateInput).toHaveValue(extendedDueDate);
 
   await expect
     .poll(async () => {
@@ -977,7 +977,7 @@ test('timeline grouped bars stay in sync with drawer date edits after drag resch
   const widenedStartDate = dayIso(1).slice(0, 10);
   const startDateInput = page.locator('[data-testid="task-detail-start-date"]');
   await startDateInput.fill(widenedStartDate);
-  await startDateInput.blur();
+  await expect(startDateInput).toHaveValue(widenedStartDate);
 
   await expect
     .poll(async () => {
