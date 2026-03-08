@@ -64,7 +64,7 @@ export class NotificationsController {
         readAt: null,
         project: { memberships: { some: { userId: req.user.sub } } },
       },
-      select: { id: true, userId: true, projectId: true, taskId: true },
+      select: { id: true, userId: true, projectId: true, taskId: true, statusUpdateId: true },
     });
     if (!unread.length) return { updatedCount: 0 };
 
@@ -123,6 +123,7 @@ export class NotificationsController {
           userId: next.userId,
           projectId: next.projectId,
           taskId: next.taskId,
+          statusUpdateId: next.statusUpdateId,
           readAt: next.readAt,
         },
       });
@@ -133,6 +134,7 @@ export class NotificationsController {
       id: updated.id,
       readAt: updated.readAt,
       taskId: updated.taskId,
+      statusUpdateId: updated.statusUpdateId,
       projectId: updated.projectId,
       type: normalizeInboxNotificationType(updated.type),
     };

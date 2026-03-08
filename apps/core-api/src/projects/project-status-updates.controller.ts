@@ -10,7 +10,7 @@ import {
   Inject,
   NotFoundException,
 } from '@nestjs/common';
-import { ProjectRole, ProjectStatusHealth } from '@prisma/client';
+import { Prisma, ProjectRole, ProjectStatusHealth } from '@prisma/client';
 import {
   IsArray,
   IsEnum,
@@ -26,6 +26,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
+import { NotificationsService } from '../notifications/notifications.service';
+
+const STATUS_UPDATE_MENTION_ID_PATTERN = '[-a-zA-Z0-9._:]+';
 
 class CreateStatusUpdateDto {
   @IsEnum(ProjectStatusHealth)
@@ -64,6 +67,7 @@ export class ProjectStatusUpdatesController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(NotificationsService) private readonly notifications: NotificationsService,
   ) {}
 
   @Post('projects/:id/status-updates')
@@ -90,6 +94,11 @@ export class ProjectStatusUpdatesController {
     await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
 
     return this.prisma.$transaction(async (tx) => {
+      const mentionedUserIds = await this.resolveMentionedProjectMemberIds(tx, projectId, [
+        summary,
+        ...blockers,
+        ...nextSteps,
+      ]);
       const statusUpdate = await tx.projectStatusUpdate.create({
         data: {
           projectId,
@@ -124,8 +133,22 @@ export class ProjectStatusUpdatesController {
           projectId: statusUpdate.projectId,
           authorUserId: statusUpdate.authorUserId,
           health: statusUpdate.health,
+          mentionedUserIds,
         },
       });
+
+      for (const userId of mentionedUserIds) {
+        await this.notifications.upsertMentionNotification(tx, {
+          userId,
+          projectId,
+          statusUpdateId: statusUpdate.id,
+          sourceType: 'project_status_update',
+          sourceId: statusUpdate.id,
+          triggeredByUserId: req.user.sub,
+          actor: req.user.sub,
+          correlationId: req.correlationId,
+        });
+      }
 
       return statusUpdate;
     });
@@ -241,5 +264,46 @@ export class ProjectStatusUpdatesController {
     }
 
     return normalized;
+  }
+
+  private extractMentionUserIdsFromText(value: string) {
+    const ids = new Set<string>();
+    const serializedRegex = new RegExp(`@\\[(?<id>${STATUS_UPDATE_MENTION_ID_PATTERN})\\|[^\\]]+\\]`, 'g');
+    let match = serializedRegex.exec(value);
+    while (match) {
+      const id = match.groups?.id?.trim();
+      if (id) ids.add(id);
+      match = serializedRegex.exec(value);
+    }
+
+    const plainRegex = new RegExp(`(^|\\s)@(${STATUS_UPDATE_MENTION_ID_PATTERN})`, 'g');
+    let plainMatch = plainRegex.exec(value);
+    while (plainMatch) {
+      const id = plainMatch[2]?.trim();
+      if (id) ids.add(id);
+      plainMatch = plainRegex.exec(value);
+    }
+    return [...ids];
+  }
+
+  private async resolveMentionedProjectMemberIds(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+    values: string[],
+  ) {
+    const mentionIds = [...new Set(values.flatMap((value) => this.extractMentionUserIdsFromText(value)))];
+    if (!mentionIds.length) {
+      return [];
+    }
+
+    const memberships = await tx.projectMembership.findMany({
+      where: {
+        projectId,
+        userId: { in: mentionIds },
+      },
+      select: { userId: true },
+    });
+    const validUserIds = new Set(memberships.map((membership) => membership.userId));
+    return mentionIds.filter((userId) => validUserIds.has(userId));
   }
 }

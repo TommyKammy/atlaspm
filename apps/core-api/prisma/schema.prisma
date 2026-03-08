@@ -174,6 +174,7 @@ model ProjectStatusUpdate {
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   author  User    @relation(fields: [authorUserId], references: [id], onDelete: Cascade)
+  notifications InboxNotification[]
 
   @@index([projectId, createdAt])
   @@map("project_status_updates")
@@ -458,7 +459,8 @@ model InboxNotification {
   id                String    @id @default(uuid())
   userId            String    @map("user_id")
   projectId         String    @map("project_id")
-  taskId            String    @map("task_id")
+  taskId            String?   @map("task_id")
+  statusUpdateId    String?   @map("status_update_id")
   type              String
   sourceType        String    @map("source_type")
   sourceId          String    @default("") @map("source_id")
@@ -469,12 +471,14 @@ model InboxNotification {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  task Task? @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  statusUpdate ProjectStatusUpdate? @relation(fields: [statusUpdateId], references: [id], onDelete: Cascade)
   triggeredBy User? @relation("NotificationTriggeredBy", fields: [triggeredByUserId], references: [id], onDelete: SetNull)
 
   @@index([userId, readAt, createdAt])
   @@index([projectId, taskId])
-  @@unique([userId, taskId, type, sourceType, sourceId])
+  @@index([projectId, statusUpdateId])
+  @@unique([userId, projectId, type, sourceType, sourceId])
   @@map("inbox_notifications")
 }
 

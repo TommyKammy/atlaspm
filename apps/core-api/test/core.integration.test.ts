@@ -3612,6 +3612,200 @@ describe('Core API Integration', () => {
       .expect(403);
   });
 
+  test('project status updates fan out mention notifications and include mention context for reminder hooks', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Project Status Update Mentions ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const mentionedUserId = `status.mentioned-${projectId}`;
+    const mentionedEmail = `${mentionedUserId}@example.com`;
+    await prisma.user.upsert({
+      where: { id: mentionedUserId },
+      create: {
+        id: mentionedUserId,
+        email: mentionedEmail,
+        displayName: 'Status Mentioned Member',
+        status: 'ACTIVE',
+      },
+      update: {
+        email: mentionedEmail,
+        displayName: 'Status Mentioned Member',
+        status: 'ACTIVE',
+      },
+    });
+    await prisma.workspaceMembership.upsert({
+      where: { workspaceId_userId: { workspaceId, userId: mentionedUserId } },
+      create: { workspaceId, userId: mentionedUserId, role: 'WS_MEMBER' },
+      update: { role: 'WS_MEMBER' },
+    });
+    await prisma.projectMembership.upsert({
+      where: { projectId_userId: { projectId, userId: mentionedUserId } },
+      create: { projectId, userId: mentionedUserId, role: 'MEMBER' },
+      update: { role: 'MEMBER' },
+    });
+
+    const mentionedToken = await app
+      .get(AuthService)
+      .mintDevToken(mentionedUserId, mentionedEmail, 'Status Mentioned Member');
+
+    const createStart = new Date();
+    const createdRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/status-updates`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        health: 'AT_RISK',
+        summary: `Need input from @${mentionedUserId} before launch.`,
+        blockers: [
+          `Waiting on @[${mentionedUserId}|Status Mentioned Member] to confirm the rollout checklist.`,
+        ],
+        nextSteps: [
+          `Review the mitigation plan with @${mentionedUserId}.`,
+        ],
+      })
+      .expect(201);
+
+    const memberNotifications = await request(app.getHttpServer())
+      .get('/notifications?status=unread')
+      .set('Authorization', `Bearer ${mentionedToken}`)
+      .expect(200);
+    const mentionNotification = memberNotifications.body.find(
+      (item: any) => item.type === 'mention' && item.sourceType === 'project_status_update',
+    );
+
+    expect(mentionNotification).toMatchObject({
+      userId: mentionedUserId,
+      project: { id: projectId },
+      triggeredBy: { id: 'test-user' },
+      statusUpdate: {
+        id: createdRes.body.id,
+        summary: `Need input from @${mentionedUserId} before launch.`,
+      },
+    });
+
+    const createOutbox = await prisma.outboxEvent.findFirst({
+      where: {
+        type: 'project_status_update.created',
+        createdAt: { gte: createStart },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(createOutbox).toBeTruthy();
+    expect(createOutbox?.payload).toMatchObject({
+      statusUpdateId: createdRes.body.id,
+      projectId,
+      authorUserId: 'test-user',
+      mentionedUserIds: [mentionedUserId],
+    });
+  });
+
+  test('task description mention notifications stay distinct per task when sourceId is blank', async () => {
+    const auth = app.get(AuthService);
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Description Mention Notifications ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Backlog' })
+      .expect(201);
+
+    const mentionedUserId = `description.mention-${projectId}`;
+    const mentionedEmail = `${mentionedUserId}@example.com`;
+    await prisma.user.upsert({
+      where: { id: mentionedUserId },
+      create: {
+        id: mentionedUserId,
+        email: mentionedEmail,
+        displayName: 'Description Mention Member',
+        status: 'ACTIVE',
+      },
+      update: {
+        email: mentionedEmail,
+        displayName: 'Description Mention Member',
+        status: 'ACTIVE',
+      },
+    });
+    await prisma.workspaceMembership.upsert({
+      where: { workspaceId_userId: { workspaceId, userId: mentionedUserId } },
+      create: { workspaceId, userId: mentionedUserId, role: 'WS_MEMBER' },
+      update: { role: 'WS_MEMBER' },
+    });
+    await prisma.projectMembership.upsert({
+      where: { projectId_userId: { projectId, userId: mentionedUserId } },
+      create: { projectId, userId: mentionedUserId, role: 'MEMBER' },
+      update: { role: 'MEMBER' },
+    });
+    const mentionedToken = await auth.mintDevToken(
+      mentionedUserId,
+      mentionedEmail,
+      'Description Mention Member',
+    );
+
+    const firstTaskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sectionId: sectionRes.body.id, title: 'Mention Task One' })
+      .expect(201);
+    const secondTaskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sectionId: sectionRes.body.id, title: 'Mention Task Two' })
+      .expect(201);
+
+    for (const taskId of [firstTaskRes.body.id, secondTaskRes.body.id]) {
+      await request(app.getHttpServer())
+        .patch(`/tasks/${taskId}/description`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          descriptionDoc: {
+            type: 'doc',
+            content: [
+              {
+                type: 'paragraph',
+                content: [
+                  { type: 'text', text: 'Need feedback from ' },
+                  { type: 'mention', attrs: { id: mentionedUserId, label: 'Description Mention Member' } },
+                ],
+              },
+            ],
+          },
+          expectedVersion: 0,
+        })
+        .expect(200);
+    }
+
+    const memberNotifications = await request(app.getHttpServer())
+      .get('/notifications?status=unread')
+      .set('Authorization', `Bearer ${mentionedToken}`)
+      .expect(200);
+
+    const mentionTaskIds = memberNotifications.body
+      .filter((item: any) => item.type === 'mention' && item.sourceType === 'description')
+      .map((item: any) => item.taskId)
+      .sort();
+
+    expect(mentionTaskIds).toEqual([firstTaskRes.body.id, secondTaskRes.body.id].sort());
+  });
+
   test('approval request notifications use the normalized inbox taxonomy and emit notification outbox events', async () => {
     const auth = app.get(AuthService);
     const workspaceRes = await request(app.getHttpServer())
