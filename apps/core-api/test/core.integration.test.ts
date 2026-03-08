@@ -90,6 +90,95 @@ describe('Core API Integration', () => {
     expect(memberships).toHaveLength(1);
   });
 
+  test('users can configure reminder delivery preferences and opt out of reminder delivery', async () => {
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
+
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Reminder Preferences Project' })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSectionId =
+      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
+        sectionsRes.body[0])?.id as string;
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        sectionId: defaultSectionId,
+        title: 'Reminder preference delivery test',
+        dueAt: new Date(Date.now() + 86_400_000).toISOString(),
+      })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+
+    const initialPreferences = await request(app.getHttpServer())
+      .get('/me/reminder-preferences')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(initialPreferences.body).toEqual({
+      enabled: true,
+      defaultLeadTimeMinutes: 60,
+    });
+
+    const updatedPreferences = await request(app.getHttpServer())
+      .put('/me/reminder-preferences')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ enabled: false, defaultLeadTimeMinutes: 1440 })
+      .expect(200);
+    expect(updatedPreferences.body).toEqual({
+      enabled: false,
+      defaultLeadTimeMinutes: 1440,
+    });
+
+    await request(app.getHttpServer())
+      .put(`/tasks/${taskId}/reminder`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ remindAt: new Date(Date.now() - 60_000).toISOString() })
+      .expect(200);
+
+    const disabledDeliveryCount = await reminderWorker.processDueReminders(new Date());
+    expect(disabledDeliveryCount).toBe(0);
+
+    const reminderWhileDisabled = await request(app.getHttpServer())
+      .get(`/tasks/${taskId}/reminder`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(reminderWhileDisabled.body.sentAt).toBeNull();
+
+    const reenabledPreferences = await request(app.getHttpServer())
+      .put('/me/reminder-preferences')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ enabled: true, defaultLeadTimeMinutes: 15 })
+      .expect(200);
+    expect(reenabledPreferences.body).toEqual({
+      enabled: true,
+      defaultLeadTimeMinutes: 15,
+    });
+
+    const deliveredCount = await reminderWorker.processDueReminders(new Date());
+    expect(deliveredCount).toBe(1);
+
+    const reminderAfterReenable = await request(app.getHttpServer())
+      .get(`/tasks/${taskId}/reminder`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(Boolean(reminderAfterReenable.body?.sentAt)).toBe(true);
+  });
+
   test('project/member/sections/tasks/rules/reorder/audit/outbox flow', async () => {
     await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
     const wsRes = await request(app.getHttpServer())

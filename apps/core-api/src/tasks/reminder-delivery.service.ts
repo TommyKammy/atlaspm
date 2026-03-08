@@ -45,7 +45,18 @@ export class ReminderDeliveryService implements OnModuleInit, OnModuleDestroy {
       },
       include: {
         task: { select: { id: true, projectId: true, title: true } },
-        user: { select: { id: true, email: true, displayName: true } },
+        user: {
+          select: {
+            id: true,
+            email: true,
+            displayName: true,
+            reminderPreference: {
+              select: {
+                enabled: true,
+              },
+            },
+          },
+        },
       },
       orderBy: { remindAt: 'asc' },
       take: batchSize,
@@ -53,6 +64,10 @@ export class ReminderDeliveryService implements OnModuleInit, OnModuleDestroy {
 
     let processed = 0;
     for (const reminder of dueReminders) {
+      if (reminder.user.reminderPreference && !reminder.user.reminderPreference.enabled) {
+        continue;
+      }
+
       const sentAt = new Date();
       const correlationId = `reminder-${reminder.id}-${sentAt.getTime()}`;
       const delivered = await this.prisma.$transaction(async (tx) => {

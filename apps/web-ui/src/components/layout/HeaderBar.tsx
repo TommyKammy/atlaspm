@@ -14,7 +14,7 @@ import type { Locale } from '@/lib/layout-preferences';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { CustomFieldDefinition, Project, ProjectMember, Section, Task } from '@/lib/types';
+import type { CustomFieldDefinition, Project, ProjectMember, ReminderPreferences, Section, Task } from '@/lib/types';
 import { parseCustomFieldFilters, stringifyCustomFieldFilters, type CustomFieldFilter } from '@/lib/project-filters';
 import { resolveProjectView } from '@/lib/project-views';
 import { useI18n } from '@/lib/i18n';
@@ -30,6 +30,11 @@ type Me = {
 };
 
 const FILTER_STATUSES: Task['status'][] = ['TODO', 'IN_PROGRESS', 'DONE', 'BLOCKED'];
+const DEFAULT_REMINDER_PREFERENCES: ReminderPreferences = {
+  enabled: true,
+  defaultLeadTimeMinutes: 60,
+};
+const REMINDER_LEAD_TIME_OPTIONS = [15, 60, 240, 1440] as const;
 
 function parseListParam(raw: string | null): string[] {
   if (!raw) return [];
@@ -97,6 +102,8 @@ function PersonalSettingsMenu() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [displayNameDraft, setDisplayNameDraft] = useState('');
+  const [remindersEnabledDraft, setRemindersEnabledDraft] = useState(true);
+  const [defaultLeadTimeDraft, setDefaultLeadTimeDraft] = useState(60);
   const [saved, setSaved] = useState(false);
 
   const meQuery = useQuery<Me>({
@@ -104,15 +111,51 @@ function PersonalSettingsMenu() {
     queryFn: () => api('/me'),
   });
 
-  const patchMe = useMutation({
-    mutationFn: (displayName: string) =>
-      api(`/users/${meQuery.data?.id}`, {
+  const reminderPreferencesQuery = useQuery<ReminderPreferences>({
+    queryKey: queryKeys.reminderPreferences,
+    queryFn: () => api('/me/reminder-preferences'),
+  });
+
+  const openPersonalSettings = useCallback(() => {
+    setDisplayNameDraft(meQuery.data?.displayName ?? '');
+    const reminderPreferences = reminderPreferencesQuery.data ?? DEFAULT_REMINDER_PREFERENCES;
+    setRemindersEnabledDraft(reminderPreferences.enabled);
+    setDefaultLeadTimeDraft(reminderPreferences.defaultLeadTimeMinutes);
+    setOpen(true);
+  }, [meQuery.data?.displayName, reminderPreferencesQuery.data]);
+
+  const saveSettings = useMutation({
+    mutationFn: async ({
+      displayName,
+      remindersEnabled,
+      defaultLeadTimeMinutes,
+    }: {
+      displayName: string;
+      remindersEnabled: boolean;
+      defaultLeadTimeMinutes: number;
+    }) => {
+      if (!meQuery.data?.id) {
+        throw new Error('Current user is unavailable');
+      }
+
+      await api(`/users/${meQuery.data.id}`, {
         method: 'PATCH',
         body: { displayName },
-      }),
+      });
+      await api('/me/reminder-preferences', {
+        method: 'PUT',
+        body: {
+          enabled: remindersEnabled,
+          defaultLeadTimeMinutes,
+        },
+      });
+    },
     onSuccess: async () => {
       setSaved(true);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.me });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.me }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.reminderPreferences }),
+      ]);
       setTimeout(() => setSaved(false), 1200);
     },
   });
@@ -135,21 +178,14 @@ function PersonalSettingsMenu() {
           <div className="px-2 py-1.5 text-xs text-muted-foreground">
             {meQuery.data?.displayName ?? meQuery.data?.email ?? meQuery.data?.id ?? ''}
           </div>
-          <DropdownMenuItem
-            onClick={() => {
-              setDisplayNameDraft(meQuery.data?.displayName ?? '');
-              setOpen(true);
-            }}
-          >
-            {t('personalSettings')}
-          </DropdownMenuItem>
+          <DropdownMenuItem onClick={openPersonalSettings}>{t('personalSettings')}</DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => setLocale(locale === 'en' ? 'ja' : 'en')}
             data-testid="language-toggle-menu"
           >
             {t('language')}: {locale === 'en' ? t('english') : t('japanese')}
           </DropdownMenuItem>
-          <DropdownMenuItem disabled>{t('notifications')}</DropdownMenuItem>
+          <DropdownMenuItem onClick={openPersonalSettings}>{t('notifications')}</DropdownMenuItem>
           <DropdownMenuItem disabled>{t('appearance')}</DropdownMenuItem>
           <DropdownMenuItem disabled>{t('keyboardShortcuts')}</DropdownMenuItem>
           <DropdownMenuItem disabled>{t('security')}</DropdownMenuItem>
@@ -202,8 +238,58 @@ function PersonalSettingsMenu() {
                 </Button>
               </div>
             </div>
+            <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">{t('reminderDelivery')}</p>
+                <p className="text-xs text-muted-foreground">{t('reminderDeliveryDescription')}</p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant={remindersEnabledDraft ? 'default' : 'outline'}
+                  onClick={() => setRemindersEnabledDraft(true)}
+                  data-testid="personal-reminders-enabled"
+                >
+                  {t('remindersEnabled')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant={!remindersEnabledDraft ? 'default' : 'outline'}
+                  onClick={() => setRemindersEnabledDraft(false)}
+                  data-testid="personal-reminders-paused"
+                >
+                  {t('remindersPaused')}
+                </Button>
+              </div>
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">{t('defaultReminderTiming')}</p>
+                <p className="text-xs text-muted-foreground">{t('defaultReminderTimingDescription')}</p>
+                <div className="flex flex-wrap gap-2">
+                  {REMINDER_LEAD_TIME_OPTIONS.map((minutes) => {
+                    const label =
+                      minutes === 15
+                        ? t('reminderLeadTime15Minutes')
+                        : minutes === 60
+                          ? t('reminderLeadTime1Hour')
+                          : minutes === 240
+                            ? t('reminderLeadTime4Hours')
+                            : t('reminderLeadTime1Day');
+                    return (
+                      <Button
+                        key={minutes}
+                        size="sm"
+                        variant={defaultLeadTimeDraft === minutes ? 'default' : 'outline'}
+                        onClick={() => setDefaultLeadTimeDraft(minutes)}
+                        data-testid={`personal-reminder-lead-time-${minutes}`}
+                      >
+                        {label}
+                      </Button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
             <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-              <p>{t('notifications')}</p>
               <p>{t('appearance')}</p>
               <p>{t('keyboardShortcuts')}</p>
               <p>{t('security')}</p>
@@ -212,11 +298,17 @@ function PersonalSettingsMenu() {
           </div>
           <DialogFooter>
             <Button
-              onClick={() => patchMe.mutate(displayNameDraft)}
-              disabled={patchMe.isPending || !meQuery.data?.id}
+              onClick={() =>
+                saveSettings.mutate({
+                  displayName: displayNameDraft,
+                  remindersEnabled: remindersEnabledDraft,
+                  defaultLeadTimeMinutes: defaultLeadTimeDraft,
+                })
+              }
+              disabled={saveSettings.isPending || !meQuery.data?.id}
               data-testid="personal-settings-save"
             >
-              {patchMe.isPending ? t('saving') : saved ? t('saved') : t('save')}
+              {saveSettings.isPending ? t('saving') : saved ? t('saved') : t('save')}
             </Button>
           </DialogFooter>
         </DialogContent>

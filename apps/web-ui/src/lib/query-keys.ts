@@ -1,5 +1,6 @@
 export const queryKeys = {
   me: ['me'] as const,
+  reminderPreferences: ['me', 'reminder-preferences'] as const,
   workspaces: ['workspaces'] as const,
   workspaceUsers: (workspaceId: string, params: { query?: string; status?: string }) =>
     ['workspace', workspaceId, 'users', params] as const,
