@@ -410,6 +410,9 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
               id: generation.id,
               status: 'failed',
               taskId: null,
+              retryCount: {
+                lt: 3,
+              },
             },
             data: {
               status: 'pending',
@@ -498,8 +501,12 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
       } catch (retryError) {
         this.logger.error(`Retry failed for generation ${generation.id}:`, retryError);
 
-        await this.prisma.recurringTaskGeneration.update({
-          where: { id: generation.id },
+        await this.prisma.recurringTaskGeneration.updateMany({
+          where: {
+            id: generation.id,
+            status: 'failed',
+            taskId: null,
+          },
           data: {
             status: 'failed',
             retryCount: {
