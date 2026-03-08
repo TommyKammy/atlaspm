@@ -558,7 +558,11 @@ test('buildTimelineLayout keeps manual task order authoritative over dependency 
     sectionRowHeight: 32,
     taskRowHeight: 40,
     compactRows: true,
-    manualRowLaneIds: ['section:design'],
+    manualPlacementByLane: {
+      'section:design': {
+        orderedTaskIds: ['task-blocker', 'task-chain-a', 'task-chain-b'],
+      },
+    },
     dependencyAwarePacking: true,
     dependencyEdges: [{ source: 'task-chain-a', target: 'task-chain-b', type: 'BLOCKS' }],
   });
@@ -622,7 +626,11 @@ test('buildTimelineLayout preserves manual vertical order while still compacting
     sectionRowHeight: 32,
     taskRowHeight: 40,
     compactRows: true,
-    manualRowLaneIds: ['section:design'],
+    manualPlacementByLane: {
+      'section:design': {
+        orderedTaskIds: manualOrderTasks.map((task) => task.id),
+      },
+    },
   });
 
   const designLane = layout.lanesWithRows[0];
@@ -678,7 +686,11 @@ test('buildTimelineLayout respects manual order for overlapping tasks even when 
     sectionRowHeight: 32,
     taskRowHeight: 40,
     compactRows: true,
-    manualRowLaneIds: ['section:design'],
+    manualPlacementByLane: {
+      'section:design': {
+        orderedTaskIds: ['task-late-first', 'task-early-second'],
+      },
+    },
   });
 
   assert.deepEqual(
@@ -898,10 +910,12 @@ test('buildTimelineLayout clamps oversized manual row hints to lane size', () =>
     sectionRowHeight: 32,
     taskRowHeight: 40,
     compactRows: true,
-    manualRowLaneIds: ['section:design'],
-    manualRowHintsByLane: {
+    manualPlacementByLane: {
       'section:design': {
-        'task-a': 100000,
+        orderedTaskIds: tasks.map((task) => task.id),
+        rowByTaskId: {
+          'task-a': 100000,
+        },
       },
     },
   });

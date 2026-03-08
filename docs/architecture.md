@@ -53,6 +53,11 @@
 - Optimistic concurrency via task `version`; conflict returns 409 and server order snapshot.
 - New task placement defaults to top of section (lowest position first).
 - Temporary sort query (`dueAt`, `progressPercent`, `updatedAt`) is read-only and never rewrites manual positions.
+- Timeline grouped-lane manual placement uses an explicit per-swimlane contract in `timelineManualLayout`:
+  - `timelineManualLayout[groupBy][laneId].orderedTaskIds` preserves authoritative task order for that lane.
+  - `timelineManualLayout[groupBy][laneId].rowByTaskId[taskId]` stores explicit row indices for tasks that were manually moved.
+- Compact Timeline packing is only the initial layout seed for lanes without manual placement; once a lane has manual placement state, the saved lane order and row indices are the source of truth across reloads.
+- `PUT /projects/:id/timeline/preferences/manual-layout/:groupBy` validates lane ids, task membership, and `rowByTaskId` bounds before persisting the grouped layout.
 
 ## Web Cache Strategy
 - `web-ui` uses TanStack Query for all core data reads (`projects`, `sections`, grouped `tasks`, `rules`, `members`).

@@ -82,6 +82,11 @@ export type TimelineLayout<TTask extends TimelineLayoutTaskInput = TimelineLayou
   totalRowCount: number;
 };
 
+export type TimelineManualLanePlacement = {
+  orderedTaskIds?: string[];
+  rowByTaskId?: Record<string, number>;
+};
+
 export type BuildTimelineLayoutInput<TTask extends TimelineLayoutTaskInput> = {
   lanes: Array<TimelineLane<TTask>>;
   windowStart: Date;
@@ -91,8 +96,7 @@ export type BuildTimelineLayoutInput<TTask extends TimelineLayoutTaskInput> = {
   taskRowHeight: number;
   laneFooterHeight?: number;
   compactRows?: boolean;
-  manualRowLaneIds?: string[];
-  manualRowHintsByLane?: Record<string, Record<string, number>>;
+  manualPlacementByLane?: Record<string, TimelineManualLanePlacement>;
   expandedRowLaneIds?: string[];
   dependencyAwarePacking?: boolean;
   dependencyEdges?: Array<{ source: string; target: string; type?: string }>;
@@ -410,7 +414,6 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
   const barsByTaskId: Record<string, { left: number; width: number; y: number }> = {};
   const taskRowsById: Record<string, { top: number; height: number }> = {};
   const lanesWithRows: Array<TimelineLayoutLane<TTask>> = [];
-  const manualRowLaneIds = new Set(input.manualRowLaneIds ?? []);
   const expandedRowLaneIds = new Set(input.expandedRowLaneIds ?? []);
   const laneFooterHeight = Math.max(0, input.laneFooterHeight ?? 0);
   const footerRowCount = laneFooterHeight > 0 ? Math.ceil(laneFooterHeight / input.taskRowHeight) : 0;
@@ -421,7 +424,8 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
     const taskRows: Array<TimelineTaskRow<TTask>> = [];
     const rows: Array<TimelinePackedRow<TTask>> = [];
     const rowIndexByTaskId: Record<string, number> = {};
-    const laneUsesManualRows = manualRowLaneIds.has(lane.id);
+    const laneManualPlacement = input.manualPlacementByLane?.[lane.id];
+    const laneUsesManualPlacement = Boolean(laneManualPlacement);
     const laneUsesExpandedRows = expandedRowLaneIds.has(lane.id);
 
     if (input.compactRows && !laneUsesExpandedRows) {
@@ -431,8 +435,8 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
           lane.tasks,
           input.dependencyAwarePacking,
           input.dependencyEdges,
-          laneUsesManualRows ? input.manualRowHintsByLane?.[lane.id] : undefined,
-          laneUsesManualRows,
+          laneManualPlacement?.rowByTaskId,
+          laneUsesManualPlacement,
         ).rowIndexByTaskId,
       );
     }
@@ -510,7 +514,8 @@ export function buildTimelineTaskOrderByLane<TTask extends TimelineLayoutTaskInp
       lane.tasks,
       input.dependencyAwarePacking,
       input.dependencyEdges,
-      input.manualRowHintsByLane?.[lane.id],
+      input.manualPlacementByLane?.[lane.id]?.rowByTaskId,
+      Boolean(input.manualPlacementByLane?.[lane.id]),
     );
     laneTaskOrder[lane.id] = [...lane.tasks]
       .sort((left, right) => {

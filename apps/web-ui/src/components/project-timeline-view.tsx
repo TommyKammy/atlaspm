@@ -1491,6 +1491,23 @@ export function ProjectScheduleCanvas({
       ),
     [preferredManualRowByTaskIdByLane, timelineLaneSubtaskMetaById],
   );
+  const treeAwareManualPlacementByLane = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(preferredManualLayout)
+          .filter(([, laneLayout]) => laneLayout.orderedTaskIds.length > 0)
+          .map(([laneId, laneLayout]) => {
+            const rowByTaskId = treeAwareManualRowByTaskIdByLane[laneId];
+            return [
+              laneId,
+              rowByTaskId && Object.keys(rowByTaskId).length > 0
+                ? { ...laneLayout, rowByTaskId }
+                : laneLayout,
+            ];
+          }),
+      ),
+    [preferredManualLayout, treeAwareManualRowByTaskIdByLane],
+  );
   const laneTaskCountById = useMemo(
     () => new Map(timelineLanes.map((lane) => [lane.id, lane.tasks.length])),
     [timelineLanes],
@@ -1510,16 +1527,6 @@ export function ProjectScheduleCanvas({
         };
       }),
     [collapsedLaneIds, timelineLaneSubtaskMetaById, timelineLanes],
-  );
-  const manualOrderLaneIds = useMemo(
-    () => {
-      return mode === 'timeline' && sortMode === 'manual'
-        ? visibleTimelineLanes
-            .filter((lane) => (preferredManualLayout[lane.id]?.orderedTaskIds ?? []).length > 0)
-            .map((lane) => lane.id)
-        : [];
-    },
-    [mode, preferredManualLayout, sortMode, visibleTimelineLanes],
   );
   const expandedRowLaneIds = useMemo(() => [] as string[], []);
 
@@ -2226,16 +2233,14 @@ export function ProjectScheduleCanvas({
       taskRowHeight: TASK_ROW_HEIGHT,
       laneFooterHeight: mode === 'timeline' ? TASK_ROW_HEIGHT : 0,
       compactRows: mode === 'timeline',
-      manualRowLaneIds: mode === 'timeline' ? manualOrderLaneIds : [],
-      ...(mode === 'timeline' ? { manualRowHintsByLane: treeAwareManualRowByTaskIdByLane } : {}),
+      ...(mode === 'timeline' ? { manualPlacementByLane: treeAwareManualPlacementByLane } : {}),
       expandedRowLaneIds: mode === 'timeline' ? expandedRowLaneIds : [],
       dependencyEdges: timeline.dependencyEdges,
     });
   }, [
     expandedRowLaneIds,
-    manualOrderLaneIds,
     mode,
-    treeAwareManualRowByTaskIdByLane,
+    treeAwareManualPlacementByLane,
     timeline.dependencyEdges,
     timeline.window.end,
     timeline.window.start,
