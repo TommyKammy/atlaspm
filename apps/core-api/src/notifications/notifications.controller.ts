@@ -15,6 +15,7 @@ import type { AppRequest } from '../common/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { NotificationsService } from './notifications.service';
+import { normalizeInboxNotificationType } from './notification-taxonomy';
 
 class ListNotificationsQuery {
   @IsOptional()
@@ -133,7 +134,7 @@ export class NotificationsController {
       readAt: updated.readAt,
       taskId: updated.taskId,
       projectId: updated.projectId,
-      type: updated.type,
+      type: normalizeInboxNotificationType(updated.type),
     };
   }
 }
