@@ -1,4 +1,4 @@
-import { beforeAll, afterAll, describe, expect, test } from 'vitest';
+import { beforeAll, afterAll, describe, expect, test, vi } from 'vitest';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -11,6 +11,7 @@ import { ReminderDeliveryService } from '../src/tasks/reminder-delivery.service'
 import { TaskRetentionService } from '../src/tasks/task-retention.service';
 import { WebhookDeliveryService } from '../src/webhooks/webhook-delivery.service';
 import { CorrelationIdMiddleware } from '../src/common/correlation.middleware';
+import { RecurringTaskWorker } from '../src/recurring-tasks/recurring-task.worker';
 
 describe('Core API Integration', () => {
   let app: INestApplication;
@@ -19,6 +20,7 @@ describe('Core API Integration', () => {
   let reminderWorker: ReminderDeliveryService;
   let retentionWorker: TaskRetentionService;
   let webhookWorker: WebhookDeliveryService;
+  let recurringWorker: RecurringTaskWorker;
 
   beforeAll(async () => {
     process.env.DEV_AUTH_ENABLED = 'true';
@@ -35,6 +37,7 @@ describe('Core API Integration', () => {
     process.env.WEBHOOK_DELIVERY_MAX_DELAY_MS = '0';
     process.env.WEBHOOK_DELIVERY_MAX_ATTEMPTS = '2';
     process.env.WEBHOOK_SIGNING_SECRET = 'webhook-test-secret';
+    process.env.RECURRING_WORKER_ENABLED = 'false';
     process.env.DATABASE_URL =
       process.env.DATABASE_URL ?? 'postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public';
 
@@ -46,6 +49,7 @@ describe('Core API Integration', () => {
     reminderWorker = moduleRef.get(ReminderDeliveryService);
     retentionWorker = moduleRef.get(TaskRetentionService);
     webhookWorker = moduleRef.get(WebhookDeliveryService);
+    recurringWorker = moduleRef.get(RecurringTaskWorker);
 
     await prisma.$connect();
     const auth = moduleRef.get(AuthService);
@@ -1648,6 +1652,156 @@ describe('Core API Integration', () => {
     expect(purgeOutbox).toBeTruthy();
     expect((purgeOutbox?.payload as any)?.taskId).toBe(expiredTask.body.id);
     expect((purgeOutbox?.payload as any)?.projectId).toBe(projectId);
+  });
+
+  test('recurring worker generates overdue slots end to end and emits audit/outbox without duplicates', async () => {
+    const frozenNow = new Date();
+    vi.useFakeTimers();
+    vi.setSystemTime(frozenNow);
+
+    try {
+      const wsRes = await request(app.getHttpServer())
+        .get('/workspaces')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const workspaceId = wsRes.body[0].id;
+
+      const projectRes = await request(app.getHttpServer())
+        .post('/projects')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ workspaceId, name: `Recurring Integration ${Date.now()}` })
+        .expect(201);
+      const projectId = projectRes.body.id as string;
+
+      const sectionsRes = await request(app.getHttpServer())
+        .get(`/projects/${projectId}/sections`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const defaultSection =
+        sectionsRes.body.find((section: any) => section.isDefault) ?? sectionsRes.body[0];
+      expect(defaultSection?.id).toBeTruthy();
+
+      const sourceTask = await request(app.getHttpServer())
+        .post(`/projects/${projectId}/tasks`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ title: 'Recurring source', sectionId: defaultSection.id })
+        .expect(201);
+
+      const todayUtc = new Date(Date.UTC(
+        frozenNow.getUTCFullYear(),
+        frozenNow.getUTCMonth(),
+        frozenNow.getUTCDate(),
+      ));
+      const yesterdayUtc = new Date(todayUtc);
+      yesterdayUtc.setUTCDate(yesterdayUtc.getUTCDate() - 1);
+      const tomorrowUtc = new Date(todayUtc);
+      tomorrowUtc.setUTCDate(tomorrowUtc.getUTCDate() + 1);
+      const createCorrelationId = `recurring-rule-${Date.now()}`;
+
+      const ruleRes = await request(app.getHttpServer())
+        .post(`/projects/${projectId}/recurring-rules`)
+        .set('Authorization', `Bearer ${token}`)
+        .set('x-correlation-id', createCorrelationId)
+        .send({
+          title: 'Recurring source',
+          description: 'Generated via worker',
+          frequency: 'DAILY',
+          interval: 1,
+          sectionId: defaultSection.id,
+          sourceTaskId: sourceTask.body.id,
+          startDate: yesterdayUtc.toISOString(),
+          endDate: todayUtc.toISOString(),
+        })
+        .expect(201);
+      const ruleId = ruleRes.body.id as string;
+
+      await prisma.recurringRule.update({
+        where: { id: ruleId },
+        data: { nextScheduledAt: yesterdayUtc },
+      });
+
+      const firstRun = await recurringWorker.processDueRecurringTasks();
+      expect(firstRun).toEqual({ processed: 2, errors: 0 });
+
+      const secondRun = await recurringWorker.processDueRecurringTasks();
+      expect(secondRun).toEqual({ processed: 0, errors: 0 });
+
+      const ruleAfter = await prisma.recurringRule.findUniqueOrThrow({
+        where: { id: ruleId },
+      });
+      expect(ruleAfter.nextScheduledAt?.toISOString()).toBe(tomorrowUtc.toISOString());
+
+      const generations = await prisma.recurringTaskGeneration.findMany({
+        where: { ruleId },
+        orderBy: { scheduledAt: 'asc' },
+      });
+      expect(generations).toHaveLength(2);
+      expect(generations.map((generation) => generation.scheduledAt.toISOString())).toEqual([
+        yesterdayUtc.toISOString(),
+        todayUtc.toISOString(),
+      ]);
+      expect(generations.map((generation) => generation.status)).toEqual(['completed', 'completed']);
+
+      const generatedTasks = await prisma.task.findMany({
+        where: { recurringRuleId: ruleId },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          status: true,
+          recurringRuleId: true,
+        },
+      });
+      expect(generatedTasks).toHaveLength(2);
+      expect(generatedTasks.every((task) => task.recurringRuleId === ruleId)).toBe(true);
+      expect(generatedTasks.map((task) => task.title)).toEqual([
+        'Recurring source',
+        'Recurring source',
+      ]);
+      expect(generatedTasks.map((task) => task.description)).toEqual([
+        'Generated via worker',
+        'Generated via worker',
+      ]);
+      expect(generatedTasks.map((task) => task.status)).toEqual(['TODO', 'TODO']);
+
+      const createdRuleAudit = await prisma.auditEvent.findFirst({
+        where: {
+          entityType: 'RecurringRule',
+          entityId: ruleId,
+          action: 'recurring_rule.created',
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(createdRuleAudit?.correlationId).toBe(createCorrelationId);
+
+      const generationAudit = await prisma.auditEvent.findMany({
+        where: {
+          entityType: 'RecurringTaskGeneration',
+          entityId: { in: generations.map((generation) => generation.id) },
+          action: 'recurring_task.generated',
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+      expect(generationAudit).toHaveLength(2);
+
+      const recurringOutboxEvents = (await prisma.outboxEvent.findMany({
+        where: { type: 'recurring_task.generated' },
+        orderBy: { createdAt: 'asc' },
+      })).filter((event) => (event.payload as any)?.ruleId === ruleId);
+      expect(recurringOutboxEvents).toHaveLength(2);
+      expect(
+        recurringOutboxEvents.map((event) => {
+          const scheduledAt = (event.payload as any)?.scheduledAt;
+          if (typeof scheduledAt === 'string') {
+            return scheduledAt;
+          }
+          return scheduledAt?.toISOString?.() ?? null;
+        }),
+      ).toEqual([yesterdayUtc.toISOString(), todayUtc.toISOString()]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test('webhook delivery worker retries failed events, signs payloads, and exposes DLQ', async () => {

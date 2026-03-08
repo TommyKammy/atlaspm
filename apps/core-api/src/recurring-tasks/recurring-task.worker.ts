@@ -15,6 +15,8 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RecurringTaskWorker.name);
   private processingInterval?: NodeJS.Timeout;
   private retryInterval?: NodeJS.Timeout;
+  private processingInFlight = false;
+  private retryInFlight = false;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -28,28 +30,30 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const processIntervalMs = parseInt(process.env.RECURRING_WORKER_INTERVAL_MS || '60000', 10);
-    const retryIntervalMs = parseInt(process.env.RECURRING_WORKER_RETRY_INTERVAL_MS || '300000', 10);
+    const processIntervalMs = this.getIntervalMs(
+      process.env.RECURRING_WORKER_INTERVAL_MS,
+      60_000,
+    );
+    const retryIntervalMs = this.getIntervalMs(
+      process.env.RECURRING_WORKER_RETRY_INTERVAL_MS,
+      300_000,
+    );
 
     this.processingInterval = setInterval(() => {
-      this.processDueRecurringTasks().catch((err) =>
-        this.logger.error('Error in processDueRecurringTasks:', err),
-      );
+      void this.runProcessingTick('interval');
     }, processIntervalMs);
+    this.processingInterval.unref?.();
 
     this.retryInterval = setInterval(() => {
-      this.retryFailedGenerations().catch((err) =>
-        this.logger.error('Error in retryFailedGenerations:', err),
-      );
+      void this.runRetryTick('interval');
     }, retryIntervalMs);
+    this.retryInterval.unref?.();
 
     this.logger.log(
       `Recurring task worker started (process: ${processIntervalMs}ms, retry: ${retryIntervalMs}ms)`,
     );
 
-    this.processDueRecurringTasks().catch((err) =>
-      this.logger.error('Error in initial processDueRecurringTasks:', err),
-    );
+    void this.runProcessingTick('startup');
   }
 
   onModuleDestroy() {
@@ -518,6 +522,88 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
     }
 
     return { retried, succeeded };
+  }
+
+  private async runProcessingTick(trigger: 'startup' | 'interval') {
+    if (this.processingInFlight) {
+      return;
+    }
+
+    this.processingInFlight = true;
+    const startedAt = Date.now();
+    try {
+      const result = await this.processDueRecurringTasks();
+      if (trigger === 'startup' || result.processed > 0 || result.errors > 0) {
+        this.logStructuredEvent('recurring.worker.process.completed', {
+          trigger,
+          processed: result.processed,
+          errors: result.errors,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+    } catch (error) {
+      this.logger.error('Error in processDueRecurringTasks:', error);
+      this.logStructuredEvent(
+        'recurring.worker.process.failed',
+        {
+          trigger,
+          durationMs: Date.now() - startedAt,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'error',
+      );
+    } finally {
+      this.processingInFlight = false;
+    }
+  }
+
+  private async runRetryTick(trigger: 'interval') {
+    if (this.retryInFlight) {
+      return;
+    }
+
+    this.retryInFlight = true;
+    const startedAt = Date.now();
+    try {
+      const result = await this.retryFailedGenerations();
+      if (result.retried > 0 || result.succeeded > 0) {
+        this.logStructuredEvent('recurring.worker.retry.completed', {
+          trigger,
+          retried: result.retried,
+          succeeded: result.succeeded,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+    } catch (error) {
+      this.logger.error('Error in retryFailedGenerations:', error);
+      this.logStructuredEvent(
+        'recurring.worker.retry.failed',
+        {
+          trigger,
+          durationMs: Date.now() - startedAt,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'error',
+      );
+    } finally {
+      this.retryInFlight = false;
+    }
+  }
+
+  private getIntervalMs(rawValue: string | undefined, defaultValue: number) {
+    const parsed = Number.parseInt(rawValue ?? '', 10);
+    if (Number.isFinite(parsed) && parsed >= 1_000) {
+      return parsed;
+    }
+    return defaultValue;
+  }
+
+  private logStructuredEvent(
+    event: string,
+    details: Record<string, unknown>,
+    level: 'log' | 'warn' | 'error' = 'log',
+  ) {
+    this.logger[level](JSON.stringify({ event, ...details }));
   }
 
 }
