@@ -91,24 +91,32 @@ describe('Core API Integration', () => {
   });
 
   test('users can configure reminder delivery preferences and opt out of reminder delivery', async () => {
-    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
+    const auth = app.get(AuthService);
+    const reminderUserId = `reminder-pref-user-${Date.now()}`;
+    const reminderToken = await auth.mintDevToken(
+      reminderUserId,
+      `${reminderUserId}@example.com`,
+      'Reminder Preference User',
+    );
+
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${reminderToken}`).expect(200);
 
     const workspaceRes = await request(app.getHttpServer())
       .get('/workspaces')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${reminderToken}`)
       .expect(200);
     const workspaceId = workspaceRes.body[0].id as string;
 
     const projectRes = await request(app.getHttpServer())
       .post('/projects')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${reminderToken}`)
       .send({ workspaceId, name: 'Reminder Preferences Project' })
       .expect(201);
     const projectId = projectRes.body.id as string;
 
     const sectionsRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/sections`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${reminderToken}`)
       .expect(200);
     const defaultSectionId =
       (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
@@ -116,7 +124,7 @@ describe('Core API Integration', () => {
 
     const taskRes = await request(app.getHttpServer())
       .post(`/projects/${projectId}/tasks`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${reminderToken}`)
       .send({
         sectionId: defaultSectionId,
         title: 'Reminder preference delivery test',
@@ -127,7 +135,7 @@ describe('Core API Integration', () => {
 
     const initialPreferences = await request(app.getHttpServer())
       .get('/me/reminder-preferences')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${reminderToken}`)
       .expect(200);
     expect(initialPreferences.body).toEqual({
       enabled: true,
@@ -136,7 +144,7 @@ describe('Core API Integration', () => {
 
     const updatedPreferences = await request(app.getHttpServer())
       .put('/me/reminder-preferences')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${reminderToken}`)
       .send({ enabled: false, defaultLeadTimeMinutes: 1440 })
       .expect(200);
     expect(updatedPreferences.body).toEqual({
@@ -146,7 +154,7 @@ describe('Core API Integration', () => {
 
     await request(app.getHttpServer())
       .put(`/tasks/${taskId}/reminder`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${reminderToken}`)
       .send({ remindAt: new Date(Date.now() - 60_000).toISOString() })
       .expect(200);
 
@@ -155,13 +163,13 @@ describe('Core API Integration', () => {
 
     const reminderWhileDisabled = await request(app.getHttpServer())
       .get(`/tasks/${taskId}/reminder`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${reminderToken}`)
       .expect(200);
     expect(reminderWhileDisabled.body.sentAt).toBeNull();
 
     const reenabledPreferences = await request(app.getHttpServer())
       .put('/me/reminder-preferences')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${reminderToken}`)
       .send({ enabled: true, defaultLeadTimeMinutes: 15 })
       .expect(200);
     expect(reenabledPreferences.body).toEqual({
@@ -174,7 +182,7 @@ describe('Core API Integration', () => {
 
     const reminderAfterReenable = await request(app.getHttpServer())
       .get(`/tasks/${taskId}/reminder`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${reminderToken}`)
       .expect(200);
     expect(Boolean(reminderAfterReenable.body?.sentAt)).toBe(true);
   });
