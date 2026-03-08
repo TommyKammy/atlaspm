@@ -425,7 +425,10 @@ export type ProjectStatusUpdate = {
   id: string;
   projectId: string;
   authorUserId: string;
-  body: string;
+  health: 'ON_TRACK' | 'AT_RISK' | 'OFF_TRACK';
+  summary: string;
+  blockers: string[];
+  nextSteps: string[];
   createdAt: string;
   updatedAt: string;
   author?: {
