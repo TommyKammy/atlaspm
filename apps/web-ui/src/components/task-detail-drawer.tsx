@@ -56,6 +56,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/lib/i18n';
+import { DEFAULT_REMINDER_PREFERENCES } from '@/lib/reminder-preferences';
 import { cn } from '@/lib/utils';
 
 const AUDIT_DIFF_IGNORED_KEYS = new Set([
@@ -79,10 +80,6 @@ const AUDIT_DIFF_PREFERRED_KEYS = new Set([
   'parentId',
   'deletedAt',
 ]);
-const DEFAULT_REMINDER_PREFERENCES: ReminderPreferences = {
-  enabled: true,
-  defaultLeadTimeMinutes: 60,
-};
 
 function formatAuditEvent(event: AuditEvent, t: (key: string) => string) {
   const action = event.action;

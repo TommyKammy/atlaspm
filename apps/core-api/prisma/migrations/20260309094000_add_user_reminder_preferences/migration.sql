@@ -4,7 +4,7 @@ CREATE TABLE "user_reminder_preferences" (
   "enabled" BOOLEAN NOT NULL DEFAULT true,
   "default_lead_time_minutes" INTEGER NOT NULL DEFAULT 60,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updated_at" TIMESTAMP(3) NOT NULL,
 
   CONSTRAINT "user_reminder_preferences_pkey" PRIMARY KEY ("id")
 );

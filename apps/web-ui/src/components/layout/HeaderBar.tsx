@@ -17,6 +17,7 @@ import { queryKeys } from '@/lib/query-keys';
 import type { CustomFieldDefinition, Project, ProjectMember, ReminderPreferences, Section, Task } from '@/lib/types';
 import { parseCustomFieldFilters, stringifyCustomFieldFilters, type CustomFieldFilter } from '@/lib/project-filters';
 import { resolveProjectView } from '@/lib/project-views';
+import { DEFAULT_REMINDER_PREFERENCES, REMINDER_LEAD_TIME_OPTIONS } from '@/lib/reminder-preferences';
 import { useI18n } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -30,11 +31,6 @@ type Me = {
 };
 
 const FILTER_STATUSES: Task['status'][] = ['TODO', 'IN_PROGRESS', 'DONE', 'BLOCKED'];
-const DEFAULT_REMINDER_PREFERENCES: ReminderPreferences = {
-  enabled: true,
-  defaultLeadTimeMinutes: 60,
-};
-const REMINDER_LEAD_TIME_OPTIONS = [15, 60, 240, 1440] as const;
 
 function parseListParam(raw: string | null): string[] {
   if (!raw) return [];
