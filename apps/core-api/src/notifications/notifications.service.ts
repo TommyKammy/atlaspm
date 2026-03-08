@@ -27,7 +27,8 @@ export class NotificationsService {
     input: {
       userId: string;
       projectId: string;
-      taskId: string;
+      taskId?: string | null;
+      statusUpdateId?: string | null;
       type: InboxNotificationType;
       sourceType: string;
       sourceId?: string;
@@ -36,12 +37,14 @@ export class NotificationsService {
       correlationId: string;
     },
   ) {
-    const sourceId = input.sourceId ?? '';
+    const sourceId =
+      input.sourceId ??
+      (input.sourceType === 'description' && input.taskId ? input.taskId : '');
     const existing = await tx.inboxNotification.findUnique({
       where: {
-        userId_taskId_type_sourceType_sourceId: {
+        userId_projectId_type_sourceType_sourceId: {
           userId: input.userId,
-          taskId: input.taskId,
+          projectId: input.projectId,
           type: input.type,
           sourceType: input.sourceType,
           sourceId,
@@ -54,7 +57,8 @@ export class NotificationsService {
         data: {
           userId: input.userId,
           projectId: input.projectId,
-          taskId: input.taskId,
+          taskId: input.taskId ?? null,
+          statusUpdateId: input.statusUpdateId ?? null,
           type: input.type,
           sourceType: input.sourceType,
           sourceId,
@@ -77,6 +81,7 @@ export class NotificationsService {
           userId: created.userId,
           projectId: created.projectId,
           taskId: created.taskId,
+          statusUpdateId: created.statusUpdateId,
           sourceType: created.sourceType,
           sourceId: created.sourceId,
         },
@@ -111,6 +116,7 @@ export class NotificationsService {
         userId: updated.userId,
         projectId: updated.projectId,
         taskId: updated.taskId,
+        statusUpdateId: updated.statusUpdateId,
         sourceType: updated.sourceType,
         sourceId: updated.sourceId,
       },
@@ -123,7 +129,8 @@ export class NotificationsService {
     input: {
       userId: string;
       projectId: string;
-      taskId: string;
+      taskId?: string | null;
+      statusUpdateId?: string | null;
       sourceType: string;
       sourceId?: string;
       triggeredByUserId?: string;
@@ -135,6 +142,7 @@ export class NotificationsService {
       userId: input.userId,
       projectId: input.projectId,
       taskId: input.taskId,
+      statusUpdateId: input.statusUpdateId,
       type: NOTIFICATION_TYPE_MENTION,
       sourceType: input.sourceType,
       sourceId: input.sourceId,
@@ -311,6 +319,7 @@ export class NotificationsService {
       include: {
         project: { select: { id: true, name: true } },
         task: { select: { id: true, title: true, deletedAt: true } },
+        statusUpdate: { select: { id: true, summary: true, health: true, createdAt: true } },
         triggeredBy: { select: { id: true, displayName: true, email: true } },
       },
       orderBy: [{ readAt: 'asc' }, { createdAt: 'desc' }],

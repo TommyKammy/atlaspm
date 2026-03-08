@@ -216,9 +216,10 @@ export type InboxNotification = {
   id: string;
   userId: string;
   projectId: string;
-  taskId: string;
+  taskId?: string | null;
+  statusUpdateId?: string | null;
   type: InboxNotificationType;
-  sourceType: 'description' | 'comment' | 'task';
+  sourceType: 'description' | 'comment' | 'task' | 'project_status_update';
   sourceId: string;
   readAt?: string | null;
   createdAt: string;
@@ -227,11 +228,17 @@ export type InboxNotification = {
     id: string;
     name: string;
   };
-  task: {
+  task?: {
     id: string;
     title: string;
     deletedAt?: string | null;
-  };
+  } | null;
+  statusUpdate?: {
+    id: string;
+    summary: string;
+    health: ProjectStatusHealth;
+    createdAt: string;
+  } | null;
   triggeredBy?: {
     id: string;
     displayName?: string | null;

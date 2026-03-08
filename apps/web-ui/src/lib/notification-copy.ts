@@ -30,6 +30,10 @@ export function notificationSummary(notification: InboxNotification, t: (key: st
     case 'unknown':
       return `${actor} ${t('notificationPerformedAction')}`;
     case 'mention':
+      if (notification.sourceType === 'project_status_update') {
+        return `${actor} ${t('mentionedYouInProjectUpdate')}`;
+      }
+      return `${actor} ${t('mentionedYou')}`;
     default:
       return `${actor} ${t('mentionedYou')}`;
   }

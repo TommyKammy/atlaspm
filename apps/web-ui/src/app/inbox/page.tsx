@@ -14,6 +14,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 type UnreadCountResponse = { count: number };
 
+function renderTargetLabel(value: string) {
+  return value.replace(/@\[(?<id>[a-zA-Z0-9:_-]+)\|(?<label>[^\]]+)\]/g, (_whole, _id: string, label: string) => {
+    return `@${label}`;
+  });
+}
+
 export default function InboxPage() {
   const { t } = useI18n();
   const router = useRouter();
@@ -91,6 +97,12 @@ export default function InboxPage() {
           ) : (
             notifications.map((item) => {
               const unread = !item.readAt;
+              const targetLabel = renderTargetLabel(
+                item.statusUpdate?.summary?.trim() || item.task?.title?.trim() || t('untitledTask'),
+              );
+              const targetHref = item.statusUpdate
+                ? `/projects/${item.project.id}?statusUpdate=${item.statusUpdate.id}`
+                : `/projects/${item.project.id}?task=${item.task?.id ?? ''}`;
               return (
                 <div
                   key={item.id}
@@ -106,7 +118,7 @@ export default function InboxPage() {
                       {unread ? <Badge variant="secondary">{t('unread')}</Badge> : null}
                     </div>
                     <p className="truncate text-xs text-muted-foreground">
-                      {item.project.name} · {item.task.title.trim() || t('untitledTask')}
+                      {item.project.name} · {targetLabel}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -125,10 +137,10 @@ export default function InboxPage() {
                         if (unread) {
                           markRead.mutate({ id: item.id, read: true });
                         }
-                        router.push(`/projects/${item.project.id}?task=${item.task.id}`);
+                        router.push(targetHref);
                       }}
                     >
-                      {t('openTask')}
+                      {item.statusUpdate ? t('openUpdate') : t('openTask')}
                     </Button>
                   </div>
                 </div>

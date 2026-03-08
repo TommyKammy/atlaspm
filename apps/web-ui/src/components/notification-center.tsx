@@ -15,6 +15,12 @@ import { Badge } from '@/components/ui/badge';
 
 type UnreadCountResponse = { count: number };
 
+function renderTargetLabel(value: string) {
+  return value.replace(/@\[(?<id>[a-zA-Z0-9:_-]+)\|(?<label>[^\]]+)\]/g, (_whole, _id: string, label: string) => {
+    return `@${label}`;
+  });
+}
+
 export function NotificationCenter() {
   const router = useRouter();
   const pathname = usePathname();
@@ -113,6 +119,12 @@ export function NotificationCenter() {
           ) : (
             notifications.map((item) => {
               const unread = !item.readAt;
+              const targetHref = item.statusUpdate
+                ? `/projects/${item.project.id}?statusUpdate=${item.statusUpdate.id}`
+                : `/projects/${item.project.id}?task=${item.task?.id ?? ''}`;
+              const targetLabel = renderTargetLabel(
+                item.statusUpdate?.summary?.trim() || item.task?.title?.trim() || t('untitledTask'),
+              );
               return (
                 <DropdownMenuItem
                   key={item.id}
@@ -121,7 +133,7 @@ export function NotificationCenter() {
                   onClick={() => {
                     setOpen(false);
                     if (unread) markRead.mutate({ id: item.id, read: true });
-                    router.push(`/projects/${item.project.id}?task=${item.task.id}`);
+                    router.push(targetHref);
                   }}
                 >
                   <div className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" style={{ opacity: unread ? 1 : 0 }} />
@@ -130,7 +142,7 @@ export function NotificationCenter() {
                       {notificationSummary(item, t)}
                     </p>
                     <p className="truncate text-xs text-muted-foreground">
-                      {item.project.name} · {item.task.title.trim() || t('untitledTask')}
+                      {item.project.name} · {targetLabel}
                     </p>
                   </div>
                 </DropdownMenuItem>

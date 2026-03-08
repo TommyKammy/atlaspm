@@ -57,6 +57,7 @@ export default function ProjectPage() {
   const queryClient = useQueryClient();
   const view = resolveProjectView(resolvedSearchParams.get('view'));
   const trashOpen = resolvedSearchParams.get('trash') === '1';
+  const highlightedStatusUpdateId = resolvedSearchParams.get('statusUpdate');
   const search = resolvedSearchParams.get('q') ?? '';
   const statusesParam = resolvedSearchParams.get('statuses');
   const assigneesParam = resolvedSearchParams.get('assignees');
@@ -296,7 +297,12 @@ export default function ProjectPage() {
         </DialogContent>
       </Dialog>
 
-      <ProjectStatusUpdates projectId={projectId} canEdit={canEditProject} />
+      <ProjectStatusUpdates
+        projectId={projectId}
+        canEdit={canEditProject}
+        members={projectMembersQuery.data ?? []}
+        highlightedStatusUpdateId={highlightedStatusUpdateId}
+      />
 
       {view === 'list' ? (
         <>

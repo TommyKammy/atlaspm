@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { queryKeys } from '@/lib/query-keys';
-import type { ProjectStatusHealth, ProjectStatusUpdate, ProjectStatusUpdateList } from '@/lib/types';
+import type { ProjectMember, ProjectStatusHealth, ProjectStatusUpdate, ProjectStatusUpdateList } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 const HEALTH_OPTIONS: ProjectStatusHealth[] = ['ON_TRACK', 'AT_RISK', 'OFF_TRACK'];
@@ -58,15 +58,72 @@ function authorLabel(statusUpdate: ProjectStatusUpdate) {
   return statusUpdate.author?.displayName ?? statusUpdate.author?.email ?? statusUpdate.authorUserId;
 }
 
+function serializeMentions(value: string, members: ProjectMember[]) {
+  if (!value.trim()) return value;
+  const idToLabel = new Map<string, string>();
+  for (const member of members) {
+    const label = member.user.displayName ?? member.user.email ?? member.user.id;
+    idToLabel.set(member.userId.toLowerCase(), label);
+  }
+  return value.replace(/(^|\s)@([a-zA-Z0-9._:|-]+)/g, (whole, prefix: string, mentionId: string) => {
+    const label = idToLabel.get(mentionId.toLowerCase());
+    if (!label) return whole;
+    return `${prefix}@[${mentionId}|${label}]`;
+  });
+}
+
+function parseMentionText(value: string) {
+  const regex = /@\[(?<id>[a-zA-Z0-9:_-]+)\|(?<label>[^\]]+)\]/g;
+  const output: Array<{ type: 'text' | 'mention'; value: string; id?: string }> = [];
+  let cursor = 0;
+  let match = regex.exec(value);
+  while (match) {
+    if (match.index > cursor) {
+      output.push({ type: 'text', value: value.slice(cursor, match.index) });
+    }
+    output.push({
+      type: 'mention',
+      id: match.groups?.id ?? '',
+      value: `@${match.groups?.label ?? match.groups?.id ?? ''}`,
+    });
+    cursor = match.index + match[0].length;
+    match = regex.exec(value);
+  }
+  if (cursor < value.length) {
+    output.push({ type: 'text', value: value.slice(cursor) });
+  }
+  return output;
+}
+
+function MentionText({ value }: { value: string }) {
+  return parseMentionText(value).map((chunk, index) =>
+    chunk.type === 'mention' ? (
+      <span
+        key={`${chunk.id ?? 'mention'}-${index}`}
+        className="rounded bg-muted px-1 py-0.5 text-foreground"
+      >
+        {chunk.value}
+      </span>
+    ) : (
+      <span key={`text-${index}`}>{chunk.value}</span>
+    ),
+  );
+}
+
 export function ProjectStatusUpdates({
   projectId,
   canEdit,
+  members,
+  highlightedStatusUpdateId,
 }: {
   projectId: string;
   canEdit: boolean;
+  members: ProjectMember[];
+  highlightedStatusUpdateId?: string | null;
 }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
+  const highlightedStatusUpdateRef = useRef<HTMLElement | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [health, setHealth] = useState<ProjectStatusHealth>('ON_TRACK');
   const [summary, setSummary] = useState('');
@@ -83,15 +140,20 @@ export function ProjectStatusUpdates({
   const hasUpdates = (statusUpdatesQuery.data?.items.length ?? 0) > 0;
   const shouldShowComposer = canEdit && composerOpen;
 
+  useEffect(() => {
+    if (!highlightedStatusUpdateId || !highlightedStatusUpdateRef.current) return;
+    highlightedStatusUpdateRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightedStatusUpdateId, statusUpdatesQuery.data?.items]);
+
   const createStatusUpdate = useMutation({
     mutationFn: () =>
       api(`/projects/${projectId}/status-updates`, {
         method: 'POST',
         body: {
           health,
-          summary: summary.trim(),
-          blockers: splitListInput(blockers),
-          nextSteps: splitListInput(nextSteps),
+          summary: serializeMentions(summary.trim(), members),
+          blockers: splitListInput(serializeMentions(blockers, members)),
+          nextSteps: splitListInput(serializeMentions(nextSteps, members)),
         },
       }) as Promise<ProjectStatusUpdate>,
     onSuccess: (created) => {
@@ -117,7 +179,15 @@ export function ProjectStatusUpdates({
       (statusUpdatesQuery.data?.items ?? []).map((statusUpdate) => (
         <article
           key={statusUpdate.id}
-          className="rounded-lg border bg-background/80 p-3"
+          ref={(node) => {
+            if (highlightedStatusUpdateId === statusUpdate.id) {
+              highlightedStatusUpdateRef.current = node;
+            }
+          }}
+          className={cn(
+            'rounded-lg border bg-background/80 p-3 transition-colors',
+            highlightedStatusUpdateId === statusUpdate.id && 'border-primary bg-primary/5',
+          )}
           data-testid={`status-update-item-${statusUpdate.id}`}
         >
           <div className="flex flex-wrap items-start justify-between gap-2">
@@ -125,7 +195,9 @@ export function ProjectStatusUpdates({
               <Badge className={cn('border px-2.5 py-1 text-[11px]', healthBadgeClasses(statusUpdate.health))}>
                 {healthLabel(statusUpdate.health, t)}
               </Badge>
-              <p className="text-sm font-medium leading-6">{statusUpdate.summary}</p>
+              <p className="text-sm font-medium leading-6">
+                <MentionText value={statusUpdate.summary} />
+              </p>
             </div>
             <div className="text-right text-xs text-muted-foreground">
               <p>{authorLabel(statusUpdate)}</p>
@@ -139,7 +211,9 @@ export function ProjectStatusUpdates({
               </p>
               <ul className="mt-1 space-y-1 text-sm text-muted-foreground">
                 {statusUpdate.blockers.map((item, index) => (
-                  <li key={`${statusUpdate.id}-blocker-${index}`}>• {item}</li>
+                  <li key={`${statusUpdate.id}-blocker-${index}`}>
+                    • <MentionText value={item} />
+                  </li>
                 ))}
               </ul>
             </div>
@@ -151,14 +225,16 @@ export function ProjectStatusUpdates({
               </p>
               <ul className="mt-1 space-y-1 text-sm text-muted-foreground">
                 {statusUpdate.nextSteps.map((item, index) => (
-                  <li key={`${statusUpdate.id}-next-${index}`}>• {item}</li>
+                  <li key={`${statusUpdate.id}-next-${index}`}>
+                    • <MentionText value={item} />
+                  </li>
                 ))}
               </ul>
             </div>
           ) : null}
         </article>
       )),
-    [statusUpdatesQuery.data?.items, t],
+    [highlightedStatusUpdateId, statusUpdatesQuery.data?.items, t],
   );
 
   return (
