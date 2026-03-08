@@ -39,7 +39,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
-import { assertValidDateRange } from '../common/date-validation';
+import { assertValidDateRange, normalizeDateOnlyField, toDateOnlyDate } from '../common/date-validation';
 import { Prisma, Priority, ProjectRole, TaskStatus, TaskType, DependencyType, CustomFieldType } from '@prisma/client';
 import { completeTaskLifecycle, DomainConflictError, DomainNotFoundError } from '@atlaspm/domain';
 import { SubtaskService } from './subtask.service';
@@ -919,6 +919,10 @@ export class TasksController {
     const progressAutomation = this.domain.deriveTaskProgressAutomation(progress, requestedStatus, null);
     const status = progressAutomation.status;
     const completedAt = status === TaskStatus.DONE ? progressAutomation.completedAt : null;
+    const startAt = toDateOnlyDate(body.startAt) ?? null;
+    const dueAt = toDateOnlyDate(body.dueAt) ?? null;
+    const baselineStartAt = toDateOnlyDate(body.baselineStartAt) ?? null;
+    const baselineDueAt = toDateOnlyDate(body.baselineDueAt) ?? null;
 
     return this.prisma.$transaction(async (tx) => {
       const task = await tx.task.create({
@@ -932,10 +936,10 @@ export class TasksController {
           progressPercent: progress,
           priority: body.priority,
           assigneeUserId: body.assigneeUserId,
-          startAt: body.startAt ? new Date(body.startAt) : null,
-          dueAt: body.dueAt ? new Date(body.dueAt) : null,
-          baselineStartAt: body.baselineStartAt ? new Date(body.baselineStartAt) : null,
-          baselineDueAt: body.baselineDueAt ? new Date(body.baselineDueAt) : null,
+          startAt,
+          dueAt,
+          baselineStartAt,
+          baselineDueAt,
           tags: body.tags ?? [],
           completedAt,
           position,
@@ -966,16 +970,16 @@ export class TasksController {
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (body.version && body.version !== task.version) throw new ConflictException('Version conflict');
 
-    const effectiveStartAt = body.startAt === undefined ? task.startAt?.toISOString() : body.startAt;
-    const effectiveDueAt = body.dueAt === undefined ? task.dueAt?.toISOString() : body.dueAt;
+    const effectiveStartAt = body.startAt === undefined ? normalizeDateOnlyField(task.startAt) : body.startAt;
+    const effectiveDueAt = body.dueAt === undefined ? normalizeDateOnlyField(task.dueAt) : body.dueAt;
     assertValidDateRange(effectiveStartAt, effectiveDueAt);
     const effectiveBaselineStartAt =
       body.baselineStartAt === undefined
-        ? task.baselineStartAt?.toISOString()
+        ? normalizeDateOnlyField(task.baselineStartAt)
         : body.baselineStartAt;
     const effectiveBaselineDueAt =
       body.baselineDueAt === undefined
-        ? task.baselineDueAt?.toISOString()
+        ? normalizeDateOnlyField(task.baselineDueAt)
         : body.baselineDueAt;
     assertValidDateRange(effectiveBaselineStartAt, effectiveBaselineDueAt, {
       startField: 'baselineStartAt',
@@ -1012,20 +1016,10 @@ export class TasksController {
           progressPercent: progress,
           priority: body.priority,
           assigneeUserId: body.assigneeUserId,
-          startAt: body.startAt ? new Date(body.startAt) : body.startAt === null ? null : undefined,
-          dueAt: body.dueAt ? new Date(body.dueAt) : body.dueAt === null ? null : undefined,
-          baselineStartAt:
-            body.baselineStartAt
-              ? new Date(body.baselineStartAt)
-              : body.baselineStartAt === null
-                ? null
-                : undefined,
-          baselineDueAt:
-            body.baselineDueAt
-              ? new Date(body.baselineDueAt)
-              : body.baselineDueAt === null
-                ? null
-                : undefined,
+          startAt: toDateOnlyDate(body.startAt),
+          dueAt: toDateOnlyDate(body.dueAt),
+          baselineStartAt: toDateOnlyDate(body.baselineStartAt),
+          baselineDueAt: toDateOnlyDate(body.baselineDueAt),
           tags: body.tags,
           sectionId: body.sectionId,
           completedAt,
@@ -1065,8 +1059,8 @@ export class TasksController {
         if (body.dueAt === null) {
           dueDateChanged = task.dueAt !== null;
         } else {
-          const newDueDate = new Date(body.dueAt).getTime();
-          const oldDueDate = task.dueAt ? task.dueAt.getTime() : null;
+          const newDueDate = normalizeDateOnlyField(body.dueAt);
+          const oldDueDate = normalizeDateOnlyField(task.dueAt);
           dueDateChanged = newDueDate !== oldDueDate;
         }
       }
@@ -1119,16 +1113,16 @@ export class TasksController {
         },
       });
     }
-    const effectiveStartAt = body.startAt === undefined ? task.startAt?.toISOString() : body.startAt;
-    const effectiveDueAt = body.dueAt === undefined ? task.dueAt?.toISOString() : body.dueAt;
+    const effectiveStartAt = body.startAt === undefined ? normalizeDateOnlyField(task.startAt) : body.startAt;
+    const effectiveDueAt = body.dueAt === undefined ? normalizeDateOnlyField(task.dueAt) : body.dueAt;
     assertValidDateRange(effectiveStartAt, effectiveDueAt);
 
     return this.prisma.$transaction(async (tx) => {
       const updatedRows = await tx.task.updateMany({
         where: { id, deletedAt: null, version: body.version },
         data: {
-          startAt: body.startAt ? new Date(body.startAt) : body.startAt === null ? null : undefined,
-          dueAt: body.dueAt ? new Date(body.dueAt) : body.dueAt === null ? null : undefined,
+          startAt: toDateOnlyDate(body.startAt),
+          dueAt: toDateOnlyDate(body.dueAt),
           version: { increment: 1 },
         },
       });
@@ -1267,8 +1261,12 @@ export class TasksController {
     let nextStartAt: Date | null = task.startAt;
     let nextDueAt: Date | null = task.dueAt;
     if (hasDrop) {
+      const dropAt = toDateOnlyDate(rawDropAt);
+      if (!dropAt) {
+        throw new BadRequestException('dropAt must be a valid ISO8601 date string');
+      }
       const dropSchedule = this.domain.deriveTimelineDropSchedule({
-        dropAt: new Date(rawDropAt),
+        dropAt,
         currentStartAt: task.startAt,
         currentDueAt: task.dueAt,
         durationDays: body.durationDays,
@@ -1277,10 +1275,10 @@ export class TasksController {
       nextDueAt = dropSchedule.dueAt;
     } else {
       if (body.startAt !== undefined) {
-        nextStartAt = body.startAt ? new Date(body.startAt) : null;
+        nextStartAt = toDateOnlyDate(body.startAt) ?? null;
       }
       if (body.dueAt !== undefined) {
-        nextDueAt = body.dueAt ? new Date(body.dueAt) : null;
+        nextDueAt = toDateOnlyDate(body.dueAt) ?? null;
       }
     }
     this.domain.assertTimelineScheduleRange(nextStartAt, nextDueAt);
@@ -2522,6 +2520,8 @@ export class TasksController {
       throw new BadRequestException('Nested subtasks are not supported');
     }
     assertValidDateRange(body.startAt, body.dueAt);
+    const startAt = toDateOnlyDate(body.startAt) ?? null;
+    const dueAt = toDateOnlyDate(body.dueAt) ?? null;
 
     const topTask = await this.prisma.task.findFirst({
       where: { projectId: parentTask.projectId, sectionId: parentTask.sectionId, deletedAt: null },
@@ -2534,8 +2534,8 @@ export class TasksController {
       projectId: parentTask.projectId,
       sectionId: parentTask.sectionId,
       position,
-      startAt: body.startAt ? new Date(body.startAt) : null,
-      dueAt: body.dueAt ? new Date(body.dueAt) : null,
+      startAt,
+      dueAt,
     };
     return this.subtaskService.createSubtask(parentId, taskData);
   }

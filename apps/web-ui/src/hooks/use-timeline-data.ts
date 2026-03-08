@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useQueries } from '@tanstack/react-query';
+import { dateOnlyInputToLocalDate } from '@atlaspm/domain';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type {
@@ -49,10 +50,6 @@ function startOfDay(value: Date): Date {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate());
 }
 
-function utcDateOnlyToLocalDate(value: Date): Date {
-  return new Date(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate());
-}
-
 function addCalendarDays(base: Date, delta: number): Date {
   const result = startOfDay(base);
   result.setDate(result.getDate() + delta);
@@ -60,13 +57,7 @@ function addCalendarDays(base: Date, delta: number): Date {
 }
 
 function toDateOrNull(value: string | null | undefined): Date | null {
-  if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.valueOf())) return null;
-  if (typeof value === 'string' && /T00:00:00(?:\.000)?Z$/.test(value)) {
-    return utcDateOnlyToLocalDate(parsed);
-  }
-  return startOfDay(parsed);
+  return dateOnlyInputToLocalDate(value);
 }
 
 function dateRange(startRaw: string | null | undefined, dueRaw: string | null | undefined): { start: Date | null; end: Date | null } {
