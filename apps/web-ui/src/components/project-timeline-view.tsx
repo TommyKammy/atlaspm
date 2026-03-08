@@ -141,9 +141,9 @@ const TIMELINE_ZOOM_CONFIG: Record<
   TimelineZoom,
   { beforeDays: number; afterDays: number; stepDays: number; dayColWidth: number }
 > = {
-  day: { beforeDays: 1, afterDays: 5, stepDays: 1, dayColWidth: 64 },
-  week: { beforeDays: 7, afterDays: 21, stepDays: 7, dayColWidth: 36 },
-  month: { beforeDays: 31, afterDays: 92, stepDays: 30, dayColWidth: 24 },
+  day: { beforeDays: 3, afterDays: 10, stepDays: 1, dayColWidth: 64 },
+  week: { beforeDays: 21, afterDays: 42, stepDays: 7, dayColWidth: 36 },
+  month: { beforeDays: 62, afterDays: 184, stepDays: 30, dayColWidth: 24 },
 };
 
 function startOfDay(value: Date): Date {
