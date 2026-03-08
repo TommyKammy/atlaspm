@@ -27,6 +27,8 @@ export function notificationSummary(notification: InboxNotification, t: (key: st
       return `${actor} ${t('notificationApprovedTask')}`;
     case 'approval_rejected':
       return `${actor} ${t('notificationRejectedTask')}`;
+    case 'unknown':
+      return `${actor} ${t('notificationPerformedAction')}`;
     case 'mention':
     default:
       return `${actor} ${t('mentionedYou')}`;

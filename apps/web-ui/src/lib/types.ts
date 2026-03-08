@@ -209,7 +209,8 @@ export type InboxNotificationType =
   | 'comment'
   | 'approval_requested'
   | 'approval_approved'
-  | 'approval_rejected';
+  | 'approval_rejected'
+  | 'unknown';
 
 export type InboxNotification = {
   id: string;

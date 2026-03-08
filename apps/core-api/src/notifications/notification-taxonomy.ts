@@ -6,6 +6,7 @@ export const NOTIFICATION_TYPE_COMMENT = 'comment';
 export const NOTIFICATION_TYPE_APPROVAL_REQUESTED = 'approval_requested';
 export const NOTIFICATION_TYPE_APPROVAL_APPROVED = 'approval_approved';
 export const NOTIFICATION_TYPE_APPROVAL_REJECTED = 'approval_rejected';
+export const NOTIFICATION_TYPE_UNKNOWN = 'unknown';
 
 export const INBOX_NOTIFICATION_TYPES = [
   NOTIFICATION_TYPE_MENTION,
@@ -19,6 +20,7 @@ export const INBOX_NOTIFICATION_TYPES = [
 ] as const;
 
 export type InboxNotificationType = (typeof INBOX_NOTIFICATION_TYPES)[number];
+export type NormalizedInboxNotificationType = InboxNotificationType | typeof NOTIFICATION_TYPE_UNKNOWN;
 
 const LEGACY_NOTIFICATION_TYPE_ALIASES: Record<string, InboxNotificationType> = {
   APPROVAL_REQUESTED: NOTIFICATION_TYPE_APPROVAL_REQUESTED,
@@ -26,9 +28,20 @@ const LEGACY_NOTIFICATION_TYPE_ALIASES: Record<string, InboxNotificationType> = 
   APPROVAL_REJECTED: NOTIFICATION_TYPE_APPROVAL_REJECTED,
 };
 
-export function normalizeInboxNotificationType(type: string): InboxNotificationType {
-  return (
-    LEGACY_NOTIFICATION_TYPE_ALIASES[type] ??
-    (INBOX_NOTIFICATION_TYPES.find((candidate) => candidate === type) ?? NOTIFICATION_TYPE_MENTION)
-  );
+export function normalizeInboxNotificationType(type: string): NormalizedInboxNotificationType {
+  const normalizedFromAlias = LEGACY_NOTIFICATION_TYPE_ALIASES[type];
+  if (normalizedFromAlias) {
+    return normalizedFromAlias;
+  }
+
+  const normalizedFromList = INBOX_NOTIFICATION_TYPES.find((candidate) => candidate === type);
+  if (normalizedFromList) {
+    return normalizedFromList;
+  }
+
+  process.emitWarning(`Unrecognized inbox notification type "${type}"`, {
+    code: 'ATLASPM_UNKNOWN_INBOX_NOTIFICATION_TYPE',
+    type: 'AtlasPMNotificationTaxonomyWarning',
+  });
+  return NOTIFICATION_TYPE_UNKNOWN;
 }
