@@ -4031,11 +4031,6 @@ export function ProjectScheduleCanvas({
                                 className={`relative h-full border-l ${laneDropActive && dragState?.dropRowIndex === row.index ? 'bg-primary/[0.03]' : ''}`}
                               >
                                 <div className="pointer-events-none absolute right-2 top-1/2 z-[3] flex -translate-y-1/2 items-center gap-2">
-                                  {mode === 'timeline' && row.tasks.length > 1 ? (
-                                    <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                                      +{row.tasks.length - 1}
-                                    </Badge>
-                                  ) : null}
                                   {mode === 'gantt' &&
                                   row.tasks.length === 1 &&
                                   (ganttVarianceByTaskId.get(primaryTask.id) ?? null) !== null ? (
@@ -4067,18 +4062,6 @@ export function ProjectScheduleCanvas({
                                               0) > 0
                                           ? t('ganttRiskBlocked')
                                           : t('ganttRiskLateDependency')}
-                                    </Badge>
-                                  ) : null}
-                                  {mode === 'timeline' &&
-                                  row.tasks.length === 1 &&
-                                  primaryTaskRiskLabel ? (
-                                    <Badge
-                                      variant="destructive"
-                                      className="h-5 px-1.5 text-[10px]"
-                                      data-testid={`timeline-risk-badge-${primaryTask.id}`}
-                                      title={primaryTaskRiskLabel}
-                                    >
-                                      {primaryTaskRiskLabel}
                                     </Badge>
                                   ) : null}
                                 </div>
