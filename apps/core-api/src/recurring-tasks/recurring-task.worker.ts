@@ -404,7 +404,25 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
         });
         const nextPosition = (maxPositionTask?.position ?? 0) + 1000;
 
-        await this.prisma.$transaction(async (tx) => {
+        const claimed = await this.prisma.$transaction(async (tx) => {
+          const claim = await tx.recurringTaskGeneration.updateMany({
+            where: {
+              id: generation.id,
+              status: 'failed',
+              taskId: null,
+              retryCount: {
+                lt: 3,
+              },
+            },
+            data: {
+              status: 'pending',
+            },
+          });
+
+          if (claim.count === 0) {
+            return false;
+          }
+
           const task = await tx.task.create({
             data: {
               projectId: rule.projectId,
@@ -426,6 +444,7 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
             data: {
               taskId: task.id,
               status: 'completed',
+              error: null,
               retryCount: {
                 increment: 1,
               },
@@ -472,13 +491,24 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
           this.logger.log(
             `Retry succeeded for generation ${generation.id}, created task ${task.id}`,
           );
+
+          return true;
         });
+
+        if (!claimed) {
+          continue;
+        }
       } catch (retryError) {
         this.logger.error(`Retry failed for generation ${generation.id}:`, retryError);
 
-        await this.prisma.recurringTaskGeneration.update({
-          where: { id: generation.id },
+        await this.prisma.recurringTaskGeneration.updateMany({
+          where: {
+            id: generation.id,
+            status: 'failed',
+            taskId: null,
+          },
           data: {
+            status: 'failed',
             retryCount: {
               increment: 1,
             },
