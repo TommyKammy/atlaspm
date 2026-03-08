@@ -99,4 +99,70 @@ describe('RecurringTaskWorker', () => {
     expect(tx.task.create).not.toHaveBeenCalled();
     expect(prisma.recurringTaskGeneration.findUnique).toHaveBeenCalledTimes(1);
   });
+
+  it('does not create duplicate tasks when the same failed generation is retried concurrently', async () => {
+    const generation = {
+      id: 'gen-failed',
+      ruleId: baseRule.id,
+      scheduledAt: new Date('2026-03-05T00:00:00.000Z'),
+      status: 'failed',
+      retryCount: 0,
+      error: 'transient failure',
+    };
+    let claimed = false;
+
+    const tx = {
+      task: {
+        create: vi.fn(async () => ({ id: 'task-1' })),
+      },
+      recurringTaskGeneration: {
+        updateMany: vi.fn(async () => {
+          if (claimed) {
+            return { count: 0 };
+          }
+          claimed = true;
+          return { count: 1 };
+        }),
+        update: vi.fn(async () => undefined),
+      },
+      recurringRule: {
+        update: vi.fn(async () => undefined),
+      },
+    };
+
+    const prisma = {
+      recurringTaskGeneration: {
+        findMany: vi.fn(async () => [generation]),
+        update: vi.fn(async () => undefined),
+      },
+      recurringRule: {
+        findFirst: vi.fn(async () => ({
+          ...baseRule,
+          isActive: true,
+        })),
+      },
+      task: {
+        findFirst: vi.fn(async () => null),
+      },
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    };
+
+    const domain = {
+      appendAuditOutbox: vi.fn(async () => undefined),
+    };
+
+    const worker = new RecurringTaskWorker(prisma as any, domain as any);
+
+    const [first, second] = await Promise.all([
+      worker.retryFailedGenerations(),
+      worker.retryFailedGenerations(),
+    ]);
+
+    expect(first).toEqual({ retried: 1, succeeded: 1 });
+    expect(second).toEqual({ retried: 1, succeeded: 0 });
+    expect(tx.task.create).toHaveBeenCalledTimes(1);
+    expect(tx.recurringTaskGeneration.updateMany).toHaveBeenCalledTimes(2);
+    expect(tx.recurringTaskGeneration.update).toHaveBeenCalledTimes(1);
+    expect(prisma.recurringTaskGeneration.update).not.toHaveBeenCalled();
+  });
 });
