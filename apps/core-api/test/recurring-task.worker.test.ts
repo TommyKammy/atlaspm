@@ -100,6 +100,45 @@ describe('RecurringTaskWorker', () => {
     expect(prisma.recurringTaskGeneration.findUnique).toHaveBeenCalledTimes(1);
   });
 
+  it('does not start a second processing tick while a prior processing run is still in flight', async () => {
+    const previousEnabled = process.env.RECURRING_WORKER_ENABLED;
+    const previousInterval = process.env.RECURRING_WORKER_INTERVAL_MS;
+    const previousRetryInterval = process.env.RECURRING_WORKER_RETRY_INTERVAL_MS;
+    process.env.RECURRING_WORKER_ENABLED = 'true';
+    process.env.RECURRING_WORKER_INTERVAL_MS = '1000';
+    process.env.RECURRING_WORKER_RETRY_INTERVAL_MS = '60000';
+
+    const { worker } = createWorkerHarness({});
+    const pendingProcess = new Promise<{ processed: number; errors: number }>(() => undefined);
+    const processSpy = vi
+      .spyOn(worker, 'processDueRecurringTasks')
+      .mockReturnValue(pendingProcess);
+    vi.spyOn(worker, 'retryFailedGenerations').mockResolvedValue({ retried: 0, succeeded: 0 });
+
+    worker.onModuleInit();
+    expect(processSpy).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(processSpy).toHaveBeenCalledTimes(1);
+
+    worker.onModuleDestroy();
+    if (previousEnabled === undefined) {
+      delete process.env.RECURRING_WORKER_ENABLED;
+    } else {
+      process.env.RECURRING_WORKER_ENABLED = previousEnabled;
+    }
+    if (previousInterval === undefined) {
+      delete process.env.RECURRING_WORKER_INTERVAL_MS;
+    } else {
+      process.env.RECURRING_WORKER_INTERVAL_MS = previousInterval;
+    }
+    if (previousRetryInterval === undefined) {
+      delete process.env.RECURRING_WORKER_RETRY_INTERVAL_MS;
+    } else {
+      process.env.RECURRING_WORKER_RETRY_INTERVAL_MS = previousRetryInterval;
+    }
+  });
+
   it('does not create duplicate tasks when the same failed generation is retried concurrently', async () => {
     const generation = {
       id: 'gen-failed',
