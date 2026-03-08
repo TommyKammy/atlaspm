@@ -1244,7 +1244,15 @@ export class TasksController {
         },
       });
     }
-    if (task.parentId && hasGroupingPatch) {
+    const hasSubtasks = hasGroupingPatch
+      ? Boolean(
+          await this.prisma.task.findFirst({
+            where: { parentId: id, deletedAt: null },
+            select: { id: true },
+          }),
+        )
+      : false;
+    if (hasGroupingPatch && (task.parentId || hasSubtasks)) {
       throw new ConflictException({
         message: 'Subtasks must stay in the same timeline group as their parent',
         latest: {
