@@ -394,8 +394,7 @@ function normalizeFiniteNumber(value: unknown): number | null {
 function normalizeDateOnly(value: unknown): string | null {
   const normalized = normalizeNonEmptyString(value);
   if (!normalized) return null;
-  const dateOnly = normalized.slice(0, 10);
-  return /^\d{4}-\d{2}-\d{2}$/.test(dateOnly) ? dateOnly : null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : null;
 }
 
 function normalizeIsoDate(value: unknown): string | undefined {

@@ -3548,7 +3548,7 @@ export class TasksController {
       state.sorting = { field: body.sortMode, direction: 'asc' };
     }
 
-    if (body.scheduleFilter) {
+    if (mode === 'timeline' && body.scheduleFilter) {
       state.filters = { ...(state.filters ?? {}), schedule: body.scheduleFilter };
     }
 

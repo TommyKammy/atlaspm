@@ -76,6 +76,40 @@ test('normalizeProjectViewState keeps timeline zoom but drops list-only visible 
   });
 });
 
+test('normalizeProjectViewState only accepts full YYYY-MM-DD date filters', () => {
+  const state = normalizeProjectViewState('list', {
+    filters: {
+      customFieldFilters: [
+        {
+          fieldId: 'cf-date-invalid',
+          type: 'DATE',
+          dateFrom: '2026-03-15T12:00:00Z',
+          dateTo: '2026-03-15junk',
+        },
+        {
+          fieldId: 'cf-date-valid',
+          type: 'DATE',
+          dateFrom: '2026-03-16',
+          dateTo: '2026-03-20',
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(state, {
+    filters: {
+      customFieldFilters: [
+        {
+          fieldId: 'cf-date-valid',
+          type: 'DATE',
+          dateFrom: '2026-03-16',
+          dateTo: '2026-03-20',
+        },
+      ],
+    },
+  });
+});
+
 test('resolveProjectViewState applies working state over named view, saved default, then fallback', () => {
   const resolved = resolveProjectViewState({
     mode: 'timeline',

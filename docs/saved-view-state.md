@@ -1,6 +1,6 @@
 # Saved View State Schema
 
-This issue defines the shared saved-view state contract that follow-up saved-view persistence and UI work build on.
+This document defines the shared saved-view state contract that follow-up saved-view persistence and UI work builds on.
 
 ## Layers
 
