@@ -110,6 +110,10 @@ test('resolveProjectViewState applies working state over named view, saved defau
     grouping: { field: 'status' },
     sorting: { field: 'dueAt', direction: 'desc' },
     filters: { schedule: 'unscheduled' },
-    zoom: { unit: 'day', anchorDate: '2026-03-22T00:00:00.000Z' },
+    zoom: {
+      unit: 'day',
+      anchorDate: '2026-03-22T00:00:00.000Z',
+      workingDaysOnly: false,
+    },
   });
 });

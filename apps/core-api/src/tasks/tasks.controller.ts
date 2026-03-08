@@ -511,11 +511,7 @@ const IMAGE_MIME_ALLOWLIST = new Set(['image/png', 'image/jpeg', 'image/webp', '
 const TIMELINE_LANE_ORDER_BASE_LIMIT = 500;
 const TIMELINE_GROUP_BY_VALUES = ['section', 'assignee'] as const;
 const TIMELINE_VIEW_MODE_VALUES = ['timeline', 'gantt'] as const;
-const TIMELINE_ZOOM_VALUES = ['day', 'week', 'month'] as const;
 const TIMELINE_SWIMLANE_VALUES = ['section', 'assignee', 'status'] as const;
-const TIMELINE_SORT_MODE_VALUES = ['manual', 'startAt', 'dueAt'] as const;
-const TIMELINE_SCHEDULE_FILTER_VALUES = ['all', 'scheduled', 'unscheduled'] as const;
-const GANTT_RISK_FILTER_MODE_VALUES = ['all', 'risk'] as const;
 const TIMELINE_UNASSIGNED_LANE_ID = '__unassigned__';
 const TIMELINE_PARENT_MOVE_LARGE_IMPACT_THRESHOLD = 5;
 
