@@ -94,6 +94,8 @@ model User {
   taskApprovals        TaskApproval[]
   timeLogs             TaskTimeLog[]
   timelinePreferences  ProjectTimelinePreference[]
+  viewPreferences      ProjectViewPreference[]
+  savedViews           ProjectSavedView[]
 }
 
 model WorkspaceMembership {
@@ -149,6 +151,8 @@ model Project {
   recurringRules RecurringRule[]
   forms       Form[]
   timelinePreferences ProjectTimelinePreference[]
+  viewPreferences ProjectViewPreference[]
+  savedViews ProjectSavedView[]
 }
 
 model ProjectStatusUpdate {
@@ -200,6 +204,42 @@ model ProjectTimelinePreference {
 
   @@unique([projectId, userId])
   @@index([userId])
+}
+
+model ProjectViewPreference {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  userId    String   @map("user_id")
+  mode      String
+  state     Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId, mode])
+  @@index([projectId, userId])
+  @@index([userId])
+  @@map("project_view_preferences")
+}
+
+model ProjectSavedView {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  userId    String   @map("user_id")
+  name      String
+  mode      String
+  state     Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, userId, createdAt])
+  @@index([userId])
+  @@map("project_saved_views")
 }
 
 model Section {

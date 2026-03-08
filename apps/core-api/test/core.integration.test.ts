@@ -3199,6 +3199,339 @@ describe('Core API Integration', () => {
       .expect(409);
   });
 
+  test('saved view APIs persist per-user defaults and named views and reject invalid project references', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Saved View Backend Project' })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const otherProjectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Saved View Isolation Project' })
+      .expect(201);
+    const otherProjectId = otherProjectRes.body.id as string;
+
+    const validAssigneeId = `saved-view-member-${projectId}`;
+    await prisma.user.upsert({
+      where: { id: validAssigneeId },
+      create: {
+        id: validAssigneeId,
+        email: `${validAssigneeId}@example.com`,
+        displayName: 'Saved View Member',
+        status: 'ACTIVE',
+      },
+      update: {},
+    });
+    await prisma.workspaceMembership.upsert({
+      where: { workspaceId_userId: { workspaceId, userId: validAssigneeId } },
+      create: { workspaceId, userId: validAssigneeId, role: 'WS_MEMBER' },
+      update: {},
+    });
+    await prisma.projectMembership.upsert({
+      where: { projectId_userId: { projectId, userId: validAssigneeId } },
+      create: { projectId, userId: validAssigneeId, role: 'VIEWER' },
+      update: {},
+    });
+
+    const invalidAssigneeId = `saved-view-outsider-${projectId}`;
+    await prisma.user.upsert({
+      where: { id: invalidAssigneeId },
+      create: {
+        id: invalidAssigneeId,
+        email: `${invalidAssigneeId}@example.com`,
+        displayName: 'Saved View Outsider',
+        status: 'ACTIVE',
+      },
+      update: {},
+    });
+    await prisma.workspaceMembership.upsert({
+      where: { workspaceId_userId: { workspaceId, userId: invalidAssigneeId } },
+      create: { workspaceId, userId: invalidAssigneeId, role: 'WS_MEMBER' },
+      update: {},
+    });
+
+    const sharedField = await prisma.customFieldDefinition.create({
+      data: {
+        projectId,
+        name: 'Priority Bucket',
+        type: 'SELECT',
+        position: 1000,
+        options: {
+          create: [
+            { label: 'P0', value: 'p0', position: 1000 },
+            { label: 'P1', value: 'p1', position: 2000 },
+          ],
+        },
+      },
+      include: {
+        options: {
+          where: { archivedAt: null },
+          orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+        },
+      },
+    });
+    const otherProjectField = await prisma.customFieldDefinition.create({
+      data: {
+        projectId: otherProjectId,
+        name: 'Other Project Field',
+        type: 'BOOLEAN',
+        position: 1000,
+      },
+    });
+
+    const initialSavedViewsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/saved-views`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(initialSavedViewsRes.body.defaultsByMode).toEqual({
+      list: null,
+      board: null,
+      timeline: null,
+      gantt: null,
+    });
+    expect(initialSavedViewsRes.body.views).toEqual([]);
+
+    const saveDefaultRes = await request(app.getHttpServer())
+      .put(`/projects/${projectId}/saved-views/defaults/list`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        state: {
+          grouping: { field: 'section' },
+          sorting: { field: 'title', direction: 'desc' },
+          filters: {
+            statusIds: ['TODO', 'DONE'],
+            assigneeIds: [validAssigneeId],
+            customFieldFilters: [
+              {
+                fieldId: sharedField.id,
+                type: 'SELECT',
+                optionIds: [sharedField.options[0]?.id],
+              },
+            ],
+          },
+          visibleFieldIds: ['name', 'status'],
+        },
+      })
+      .expect(200);
+    expect(saveDefaultRes.body.defaultsByMode.list).toEqual({
+      grouping: { field: 'section' },
+      sorting: { field: 'title', direction: 'desc' },
+      filters: {
+        statusIds: ['TODO', 'DONE'],
+        assigneeIds: [validAssigneeId],
+        customFieldFilters: [
+          {
+            fieldId: sharedField.id,
+            type: 'SELECT',
+            optionIds: [sharedField.options[0]?.id],
+          },
+        ],
+      },
+      visibleFieldIds: ['name', 'status'],
+    });
+
+    const createSavedViewRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/saved-views`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: ' My Focus ',
+        mode: 'list',
+        state: {
+          grouping: { field: 'assignee' },
+          sorting: { field: 'priority', direction: 'asc' },
+          filters: {
+            assigneeIds: [validAssigneeId],
+            statusIds: ['IN_PROGRESS'],
+          },
+          visibleFieldIds: ['name', 'assignee', 'status'],
+        },
+      })
+      .expect(201);
+    expect(createSavedViewRes.body.name).toBe('My Focus');
+    expect(createSavedViewRes.body.mode).toBe('list');
+    expect(createSavedViewRes.body.state).toEqual({
+      grouping: { field: 'assignee' },
+      sorting: { field: 'priority', direction: 'asc' },
+      filters: {
+        assigneeIds: [validAssigneeId],
+        statusIds: ['IN_PROGRESS'],
+      },
+      visibleFieldIds: ['name', 'assignee', 'status'],
+    });
+    const savedViewId = createSavedViewRes.body.id as string;
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/saved-views`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: 'Invalid assignee view',
+        mode: 'list',
+        state: {
+          filters: {
+            assigneeIds: [invalidAssigneeId],
+          },
+        },
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/saved-views`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: 'Invalid field view',
+        mode: 'list',
+        state: {
+          filters: {
+            customFieldFilters: [
+              {
+                fieldId: otherProjectField.id,
+                type: 'BOOLEAN',
+                booleanValue: true,
+              },
+            ],
+          },
+        },
+      })
+      .expect(400);
+
+    const updateSavedViewRes = await request(app.getHttpServer())
+      .patch(`/saved-views/${savedViewId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: 'Renamed Focus',
+        state: {
+          grouping: { field: 'section' },
+          sorting: { field: 'position', direction: 'asc' },
+          filters: {
+            assigneeIds: [validAssigneeId],
+            statusIds: ['TODO'],
+          },
+          visibleFieldIds: ['name', 'dueDate'],
+        },
+      })
+      .expect(200);
+    expect(updateSavedViewRes.body.name).toBe('Renamed Focus');
+    expect(updateSavedViewRes.body.state).toEqual({
+      grouping: { field: 'section' },
+      sorting: { field: 'position', direction: 'asc' },
+      filters: {
+        assigneeIds: [validAssigneeId],
+        statusIds: ['TODO'],
+      },
+      visibleFieldIds: ['name', 'dueDate'],
+    });
+
+    const persistedSavedViewsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/saved-views`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(persistedSavedViewsRes.body.defaultsByMode.list).toEqual({
+      grouping: { field: 'section' },
+      sorting: { field: 'title', direction: 'desc' },
+      filters: {
+        statusIds: ['TODO', 'DONE'],
+        assigneeIds: [validAssigneeId],
+        customFieldFilters: [
+          {
+            fieldId: sharedField.id,
+            type: 'SELECT',
+            optionIds: [sharedField.options[0]?.id],
+          },
+        ],
+      },
+      visibleFieldIds: ['name', 'status'],
+    });
+    expect(persistedSavedViewsRes.body.views).toEqual([
+      expect.objectContaining({
+        id: savedViewId,
+        name: 'Renamed Focus',
+        mode: 'list',
+        state: {
+          grouping: { field: 'section' },
+          sorting: { field: 'position', direction: 'asc' },
+          filters: {
+            assigneeIds: [validAssigneeId],
+            statusIds: ['TODO'],
+          },
+          visibleFieldIds: ['name', 'dueDate'],
+        },
+      }),
+    ]);
+
+    const recentAuditEvents = await prisma.auditEvent.findMany({
+      where: {
+        entityType: 'ProjectSavedView',
+        entityId: { in: [savedViewId] },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(
+      recentAuditEvents.some((event) => event.action === 'project.saved_view.created'),
+    ).toBe(true);
+    expect(
+      recentAuditEvents.some((event) => event.action === 'project.saved_view.updated'),
+    ).toBe(true);
+
+    const recentOutboxEvents = await prisma.outboxEvent.findMany({
+      where: {
+        type: { in: ['project.view_default.updated', 'project.saved_view.created', 'project.saved_view.updated'] },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(
+      recentOutboxEvents.some(
+        (event) =>
+          event.type === 'project.view_default.updated' &&
+          (event.payload as any)?.projectId === projectId &&
+          (event.payload as any)?.mode === 'list',
+      ),
+    ).toBe(true);
+    expect(
+      recentOutboxEvents.some(
+        (event) =>
+          event.type === 'project.saved_view.created' &&
+          (event.payload as any)?.id === savedViewId,
+      ),
+    ).toBe(true);
+    expect(
+      recentOutboxEvents.some(
+        (event) =>
+          event.type === 'project.saved_view.updated' &&
+          (event.payload as any)?.id === savedViewId,
+      ),
+    ).toBe(true);
+
+    await request(app.getHttpServer())
+      .delete(`/saved-views/${savedViewId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const afterDeleteRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/saved-views`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(afterDeleteRes.body.views).toEqual([]);
+
+    const deletedAudit = await prisma.auditEvent.findFirst({
+      where: {
+        entityType: 'ProjectSavedView',
+        entityId: savedViewId,
+        action: 'project.saved_view.deleted',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(deletedAudit).toBeTruthy();
+  });
+
   test('timeline manual layout preserves legacy per-swimlane task order state when upgrading from #232', async () => {
     const workspaceRes = await request(app.getHttpServer())
       .get('/workspaces')
