@@ -2233,12 +2233,13 @@ export function ProjectScheduleCanvas({
       taskRowHeight: TASK_ROW_HEIGHT,
       laneFooterHeight: mode === 'timeline' ? TASK_ROW_HEIGHT : 0,
       compactRows: mode === 'timeline',
-      ...(mode === 'timeline' ? { manualPlacementByLane: treeAwareManualPlacementByLane } : {}),
+      ...(hasActiveManualLayout ? { manualPlacementByLane: treeAwareManualPlacementByLane } : {}),
       expandedRowLaneIds: mode === 'timeline' ? expandedRowLaneIds : [],
       dependencyEdges: timeline.dependencyEdges,
     });
   }, [
     expandedRowLaneIds,
+    hasActiveManualLayout,
     mode,
     treeAwareManualPlacementByLane,
     timeline.dependencyEdges,

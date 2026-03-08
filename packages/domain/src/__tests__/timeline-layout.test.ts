@@ -517,6 +517,17 @@ test('buildTimelineLayout keeps manual task order authoritative over dependency 
         label: 'Design',
         tasks: [
           {
+            id: 'task-chain-b',
+            title: 'Chain follow-up',
+            sectionId: 'design',
+            assigneeUserId: 'user-1',
+            status: 'TODO',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-07'),
+            timelineEnd: utcDate('2026-03-08'),
+          },
+          {
             id: 'task-blocker',
             title: 'Manual blocker first',
             sectionId: 'design',
@@ -537,17 +548,6 @@ test('buildTimelineLayout keeps manual task order authoritative over dependency 
             inWindow: true,
             timelineStart: utcDate('2026-03-05'),
             timelineEnd: utcDate('2026-03-06'),
-          },
-          {
-            id: 'task-chain-b',
-            title: 'Chain follow-up',
-            sectionId: 'design',
-            assigneeUserId: 'user-1',
-            status: 'TODO',
-            hasSchedule: true,
-            inWindow: true,
-            timelineStart: utcDate('2026-03-07'),
-            timelineEnd: utcDate('2026-03-08'),
           },
         ],
       },
@@ -584,17 +584,6 @@ test('buildTimelineLayout keeps manual task order authoritative over dependency 
 test('buildTimelineLayout preserves manual vertical order while still compacting non-overlapping tasks', () => {
   const manualOrderTasks: TaskInput[] = [
     {
-      id: 'task-late',
-      title: 'Manual top, late dates',
-      sectionId: 'design',
-      assigneeUserId: 'user-1',
-      status: 'TODO',
-      hasSchedule: true,
-      inWindow: true,
-      timelineStart: utcDate('2026-03-05'),
-      timelineEnd: utcDate('2026-03-06'),
-    },
-    {
       id: 'task-early',
       title: 'Manual second, early dates',
       sectionId: 'design',
@@ -616,6 +605,17 @@ test('buildTimelineLayout preserves manual vertical order while still compacting
       timelineStart: utcDate('2026-03-03'),
       timelineEnd: utcDate('2026-03-05'),
     },
+    {
+      id: 'task-late',
+      title: 'Manual top, late dates',
+      sectionId: 'design',
+      assigneeUserId: 'user-1',
+      status: 'TODO',
+      hasSchedule: true,
+      inWindow: true,
+      timelineStart: utcDate('2026-03-05'),
+      timelineEnd: utcDate('2026-03-06'),
+    },
   ];
 
   const layout = buildTimelineLayout({
@@ -628,7 +628,7 @@ test('buildTimelineLayout preserves manual vertical order while still compacting
     compactRows: true,
     manualPlacementByLane: {
       'section:design': {
-        orderedTaskIds: manualOrderTasks.map((task) => task.id),
+        orderedTaskIds: ['task-late', 'task-early', 'task-overlap'],
       },
     },
   });
@@ -656,17 +656,6 @@ test('buildTimelineLayout respects manual order for overlapping tasks even when 
         label: 'Design',
         tasks: [
           {
-            id: 'task-late-first',
-            title: 'Manual top despite later start',
-            sectionId: 'design',
-            assigneeUserId: 'user-1',
-            status: 'TODO',
-            hasSchedule: true,
-            inWindow: true,
-            timelineStart: utcDate('2026-03-04'),
-            timelineEnd: utcDate('2026-03-07'),
-          },
-          {
             id: 'task-early-second',
             title: 'Manual second despite earlier start',
             sectionId: 'design',
@@ -676,6 +665,17 @@ test('buildTimelineLayout respects manual order for overlapping tasks even when 
             inWindow: true,
             timelineStart: utcDate('2026-03-02'),
             timelineEnd: utcDate('2026-03-05'),
+          },
+          {
+            id: 'task-late-first',
+            title: 'Manual top despite later start',
+            sectionId: 'design',
+            assigneeUserId: 'user-1',
+            status: 'TODO',
+            hasSchedule: true,
+            inWindow: true,
+            timelineStart: utcDate('2026-03-04'),
+            timelineEnd: utcDate('2026-03-07'),
           },
         ],
       },

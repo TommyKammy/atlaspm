@@ -154,6 +154,20 @@ function applyTaskOrder<TTask extends { id: string }>(
   });
 }
 
+function applyManualPlacementOrder<TTask extends { id: string }>(
+  tasks: TTask[],
+  manualPlacement: TimelineManualLanePlacement | undefined,
+): TTask[] {
+  const orderedTaskIds = manualPlacement?.orderedTaskIds ?? [];
+  if (!orderedTaskIds.length) return tasks;
+  return applyTaskOrder(
+    '__manual-placement__',
+    tasks,
+    { '__manual-placement__': orderedTaskIds },
+    new Map(tasks.map((task, index) => [task.id, index])),
+  );
+}
+
 function buildCompactRowPlacement<TTask extends TimelineLayoutTaskInput>(
   tasks: TTask[],
   dependencyAwarePacking: boolean | undefined,
@@ -419,12 +433,13 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
   const footerRowCount = laneFooterHeight > 0 ? Math.ceil(laneFooterHeight / input.taskRowHeight) : 0;
 
   for (const lane of input.lanes) {
+    const laneManualPlacement = input.manualPlacementByLane?.[lane.id];
+    const orderedLaneTasks = applyManualPlacementOrder(lane.tasks, laneManualPlacement);
     const laneTop = cursorY;
     cursorY += input.sectionRowHeight;
     const taskRows: Array<TimelineTaskRow<TTask>> = [];
     const rows: Array<TimelinePackedRow<TTask>> = [];
     const rowIndexByTaskId: Record<string, number> = {};
-    const laneManualPlacement = input.manualPlacementByLane?.[lane.id];
     const laneUsesManualPlacement = Boolean(laneManualPlacement);
     const laneUsesExpandedRows = expandedRowLaneIds.has(lane.id);
 
@@ -432,7 +447,7 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
       Object.assign(
         rowIndexByTaskId,
         buildCompactRowPlacement(
-          lane.tasks,
+          orderedLaneTasks,
           input.dependencyAwarePacking,
           input.dependencyEdges,
           laneManualPlacement?.rowByTaskId,
@@ -441,7 +456,7 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
       );
     }
 
-    for (const task of lane.tasks) {
+    for (const task of orderedLaneTasks) {
       const rowIndex =
         input.compactRows && !laneUsesExpandedRows
           ? (rowIndexByTaskId[task.id] ?? rows.length)
@@ -477,8 +492,8 @@ export function buildTimelineLayout<TTask extends TimelineLayoutTaskInput>(
     cursorY += laneFooterHeight;
 
     lanesWithRows.push({
-      lane,
-      tasks: lane.tasks,
+      lane: { ...lane, tasks: orderedLaneTasks },
+      tasks: orderedLaneTasks,
       top: laneTop,
       bottom: cursorY,
       footerHeight: laneFooterHeight,
@@ -504,20 +519,24 @@ export function buildTimelineTaskOrderByLane<TTask extends TimelineLayoutTaskInp
   const laneTaskOrder: TimelineTaskOrderByLane = {};
   const expandedRowLaneIds = new Set(input.expandedRowLaneIds ?? []);
   for (const lane of input.lanes) {
-    if (!lane.tasks.length) continue;
+    const orderedLaneTasks = applyManualPlacementOrder(
+      lane.tasks,
+      input.manualPlacementByLane?.[lane.id],
+    );
+    if (!orderedLaneTasks.length) continue;
     if (!input.compactRows || expandedRowLaneIds.has(lane.id)) {
-      laneTaskOrder[lane.id] = lane.tasks.map((task) => task.id);
+      laneTaskOrder[lane.id] = orderedLaneTasks.map((task) => task.id);
       continue;
     }
 
     const compactPlacement = buildCompactRowPlacement(
-      lane.tasks,
+      orderedLaneTasks,
       input.dependencyAwarePacking,
       input.dependencyEdges,
       input.manualPlacementByLane?.[lane.id]?.rowByTaskId,
       Boolean(input.manualPlacementByLane?.[lane.id]),
     );
-    laneTaskOrder[lane.id] = [...lane.tasks]
+    laneTaskOrder[lane.id] = [...orderedLaneTasks]
       .sort((left, right) => {
         const rowDelta =
           (compactPlacement.rowIndexByTaskId[left.id] ?? 0) -
