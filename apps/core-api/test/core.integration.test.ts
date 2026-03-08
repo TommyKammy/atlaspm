@@ -3469,7 +3469,7 @@ describe('Core API Integration', () => {
 
     const recentAuditEvents = await prisma.auditEvent.findMany({
       where: {
-        entityType: { in: ['ProjectViewPreference', 'ProjectSavedView'] },
+        entityType: 'ProjectSavedView',
         entityId: { in: [savedViewId] },
       },
       orderBy: { createdAt: 'asc' },
