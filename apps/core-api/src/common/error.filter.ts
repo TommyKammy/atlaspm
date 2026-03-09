@@ -40,11 +40,12 @@ export class GlobalErrorFilter implements ExceptionFilter {
 
     const errorMessage = exception instanceof Error ? exception.message : 'Unknown error';
     const errorStack = exception instanceof Error ? exception.stack : undefined;
-    const route = req.route?.path ?? req.path ?? req.url;
+    const path = req.path ?? req.url;
+    const route = req.route?.path ?? path;
 
     this.logger.error({
       message: 'Internal Server Error',
-      path: route,
+      path,
       route,
       method: req.method,
       body: redactLogData(req.body),

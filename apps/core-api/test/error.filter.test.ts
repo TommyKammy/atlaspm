@@ -4,6 +4,8 @@ import { GlobalErrorFilter } from '../src/common/error.filter';
 
 type RequestLike = {
   url: string;
+  path?: string;
+  route?: { path?: string };
   method: string;
   body: Record<string, unknown>;
   query: Record<string, unknown>;
@@ -30,27 +32,37 @@ describe('GlobalErrorFilter', () => {
   test('redacts sensitive request data in unexpected error logs', () => {
     const filter = new GlobalErrorFilter();
     const request: RequestLike = {
-      url: '/auth/callback/token-abc',
+      url: '/projects/project-1/tasks?access_token=query-access-token',
+      path: '/projects/project-1/tasks',
+      route: { path: '/projects/:id/tasks' },
       method: 'POST',
       correlationId: 'corr-123',
       user: { sub: 'user-123' },
       body: {
         email: 'user@example.com',
+        inviteCode: 'invite-code',
         password: 'super-secret',
         nested: {
           token: 'body-token',
           attachments: [
             { accessToken: 'attachment-token', name: 'contract.pdf' },
-            { metadata: { apiKey: 'nested-api-key' } },
+            {
+              metadata: {
+                apiKey: 'nested-api-key',
+                inviterEmail: 'owner@example.com',
+              },
+            },
           ],
         },
       },
       query: {
         search: 'visible',
         access_token: 'query-access-token',
+        invitedEmail: 'friend@example.com',
       },
       params: {
         taskId: 'task-1',
+        invitationId: 'invite-1',
         token: 'param-token',
       },
     };
@@ -67,27 +79,36 @@ describe('GlobalErrorFilter', () => {
     expect(errorSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         message: 'Internal Server Error',
-        path: '/auth/callback/token-abc',
+        path: '/projects/project-1/tasks',
+        route: '/projects/:id/tasks',
         method: 'POST',
         correlationId: 'corr-123',
         user: 'user-123',
         body: {
-          email: 'user@example.com',
+          email: '[REDACTED]',
+          inviteCode: '[REDACTED]',
           password: '[REDACTED]',
           nested: {
             token: '[REDACTED]',
             attachments: [
               { accessToken: '[REDACTED]', name: 'contract.pdf' },
-              { metadata: { apiKey: '[REDACTED]' } },
+              {
+                metadata: {
+                  apiKey: '[REDACTED]',
+                  inviterEmail: '[REDACTED]',
+                },
+              },
             ],
           },
         },
         query: {
           search: 'visible',
           access_token: '[REDACTED]',
+          invitedEmail: '[REDACTED]',
         },
         params: {
           taskId: 'task-1',
+          invitationId: '[REDACTED]',
           token: '[REDACTED]',
         },
       }),

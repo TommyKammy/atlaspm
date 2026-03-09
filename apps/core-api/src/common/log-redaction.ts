@@ -1,6 +1,8 @@
 const REDACTED_VALUE = '[REDACTED]';
 
 const SENSITIVE_KEY_PATTERNS = [
+  /email/i,
+  /invit(e|ation)/i,
   /password/i,
   /passphrase/i,
   /secret/i,
