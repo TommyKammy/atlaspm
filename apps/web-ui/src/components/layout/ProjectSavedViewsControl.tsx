@@ -115,9 +115,9 @@ export function ProjectSavedViewsControl({
     });
   }, [listLikeWorkingState, mode, savedViewsQuery.data, selectedViewId, updateProjectQueryParams]);
 
-  if (!projectId || !mode) return null;
+  const currentState = useMemo(() => {
+    if (!projectId || !mode) return null;
 
-  const getCurrentState = () => {
     if (mode === 'list' || mode === 'board') {
       return listLikeWorkingState ?? buildListLikeProjectViewState({
         mode,
@@ -128,10 +128,8 @@ export function ProjectSavedViewsControl({
     }
 
     return readTimelineProjectViewState(projectId, mode) ?? null;
-  };
-
-  const currentState = getCurrentState();
-  const currentStateIsSavable = currentState ? hasProjectViewState(mode, currentState) : false;
+  }, [listLikeWorkingState, mode, projectId]);
+  const currentStateIsSavable = mode && currentState ? hasProjectViewState(mode, currentState) : false;
 
   const invalidateSavedViews = async () => {
     await queryClient.invalidateQueries({ queryKey: queryKeys.projectSavedViews(projectId) });
@@ -139,7 +137,7 @@ export function ProjectSavedViewsControl({
 
   const saveViewMutation = useMutation({
     mutationFn: async () => {
-      if (!currentState) {
+      if (!projectId || !mode || !currentState) {
         throw new Error('Current view state is unavailable');
       }
       return api(`/projects/${projectId}/saved-views`, {
@@ -180,7 +178,7 @@ export function ProjectSavedViewsControl({
 
   const setDefaultMutation = useMutation({
     mutationFn: async () => {
-      if (!currentState) {
+      if (!projectId || !mode || !currentState) {
         throw new Error('Current view state is unavailable');
       }
       return api(`/projects/${projectId}/saved-views/defaults/${mode}`, {
@@ -220,6 +218,8 @@ export function ProjectSavedViewsControl({
   });
 
   const applyView = (view: ProjectSavedView) => {
+    if (!mode) return;
+
     if (mode === 'list' || mode === 'board') {
       updateProjectQueryParams({
         ...buildListLikeProjectViewQueryUpdates(view.state),
@@ -232,6 +232,8 @@ export function ProjectSavedViewsControl({
     }
     setOpen(false);
   };
+
+  if (!projectId || !mode) return null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

@@ -632,6 +632,27 @@ function applySavedProjectViewState(
   applyTimelineViewState(savedProjectViewStateToTimelineViewState(mode, parsed), setters);
 }
 
+function buildViewStateForMode(
+  mode: TimelineMode,
+  snapshot: LocalTimelineViewStateSnapshot,
+): TimelineViewState {
+  return mode === 'timeline'
+    ? {
+        zoom: snapshot.zoom,
+        anchorDate: snapshot.anchorDate.toISOString(),
+        swimlane: snapshot.swimlane,
+        sortMode: snapshot.sortMode,
+        scheduleFilter: snapshot.scheduleFilter,
+        workingDaysOnly: snapshot.workingDaysOnly,
+      }
+    : {
+        zoom: snapshot.zoom,
+        anchorDate: snapshot.anchorDate.toISOString(),
+        ganttRiskFilterMode: snapshot.ganttRiskFilterMode,
+        ganttStrictMode: snapshot.ganttStrictMode,
+      };
+}
+
 function buildSavedProjectViewStateForMode(
   mode: TimelineMode,
   snapshot: LocalTimelineViewStateSnapshot,
@@ -1155,9 +1176,20 @@ export function ProjectScheduleCanvas({
     [mode],
   );
   const selectedSavedViewId = searchParams.get(PROJECT_SAVED_VIEW_PARAM);
+  const legacyPersistedDefaultViewState = useMemo(() => {
+    const candidate =
+      mode === 'timeline'
+        ? timelinePreferencesQuery.data?.timelineViewState
+        : timelinePreferencesQuery.data?.ganttViewState;
+    return parseSavedProjectViewState(mode, candidate);
+  }, [
+    mode,
+    timelinePreferencesQuery.data?.ganttViewState,
+    timelinePreferencesQuery.data?.timelineViewState,
+  ]);
   const persistedDefaultViewState = useMemo(
-    () => savedViewsQuery.data?.defaultsByMode[mode] ?? null,
-    [mode, savedViewsQuery.data?.defaultsByMode],
+    () => savedViewsQuery.data?.defaultsByMode[mode] ?? legacyPersistedDefaultViewState,
+    [legacyPersistedDefaultViewState, mode, savedViewsQuery.data?.defaultsByMode],
   );
   const selectedNamedView = useMemo(
     () =>
@@ -1346,24 +1378,61 @@ export function ProjectScheduleCanvas({
     mutationFn: async ({
       nextMode,
       viewState,
+      savedViewState,
     }: {
       nextMode: TimelineMode;
-      viewState: SavedProjectViewState;
+      viewState: TimelineViewState;
+      savedViewState: SavedProjectViewState;
     }) =>
-      (await api(`/projects/${projectId}/saved-views/defaults/${nextMode}`, {
-        method: 'PUT',
-        body: { state: viewState },
-      })) as ProjectSavedViewsResponse,
+      (await Promise.all([
+        api(`/projects/${projectId}/timeline/preferences/view-state/${nextMode}`, {
+          method: 'PUT',
+          body: viewState,
+        }) as Promise<TimelinePreferences>,
+        api(`/projects/${projectId}/saved-views/defaults/${nextMode}`, {
+          method: 'PUT',
+          body: { state: savedViewState },
+        }) as Promise<ProjectSavedViewsResponse>,
+      ]))[0],
     onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.projectSavedViews(projectId),
-      });
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.projectTimelinePreferences(projectId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.projectSavedViews(projectId),
+        }),
+      ]);
     },
     onError: () => {
       setRescheduleNotice({ type: 'error', message: t('timelineViewStateSaveFailed') });
     },
   });
 
+  const currentModeViewState = useMemo(
+    () =>
+      buildViewStateForMode(mode, {
+        zoom,
+        anchorDate,
+        swimlane,
+        sortMode,
+        scheduleFilter,
+        workingDaysOnly,
+        ganttRiskFilterMode,
+        ganttStrictMode,
+      }),
+    [
+      anchorDate,
+      ganttRiskFilterMode,
+      ganttStrictMode,
+      mode,
+      scheduleFilter,
+      sortMode,
+      swimlane,
+      workingDaysOnly,
+      zoom,
+    ],
+  );
   const currentModeSavedViewState = useMemo(
     () =>
       buildSavedProjectViewStateForMode(mode, {
@@ -3480,7 +3549,8 @@ export function ProjectScheduleCanvas({
               onClick={() =>
                 saveViewStateMutation.mutate({
                   nextMode: mode,
-                  viewState: currentModeSavedViewState,
+                  viewState: currentModeViewState,
+                  savedViewState: currentModeSavedViewState,
                 })
               }
             >
