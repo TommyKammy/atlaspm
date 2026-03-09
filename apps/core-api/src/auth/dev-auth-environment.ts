@@ -1,3 +1,5 @@
+import { getValidatedDevAuthSecret } from './dev-auth-secret';
+
 const SAFE_DEV_AUTH_NODE_ENVS = new Set(['development', 'test']);
 
 function normalizeNodeEnv(nodeEnv: string | undefined): string | null {
@@ -19,12 +21,16 @@ export function shouldRegisterDevAuthController(env: NodeJS.ProcessEnv = process
 }
 
 export function assertSafeDevAuthEnvironment(env: NodeJS.ProcessEnv = process.env): void {
-  if (!isDevAuthEnabled(env) || isSafeDevAuthEnvironment(env)) {
+  if (!isDevAuthEnabled(env)) {
     return;
   }
 
-  const receivedNodeEnv = normalizeNodeEnv(env.NODE_ENV) ?? '(unset)';
-  throw new Error(
-    `DEV_AUTH_ENABLED=true is only allowed when NODE_ENV is one of: development, test. Received NODE_ENV=${receivedNodeEnv}.`,
-  );
+  if (!isSafeDevAuthEnvironment(env)) {
+    const receivedNodeEnv = normalizeNodeEnv(env.NODE_ENV) ?? '(unset)';
+    throw new Error(
+      `DEV_AUTH_ENABLED=true is only allowed when NODE_ENV is one of: development, test. Received NODE_ENV=${receivedNodeEnv}.`,
+    );
+  }
+
+  getValidatedDevAuthSecret(env);
 }

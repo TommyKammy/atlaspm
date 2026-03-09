@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { SignJWT, jwtVerify, createRemoteJWKSet } from 'jose';
 import { createSecretKey } from 'crypto';
 import type { AuthUser } from '../common/types';
+import { getValidatedDevAuthSecret } from './dev-auth-secret';
 
 @Injectable()
 export class AuthService {
@@ -10,7 +11,7 @@ export class AuthService {
     const token = authHeader.slice('Bearer '.length);
     const devEnabled = process.env.DEV_AUTH_ENABLED === 'true';
     if (devEnabled) {
-      const secret = createSecretKey(Buffer.from(process.env.DEV_AUTH_SECRET ?? 'dev-secret'));
+      const secret = createSecretKey(Buffer.from(getValidatedDevAuthSecret()));
       let payload: Awaited<ReturnType<typeof jwtVerify>>['payload'];
       try {
         ({ payload } = await jwtVerify(token, secret, { issuer: 'atlaspm-dev', audience: 'atlaspm-dev' }));
@@ -37,7 +38,7 @@ export class AuthService {
 
   async mintDevToken(sub: string, email?: string, name?: string) {
     if (process.env.DEV_AUTH_ENABLED !== 'true') throw new UnauthorizedException('Dev auth disabled');
-    const secret = createSecretKey(Buffer.from(process.env.DEV_AUTH_SECRET ?? 'dev-secret'));
+    const secret = createSecretKey(Buffer.from(getValidatedDevAuthSecret()));
     const ttl = process.env.DEV_AUTH_TOKEN_TTL ?? '8h';
     return new SignJWT({ email, name })
       .setProtectedHeader({ alg: 'HS256' })

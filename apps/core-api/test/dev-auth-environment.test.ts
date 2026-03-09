@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import { AuthService } from '../src/auth/auth.service';
 import { DevAuthModule } from '../src/auth/dev-auth.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -70,10 +71,33 @@ describe('Dev auth environment guardrails', () => {
     await expect(app.init()).rejects.toThrow(/DEV_AUTH_ENABLED=true is only allowed/i);
   });
 
+  test('fails startup when dev auth is enabled without an explicit secret', async () => {
+    process.env.NODE_ENV = 'test';
+    process.env.DEV_AUTH_ENABLED = 'true';
+    delete process.env.DEV_AUTH_SECRET;
+
+    const app = await createAuthApp();
+
+    await expect(app.init()).rejects.toThrow(/DEV_AUTH_SECRET/i);
+  });
+
+  test.each(['dev-secret', 'dev-secret-change-me', 'short-secret'])(
+    'fails startup when dev auth uses a weak or placeholder secret: %s',
+    async (secret) => {
+      process.env.NODE_ENV = 'test';
+      process.env.DEV_AUTH_ENABLED = 'true';
+      process.env.DEV_AUTH_SECRET = secret;
+
+      const app = await createAuthApp();
+
+      await expect(app.init()).rejects.toThrow(/DEV_AUTH_SECRET/i);
+    },
+  );
+
   test('allows dev auth token minting in the test environment', async () => {
     process.env.NODE_ENV = 'test';
     process.env.DEV_AUTH_ENABLED = 'true';
-    process.env.DEV_AUTH_SECRET = 'dev-secret';
+    process.env.DEV_AUTH_SECRET = 'local-dev-auth-secret-for-tests';
 
     const app = await createAuthApp();
     await app.init();
@@ -89,5 +113,25 @@ describe('Dev auth environment guardrails', () => {
     } finally {
       await app.close();
     }
+  });
+
+  test.each([
+    { name: 'missing secret', secret: undefined },
+    { name: 'default fallback secret', secret: 'dev-secret' },
+    { name: 'placeholder secret', secret: 'dev-secret-change-me' },
+    { name: 'short secret', secret: 'short-secret' },
+  ])('AuthService rejects dev token minting with $name', async ({ secret }) => {
+    process.env.DEV_AUTH_ENABLED = 'true';
+    process.env.NODE_ENV = 'test';
+
+    if (secret === undefined) {
+      delete process.env.DEV_AUTH_SECRET;
+    } else {
+      process.env.DEV_AUTH_SECRET = secret;
+    }
+
+    const authService = new AuthService();
+
+    await expect(authService.mintDevToken('user-123')).rejects.toThrow(/DEV_AUTH_SECRET/i);
   });
 });
