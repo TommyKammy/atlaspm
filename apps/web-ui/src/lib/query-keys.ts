@@ -12,6 +12,7 @@ export const queryKeys = {
     ['project', projectId, 'tasks', { groupBy: 'section' }] as const,
   projectTasksDeletedGrouped: (projectId: string) =>
     ['project', projectId, 'tasks', { groupBy: 'section', deleted: true }] as const,
+  projectAudit: (projectId: string) => ['project', projectId, 'audit'] as const,
   projectRules: (projectId: string) => ['project', projectId, 'rules'] as const,
   projectRecurringRules: (projectId: string, options?: { includeInactive?: boolean }) =>
     ['project', projectId, 'recurring-rules', options?.includeInactive ? 'all' : 'active'] as const,

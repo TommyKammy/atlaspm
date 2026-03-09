@@ -1103,6 +1103,81 @@ describe('Core API Integration', () => {
     expect(defaultSection).toBeTruthy();
   });
 
+  test('GET /projects/:id/audit includes project-scoped member and rule changes', async () => {
+    const auth = app.get(AuthService);
+
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
+
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Audit Scope ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const invitedUserId = `project-audit-member-${Date.now()}`;
+    const invitedEmail = `${invitedUserId}@example.com`;
+    const inviteRes = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ email: invitedEmail, role: 'WS_MEMBER' })
+      .expect(201);
+    const invitedToken = await auth.mintDevToken(invitedUserId, invitedEmail, 'Project Audit Member');
+    await request(app.getHttpServer())
+      .post('/invitations/accept')
+      .set('Authorization', `Bearer ${invitedToken}`)
+      .send({ token: String(inviteRes.body.inviteLink).split('inviteToken=')[1] })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/members`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: invitedUserId, role: 'MEMBER' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/projects/${projectId}/members/${invitedUserId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ role: 'VIEWER' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/rules`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: `Audit Rule ${Date.now()}`,
+        templateKey: `custom_audit_scope_${Date.now()}`,
+        enabled: true,
+        definition: {
+          trigger: 'task.progress.changed',
+          logicalOperator: 'AND',
+          conditions: [{ field: 'progressPercent', op: 'gte', value: 60 }],
+          actions: [{ type: 'setStatus', status: 'DONE' }],
+        },
+      })
+      .expect(201);
+
+    const auditRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/audit`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(auditRes.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ entityType: 'Project', action: 'project.created', entityId: projectId }),
+        expect.objectContaining({ entityType: 'ProjectMembership', action: 'project.member.added' }),
+        expect.objectContaining({ entityType: 'ProjectMembership', action: 'project.member.role_changed' }),
+        expect.objectContaining({ entityType: 'Rule', action: 'rule.created' }),
+      ]),
+    );
+  });
+
   test('custom field definition APIs enforce RBAC and emit audit/outbox', async () => {
     const wsRes = await request(app.getHttpServer())
       .get('/workspaces')

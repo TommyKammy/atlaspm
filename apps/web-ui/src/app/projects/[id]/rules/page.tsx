@@ -4,9 +4,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { api } from '@/lib/api';
+import { AuditActivityList } from '@/components/audit-activity-list';
 import { queryKeys } from '@/lib/query-keys';
 import { useI18n } from '@/lib/i18n';
 import type {
+  AuditEvent,
   CustomFieldDefinition,
   Rule,
   RuleAction,
@@ -653,6 +655,11 @@ export default function RulesPage() {
     queryFn: () => api(`/projects/${projectId}/members`),
     enabled: Boolean(projectId),
   });
+  const auditQuery = useQuery<AuditEvent[]>({
+    queryKey: queryKeys.projectAudit(projectId),
+    queryFn: () => api(`/projects/${projectId}/audit`),
+    enabled: Boolean(projectId),
+  });
   const meQuery = useQuery<{ id: string }>({
     queryKey: queryKeys.me,
     queryFn: () => api('/me'),
@@ -676,6 +683,7 @@ export default function RulesPage() {
         if (current.some((rule) => rule.id === created.id)) return current;
         return [...current, created].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
       });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectAudit(projectId) });
       setIsCreating(false);
     },
   });
@@ -687,6 +695,7 @@ export default function RulesPage() {
       queryClient.setQueryData<Rule[]>(queryKeys.projectRules(projectId), (current = []) =>
         current.map((rule) => (rule.id === updated.id ? updated : rule)),
       );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectAudit(projectId) });
     },
   });
 
@@ -697,6 +706,7 @@ export default function RulesPage() {
       queryClient.setQueryData<Rule[]>(queryKeys.projectRules(projectId), (current = []) =>
         current.map((rule) => (rule.id === updated.id ? updated : rule)),
       );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectAudit(projectId) });
       setEditingRuleId(null);
     },
   });
@@ -707,6 +717,7 @@ export default function RulesPage() {
       queryClient.setQueryData<Rule[]>(queryKeys.projectRules(projectId), (current = []) =>
         current.filter((rule) => rule.id !== id),
       );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectAudit(projectId) });
     },
   });
 
@@ -817,6 +828,13 @@ export default function RulesPage() {
       {!rules.length ? (
         <div className="rounded-lg border border-dashed bg-card p-6 text-sm text-muted-foreground">{t('noRules')}</div>
       ) : null}
+
+      <section className="rounded-lg border bg-card p-4">
+        <h2 className="text-base font-semibold">{t('activity')}</h2>
+        <div className="mt-3">
+          <AuditActivityList events={auditQuery.data ?? []} members={membersQuery.data ?? []} />
+        </div>
+      </section>
     </div>
   );
 }

@@ -31,6 +31,7 @@ import type {
   RecurringFrequency,
   ReminderPreferences,
   RecurringRule,
+  Section,
   SectionTaskGroup,
   Task,
   TaskAttachment,
@@ -40,6 +41,7 @@ import type {
   TaskTree,
 } from '@/lib/types';
 import { ApprovalSection } from '@/components/task-approval-section';
+import { AuditActivityList } from '@/components/audit-activity-list';
 import { DependencyManager } from '@/components/dependency-manager';
 import TaskDescriptionEditor from '@/components/editor/TaskDescriptionEditor';
 import { ProjectSelector } from '@/components/project-selector';
@@ -58,48 +60,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/lib/i18n';
 import { DEFAULT_REMINDER_PREFERENCES } from '@/lib/reminder-preferences';
 import { cn } from '@/lib/utils';
-
-const AUDIT_DIFF_IGNORED_KEYS = new Set([
-  'createdAt',
-  'updatedAt',
-  'version',
-  'descriptionVersion',
-  'correlationId',
-]);
-
-const AUDIT_DIFF_PREFERRED_KEYS = new Set([
-  'title',
-  'status',
-  'progressPercent',
-  'priority',
-  'assigneeUserId',
-  'startAt',
-  'dueAt',
-  'sectionId',
-  'completedAt',
-  'parentId',
-  'deletedAt',
-]);
-
-function formatAuditEvent(event: AuditEvent, t: (key: string) => string) {
-  const action = event.action;
-  if (action === 'task.description.updated') return t('activityUpdatedDescription');
-  if (action === 'task.description.snapshot_saved') return t('activityUpdatedDescription');
-  if (action === 'task.comment.created') return t('activityAddedComment');
-  if (action === 'task.comment.updated') return t('activityEditedComment');
-  if (action === 'task.comment.deleted') return t('activityDeletedComment');
-  if (action === 'task.reordered') return t('activityReorderedTask');
-  if (action === 'task.updated') return t('activityUpdatedTask');
-  if (action === 'task.mention.created') return t('activityAddedMention');
-  if (action === 'task.mention.deleted') return t('activityRemovedMention');
-  if (action === 'task.attachment.created') return t('activityAddedAttachment');
-  if (action === 'task.attachment.deleted') return t('activityDeletedAttachment');
-  if (action === 'task.reminder.set') return t('activitySetReminder');
-  if (action === 'task.reminder.cleared') return t('activityClearedReminder');
-  if (action === 'task.reminder.sent') return t('activitySentReminder');
-  if (action === 'rule.applied') return t('activityAppliedRule');
-  return action;
-}
 
 function getAuditDescriptionText(event: AuditEvent) {
   const beforeRaw = event.beforeJson?.descriptionText;
@@ -152,86 +112,6 @@ function renderTaskTypeCompletionIcon(task: Task | null | undefined, isDone: boo
     return <Stamp className={cn('mr-1 h-4 w-4 shrink-0', isDone ? 'text-emerald-600' : 'text-muted-foreground')} />;
   }
   return isDone ? <CheckCircle2 className="mr-1 h-4 w-4 shrink-0" /> : <Circle className="mr-1 h-4 w-4 shrink-0" />;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function isPrimitive(value: unknown) {
-  return (
-    value === null ||
-    value === undefined ||
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  );
-}
-
-function auditFieldLabel(key: string, t: (key: string) => string) {
-  if (key === 'title') return t('name');
-  if (key === 'status') return t('status');
-  if (key === 'progressPercent') return t('progress');
-  if (key === 'priority') return t('priorityAll').replace(':', '');
-  if (key === 'assigneeUserId') return t('assignee');
-  if (key === 'startAt') return t('startDate');
-  if (key === 'dueAt') return t('dueDate');
-  if (key === 'sectionId') return t('section');
-  if (key === 'completedAt') return t('statusDone');
-  if (key === 'parentId') return t('subtasks');
-  if (key === 'deletedAt') return t('delete');
-  return key;
-}
-
-function formatAuditValue(
-  value: unknown,
-  field: string,
-  locale: 'en' | 'ja',
-  t: (key: string) => string,
-) {
-  if (value === null || value === undefined || value === '') return t('noValue');
-  if (typeof value === 'boolean') return value ? 'true' : 'false';
-  if (typeof value === 'number') return String(value);
-  if (typeof value === 'string') {
-    if (field === 'status') return statusLabel(value as Task['status'], t);
-    if (
-      field === 'startAt'
-      || field === 'dueAt'
-      || field === 'baselineStartAt'
-      || field === 'baselineDueAt'
-    ) {
-      const date = dateOnlyInputToLocalDate(value);
-      if (date) {
-        return date.toLocaleDateString(locale === 'ja' ? 'ja-JP' : 'en-US');
-      }
-    }
-    if (field.endsWith('At')) {
-      const date = new Date(value);
-      if (!Number.isNaN(date.getTime())) {
-        return date.toLocaleString(locale === 'ja' ? 'ja-JP' : 'en-US');
-      }
-    }
-    return value;
-  }
-  const serialized = JSON.stringify(value);
-  return serialized.length > 96 ? `${serialized.slice(0, 96)}...` : serialized;
-}
-
-function extractAuditDiff(event: AuditEvent) {
-  const before = isPlainRecord(event.beforeJson) ? event.beforeJson : {};
-  const after = isPlainRecord(event.afterJson) ? event.afterJson : {};
-  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
-
-  const changed = [...keys].filter((key) => {
-    if (AUDIT_DIFF_IGNORED_KEYS.has(key)) return false;
-    const left = before[key];
-    const right = after[key];
-    if (JSON.stringify(left) === JSON.stringify(right)) return false;
-    if (AUDIT_DIFF_PREFERRED_KEYS.has(key)) return true;
-    return isPrimitive(left) && isPrimitive(right);
-  });
-
-  return { before, after, changed };
 }
 
 function parseCommentBody(body: string) {
@@ -500,6 +380,11 @@ export default function TaskDetailDrawer({
   const membersQuery = useQuery<ProjectMember[]>({
     queryKey: queryKeys.projectMembers(projectId),
     queryFn: () => api(`/projects/${projectId}/members`),
+    enabled,
+  });
+  const sectionsQuery = useQuery<Section[]>({
+    queryKey: queryKeys.projectSections(projectId),
+    queryFn: () => api(`/projects/${projectId}/sections`),
     enabled,
   });
 
@@ -1661,40 +1546,11 @@ export default function TaskDetailDrawer({
               ) : null}
 
               {tab === 'activity' ? (
-                <div className="space-y-2">
-                  {activity.map((event) => {
-                    const diff = extractAuditDiff(event);
-                    return (
-                      <div key={event.id} className="border-b border-border/60 pb-2" data-testid={`activity-${event.id}`}>
-                        <div className="text-sm font-medium">
-                          {event.actor} {formatAuditEvent(event, t)}
-                        </div>
-                        <div className="text-xs text-muted-foreground">{new Date(event.createdAt).toLocaleString()}</div>
-                        {diff.changed.length ? (
-                          <div className="mt-2 space-y-1 rounded-md border border-border/60 bg-muted/20 p-2">
-                            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                              {t('changes')}
-                            </div>
-                            {diff.changed.slice(0, 8).map((field) => (
-                              <div key={`${event.id}-${field}`} className="grid grid-cols-[132px_1fr_1fr] gap-2 text-xs">
-                                <div className="text-muted-foreground">{auditFieldLabel(field, t)}</div>
-                                <div>
-                                  <span className="font-medium">{t('before')}:</span>{' '}
-                                  {formatAuditValue(diff.before[field], field, locale, t)}
-                                </div>
-                                <div>
-                                  <span className="font-medium">{t('after')}:</span>{' '}
-                                  {formatAuditValue(diff.after[field], field, locale, t)}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                  {!activity.length ? <div className="text-sm text-muted-foreground">{t('noActivityYet')}</div> : null}
-                </div>
+                <AuditActivityList
+                  events={activity}
+                  members={membersQuery.data ?? []}
+                  sections={sectionsQuery.data ?? []}
+                />
               ) : null}
             </div>
           </div>

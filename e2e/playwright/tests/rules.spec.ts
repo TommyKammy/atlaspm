@@ -51,7 +51,9 @@ test('Rule can be created from rules page', async ({ page }) => {
   await page.getByTestId('rule-create-name-input').fill(ruleName);
   await page.getByTestId('rule-create-save').click();
 
-  await expect(page.getByText(ruleName)).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('[data-testid^="rule-name-"]').filter({ hasText: ruleName }).first()).toBeVisible({
+    timeout: 15000,
+  });
 });
 
 test('Custom rule can be deleted from rules page', async ({ page }) => {
@@ -63,7 +65,9 @@ test('Custom rule can be deleted from rules page', async ({ page }) => {
   await page.getByTestId('rule-create-button').click();
   await page.getByTestId('rule-create-name-input').fill(ruleName);
   await page.getByTestId('rule-create-save').click();
-  await expect(page.getByText(ruleName)).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('[data-testid^="rule-name-"]').filter({ hasText: ruleName }).first()).toBeVisible({
+    timeout: 15000,
+  });
 
   const createdCard = page
     .locator('[data-testid^="rule-card-"]')
