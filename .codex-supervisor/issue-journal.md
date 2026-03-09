@@ -1,62 +1,71 @@
-# Issue #286: P5-3: Add operational hardening for migrations, jobs, and observability
+# Issue #272: P1-3: Build saved-view UI for save/apply/rename/delete
 
 ## Supervisor Snapshot
-- Issue URL: https://github.com/TommyKammy/atlaspm/issues/286
-- Branch: codex/reopen-issue-286
-- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-286
-- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-286/.codex-supervisor/issue-journal.md
+- Issue URL: https://github.com/TommyKammy/atlaspm/issues/272
+- Branch: codex/reopen-issue-272
+- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-272
+- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-272/.codex-supervisor/issue-journal.md
 - Current phase: addressing_review
-- Attempt count: 2
-- Last head SHA: 521c3f4d1304d654f516c66fe21ab91dbe186400
+- Attempt count: 3
+- Last head SHA: 212b31b691eb6b55e540754d3e1230c9adfc8283
 - Blocked reason: none
-- Last failure signature: PRRT_kwDORWcwRc5y6G0v|PRRT_kwDORWcwRc5y6G02|PRRT_kwDORWcwRc5y6G08|PRRT_kwDORWcwRc5y6G1B
+- Last failure signature: PRRT_kwDORWcwRc5y7n84|PRRT_kwDORWcwRc5y7n9N|PRRT_kwDORWcwRc5y7n9U
 - Repeated failure signature count: 1
-- Updated at: 2026-03-09T02:40:07.433Z
+- Updated at: 2026-03-09T06:23:40.355Z
 
 ## Latest Codex Summary
-Added a checkpoint commit on `codex/reopen-issue-286`: `521c3f4` (`Add migration preflight and request log hardening`).
+Draft PR is open at https://github.com/TommyKammy/atlaspm/pull/308 on `codex/reopen-issue-272`. The saved-view checkpoint remains `212b31b` (`Add saved view controls to project shell`), and the focused verification still passes for save/apply/rename/delete/default reload behavior.
 
-The focused reproducer was a new test proving `http.request.start` logs were missing `userId`; that is now fixed in [request-logging.middleware.ts](/home/tommy/Dev/atlaspm-worktrees/issue-286/apps/core-api/src/common/request-logging.middleware.ts). I also added a Prisma startup preflight in [migration-health.ts](/home/tommy/Dev/atlaspm-worktrees/issue-286/apps/core-api/src/prisma/migration-health.ts) and wired it through [prisma.service.ts](/home/tommy/Dev/atlaspm-worktrees/issue-286/apps/core-api/src/prisma/prisma.service.ts) so startup now logs structured migration health, warns on pending/extra migrations, and blocks startup on failed migrations with explicit recovery guidance. The new tests are in [request-logging.middleware.test.ts](/home/tommy/Dev/atlaspm-worktrees/issue-286/apps/core-api/test/request-logging.middleware.test.ts) and [migration-health.test.ts](/home/tommy/Dev/atlaspm-worktrees/issue-286/apps/core-api/test/migration-health.test.ts).
+The only remaining local dirt is non-checkpoint metadata: the updated issue journal and generated `apps/web-ui/tsconfig.tsbuildinfo`.
 
-Verification was focused and clean after generating Prisma client: `pnpm exec vitest run test/request-logging.middleware.test.ts test/migration-health.test.ts`, `pnpm prisma:generate`, and `pnpm type-check`. I also updated [.codex-supervisor/issue-journal.md](/home/tommy/Dev/atlaspm-worktrees/issue-286/.codex-supervisor/issue-journal.md) with the repro, commands, and next step.
-
-Summary: Added a reproducing test and fix for missing request-start `userId` logs, plus Prisma migration-health startup diagnostics and guardrails; committed as `521c3f4`.
-State hint: implementing
+Summary: Pushed the saved-view checkpoint and opened draft PR #308 for review.
+State hint: draft_pr
 Blocked reason: none
-Tests: `cd apps/core-api && pnpm exec vitest run test/request-logging.middleware.test.ts test/migration-health.test.ts`; `cd apps/core-api && pnpm prisma:generate`; `cd apps/core-api && pnpm type-check`
+Tests: `pnpm --filter @atlaspm/web-ui type-check`; `./scripts/run-e2e.sh tests/saved-views.spec.ts`; `E2E_REBUILD=1 ./scripts/run-e2e.sh tests/saved-views.spec.ts`
 Failure signature: none
-Next action: Add the next narrow reproducer around background job failure/completion diagnostics and extend structured job observability in the same style.
+Next action: Monitor draft PR #308 for CI or review feedback and address any focused follow-up issues.
 
 ## Active Failure Context
 - Category: review
-- Summary: 4 unresolved automated review thread(s) remain.
-- Reference: https://github.com/TommyKammy/atlaspm/pull/307#discussion_r2902900985
+- Summary: 3 unresolved automated review thread(s) remain.
+- Reference: https://github.com/TommyKammy/atlaspm/pull/308#discussion_r2903435265
 - Details:
-  - apps/core-api/src/common/request-logging.middleware.ts:7 `userId` is captured before Nest guards run. In this app, `AuthGuard` sets `req.user` during `canActivate`, which happens after Express middleware registration in `main.ts`, so `userId` here will almost always be `'anonymous'` and this change will also regress the `http.request.end` log (it previously could pick up `req.user` by the time `finish` fires). Consider computing `userId` inside the `finish` callback (for the end log), and if you truly need `userId` on the start event, move the start logging to a Nest interceptor/guard that runs after authentication rather than Express middleware.
-  - apps/core-api/test/request-logging.middleware.test.ts:30 This test pre-populates `request.user` before invoking the Express middleware, but in production `req.user` is populated by `AuthGuard.canActivate` (after middleware), so `http.request.start` will not see a user and this test will give false confidence. To match real behavior, start with no `user`, then set `request.user` before triggering the captured `finish` listener; assert that the end log includes the authenticated `userId` and decide whether the start log should omit `userId` or use a sentinel like `'unknown'`.
-  - apps/core-api/src/prisma/prisma.service.ts:22 `inspectMigrationHealth()` can throw (e.g., missing `prisma/migrations` directory at runtime, or `_prisma_migrations` table not present / insufficient privileges). Right now any such error will crash startup without producing the structured health output you intended. Consider wrapping the migration-health probe in a try/catch that logs a clear, operator-actionable warning/error (and decide explicitly whether to fail open or fail closed for probe failures).
-  - apps/core-api/src/prisma/migration-health.ts:36 This uses `$queryRawUnsafe` even though the SQL is static. Using the safe `$queryRaw` API (e.g., with `Prisma.sql`) avoids normalizing an unsafe pattern into the codebase and makes it harder to accidentally introduce SQL injection later if the query becomes parameterized.
+  - apps/web-ui/src/components/layout/ProjectSavedViewsControl.tsx:322 `data-testid` for apply uses `view.name`, which is user-controlled and changes on rename. This makes selectors brittle (e.g., names containing quotes/special chars) and breaks the general convention elsewhere in the repo of using stable identifiers in test ids. Use `view.id` (or a normalized/sanitized segment) for the test id, and rely on visible text (or a separate attribute) to assert the name in tests. ```suggestion data-testid={`saved-view-apply-${view.id}`} ```
+  - e2e/playwright/tests/saved-views.spec.ts:96 After clicking "set default", the test proceeds and then calls `page.reload()` without explicitly waiting for the default-setting request to finish. A navigation/reload can cancel in-flight fetches, which can make this E2E flow flaky. Add an explicit wait for the mutation to settle (e.g., wait for the button to exit the pending state/text to revert, or wait for the saved-views response to reflect the new default) before reloading.
+  - apps/web-ui/src/lib/types.ts:39 `ProjectViewMode`, `ProjectViewCustomFieldFilter`, and `ProjectViewState` are re-declared here even though identical types already exist in `@atlaspm/domain` (see `packages/domain/src/services/project-view-state.ts`). Duplicating these shapes in web-ui risks drift and subtle incompatibilities over time (e.g., when a new mode or filter field is added). Prefer importing/re-exporting the domain types (or referencing them directly) and only define web-ui–specific API response wrappers in this file. ```suggestion import type { ProjectViewMode, ProjectViewCustomFieldFilter, ProjectViewState } from '@atlaspm/domain'; export type { ProjectViewMode, ProjectViewCustomFieldFilter, ProjectViewState }; export type Project = { id: string; workspaceId: string; name: string }; ```
 
 ## Codex Working Notes
 ### Current Handoff
-- Hypothesis: The valid review fixes are to align request logging with actual Nest auth timing and to make the migration-health probe fail open with structured diagnostics while still failing closed for confirmed failed migrations.
-- Primary failure or risk: Review threads identified an incorrect middleware assumption (`req.user` not available at request start), unsafe `$queryRawUnsafe` usage for a static query, and missing probe-error handling that could crash startup without actionable output.
-- Last focused command: `cd /home/tommy/Dev/atlaspm-worktrees/issue-286/apps/core-api && pnpm prisma:generate && pnpm type-check`
-- Files changed: `apps/core-api/src/common/request-logging.middleware.ts`, `apps/core-api/src/prisma/prisma.service.ts`, `apps/core-api/src/prisma/migration-health.ts`, `apps/core-api/test/request-logging.middleware.test.ts`, `apps/core-api/test/migration-health.test.ts`, `docs/architecture.md`
+- Hypothesis: The saved-view issue is a missing `web-ui` surface, not a backend gap. A focused list-view e2e can drive the narrowest useful implementation, then the same shell control can bridge timeline/gantt state via lightweight local-storage + event sync.
+- Primary failure or risk: Automated review flagged three valid follow-ups: unstable user-controlled `data-testid` values, duplicated project-view domain types in `web-ui`, and an e2e reload that could race the default-save request.
+- Last focused command: `cd /home/tommy/Dev/atlaspm-worktrees/issue-272 && E2E_REBUILD=1 ./scripts/run-e2e.sh tests/saved-views.spec.ts`
+- Files changed: `apps/web-ui/src/components/layout/ProjectSavedViewsControl.tsx`, `apps/web-ui/src/lib/types.ts`, `e2e/playwright/tests/saved-views.spec.ts`
 - Next 1-3 actions:
-  1. Commit the review fixes for request logging and migration probe handling.
-  2. Update the PR branch and resolve the automated review threads.
-  3. If more review arrives, keep the next change narrowly scoped to the cited behavior.
+  1. Commit and push the review-fix follow-up to PR #308.
+  2. Resolve the three automated review threads after the branch update.
+  3. If more feedback arrives, keep the next change constrained to saved-view shell behavior.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
-- Reproduced with `pnpm exec vitest run test/request-logging.middleware.test.ts` after installing dependencies; failure showed missing `userId` on `http.request.start`.
-- Focused verification now passing:
-  - `cd apps/core-api && pnpm exec vitest run test/request-logging.middleware.test.ts test/migration-health.test.ts`
-  - `cd apps/core-api && pnpm prisma:generate`
-  - `cd apps/core-api && pnpm type-check`
-- Review fixes applied:
-  - request-start logs no longer claim `userId`; request-end still captures `req.user` after guards.
-  - migration-health now uses `$queryRaw` with `Prisma.sql`.
-  - startup wraps migration probe failures and emits `prisma.migrations.probe_failed` warnings instead of crashing on probe-only errors.
-  - default migrations path now resolves relative to `src/prisma`/`dist/prisma`, not process cwd.
+- Reproduced first with `./scripts/run-e2e.sh tests/saved-views.spec.ts`; initial focused failure was `saved-view-trigger` missing in the project header.
+- Needed `pnpm install` in this worktree before the Playwright runner was available.
+- Current focused verification passing:
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm --filter @atlaspm/web-ui lint`
+  - `./scripts/run-e2e.sh tests/saved-views.spec.ts`
+  - `E2E_REBUILD=1 ./scripts/run-e2e.sh tests/saved-views.spec.ts`
+- Branch/PR status:
+  - committed checkpoint: `212b31b` (`Add saved view controls to project shell`)
+  - pushed branch: `origin/codex/reopen-issue-272`
+  - draft PR: `https://github.com/TommyKammy/atlaspm/pull/308`
+- UI slice implemented:
+  - Added a shared project saved-view popover in the header for save/apply/rename/delete/set-default.
+  - List/board saved views serialize current filter state from URL params and clear active named selection on manual filter edits.
+  - Timeline/gantt now resolve defaults/named views from `/projects/:id/saved-views`, and listen for shell apply events so named/default changes take effect without refresh.
+  - Focused Playwright coverage now exercises save, apply, rename, delete, and default-on-reload for list view.
+- Review follow-up applied:
+  - saved-view apply buttons now use stable `view.id`-based test ids.
+  - `apps/web-ui/src/lib/types.ts` now re-exports project-view types from `@atlaspm/domain` instead of duplicating them.
+  - the Playwright default-save step now waits for the `PUT /saved-views/defaults/list` response before reloading.
+- Local workspace note:
+  - `apps/web-ui/tsconfig.tsbuildinfo` is still modified from local type-checking and was not included in the checkpoint commit.

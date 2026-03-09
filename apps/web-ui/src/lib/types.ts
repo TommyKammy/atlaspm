@@ -1,4 +1,26 @@
+import type { ProjectViewCustomFieldFilter, ProjectViewMode, ProjectViewState } from '@atlaspm/domain';
+
+export type { ProjectViewCustomFieldFilter, ProjectViewMode, ProjectViewState };
+
 export type Project = { id: string; workspaceId: string; name: string };
+
+export type ProjectSavedView = {
+  id: string;
+  projectId: string;
+  userId: string;
+  name: string;
+  mode: ProjectViewMode;
+  state: ProjectViewState;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProjectSavedViewsResponse = {
+  projectId: string;
+  userId: string;
+  defaultsByMode: Record<ProjectViewMode, ProjectViewState | null>;
+  views: ProjectSavedView[];
+};
 
 export type Workspace = {
   id: string;
