@@ -6,6 +6,7 @@ import {
   Req,
   UnauthorizedException,
   BadRequestException,
+  ServiceUnavailableException,
   Logger,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
@@ -96,12 +97,12 @@ export class SlackWebhookController {
     this.logger.debug('Received Slack event', { type: payload.type });
 
     // Verify signature BEFORE processing anything (including challenge)
-    const signingSecret = process.env.SLACK_SIGNING_SECRET;
-    if (signingSecret) {
-      verifySlackSignature(signingSecret, signature, timestamp, req.rawBody);
-    } else {
-      this.logger.warn('SLACK_SIGNING_SECRET not configured, skipping signature verification');
+    const signingSecret = process.env.SLACK_SIGNING_SECRET?.trim();
+    if (!signingSecret) {
+      this.logger.error('SLACK_SIGNING_SECRET is not configured; rejecting Slack webhook request');
+      throw new ServiceUnavailableException('Slack signing secret is not configured');
     }
+    verifySlackSignature(signingSecret, signature, timestamp, req.rawBody);
 
     // Now safe to return challenge
     if (payload.challenge) {
