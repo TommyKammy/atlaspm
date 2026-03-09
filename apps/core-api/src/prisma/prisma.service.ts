@@ -1,8 +1,11 @@
 import { INestApplication, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { resolve } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import {
+  formatMigrationHealthProbeFailure,
   formatMigrationHealth,
   inspectMigrationHealth,
+  type MigrationHealthSummary,
   shouldBlockStartupForMigrationHealth,
 } from './migration-health';
 
@@ -12,8 +15,16 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
 
   async onModuleInit() {
     await this.$connect();
+    const migrationsDir = this.resolveMigrationsDir();
+    let summary: MigrationHealthSummary;
 
-    const summary = await inspectMigrationHealth(this);
+    try {
+      summary = await inspectMigrationHealth(this, migrationsDir);
+    } catch (error) {
+      this.logger.warn(formatMigrationHealthProbeFailure(error, migrationsDir));
+      return;
+    }
+
     const message = formatMigrationHealth(summary);
 
     if (shouldBlockStartupForMigrationHealth(summary)) {
@@ -33,5 +44,9 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
     process.on('beforeExit', () => {
       void app.close();
     });
+  }
+
+  private resolveMigrationsDir() {
+    return resolve(__dirname, '../../prisma/migrations');
   }
 }

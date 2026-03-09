@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
+  formatMigrationHealthProbeFailure,
   formatMigrationHealth,
   inspectMigrationHealth,
   shouldBlockStartupForMigrationHealth,
@@ -25,7 +26,7 @@ describe('migration health', () => {
     ]);
 
     const prisma = {
-      $queryRawUnsafe: vi.fn().mockResolvedValue([
+      $queryRaw: vi.fn().mockResolvedValue([
         {
           migration_name: '202602230001_init',
           finished_at: new Date('2026-02-23T00:01:00.000Z'),
@@ -48,7 +49,7 @@ describe('migration health', () => {
     const migrationsDir = createMigrationsDir(['202602230001_init']);
 
     const prisma = {
-      $queryRawUnsafe: vi.fn().mockResolvedValue([
+      $queryRaw: vi.fn().mockResolvedValue([
         {
           migration_name: '202602230001_init',
           finished_at: null,
@@ -71,6 +72,17 @@ describe('migration health', () => {
     expect(message).toContain('"event":"prisma.migrations.attention_required"');
     expect(message).toContain('"hasLogs":true');
     expect(message).toContain('Failed Prisma migrations detected');
+  });
+
+  test('formats probe failures with actionable structured warnings', () => {
+    const message = formatMigrationHealthProbeFailure(
+      new Error('permission denied for relation _prisma_migrations'),
+      '/srv/atlaspm/apps/core-api/prisma/migrations',
+    );
+
+    expect(message).toContain('"event":"prisma.migrations.probe_failed"');
+    expect(message).toContain('/srv/atlaspm/apps/core-api/prisma/migrations');
+    expect(message).toContain('permission denied for relation _prisma_migrations');
   });
 
   function createMigrationsDir(migrationNames: string[]) {

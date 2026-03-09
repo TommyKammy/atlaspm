@@ -1,8 +1,9 @@
 import { readdir } from 'node:fs/promises';
-import { basename, resolve } from 'node:path';
+import { resolve } from 'node:path';
+import { Prisma } from '@prisma/client';
 
 type MigrationQueryClient = {
-  $queryRawUnsafe<T = unknown>(query: string): Promise<T>;
+  $queryRaw<T = unknown>(query: Prisma.Sql): Promise<T>;
 };
 
 type MigrationRow = {
@@ -23,16 +24,15 @@ export type MigrationHealthSummary = {
 
 export async function inspectMigrationHealth(
   prisma: MigrationQueryClient,
-  migrationsDir = resolve(process.cwd(), 'prisma', 'migrations'),
+  migrationsDir = resolve(__dirname, '../../prisma/migrations'),
 ): Promise<MigrationHealthSummary> {
   const localMigrationNames = (await readdir(migrationsDir, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
-    .filter((name) => name !== basename(migrationsDir))
     .sort();
 
-  const rows = await prisma.$queryRawUnsafe<MigrationRow[]>(
-    'SELECT migration_name, finished_at, rolled_back_at, logs FROM "_prisma_migrations" ORDER BY migration_name ASC',
+  const rows = await prisma.$queryRaw<MigrationRow[]>(
+    Prisma.sql`SELECT migration_name, finished_at, rolled_back_at, logs FROM "_prisma_migrations" ORDER BY migration_name ASC`,
   );
 
   const appliedRows = rows.filter((row) => row.finished_at && !row.rolled_back_at);
@@ -102,4 +102,14 @@ export function formatMigrationHealth(summary: MigrationHealthSummary) {
 
 export function shouldBlockStartupForMigrationHealth(summary: MigrationHealthSummary) {
   return summary.failedDatabaseMigrations.length > 0;
+}
+
+export function formatMigrationHealthProbeFailure(error: unknown, migrationsDir: string) {
+  return JSON.stringify({
+    event: 'prisma.migrations.probe_failed',
+    migrationsDir,
+    error: error instanceof Error ? error.message : String(error),
+    warning:
+      'Unable to inspect Prisma migration health during startup. Verify the migrations directory, database permissions, and "_prisma_migrations" table state.',
+  });
 }

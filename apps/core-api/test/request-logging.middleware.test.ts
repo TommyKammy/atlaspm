@@ -19,14 +19,13 @@ describe('RequestLoggingMiddleware', () => {
     vi.restoreAllMocks();
   });
 
-  test('logs user identity on request start and end', () => {
+  test('logs authenticated user identity on request end after guards populate req.user', () => {
     const middleware = new RequestLoggingMiddleware();
     const request: RequestLike = {
       method: 'GET',
       path: '/tasks',
       query: { projectId: 'project-1' },
       correlationId: 'corr-123',
-      user: { sub: 'user-123' },
     };
 
     let finishListener: (() => void) | undefined;
@@ -43,6 +42,7 @@ describe('RequestLoggingMiddleware', () => {
     const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
 
     middleware.use(request as never, response as never, next);
+    request.user = { sub: 'user-123' };
     finishListener?.();
 
     expect(next).toHaveBeenCalledTimes(1);
@@ -56,8 +56,8 @@ describe('RequestLoggingMiddleware', () => {
       path: '/tasks',
       query: { projectId: 'project-1' },
       correlationId: 'corr-123',
-      userId: 'user-123',
     });
+    expect(startLog.userId).toBeUndefined();
 
     const endLog = JSON.parse(infoSpy.mock.calls[1][0] as string);
     expect(endLog).toMatchObject({
