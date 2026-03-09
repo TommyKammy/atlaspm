@@ -221,6 +221,7 @@ DROP INDEX IF EXISTS "Task_active_project_section_position_idx";
 DROP INDEX IF EXISTS "Task_active_project_dueAt_idx";
 DROP INDEX IF EXISTS "Task_active_project_status_assignee_dueAt_idx";
 DROP INDEX IF EXISTS "Task_active_project_updatedAt_desc_idx";
+DROP INDEX IF EXISTS "inbox_notifications_user_id_unread_created_at_desc_idx";
 SQL
 
 PSQL_DATABASE="$DB_NAME" REPORT_TITLE="AtlasPM DB EXPLAIN Prodlike Baseline (Wave1 only)" \
@@ -239,11 +240,16 @@ CREATE INDEX IF NOT EXISTS "Task_active_project_status_assignee_dueAt_idx"
 CREATE INDEX IF NOT EXISTS "Task_active_project_updatedAt_desc_idx"
   ON "Task"("projectId", "updatedAt" DESC)
   WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS "inbox_notifications_user_id_unread_created_at_desc_idx"
+  ON "inbox_notifications"("user_id", "created_at" DESC)
+  WHERE "read_at" IS NULL;
 SQL
 
 echo "==> Re-analyzing after index recreation"
 db_psql <<'SQL'
 ANALYZE "Task";
+ANALYZE inbox_notifications;
 SQL
 
 PSQL_DATABASE="$DB_NAME" REPORT_TITLE="AtlasPM DB EXPLAIN Prodlike After Indexes (Wave2)" \

@@ -155,6 +155,15 @@ export class NotificationsService {
     });
   }
 
+  private async listAccessibleProjectIds(userId: string) {
+    const memberships = await this.prisma.projectMembership.findMany({
+      where: { userId },
+      select: { projectId: true },
+    });
+
+    return memberships.map((membership) => membership.projectId);
+  }
+
   async createTaskAssignmentNotification(
     tx: Prisma.TransactionClient,
     input: {
@@ -309,15 +318,16 @@ export class NotificationsService {
     status: 'all' | 'unread';
     take: number;
   }) {
+    const accessibleProjectIds = await this.listAccessibleProjectIds(input.userId);
+    if (!accessibleProjectIds.length) {
+      return [];
+    }
+
     const notifications = await this.prisma.inboxNotification.findMany({
       where: {
         userId: input.userId,
+        projectId: { in: accessibleProjectIds },
         ...(input.status === 'unread' ? { readAt: null } : {}),
-        project: {
-          memberships: {
-            some: { userId: input.userId },
-          },
-        },
       },
       include: {
         project: { select: { id: true, name: true } },
@@ -325,7 +335,10 @@ export class NotificationsService {
         statusUpdate: { select: { id: true, summary: true, health: true, createdAt: true } },
         triggeredBy: { select: { id: true, displayName: true, email: true } },
       },
-      orderBy: [{ readAt: 'asc' }, { createdAt: 'desc' }],
+      orderBy:
+        input.status === 'unread'
+          ? [{ createdAt: 'desc' }]
+          : [{ readAt: 'asc' }, { createdAt: 'desc' }],
       take: input.take,
     });
     return notifications.map((notification) => ({
@@ -335,15 +348,16 @@ export class NotificationsService {
   }
 
   async unreadCountForUser(userId: string) {
+    const accessibleProjectIds = await this.listAccessibleProjectIds(userId);
+    if (!accessibleProjectIds.length) {
+      return 0;
+    }
+
     return this.prisma.inboxNotification.count({
       where: {
         userId,
+        projectId: { in: accessibleProjectIds },
         readAt: null,
-        project: {
-          memberships: {
-            some: { userId },
-          },
-        },
       },
     });
   }
