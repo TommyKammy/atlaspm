@@ -310,13 +310,6 @@ export default function ProjectPage() {
         highlightedStatusUpdateId={highlightedStatusUpdateId}
       />
 
-      <section className="rounded-lg border bg-card p-4">
-        <h2 className="text-base font-semibold">{t('activity')}</h2>
-        <div className="mt-3">
-          <AuditActivityList events={projectAuditQuery.data ?? []} members={projectMembersQuery.data ?? []} />
-        </div>
-      </section>
-
       {view === 'list' ? (
         <>
           {!canEditProject ? (
@@ -502,6 +495,13 @@ export default function ProjectPage() {
           {view} {t('listViewIsPlanned')}
         </section>
       )}
+
+      <section className="rounded-lg border bg-card p-4">
+        <h2 className="text-base font-semibold">{t('activity')}</h2>
+        <div className="mt-3">
+          <AuditActivityList events={projectAuditQuery.data ?? []} members={projectMembersQuery.data ?? []} />
+        </div>
+      </section>
     </div>
   );
 }
