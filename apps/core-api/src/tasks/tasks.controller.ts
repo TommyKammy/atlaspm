@@ -39,7 +39,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
-import { assertValidDateRange, normalizeDateOnlyField, toDateOnlyDate } from '../common/date-validation';
+import { assertValidDateRange, normalizeDateOnlyField, parseTaskDateQuery, toDateOnlyDate } from '../common/date-validation';
 import { Prisma, Priority, ProjectRole, TaskStatus, TaskType, DependencyType, CustomFieldType } from '@prisma/client';
 import {
   completeTaskLifecycle,
@@ -85,11 +85,11 @@ class TaskQuery {
   assignee?: string;
 
   @IsOptional()
-  @IsISO8601()
+  @IsString()
   dueFrom?: string;
 
   @IsOptional()
-  @IsISO8601()
+  @IsString()
   dueTo?: string;
 
   @IsOptional()
@@ -606,8 +606,8 @@ export class TasksController {
     if (query.assignee) where.assigneeUserId = query.assignee;
     if (query.dueFrom || query.dueTo) {
       where.dueAt = {
-        gte: query.dueFrom ? new Date(query.dueFrom) : undefined,
-        lte: query.dueTo ? new Date(query.dueTo) : undefined,
+        gte: query.dueFrom ? parseTaskDateQuery(query.dueFrom, 'dueFrom') : undefined,
+        lte: query.dueTo ? parseTaskDateQuery(query.dueTo, 'dueTo') : undefined,
       };
     }
     if (query.tag) where.tags = { has: query.tag };
