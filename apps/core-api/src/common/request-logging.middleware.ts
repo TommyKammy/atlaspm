@@ -3,6 +3,7 @@ import type { NextFunction, Request, Response } from 'express';
 export class RequestLoggingMiddleware {
   use(req: Request & { correlationId?: string; user?: { sub?: string } }, res: Response, next: NextFunction) {
     const correlationId = req.correlationId ?? 'unknown';
+    const userId = req.user?.sub ?? 'anonymous';
     const startedAt = Date.now();
     console.info(
       JSON.stringify({
@@ -12,6 +13,7 @@ export class RequestLoggingMiddleware {
         path: req.path,
         query: req.query,
         correlationId,
+        userId,
       }),
     );
 
@@ -25,7 +27,7 @@ export class RequestLoggingMiddleware {
           path: req.path,
           statusCode: res.statusCode,
           durationMs,
-          userId: req.user?.sub ?? 'anonymous',
+          userId,
           correlationId,
         }),
       );
