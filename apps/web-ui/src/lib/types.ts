@@ -251,6 +251,23 @@ export type InboxNotification = {
   } | null;
 };
 
+export type NotificationDeliveryFailure = {
+  eventId: string;
+  type: string;
+  project: {
+    id: string;
+    name: string;
+  };
+  status: 'retrying' | 'dead_lettered';
+  deliveryAttempts: number;
+  nextRetryAt?: string | null;
+  deadLetteredAt?: string | null;
+  lastError?: string | null;
+  createdAt: string;
+  correlationId: string;
+  retryable: boolean;
+};
+
 export type AuditEvent = {
   id: string;
   actor: string;

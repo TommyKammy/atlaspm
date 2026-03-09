@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { ProjectRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { Prisma } from '@prisma/client';
@@ -346,5 +347,148 @@ export class NotificationsService {
         },
       },
     });
+  }
+
+  async listDeliveryFailuresForUser(input: {
+    userId: string;
+    take: number;
+  }) {
+    const adminMemberships = await this.prisma.projectMembership.findMany({
+      where: {
+        userId: input.userId,
+        role: ProjectRole.ADMIN,
+      },
+      select: {
+        project: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+    if (!adminMemberships.length) {
+      return [];
+    }
+
+    const projectMap = new Map(adminMemberships.map((membership) => [membership.project.id, membership.project]));
+    const candidateEvents = await this.prisma.outboxEvent.findMany({
+      where: {
+        deliveredAt: null,
+        deliveryAttempts: { gt: 0 },
+      },
+      orderBy: [{ deadLetteredAt: 'desc' }, { nextRetryAt: 'asc' }, { createdAt: 'desc' }],
+      take: Math.max(input.take * 4, 100),
+    });
+    if (!candidateEvents.length) {
+      return [];
+    }
+
+    const taskIds = new Set<string>();
+    const sectionIds = new Set<string>();
+    for (const event of candidateEvents) {
+      for (const taskId of this.collectStringValues(event.payload, 'taskId')) {
+        taskIds.add(taskId);
+      }
+      for (const sectionId of this.collectStringValues(event.payload, 'sectionId')) {
+        sectionIds.add(sectionId);
+      }
+    }
+
+    const [taskRows, sectionRows] = await Promise.all([
+      taskIds.size
+        ? this.prisma.task.findMany({
+            where: { id: { in: [...taskIds] } },
+            select: { id: true, projectId: true },
+          })
+        : Promise.resolve([]),
+      sectionIds.size
+        ? this.prisma.section.findMany({
+            where: { id: { in: [...sectionIds] } },
+            select: { id: true, projectId: true },
+          })
+        : Promise.resolve([]),
+    ]);
+    const taskProjectMap = new Map(taskRows.map((row) => [row.id, row.projectId]));
+    const sectionProjectMap = new Map(sectionRows.map((row) => [row.id, row.projectId]));
+
+    return candidateEvents
+      .map((event) => {
+        const projectId = this.resolveProjectIdForEvent(event.payload, projectMap, taskProjectMap, sectionProjectMap);
+        if (!projectId) {
+          return null;
+        }
+        const project = projectMap.get(projectId);
+        if (!project) {
+          return null;
+        }
+        return {
+          eventId: event.id,
+          type: event.type,
+          project,
+          status: event.deadLetteredAt ? 'dead_lettered' : 'retrying',
+          deliveryAttempts: event.deliveryAttempts,
+          nextRetryAt: event.nextRetryAt,
+          deadLetteredAt: event.deadLetteredAt,
+          lastError: event.lastError,
+          createdAt: event.createdAt,
+          correlationId: event.correlationId,
+          retryable: Boolean(event.deadLetteredAt),
+        };
+      })
+      .filter((event): event is NonNullable<typeof event> => Boolean(event))
+      .slice(0, input.take);
+  }
+
+  private resolveProjectIdForEvent(
+    payload: unknown,
+    adminProjects: Map<string, { id: string; name: string }>,
+    taskProjectMap: Map<string, string>,
+    sectionProjectMap: Map<string, string>,
+  ) {
+    for (const projectId of this.collectStringValues(payload, 'projectId')) {
+      if (adminProjects.has(projectId)) {
+        return projectId;
+      }
+    }
+
+    for (const taskId of this.collectStringValues(payload, 'taskId')) {
+      const projectId = taskProjectMap.get(taskId);
+      if (projectId && adminProjects.has(projectId)) {
+        return projectId;
+      }
+    }
+
+    for (const sectionId of this.collectStringValues(payload, 'sectionId')) {
+      const projectId = sectionProjectMap.get(sectionId);
+      if (projectId && adminProjects.has(projectId)) {
+        return projectId;
+      }
+    }
+
+    return null;
+  }
+
+  private collectStringValues(value: unknown, key: string): string[] {
+    const result = new Set<string>();
+    const walk = (input: unknown) => {
+      if (!input || typeof input !== 'object') return;
+      if (Array.isArray(input)) {
+        for (const item of input) {
+          walk(item);
+        }
+        return;
+      }
+      const record = input as Record<string, unknown>;
+      const candidate = record[key];
+      if (typeof candidate === 'string' && candidate.trim()) {
+        result.add(candidate);
+      }
+      for (const nested of Object.values(record)) {
+        walk(nested);
+      }
+    };
+    walk(value);
+    return [...result];
   }
 }

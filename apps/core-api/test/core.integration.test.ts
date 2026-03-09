@@ -5107,4 +5107,65 @@ describe('Core API Integration', () => {
       status: 'BLOCKED',
     });
   });
+
+  test('GET /notifications/delivery-failures exposes retrying and dead-lettered webhook issues for project admins', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Notification Delivery Visibility ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const retryingEvent = await prisma.outboxEvent.create({
+      data: {
+        type: 'task.updated',
+        payload: { projectId, taskId: 'retrying-task' },
+        correlationId: `notif-delivery-retrying-${Date.now()}`,
+        deliveryAttempts: 2,
+        nextRetryAt: new Date(Date.now() + 60_000),
+        lastError: 'webhook-a:500',
+      },
+    });
+
+    const deadLetteredEvent = await prisma.outboxEvent.create({
+      data: {
+        type: 'task.updated',
+        payload: { projectId, taskId: 'dead-letter-task' },
+        correlationId: `notif-delivery-dead-${Date.now()}`,
+        deliveryAttempts: 5,
+        deadLetteredAt: new Date(),
+        lastError: 'webhook-b:timeout',
+      },
+    });
+
+    const response = await request(app.getHttpServer())
+      .get('/notifications/delivery-failures')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(response.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventId: retryingEvent.id,
+          project: expect.objectContaining({ id: projectId }),
+          status: 'retrying',
+          deliveryAttempts: 2,
+          lastError: 'webhook-a:500',
+        }),
+        expect.objectContaining({
+          eventId: deadLetteredEvent.id,
+          project: expect.objectContaining({ id: projectId }),
+          status: 'dead_lettered',
+          deliveryAttempts: 5,
+          lastError: 'webhook-b:timeout',
+        }),
+      ]),
+    );
+  });
 });
