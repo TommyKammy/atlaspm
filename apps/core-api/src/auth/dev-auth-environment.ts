@@ -3,6 +3,8 @@ const DEV_AUTH_SECRET_MIN_LENGTH = 16;
 const DISALLOWED_DEV_AUTH_SECRETS = new Set([
   'dev-secret',
   'dev-secret-change-me',
+  'replace-with-a-random-dev-auth-secret',
+  'replace-me',
   'change-me',
   'changeme',
   'secret',

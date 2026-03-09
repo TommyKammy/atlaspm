@@ -90,6 +90,16 @@ describe('Dev auth environment guardrails', () => {
     await expect(app.init()).rejects.toThrow(/DEV_AUTH_SECRET is too weak/i);
   });
 
+  test('fails startup when dev auth uses a repo-shipped placeholder secret', async () => {
+    process.env.NODE_ENV = 'test';
+    process.env.DEV_AUTH_ENABLED = 'true';
+    process.env.DEV_AUTH_SECRET = 'replace-with-a-random-dev-auth-secret';
+
+    const app = await createAuthApp();
+
+    await expect(app.init()).rejects.toThrow(/DEV_AUTH_SECRET is too weak/i);
+  });
+
   test('allows dev auth token minting in the test environment', async () => {
     process.env.NODE_ENV = 'test';
     process.env.DEV_AUTH_ENABLED = 'true';
