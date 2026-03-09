@@ -15,6 +15,7 @@ export const queryKeys = {
   projectRecurringRules: (projectId: string, options?: { includeInactive?: boolean }) =>
     ['project', projectId, 'recurring-rules', options?.includeInactive ? 'all' : 'active'] as const,
   projectMembers: (projectId: string) => ['project', projectId, 'members'] as const,
+  projectSavedViews: (projectId: string) => ['project', projectId, 'saved-views'] as const,
   projectStatusUpdates: (projectId: string) => ['project', projectId, 'status-updates'] as const,
   projectTimelinePreferences: (projectId: string) => ['project', projectId, 'timeline', 'preferences'] as const,
   projectCustomFields: (projectId: string) => ['project', projectId, 'custom-fields'] as const,

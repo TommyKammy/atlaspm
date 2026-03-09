@@ -121,7 +121,7 @@ test('timeline and gantt controls stay isolated while list ordering remains stab
   await expect(page.locator('[data-testid="gantt-strict-mode"]')).toHaveAttribute('data-active', 'true');
   await expect(page.locator('[data-testid="timeline-save-default"]')).toBeEnabled();
   const saveResponse = page.waitForResponse((response) =>
-    response.url().includes(`/projects/${projectId}/timeline/preferences/view-state/gantt`) &&
+    response.url().includes(`/projects/${projectId}/saved-views/defaults/gantt`) &&
     response.request().method() === 'PUT' &&
     response.ok(),
   );

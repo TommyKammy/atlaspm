@@ -1,3 +1,5 @@
+import type { ProjectViewMode, ProjectViewState } from '@atlaspm/domain';
+
 export type Project = { id: string; workspaceId: string; name: string };
 
 export type Workspace = {
@@ -273,6 +275,24 @@ export type ProjectMember = {
     displayName?: string | null;
     avatarUrl?: string | null;
   };
+};
+
+export type ProjectSavedView = {
+  id: string;
+  projectId: string;
+  userId: string;
+  name: string;
+  mode: ProjectViewMode;
+  state: ProjectViewState;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProjectSavedViewsResponse = {
+  projectId: string;
+  userId: string;
+  defaultsByMode: Record<ProjectViewMode, ProjectViewState | null>;
+  views: ProjectSavedView[];
 };
 
 type RuleNumericOperator = 'eq' | 'lt' | 'lte' | 'gt' | 'gte' | 'between';

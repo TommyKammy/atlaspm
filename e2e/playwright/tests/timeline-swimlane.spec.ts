@@ -451,7 +451,7 @@ test('timeline uses local transient state before saved default and falls back to
 
   await freshPage.click('[data-testid="timeline-swimlane-status"]');
   const saveResponse = freshPage.waitForResponse((response) =>
-    response.url().includes(`/projects/${projectId}/timeline/preferences/view-state/timeline`) &&
+    response.url().includes(`/projects/${projectId}/saved-views/defaults/timeline`) &&
     response.request().method() === 'PUT' &&
     response.ok(),
   );

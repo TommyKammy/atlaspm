@@ -549,13 +549,17 @@ test('timeline working-days drag skips weekends and Alt keeps calendar-day place
     dueAt: friday.toISOString(),
   });
 
-  await api(`/projects/${projectId}/timeline/preferences/view-state/timeline`, token, 'PUT', {
-    zoom: 'day',
-    anchorDate: friday.toISOString(),
-    swimlane: 'section',
-    sortMode: 'manual',
-    scheduleFilter: 'scheduled',
-    workingDaysOnly: true,
+  await api(`/projects/${projectId}/saved-views/defaults/timeline`, token, 'PUT', {
+    state: {
+      grouping: { field: 'section' },
+      sorting: { field: 'manual', direction: 'asc' },
+      filters: { schedule: 'scheduled' },
+      zoom: {
+        unit: 'day',
+        anchorDate: friday.toISOString(),
+        workingDaysOnly: true,
+      },
+    },
   });
 
   await page.goto(`/projects/${projectId}?view=timeline`);

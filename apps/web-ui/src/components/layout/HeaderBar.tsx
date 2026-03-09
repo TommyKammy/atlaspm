@@ -1,6 +1,22 @@
 'use client';
 
-import { Filter, Layers3, Menu, Moon, Search, Settings2, Sun, Trash2 } from 'lucide-react';
+import {
+  Bookmark,
+  Filter,
+  Layers3,
+  Menu,
+  Moon,
+  Search,
+  Settings2,
+  Sun,
+  Trash2,
+} from 'lucide-react';
+import {
+  createProjectViewFallbackState,
+  resolveProjectViewState,
+  type ProjectViewMode,
+  type ProjectViewState,
+} from '@atlaspm/domain';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
 import Link from 'next/link';
@@ -14,8 +30,26 @@ import type { Locale } from '@/lib/layout-preferences';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { CustomFieldDefinition, Project, ProjectMember, Section, Task } from '@/lib/types';
+import type {
+  CustomFieldDefinition,
+  Project,
+  ProjectMember,
+  ProjectSavedView,
+  ProjectSavedViewsResponse,
+  Section,
+  Task,
+} from '@/lib/types';
 import { parseCustomFieldFilters, stringifyCustomFieldFilters, type CustomFieldFilter } from '@/lib/project-filters';
+import {
+  buildProjectFilterViewState,
+  getProjectSavedViewQueryUpdates,
+  persistProjectViewStateToStorage,
+  PROJECT_SAVED_VIEW_PARAM,
+  PROJECT_VIEW_STATE_APPLY_EVENT,
+  PROJECT_VIEW_STATE_RESPONSE_EVENT,
+  PROJECT_VIEW_STATE_REQUEST_EVENT,
+  supportsProjectSavedViewsMode,
+} from '@/lib/project-saved-views';
 import { resolveProjectView } from '@/lib/project-views';
 import { useI18n } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
@@ -62,6 +96,43 @@ function statusLabel(status: Task['status'], t: (key: string) => string) {
 
 function isFilterableCustomField(field: CustomFieldDefinition) {
   return field.type === 'SELECT' || field.type === 'BOOLEAN' || field.type === 'NUMBER' || field.type === 'DATE';
+}
+
+function viewModeLabel(mode: ProjectViewMode, t: (key: string) => string) {
+  if (mode === 'list') return t('list');
+  if (mode === 'board') return t('board');
+  if (mode === 'timeline') return t('timeline');
+  return t('gantt');
+}
+
+async function requestProjectViewState(
+  mode: Extract<ProjectViewMode, 'timeline' | 'gantt'>,
+): Promise<ProjectViewState | null> {
+  if (typeof window === 'undefined') return null;
+
+  const requestId = `${mode}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  return new Promise((resolve) => {
+    const timeoutId = window.setTimeout(() => {
+      window.removeEventListener(PROJECT_VIEW_STATE_RESPONSE_EVENT, onResponse as EventListener);
+      resolve(null);
+    }, 300);
+
+    const onResponse = (event: Event) => {
+      const detail = (event as CustomEvent<{ requestId?: string; state?: ProjectViewState | null }>).detail;
+      if (detail?.requestId !== requestId) return;
+      window.clearTimeout(timeoutId);
+      window.removeEventListener(PROJECT_VIEW_STATE_RESPONSE_EVENT, onResponse as EventListener);
+      resolve(detail.state ?? null);
+    };
+
+    window.addEventListener(PROJECT_VIEW_STATE_RESPONSE_EVENT, onResponse as EventListener);
+    window.dispatchEvent(
+      new CustomEvent(PROJECT_VIEW_STATE_REQUEST_EVENT, {
+        detail: { requestId, mode },
+      }),
+    );
+  });
 }
 
 function ThemeToggle() {
@@ -232,6 +303,7 @@ export function HeaderBar({
 }) {
   const { t } = useI18n();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const searchParamsString = searchParams.toString();
@@ -242,6 +314,8 @@ export function HeaderBar({
   });
   const projectId = useMemo(() => pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null, [pathname]);
   const resolvedCurrentView = resolveProjectView(resolvedSearchParams.get('view'));
+  const savedViewMode = supportsProjectSavedViewsMode(resolvedCurrentView) ? resolvedCurrentView : null;
+  const savedViewId = resolvedSearchParams.get(PROJECT_SAVED_VIEW_PARAM);
   const query = resolvedSearchParams.get('q') ?? '';
   const statusesParam = resolvedSearchParams.get('statuses');
   const assigneesParam = resolvedSearchParams.get('assignees');
@@ -291,11 +365,33 @@ export function HeaderBar({
     queryFn: () => api(`/projects/${projectId}/custom-fields`),
     enabled: Boolean(projectId),
   });
+  const meQuery = useQuery<Me>({
+    queryKey: queryKeys.me,
+    queryFn: () => api('/me'),
+  });
+  const savedViewsQuery = useQuery<ProjectSavedViewsResponse>({
+    queryKey: queryKeys.projectSavedViews(projectId ?? ''),
+    queryFn: () => api(`/projects/${projectId}/saved-views`),
+    enabled: Boolean(projectId),
+  });
 
   const title = useMemo(() => {
     if (!projectId) return t('projects');
     return projects.find((project) => project.id === projectId)?.name ?? t('project');
   }, [projectId, projects, t]);
+  const selectedSavedView = useMemo(
+    () =>
+      savedViewId
+        ? savedViewsQuery.data?.views.find(
+            (view) => view.id === savedViewId && (!savedViewMode || view.mode === savedViewMode),
+          ) ?? null
+        : null,
+    [savedViewId, savedViewMode, savedViewsQuery.data?.views],
+  );
+  const viewsForCurrentMode = useMemo(
+    () => (savedViewMode ? (savedViewsQuery.data?.views ?? []).filter((view) => view.mode === savedViewMode) : []),
+    [savedViewMode, savedViewsQuery.data?.views],
+  );
 
   const updateProjectQueryParams = useCallback((updates: Record<string, string | null>) => {
     if (!projectId) return;
@@ -337,6 +433,7 @@ export function HeaderBar({
         statuses: nextStatuses.length ? nextStatuses.join(',') : null,
         assignees: nextAssignees.length ? nextAssignees.join(',') : null,
         cf: serializedCustomFieldFilters,
+        [PROJECT_SAVED_VIEW_PARAM]: null,
       });
     },
     [projectFilterStorageKey, updateProjectQueryParams],
@@ -378,8 +475,16 @@ export function HeaderBar({
   }, [applyProjectFilters]);
   const filterCount = selectedStatuses.length + selectedAssignees.length + selectedCustomFieldFilters.length;
   const [sectionsOpen, setSectionsOpen] = useState(false);
-
   const [projectSearchInput, setProjectSearchInput] = useState(query);
+  const [savedViewsOpen, setSavedViewsOpen] = useState(false);
+  const [saveViewDialogOpen, setSaveViewDialogOpen] = useState(false);
+  const [renameViewDialogOpen, setRenameViewDialogOpen] = useState(false);
+  const [deleteViewDialogOpen, setDeleteViewDialogOpen] = useState(false);
+  const [saveViewName, setSaveViewName] = useState('');
+  const [renameViewName, setRenameViewName] = useState('');
+  const [viewToRename, setViewToRename] = useState<ProjectSavedView | null>(null);
+  const [viewToDelete, setViewToDelete] = useState<ProjectSavedView | null>(null);
+  const [savedViewsError, setSavedViewsError] = useState<string | null>(null);
   const sectionTaskCounts = useMemo(
     () => new Map((groupedTasksQuery.data ?? []).map((group) => [group.section.id, group.tasks.length])),
     [groupedTasksQuery.data],
@@ -403,6 +508,157 @@ export function HeaderBar({
     () => new Map(selectedCustomFieldFilters.map((filter) => [filter.fieldId, filter])),
     [selectedCustomFieldFilters],
   );
+  const currentProjectFilterViewState = useMemo(
+    () =>
+      savedViewMode === 'list' || savedViewMode === 'board'
+        ? buildProjectFilterViewState(
+            savedViewMode,
+            selectedStatuses,
+            selectedAssignees,
+            selectedCustomFieldFilters,
+          )
+        : null,
+    [savedViewMode, selectedAssignees, selectedCustomFieldFilters, selectedStatuses],
+  );
+  const resolvedSavedFilterState = useMemo(() => {
+    if (savedViewMode !== 'list' && savedViewMode !== 'board') return null;
+    return resolveProjectViewState({
+      mode: savedViewMode,
+      fallbackState: createProjectViewFallbackState(savedViewMode),
+      savedDefaultState: savedViewsQuery.data?.defaultsByMode[savedViewMode] ?? null,
+      selectedNamedView: selectedSavedView,
+      workingState: currentProjectFilterViewState,
+    }).state;
+  }, [
+    currentProjectFilterViewState,
+    savedViewMode,
+    savedViewsQuery.data?.defaultsByMode,
+    selectedSavedView,
+  ]);
+
+  const getCurrentSavedViewState = useCallback(async (): Promise<ProjectViewState | null> => {
+    if (!savedViewMode) return null;
+    if (savedViewMode === 'list' || savedViewMode === 'board') {
+      return currentProjectFilterViewState;
+    }
+    return requestProjectViewState(savedViewMode);
+  }, [currentProjectFilterViewState, savedViewMode]);
+
+  const applySavedViewState = useCallback(
+    (view: ProjectSavedView) => {
+      if (!projectId) return;
+      setSavedViewsError(null);
+      const resolved = resolveProjectViewState({
+        mode: view.mode,
+        fallbackState: createProjectViewFallbackState(view.mode),
+        savedDefaultState: savedViewsQuery.data?.defaultsByMode[view.mode] ?? null,
+        selectedNamedView: view,
+        workingState: null,
+      }).state;
+
+      if (view.mode === 'list' || view.mode === 'board') {
+        updateProjectQueryParams({
+          view: view.mode,
+          [PROJECT_SAVED_VIEW_PARAM]: view.id,
+          ...getProjectSavedViewQueryUpdates(resolved),
+        });
+        return;
+      }
+
+      persistProjectViewStateToStorage(projectId, view.mode, resolved, meQuery.data?.id);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent(PROJECT_VIEW_STATE_APPLY_EVENT, {
+            detail: { mode: view.mode, state: resolved },
+          }),
+        );
+      }
+      updateProjectQueryParams({
+        view: view.mode,
+        [PROJECT_SAVED_VIEW_PARAM]: view.id,
+      });
+    },
+    [meQuery.data?.id, projectId, savedViewsQuery.data?.defaultsByMode, updateProjectQueryParams],
+  );
+
+  const createSavedView = useMutation({
+    mutationFn: async (name: string) => {
+      if (!projectId || !savedViewMode) throw new Error('Saved views unavailable');
+      const state = await getCurrentSavedViewState();
+      if (!state) throw new Error('Saved views unavailable');
+      return api(`/projects/${projectId}/saved-views`, {
+        method: 'POST',
+        body: { name, mode: savedViewMode, state },
+      }) as Promise<ProjectSavedView>;
+    },
+    onSuccess: async (created) => {
+      setSaveViewDialogOpen(false);
+      setSaveViewName('');
+      setSavedViewsError(null);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectSavedViews(projectId ?? '') });
+      applySavedViewState(created);
+    },
+    onError: () => {
+      setSavedViewsError(t('saveViewCreateFailed'));
+    },
+  });
+
+  const saveDefaultView = useMutation({
+    mutationFn: async () => {
+      if (!projectId || !savedViewMode) throw new Error('Saved views unavailable');
+      const state = await getCurrentSavedViewState();
+      if (!state) throw new Error('Saved views unavailable');
+      return api(`/projects/${projectId}/saved-views/defaults/${savedViewMode}`, {
+        method: 'PUT',
+        body: { state },
+      }) as Promise<ProjectSavedViewsResponse>;
+    },
+    onSuccess: async () => {
+      setSavedViewsError(null);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectSavedViews(projectId ?? '') });
+    },
+    onError: () => {
+      setSavedViewsError(t('saveViewDefaultFailed'));
+    },
+  });
+
+  const renameSavedView = useMutation({
+    mutationFn: async ({ viewId, name }: { viewId: string; name: string }) =>
+      (api(`/saved-views/${viewId}`, {
+        method: 'PATCH',
+        body: { name },
+      }) as Promise<ProjectSavedView>),
+    onSuccess: async () => {
+      setRenameViewDialogOpen(false);
+      setRenameViewName('');
+      setViewToRename(null);
+      setSavedViewsError(null);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectSavedViews(projectId ?? '') });
+    },
+    onError: () => {
+      setSavedViewsError(t('saveViewUpdateFailed'));
+    },
+  });
+
+  const deleteSavedView = useMutation({
+    mutationFn: async (viewId: string) =>
+      (api(`/saved-views/${viewId}`, {
+        method: 'DELETE',
+      }) as Promise<{ ok: true }>),
+    onSuccess: async () => {
+      const deletedViewId = viewToDelete?.id ?? null;
+      setDeleteViewDialogOpen(false);
+      setViewToDelete(null);
+      setSavedViewsError(null);
+      if (deletedViewId && selectedSavedView?.id === deletedViewId) {
+        updateProjectQueryParams({ [PROJECT_SAVED_VIEW_PARAM]: null });
+      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectSavedViews(projectId ?? '') });
+    },
+    onError: () => {
+      setSavedViewsError(t('saveViewDeleteFailed'));
+    },
+  });
 
   const focusSection = useCallback(
     (sectionId: string) => {
@@ -436,6 +692,30 @@ export function HeaderBar({
   }, [query]);
 
   useEffect(() => {
+    if (!projectId || !savedViewsQuery.isFetched) return;
+    if (savedViewMode !== 'list' && savedViewMode !== 'board') return;
+    if (!resolvedSavedFilterState) return;
+    const next = getProjectSavedViewQueryUpdates(resolvedSavedFilterState);
+    if (
+      next.statuses === (statusesParam ?? null)
+      && next.assignees === (assigneesParam ?? null)
+      && next.cf === (customFieldFiltersParam ?? null)
+    ) {
+      return;
+    }
+    updateProjectQueryParams(next);
+  }, [
+    assigneesParam,
+    customFieldFiltersParam,
+    projectId,
+    resolvedSavedFilterState,
+    savedViewMode,
+    savedViewsQuery.isFetched,
+    statusesParam,
+    updateProjectQueryParams,
+  ]);
+
+  useEffect(() => {
     if (!projectId || !projectFilterStorageKey || typeof window === 'undefined') return;
     window.localStorage.setItem(
       projectFilterStorageKey,
@@ -448,7 +728,108 @@ export function HeaderBar({
   }, [projectFilterStorageKey, projectId, selectedAssignees, selectedCustomFieldFilters, selectedStatuses]);
 
   return (
-    <header className="sticky top-0 z-10 flex h-14 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:px-6">
+    <>
+      <Dialog open={saveViewDialogOpen} onOpenChange={setSaveViewDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{t('saveView')}</DialogTitle>
+            <DialogDescription>{t('currentView')}</DialogDescription>
+          </DialogHeader>
+          <Input
+            value={saveViewName}
+            onChange={(event) => setSaveViewName(event.target.value)}
+            placeholder={t('saveViewName')}
+            data-testid="project-save-view-name-input"
+          />
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSaveViewDialogOpen(false);
+                setSaveViewName('');
+              }}
+            >
+              {t('cancel')}
+            </Button>
+            <Button
+              data-testid="project-save-view-confirm"
+              disabled={!saveViewName.trim() || createSavedView.isPending}
+              onClick={() => createSavedView.mutate(saveViewName.trim())}
+            >
+              {createSavedView.isPending ? t('saving') : t('saveView')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={renameViewDialogOpen} onOpenChange={setRenameViewDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{t('renameSavedView')}</DialogTitle>
+          </DialogHeader>
+          <Input
+            value={renameViewName}
+            onChange={(event) => setRenameViewName(event.target.value)}
+            placeholder={t('saveViewName')}
+            data-testid="project-rename-view-name-input"
+          />
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRenameViewDialogOpen(false);
+                setViewToRename(null);
+                setRenameViewName('');
+              }}
+            >
+              {t('cancel')}
+            </Button>
+            <Button
+              data-testid="project-rename-view-confirm"
+              disabled={!renameViewName.trim() || !viewToRename || renameSavedView.isPending}
+              onClick={() => {
+                if (!viewToRename) return;
+                renameSavedView.mutate({ viewId: viewToRename.id, name: renameViewName.trim() });
+              }}
+            >
+              {renameSavedView.isPending ? t('saving') : t('save')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteViewDialogOpen} onOpenChange={setDeleteViewDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{t('deleteSavedView')}</DialogTitle>
+            <DialogDescription>{viewToDelete?.name ?? ''}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteViewDialogOpen(false);
+                setViewToDelete(null);
+              }}
+            >
+              {t('cancel')}
+            </Button>
+            <Button
+              data-testid="project-delete-view-confirm"
+              className="bg-destructive text-destructive-foreground hover:opacity-90"
+              disabled={!viewToDelete || deleteSavedView.isPending}
+              onClick={() => {
+                if (!viewToDelete) return;
+                deleteSavedView.mutate(viewToDelete.id);
+              }}
+            >
+              {t('delete')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <header className="sticky top-0 z-10 flex h-14 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:px-6">
       <div className="flex min-w-0 flex-[1_1_24rem] items-center gap-2">
         {onToggleSidebarMode ? (
           <Button
@@ -516,6 +897,117 @@ export function HeaderBar({
       <div className="flex shrink-0 items-center gap-1 pl-1">
         {projectId ? (
           <>
+            {savedViewMode ? (
+              <Popover open={savedViewsOpen} onOpenChange={setSavedViewsOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 gap-1 rounded-full px-3 hover:bg-muted/50"
+                    data-testid="project-saved-views-trigger"
+                  >
+                    <Bookmark className="h-4 w-4" />
+                    <span className="text-xs">
+                      {selectedSavedView?.name ?? t('savedViews')}
+                    </span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-80 p-0" data-testid="project-saved-views-popover">
+                  <div className="flex items-center justify-between border-b px-3 py-2">
+                    <div>
+                      <p className="text-xs font-medium">{t('savedViews')}</p>
+                      <p className="text-[11px] text-muted-foreground">{viewModeLabel(savedViewMode, t)}</p>
+                    </div>
+                    {selectedSavedView ? (
+                      <span className="rounded bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                        {t('viewApplied')}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="space-y-3 p-3">
+                    {savedViewsError ? (
+                      <p className="text-xs text-destructive">{savedViewsError}</p>
+                    ) : null}
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1"
+                        data-testid="project-save-view-trigger"
+                        onClick={() => {
+                          setSavedViewsOpen(false);
+                          setSaveViewDialogOpen(true);
+                          setSaveViewName(selectedSavedView?.name ?? '');
+                        }}
+                      >
+                        {t('saveCurrentView')}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1"
+                        data-testid="project-save-default-view"
+                        disabled={saveDefaultView.isPending}
+                        onClick={() => saveDefaultView.mutate()}
+                      >
+                        {saveDefaultView.isPending ? t('saving') : t('saveDefaultView')}
+                      </Button>
+                    </div>
+                    {!viewsForCurrentMode.length ? (
+                      <p className="text-sm text-muted-foreground">{t('savedViewsEmpty')}</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {viewsForCurrentMode.map((view) => (
+                          <div
+                            key={view.id}
+                            className="flex items-center gap-2 rounded-md border border-border/60 p-2"
+                          >
+                            <Button
+                              size="sm"
+                              variant={selectedSavedView?.id === view.id ? 'outline' : 'ghost'}
+                              className="min-w-0 flex-1 justify-start"
+                              data-testid={`project-saved-view-apply-${view.id}`}
+                              onClick={() => {
+                                setSavedViewsOpen(false);
+                                applySavedViewState(view);
+                              }}
+                            >
+                              <span className="truncate">{view.name}</span>
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              data-testid={`project-saved-view-rename-${view.id}`}
+                              onClick={() => {
+                                setSavedViewsOpen(false);
+                                setViewToRename(view);
+                                setRenameViewName(view.name);
+                                setRenameViewDialogOpen(true);
+                              }}
+                            >
+                              {t('renameView')}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-destructive hover:text-destructive"
+                              data-testid={`project-saved-view-delete-${view.id}`}
+                              onClick={() => {
+                                setSavedViewsOpen(false);
+                                setViewToDelete(view);
+                                setDeleteViewDialogOpen(true);
+                              }}
+                            >
+                              {t('delete')}
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            ) : null}
             <Popover open={sectionsOpen} onOpenChange={setSectionsOpen}>
               <PopoverTrigger asChild>
                 <Button
@@ -926,5 +1418,6 @@ export function HeaderBar({
         <PersonalSettingsMenu />
       </div>
     </header>
+    </>
   );
 }

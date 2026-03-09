@@ -362,7 +362,7 @@ test('stable fixture keeps timeline and gantt transitions isolated across saved 
   await expect(page.locator('[data-testid="gantt-strict-mode"]')).toHaveAttribute('data-active', 'true');
 
   const saveDefault = page.waitForResponse((response) =>
-    response.url().includes(`/projects/${fixture.projectId}/timeline/preferences/view-state/gantt`) &&
+    response.url().includes(`/projects/${fixture.projectId}/saved-views/defaults/gantt`) &&
     response.request().method() === 'PUT' &&
     response.ok(),
   );
