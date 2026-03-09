@@ -91,6 +91,7 @@ docker compose up -d --build
 
 - OIDC JWT verification via JWKS by default.
 - Dev auth mode is disabled by default and only enabled via `DEV_AUTH_ENABLED=true`.
+- Dev auth requires an explicit safe `NODE_ENV` (`development`, `test`, or `local`). If `NODE_ENV` is unset or unsafe, `core-api` refuses to boot with `DEV_AUTH_ENABLED=true`.
 - Risk note: when `DEV_AUTH_ENABLED=true`, `POST /dev-auth/token` is intentionally available for local testing and can mint tokens for arbitrary `sub` values.
 - `DEV_AUTH_ENABLED=true` must be treated as a critical risk outside isolated local environments.
 - Dev auth token lifetime is configurable via `DEV_AUTH_TOKEN_TTL` (default `8h`).

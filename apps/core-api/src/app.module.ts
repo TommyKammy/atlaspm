@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaService } from './prisma/prisma.service';
 import { AuthModule } from './auth/auth.module';
+import { DevAuthModule } from './auth/dev-auth.module';
 import { WorkspacesController } from './workspaces/workspaces.controller';
 import { ProjectsController } from './projects/projects.controller';
 import { SectionsController } from './sections/sections.controller';
@@ -35,9 +36,20 @@ import { TaskApprovalController } from './task-approvals/task-approval.controlle
 import { TaskTimeTrackingController } from './task-time-tracking/task-time-tracking.controller';
 import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
 import { TaskProjectLinksModule } from './task-project-links/task-project-links.module';
+import { shouldRegisterDevAuthController } from './auth/dev-auth-environment';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule.register(), SearchModule, PortfoliosModule, WorkloadModule, DashboardsModule, IntegrationsModule, TaskProjectLinksModule],
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    AuthModule,
+    ...(shouldRegisterDevAuthController() ? [DevAuthModule] : []),
+    SearchModule,
+    PortfoliosModule,
+    WorkloadModule,
+    DashboardsModule,
+    IntegrationsModule,
+    TaskProjectLinksModule,
+  ],
   controllers: [
     WorkspacesController,
     ProjectsController,

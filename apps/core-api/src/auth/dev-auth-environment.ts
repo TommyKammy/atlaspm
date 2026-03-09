@@ -1,7 +1,8 @@
 const SAFE_DEV_AUTH_NODE_ENVS = new Set(['development', 'test', 'local']);
 
 export function getDevAuthEnvironment(env: NodeJS.ProcessEnv = process.env) {
-  return (env.NODE_ENV ?? 'development').trim().toLowerCase();
+  const current = env.NODE_ENV?.trim().toLowerCase();
+  return current && current.length > 0 ? current : 'unset';
 }
 
 export function isDevAuthEnabled(env: NodeJS.ProcessEnv = process.env) {
