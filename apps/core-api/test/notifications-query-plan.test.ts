@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { PrismaClient, ProjectRole, WorkspaceRole } from '@prisma/client';
 
+process.env.DATABASE_URL =
+  process.env.DATABASE_URL ?? 'postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public';
+
 type ExplainRow = {
   'QUERY PLAN': Array<{
     Plan: Record<string, unknown>;
@@ -17,9 +20,6 @@ describe('notifications inbox query plan', () => {
   const notificationCount = 20_000;
 
   beforeAll(async () => {
-    process.env.DATABASE_URL =
-      process.env.DATABASE_URL ?? 'postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public';
-
     await prisma.$connect();
 
     await prisma.user.createMany({
