@@ -2420,6 +2420,106 @@ describe('Core API Integration', () => {
     expect((dateCreateOutbox?.payload as any)?.dueAt).toBeTruthy();
   });
 
+  test('GET /projects/:id/tasks rejects unsupported due date query values', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Task List Date Filter Test ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSectionId =
+      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ?? sectionsRes.body[0])?.id as string;
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Task with due date',
+        sectionId: defaultSectionId,
+        dueAt: '2026-03-12T00:00:00.000Z',
+      })
+      .expect(201);
+
+    const missingTimezoneRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/tasks?dueFrom=${encodeURIComponent('2026-03-10T12:30:00')}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(400);
+
+    expect(missingTimezoneRes.body).toMatchObject({
+      code: 'INVALID_DATE_FORMAT',
+      message: expect.stringContaining('dueFrom'),
+    });
+
+    const invalidOffsetRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/tasks?dueTo=${encodeURIComponent('2026-03-12T23:59:59+14:30')}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(400);
+
+    expect(invalidOffsetRes.body).toMatchObject({
+      code: 'INVALID_DATE_FORMAT',
+      message: expect.stringContaining('dueTo'),
+    });
+  });
+
+  test('GET /projects/:id/tasks accepts explicit due date query formats', async () => {
+    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const workspaceId = wsRes.body[0].id;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Task List Valid Date Filter Test ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSectionId =
+      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ?? sectionsRes.body[0])?.id as string;
+
+    const includedTaskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Included due date task',
+        sectionId: defaultSectionId,
+        dueAt: '2026-03-12T00:00:00.000Z',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Excluded due date task',
+        sectionId: defaultSectionId,
+        dueAt: '2026-03-08T00:00:00.000Z',
+      })
+      .expect(201);
+
+    const res = await request(app.getHttpServer())
+      .get(
+        `/projects/${projectId}/tasks?dueFrom=${encodeURIComponent('2026-03-10')}&dueTo=${encodeURIComponent(
+          '2026-03-12T23:59:59Z',
+        )}`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(res.body.map((task: { id: string }) => task.id)).toContain(includedTaskRes.body.id);
+    expect(res.body).toHaveLength(1);
+  });
+
   test('schedule APIs normalize mixed timestamps to UTC date-only persistence', async () => {
     const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
     const workspaceId = wsRes.body[0].id;
