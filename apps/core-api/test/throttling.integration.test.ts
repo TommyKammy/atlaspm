@@ -6,11 +6,49 @@ import crypto from 'node:crypto';
 import { CorrelationIdMiddleware } from '../src/common/correlation.middleware';
 import { PrismaService } from '../src/prisma/prisma.service';
 
+const ENV_KEYS = [
+  'NODE_ENV',
+  'DEV_AUTH_ENABLED',
+  'DEV_AUTH_SECRET',
+  'SEARCH_ENABLED',
+  'REMINDER_WORKER_ENABLED',
+  'TASK_RETENTION_WORKER_ENABLED',
+  'WEBHOOK_DELIVERY_WORKER_ENABLED',
+  'RECURRING_WORKER_ENABLED',
+  'SLACK_SIGNING_SECRET',
+] as const;
+
+function snapshotEnv(): Record<(typeof ENV_KEYS)[number], string | undefined> {
+  return {
+    NODE_ENV: process.env.NODE_ENV,
+    DEV_AUTH_ENABLED: process.env.DEV_AUTH_ENABLED,
+    DEV_AUTH_SECRET: process.env.DEV_AUTH_SECRET,
+    SEARCH_ENABLED: process.env.SEARCH_ENABLED,
+    REMINDER_WORKER_ENABLED: process.env.REMINDER_WORKER_ENABLED,
+    TASK_RETENTION_WORKER_ENABLED: process.env.TASK_RETENTION_WORKER_ENABLED,
+    WEBHOOK_DELIVERY_WORKER_ENABLED: process.env.WEBHOOK_DELIVERY_WORKER_ENABLED,
+    RECURRING_WORKER_ENABLED: process.env.RECURRING_WORKER_ENABLED,
+    SLACK_SIGNING_SECRET: process.env.SLACK_SIGNING_SECRET,
+  };
+}
+
+function restoreEnv(snapshot: Record<(typeof ENV_KEYS)[number], string | undefined>) {
+  for (const key of ENV_KEYS) {
+    const value = snapshot[key];
+    if (value === undefined) {
+      delete process.env[key];
+      continue;
+    }
+    process.env[key] = value;
+  }
+}
+
 function signSlackBody(body: string, secret: string, timestamp: string): string {
   return `v0=${crypto.createHmac('sha256', secret).update(`v0:${timestamp}:${body}`, 'utf8').digest('hex')}`;
 }
 
 describe('Core API throttling', () => {
+  const envSnapshot = snapshotEnv();
   let app: INestApplication;
 
   beforeAll(async () => {
@@ -44,20 +82,23 @@ describe('Core API throttling', () => {
 
   afterAll(async () => {
     await app.close();
+    restoreEnv(envSnapshot);
   });
 
   test('applies the default throttling baseline to general API routes', async () => {
     const server = app.getHttpServer();
 
-    for (let index = 0; index < 70; index += 1) {
-      await request(server)
+    for (let index = 0; index < 60; index += 1) {
+      const response = await request(server)
         .post('/dev-auth/token')
         .send({ sub: `user-${index}`, email: `user-${index}@example.com`, name: 'Test User' });
+
+      expect(response.status).toBe(201);
     }
 
     const response = await request(server)
       .post('/dev-auth/token')
-      .send({ sub: 'user-final', email: 'user-final@example.com', name: 'Test User' });
+      .send({ sub: 'user-60', email: 'user-60@example.com', name: 'Test User' });
 
     expect(response.status).toBe(429);
   });
@@ -73,12 +114,14 @@ describe('Core API throttling', () => {
       const timestamp = `${Math.floor(Date.now() / 1000)}`;
       const signature = signSlackBody(body, process.env.SLACK_SIGNING_SECRET!, timestamp);
 
-      await request(server)
+      const response = await request(server)
         .post('/webhooks/slack/events')
         .set('content-type', 'application/json')
         .set('x-slack-request-timestamp', timestamp)
         .set('x-slack-signature', signature)
         .send(body);
+
+      expect(response.status).toBe(201);
     }
 
     const timestamp = `${Math.floor(Date.now() / 1000)}`;

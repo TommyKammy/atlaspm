@@ -5,18 +5,29 @@
 - Branch: codex/reopen-issue-324
 - Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-324
 - Journal: /home/tommy/Dev/atlaspm-worktrees/issue-324/.codex-supervisor/issue-journal.md
-- Current phase: reproducing
-- Attempt count: 1
-- Last head SHA: ed634b8b78e07a6d07ba3d101441fb2936bc847b
+- Current phase: addressing_review
+- Attempt count: 2
+- Last head SHA: e63e4b33cc2716471ffe3d36da61db44cc5ea095
 - Blocked reason: none
-- Last failure signature: none
-- Repeated failure signature count: 0
-- Updated at: 2026-03-09T14:09:44.498Z
+- Last failure signature: PRRT_kwDORWcwRc5zCO_F|PRRT_kwDORWcwRc5zCO_v|PRRT_kwDORWcwRc5zCPAF
+- Repeated failure signature count: 1
+- Updated at: 2026-03-09T14:22:49.981Z
 
 ## Latest Codex Summary
-- Reproduced missing app-level throttling with a focused `AppModule` integration test using a stubbed `PrismaService`.
-- Added a shared app-level throttling module, kept Slack stricter than the baseline, and gave public attachment downloads a higher-volume override.
-- Focused throttling and Slack signature tests now pass locally, along with `core-api` type-check.
+Addressed the configured-bot review on PR #327 by tightening `apps/core-api/test/throttling.integration.test.ts` without changing runtime behavior.
+
+The test now snapshots/restores the exact env vars it mutates and asserts the success boundary for both policies: 60 successful baseline requests before the 61st is throttled, and 10 successful Slack requests before the 11th is throttled.
+
+Tests run:
+`pnpm --filter @atlaspm/core-api exec vitest run test/throttling.integration.test.ts test/slack-webhook-signature.test.ts --reporter=dot`
+`pnpm --filter @atlaspm/core-api type-check`
+
+Summary: Tightened the throttling regression test to address review comments about env leakage and weak boundary assertions.
+State hint: addressing_review
+Blocked reason: none
+Tests: `pnpm --filter @atlaspm/core-api exec vitest run test/throttling.integration.test.ts test/slack-webhook-signature.test.ts --reporter=dot`; `pnpm --filter @atlaspm/core-api type-check`
+Failure signature: none
+Next action: Commit and push the review-fix test changes, then resolve the three configured-bot threads on PR #327.
 
 ## Active Failure Context
 - None recorded.
@@ -24,13 +35,13 @@
 ## Codex Working Notes
 ### Current Handoff
 - Hypothesis: The issue was caused by throttling config living only in `IntegrationsModule` without a global `ThrottlerGuard`, so neither baseline routes nor Slack overrides were enforced.
-- Primary failure or risk: The focused fix is in place locally; remaining work is commit hygiene and any broader verification the supervisor wants beyond targeted tests.
+- Primary failure or risk: The remaining work is operational: push the review-fix commit and clear the three resolved review threads on PR #327.
 - Last focused command: `pnpm --filter @atlaspm/core-api type-check`
-- Files changed: `apps/core-api/src/app.module.ts`, `apps/core-api/src/common/throttling.ts`, `apps/core-api/src/integrations/integrations.module.ts`, `apps/core-api/src/integrations/slack.controller.ts`, `apps/core-api/src/tasks/public-attachments.controller.ts`, `apps/core-api/test/throttling.integration.test.ts`
+- Files changed: `apps/core-api/test/throttling.integration.test.ts`
 - Next 1-3 actions:
-  1. Commit the throttling baseline changes and focused regression test.
-  2. If needed, run a slightly broader `core-api` test slice around public routes before opening/updating a PR.
-  3. Open or update the PR for issue #324 with the reproduction and focused verification notes.
+  1. Commit and push the tightened throttling test.
+  2. Resolve the three configured-bot review threads on PR #327.
+  3. Re-check PR #327 merge state after GitHub finishes processing the update.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
@@ -45,13 +56,11 @@
 - Failure signature:
   - `throttling-not-enforced-app-or-slack`
 - Current focused verification passing:
-  - `pnpm install`
-  - `pnpm --filter @atlaspm/domain build`
-  - `pnpm --filter @atlaspm/shared-types build`
-  - `pnpm --filter @atlaspm/core-api prisma:generate`
   - `pnpm --filter @atlaspm/core-api exec vitest run test/throttling.integration.test.ts test/slack-webhook-signature.test.ts --reporter=dot`
   - `pnpm --filter @atlaspm/core-api type-check`
 - Implementation notes:
   - Added `ApiThrottlingModule` with `ThrottlerModule.forRoot([{ name: 'default', limit: 60, ttl: 60000 }])` and registered `ThrottlerGuard` as an `APP_GUARD`.
   - Removed the inert module-local `ThrottlerModule` registration from `IntegrationsModule`.
   - Kept Slack on a stricter override (`10/minute`) and added a higher-volume override for `GET /public/attachments/:id/:token` (`300/minute`).
+  - Review follow-up snapshots and restores the mutated env keys in `test/throttling.integration.test.ts`.
+  - Review follow-up now asserts 60 baseline successes before the 61st request gets `429`, and 10 Slack successes before the 11th gets `429`.
