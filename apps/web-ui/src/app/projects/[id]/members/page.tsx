@@ -7,8 +7,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check } from 'lucide-react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { AuditActivityList } from '@/components/audit-activity-list';
 import { queryKeys } from '@/lib/query-keys';
-import type { Project, ProjectMember, Workspace, WorkspaceUserRow } from '@/lib/types';
+import type { AuditEvent, Project, ProjectMember, Workspace, WorkspaceUserRow } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -36,6 +37,11 @@ export default function ProjectMembersPage() {
     queryFn: () => api(`/projects/${projectId}/members`),
     enabled: Boolean(projectId),
   });
+  const auditQuery = useQuery<AuditEvent[]>({
+    queryKey: queryKeys.projectAudit(projectId),
+    queryFn: () => api(`/projects/${projectId}/audit`),
+    enabled: Boolean(projectId),
+  });
 
   const project = useMemo(() => projectsQuery.data?.find((item) => item.id === projectId), [projectsQuery.data, projectId]);
   const workspace = useMemo(
@@ -56,6 +62,7 @@ export default function ProjectMembersPage() {
       setAddOpen(false);
       setSelectedUserId('');
       queryClient.invalidateQueries({ queryKey: queryKeys.projectMembers(projectId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectAudit(projectId) });
     },
   });
 
@@ -64,6 +71,7 @@ export default function ProjectMembersPage() {
       api(`/projects/${projectId}/members/${payload.userId}`, { method: 'PATCH', body: { role: payload.role } }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projectMembers(projectId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectAudit(projectId) });
     },
   });
 
@@ -71,6 +79,7 @@ export default function ProjectMembersPage() {
     mutationFn: (userId: string) => api(`/projects/${projectId}/members/${userId}`, { method: 'DELETE' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projectMembers(projectId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectAudit(projectId) });
     },
   });
 
@@ -201,6 +210,13 @@ export default function ProjectMembersPage() {
             })}
           </TableBody>
         </Table>
+      </section>
+
+      <section className="rounded-lg border bg-card p-4">
+        <h2 className="text-base font-semibold">{t('activity')}</h2>
+        <div className="mt-3">
+          <AuditActivityList events={auditQuery.data ?? []} members={membersQuery.data ?? []} />
+        </div>
       </section>
     </div>
   );

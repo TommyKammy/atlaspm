@@ -4,6 +4,7 @@ import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigat
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Plus } from 'lucide-react';
+import { AuditActivityList } from '@/components/audit-activity-list';
 import ProjectBoard from '@/components/project-board';
 import { ProjectBoardView, ProjectCalendarView, ProjectFilesView } from '@/components/project-alt-views';
 import { ProjectGanttShell } from '@/components/project-gantt-shell';
@@ -11,7 +12,7 @@ import { ProjectStatusUpdates } from '@/components/project-status-updates';
 import { ProjectTimelineShell } from '@/components/project-timeline-shell';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { Project, ProjectMember, Section, SectionTaskGroup, Task } from '@/lib/types';
+import type { AuditEvent, Project, ProjectMember, Section, SectionTaskGroup, Task } from '@/lib/types';
 import { parseCustomFieldFilters } from '@/lib/project-filters';
 import { resolveProjectView } from '@/lib/project-views';
 import { Button } from '@/components/ui/button';
@@ -100,6 +101,11 @@ export default function ProjectPage() {
   const projectMembersQuery = useQuery<ProjectMember[]>({
     queryKey: queryKeys.projectMembers(projectId),
     queryFn: () => api(`/projects/${projectId}/members`),
+    enabled: Boolean(projectId),
+  });
+  const projectAuditQuery = useQuery<AuditEvent[]>({
+    queryKey: queryKeys.projectAudit(projectId),
+    queryFn: () => api(`/projects/${projectId}/audit`),
     enabled: Boolean(projectId),
   });
 
@@ -303,6 +309,13 @@ export default function ProjectPage() {
         members={projectMembersQuery.data ?? []}
         highlightedStatusUpdateId={highlightedStatusUpdateId}
       />
+
+      <section className="rounded-lg border bg-card p-4">
+        <h2 className="text-base font-semibold">{t('activity')}</h2>
+        <div className="mt-3">
+          <AuditActivityList events={projectAuditQuery.data ?? []} members={projectMembersQuery.data ?? []} />
+        </div>
+      </section>
 
       {view === 'list' ? (
         <>

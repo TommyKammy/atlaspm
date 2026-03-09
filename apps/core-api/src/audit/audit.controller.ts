@@ -24,7 +24,28 @@ export class AuditController {
   @Get('projects/:id/audit')
   async projectAudit(@Param('id') projectId: string, @CurrentRequest() req: AppRequest) {
     await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
-    return this.prisma.auditEvent.findMany({ where: { entityType: 'Project', entityId: projectId }, orderBy: { createdAt: 'desc' } });
+    return this.prisma.auditEvent.findMany({
+      where: {
+        OR: [
+          { entityType: 'Project', entityId: projectId },
+          {
+            entityType: 'Rule',
+            OR: [
+              { beforeJson: { path: ['projectId'], equals: projectId } },
+              { afterJson: { path: ['projectId'], equals: projectId } },
+            ],
+          },
+          {
+            entityType: 'ProjectMembership',
+            OR: [
+              { beforeJson: { path: ['projectId'], equals: projectId } },
+              { afterJson: { path: ['projectId'], equals: projectId } },
+            ],
+          },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   @Get('sections/:id/audit')
