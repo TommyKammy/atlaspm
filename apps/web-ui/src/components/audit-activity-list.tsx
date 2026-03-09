@@ -1,5 +1,6 @@
 'use client';
 
+import { dateOnlyInputToLocalDate } from '@atlaspm/domain';
 import { useMemo } from 'react';
 import { useI18n } from '@/lib/i18n';
 import type { AuditEvent, ProjectMember, Section, Task, RuleCondition, RuleAction } from '@/lib/types';
@@ -77,10 +78,10 @@ function auditFieldLabel(key: string, t: (key: string) => string) {
   return humanizeKey(key);
 }
 
-function formatCondition(condition: RuleCondition) {
+function formatCondition(condition: RuleCondition, t: (key: string) => string) {
   const field = condition.field === 'customFieldNumber'
-    ? `custom field ${condition.fieldId}`
-    : 'progress';
+    ? t('auditCustomFieldLabel').replace('{{fieldId}}', condition.fieldId)
+    : t('progress').toLowerCase();
   const op = condition.op;
   if (op === 'between') {
     return `${field} ${condition.min ?? 0}-${condition.max ?? 0}`;
@@ -90,9 +91,9 @@ function formatCondition(condition: RuleCondition) {
 
 function formatAction(action: RuleAction, t: (key: string) => string) {
   if (action.type === 'setStatus') return `${t('status')} -> ${statusLabel(action.status, t)}`;
-  if (action.type === 'setCompletedAtNow') return 'mark complete';
-  if (action.type === 'setCompletedAtNull') return 'clear completion';
-  return 'update task';
+  if (action.type === 'setCompletedAtNow') return t('auditMarkComplete');
+  if (action.type === 'setCompletedAtNull') return t('auditClearCompletion');
+  return t('auditUpdateTask');
 }
 
 function describeRuleDefinition(
@@ -100,11 +101,11 @@ function describeRuleDefinition(
   t: (key: string) => string,
 ) {
   if (!isPlainRecord(value)) return '';
-  const trigger = typeof value.trigger === 'string' ? value.trigger : 'rule';
+  const trigger = typeof value.trigger === 'string' ? value.trigger : t('auditRuleTriggerFallback');
   const conditions = Array.isArray(value.conditions)
     ? value.conditions
         .filter((item): item is RuleCondition => isPlainRecord(item) && typeof item.field === 'string' && typeof item.op === 'string')
-        .map((item) => formatCondition(item))
+        .map((item) => formatCondition(item, t))
     : [];
   const actions = Array.isArray(value.actions)
     ? value.actions
@@ -112,8 +113,8 @@ function describeRuleDefinition(
         .map((item) => formatAction(item, t))
     : [];
 
-  const conditionSummary = conditions.length ? conditions.join(' and ') : 'always';
-  const actionSummary = actions.length ? actions.join(', ') : 'no actions';
+  const conditionSummary = conditions.length ? conditions.join(` ${t('auditJoinAnd')} `) : t('auditAlways');
+  const actionSummary = actions.length ? actions.join(', ') : t('auditNoActions');
   return `${trigger}: ${conditionSummary} -> ${actionSummary}`;
 }
 
@@ -134,7 +135,7 @@ function extractAuditDiff(event: AuditEvent) {
   return { before, after, changed };
 }
 
-function formatAuditEvent(action: string, locale: 'en' | 'ja', t: (key: string) => string) {
+function formatAuditEvent(action: string, t: (key: string) => string) {
   if (action === 'task.description.updated') return t('activityUpdatedDescription');
   if (action === 'task.description.snapshot_saved') return t('activityUpdatedDescription');
   if (action === 'task.comment.created') return t('activityAddedComment');
@@ -150,40 +151,21 @@ function formatAuditEvent(action: string, locale: 'en' | 'ja', t: (key: string) 
   if (action === 'task.reminder.cleared') return t('activityClearedReminder');
   if (action === 'task.reminder.sent') return t('activitySentReminder');
   if (action === 'rule.applied') return t('activityAppliedRule');
-
-  const en: Record<string, string> = {
-    'project.created': 'created project',
-    'project.member.added': 'added a member',
-    'project.member.role_changed': 'changed member role',
-    'project.member.removed': 'removed a member',
-    'rule.created': 'created rule',
-    'rule.updated': 'updated rule',
-    'rule.enabled': 'enabled rule',
-    'rule.disabled': 'disabled rule',
-    'rule.deleted': 'deleted rule',
-    'rule.ensure_template': 'ensured template rule',
-    'project.view_default.updated': 'updated default view',
-    'project.saved_view.created': 'created saved view',
-    'project.saved_view.updated': 'updated saved view',
-    'project.saved_view.deleted': 'deleted saved view',
-  };
-  const ja: Record<string, string> = {
-    'project.created': 'プロジェクトを作成',
-    'project.member.added': 'メンバーを追加',
-    'project.member.role_changed': 'メンバー権限を変更',
-    'project.member.removed': 'メンバーを削除',
-    'rule.created': 'ルールを作成',
-    'rule.updated': 'ルールを更新',
-    'rule.enabled': 'ルールを有効化',
-    'rule.disabled': 'ルールを無効化',
-    'rule.deleted': 'ルールを削除',
-    'rule.ensure_template': 'テンプレートルールを同期',
-    'project.view_default.updated': 'デフォルトビューを更新',
-    'project.saved_view.created': '保存ビューを作成',
-    'project.saved_view.updated': '保存ビューを更新',
-    'project.saved_view.deleted': '保存ビューを削除',
-  };
-  return (locale === 'ja' ? ja : en)[action] ?? action;
+  if (action === 'project.created') return t('activityCreatedProject');
+  if (action === 'project.member.added') return t('activityAddedProjectMember');
+  if (action === 'project.member.role_changed') return t('activityChangedProjectMemberRole');
+  if (action === 'project.member.removed') return t('activityRemovedProjectMember');
+  if (action === 'rule.created') return t('activityCreatedRule');
+  if (action === 'rule.updated') return t('activityUpdatedRule');
+  if (action === 'rule.enabled') return t('activityEnabledRule');
+  if (action === 'rule.disabled') return t('activityDisabledRule');
+  if (action === 'rule.deleted') return t('activityDeletedRule');
+  if (action === 'rule.ensure_template') return t('activityEnsuredTemplateRule');
+  if (action === 'project.view_default.updated') return t('activityUpdatedDefaultView');
+  if (action === 'project.saved_view.created') return t('activityCreatedSavedView');
+  if (action === 'project.saved_view.updated') return t('activityUpdatedSavedView');
+  if (action === 'project.saved_view.deleted') return t('activityDeletedSavedView');
+  return action;
 }
 
 function actorLabel(actor: string, memberLabels: Map<string, string>) {
@@ -226,8 +208,8 @@ export function AuditActivityList({
       if (field === 'assigneeUserId' || field === 'userId' || field === 'deletedByUserId') return resolveMemberLabel(value);
       if (field === 'sectionId') return sectionLabels.get(value) ?? value;
       if (field === 'startAt' || field === 'dueAt' || field === 'baselineStartAt' || field === 'baselineDueAt') {
-        const date = new Date(`${value}T00:00:00`);
-        if (!Number.isNaN(date.getTime())) {
+        const date = dateOnlyInputToLocalDate(value);
+        if (date) {
           return date.toLocaleDateString(locale === 'ja' ? 'ja-JP' : 'en-US');
         }
       }
@@ -253,7 +235,7 @@ export function AuditActivityList({
         return (
           <div key={event.id} className="border-b border-border/60 pb-2 last:border-b-0" data-testid={`activity-${event.id}`}>
             <div className="text-sm font-medium">
-              {actorLabel(event.actor, memberLabels)} {formatAuditEvent(event.action, locale, t)}
+              {actorLabel(event.actor, memberLabels)} {formatAuditEvent(event.action, t)}
             </div>
             <div className="text-xs text-muted-foreground">{new Date(event.createdAt).toLocaleString()}</div>
             {diff.changed.length ? (

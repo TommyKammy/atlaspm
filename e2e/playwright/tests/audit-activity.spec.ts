@@ -46,7 +46,12 @@ test('project members page shows readable audit before/after diffs', async ({ br
     email: invitedEmail,
     role: 'WS_MEMBER',
   });
-  const inviteToken = String(invitation.inviteLink).split('inviteToken=')[1];
+  const inviteUrl = new URL(String(invitation.inviteLink));
+  const inviteToken = inviteUrl.searchParams.get('inviteToken');
+  expect(inviteToken).toBeTruthy();
+  if (!inviteToken) {
+    throw new Error(`Invite token missing from inviteLink: ${invitation.inviteLink}`);
+  }
 
   const invitedContext: BrowserContext = await browser.newContext();
   const invitedPage = await invitedContext.newPage();

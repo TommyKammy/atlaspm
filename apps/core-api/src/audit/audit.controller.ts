@@ -45,6 +45,7 @@ export class AuditController {
         ],
       },
       orderBy: { createdAt: 'desc' },
+      take: 100,
     });
   }
 
