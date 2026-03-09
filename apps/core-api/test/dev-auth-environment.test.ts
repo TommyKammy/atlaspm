@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import { AuthService } from '../src/auth/auth.service';
 import { DevAuthModule } from '../src/auth/dev-auth.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -139,6 +140,29 @@ describe('Dev auth environment guardrails', () => {
 
       expect(setCookie.some((cookie) => /(?:__Host-)?atlaspm_session=/.test(cookie))).toBe(true);
       expect(setCookie.some((cookie) => /(?:__Host-)?atlaspm_csrf=/.test(cookie))).toBe(true);
+    } finally {
+      await app.close();
+    }
+  }, 15_000);
+
+  test('accepts the dev session cookie as an auth credential', async () => {
+    process.env.NODE_ENV = 'test';
+    process.env.DEV_AUTH_ENABLED = 'true';
+    process.env.DEV_AUTH_SECRET = 'atlaspm-test-secret-123';
+
+    const app = await createAuthApp();
+    await app.init();
+
+    try {
+      const auth = app.get(AuthService);
+      const token = await auth.mintDevToken('user-123', 'user@example.com', 'User Example');
+      const user = await auth.verify(undefined, `atlaspm_session=${token}`);
+
+      expect(user).toEqual({
+        sub: 'user-123',
+        email: 'user@example.com',
+        name: 'User Example',
+      });
     } finally {
       await app.close();
     }
