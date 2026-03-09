@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { redactLogData } from './log-redaction';
 
 @Catch()
 export class GlobalErrorFilter implements ExceptionFilter {
@@ -39,14 +40,17 @@ export class GlobalErrorFilter implements ExceptionFilter {
 
     const errorMessage = exception instanceof Error ? exception.message : 'Unknown error';
     const errorStack = exception instanceof Error ? exception.stack : undefined;
-    
+    const path = req.path ?? req.url;
+    const route = req.route?.path ?? path;
+
     this.logger.error({
       message: 'Internal Server Error',
-      path: req.url,
+      path,
+      route,
       method: req.method,
-      body: req.body,
-      query: req.query,
-      params: req.params,
+      body: redactLogData(req.body),
+      query: redactLogData(req.query),
+      params: redactLogData(req.params),
       user: req.user?.sub ?? 'anonymous',
       error: errorMessage,
       stack: errorStack,
