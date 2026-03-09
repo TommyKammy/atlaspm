@@ -63,17 +63,37 @@ describe('Dev auth environment guardrails', () => {
   test('fails startup when dev auth is enabled in an unsafe environment', async () => {
     process.env.NODE_ENV = 'production';
     process.env.DEV_AUTH_ENABLED = 'true';
-    process.env.DEV_AUTH_SECRET = 'dev-secret';
+    process.env.DEV_AUTH_SECRET = 'atlaspm-test-secret-123';
 
     const app = await createAuthApp();
 
     await expect(app.init()).rejects.toThrow(/DEV_AUTH_ENABLED=true is only allowed/i);
   });
 
-  test('allows dev auth token minting in the test environment', async () => {
+  test('fails startup when dev auth is enabled without an explicit secret', async () => {
+    process.env.NODE_ENV = 'test';
+    process.env.DEV_AUTH_ENABLED = 'true';
+    delete process.env.DEV_AUTH_SECRET;
+
+    const app = await createAuthApp();
+
+    await expect(app.init()).rejects.toThrow(/DEV_AUTH_SECRET must be set/i);
+  });
+
+  test('fails startup when dev auth uses an obvious default secret', async () => {
     process.env.NODE_ENV = 'test';
     process.env.DEV_AUTH_ENABLED = 'true';
     process.env.DEV_AUTH_SECRET = 'dev-secret';
+
+    const app = await createAuthApp();
+
+    await expect(app.init()).rejects.toThrow(/DEV_AUTH_SECRET is too weak/i);
+  });
+
+  test('allows dev auth token minting in the test environment', async () => {
+    process.env.NODE_ENV = 'test';
+    process.env.DEV_AUTH_ENABLED = 'true';
+    process.env.DEV_AUTH_SECRET = 'atlaspm-test-secret-123';
 
     const app = await createAuthApp();
     await app.init();
@@ -89,5 +109,5 @@ describe('Dev auth environment guardrails', () => {
     } finally {
       await app.close();
     }
-  });
+  }, 15_000);
 });
