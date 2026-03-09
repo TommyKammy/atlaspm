@@ -5,8 +5,10 @@ import { AppModule } from './app.module';
 import { CorrelationIdMiddleware } from './common/correlation.middleware';
 import { GlobalErrorFilter } from './common/error.filter';
 import { RequestLoggingMiddleware } from './common/request-logging.middleware';
+import { assertSafeDevAuthEnvironment } from './auth/dev-auth-environment';
 
-async function bootstrap() {
+export async function bootstrap() {
+  assertSafeDevAuthEnvironment();
   const app = await NestFactory.create(AppModule, { rawBody: true });
   app.use(new CorrelationIdMiddleware().use);
   app.use(new RequestLoggingMiddleware().use);
@@ -24,4 +26,6 @@ async function bootstrap() {
   await app.listen(port);
 }
 
-bootstrap();
+if (require.main === module) {
+  void bootstrap();
+}
