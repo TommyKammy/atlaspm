@@ -120,4 +120,27 @@ describe('Dev auth environment guardrails', () => {
       await app.close();
     }
   }, 15_000);
+
+  test('establishes a browser session cookie for dev auth login', async () => {
+    process.env.NODE_ENV = 'test';
+    process.env.DEV_AUTH_ENABLED = 'true';
+    process.env.DEV_AUTH_SECRET = 'atlaspm-test-secret-123';
+
+    const app = await createAuthApp();
+    await app.init();
+
+    try {
+      const response = await request(app.getHttpServer())
+        .post('/dev-auth/token')
+        .send({ sub: 'user-123', email: 'user@example.com', name: 'User Example' })
+        .expect(201);
+
+      const setCookie = response.headers['set-cookie'] ?? [];
+
+      expect(setCookie.some((cookie) => /(?:__Host-)?atlaspm_session=/.test(cookie))).toBe(true);
+      expect(setCookie.some((cookie) => /(?:__Host-)?atlaspm_csrf=/.test(cookie))).toBe(true);
+    } finally {
+      await app.close();
+    }
+  }, 15_000);
 });

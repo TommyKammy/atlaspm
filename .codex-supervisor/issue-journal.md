@@ -1,43 +1,37 @@
-# Issue #330: P1: Write ADR for browser auth migration off localStorage bearer tokens
+# Issue #331: P1: Introduce secure cookie or session transport for web-ui authentication
 
 ## Supervisor Snapshot
-- Issue URL: https://github.com/TommyKammy/atlaspm/issues/330
-- Branch: codex/reopen-issue-330
-- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-330
-- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-330/.codex-supervisor/issue-journal.md
-- Current phase: addressing_review
-- Attempt count: 2
-- Last head SHA: 836ce2febe5a18d2eb8ee90df85cbe38c5e50058
+- Issue URL: https://github.com/TommyKammy/atlaspm/issues/331
+- Branch: codex/reopen-issue-331
+- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-331
+- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-331/.codex-supervisor/issue-journal.md
+- Current phase: reproducing
+- Attempt count: 1
+- Last head SHA: d7f83f8965c25694e48f2ef3e936d2c8acb1f5b7
 - Blocked reason: none
-- Last failure signature: PRRT_kwDORWcwRc5zI8p1
-- Repeated failure signature count: 1
-- Updated at: 2026-03-10T06:47:14+09:00
+- Last failure signature: none
+- Repeated failure signature count: 0
+- Updated at: 2026-03-09T22:05:16.215Z
 
 ## Latest Codex Summary
-Added the ADR at [docs/adr-browser-auth-session.md](/home/tommy/Dev/atlaspm-worktrees/issue-330/docs/adr-browser-auth-session.md) and linked it from [docs/architecture.md](/home/tommy/Dev/atlaspm-worktrees/issue-330/docs/architecture.md). The decision is explicit: move browser auth from `localStorage` bearer tokens to `core-api` managed `HttpOnly` cookie sessions, keep OIDC exchange and refresh server-side, require CSRF protection for unsafe browser requests, preserve bearer auth temporarily for non-browser clients, and stage the rollout so old/new frontend and backend versions can overlap safely.
-
-Committed as `836ce2f` (`docs: add browser auth migration ADR`), pushed on `codex/reopen-issue-330`, and opened draft PR #334: https://github.com/TommyKammy/atlaspm/pull/334
-
-Summary: Wrote and committed the browser-auth migration ADR, added the architecture cross-reference, pushed the branch, and opened draft PR #334.
-State hint: draft_pr
-Blocked reason: verification
-Tests: `rg -n "atlaspm_token|POST /dev-auth/token|Authorization: Bearer|credentials: 'include'" apps/web-ui/src apps/core-api/src docs/adr-browser-auth-session.md docs/architecture.md`; `pnpm --filter @atlaspm/web-ui type-check` (failed because `node_modules` is absent and `tsc` is not installed in this worktree)
-Failure signature: missing-node-modules-tsc
-Next action: Review draft PR #334, or install workspace dependencies if stronger local verification is required before merge
+- Added a focused failing integration test in `apps/core-api/test/dev-auth-environment.test.ts` proving that dev browser login still does not establish session cookies.
+- Reproduced the issue with `pnpm --filter @atlaspm/core-api exec vitest run test/dev-auth-environment.test.ts` after bootstrapping this worktree with `pnpm install` and `pnpm --filter @atlaspm/core-api prisma:generate`.
 
 ## Active Failure Context
-- None recorded.
+- Failure signature: `browser-auth-missing-session-cookie`
+- Focused failing test: `Dev auth environment guardrails > establishes a browser session cookie for dev auth login`
+- Failure detail: `POST /dev-auth/token` responds `201` but `response.headers['set-cookie']` does not contain either `atlaspm_session` / `__Host-atlaspm_session` or `atlaspm_csrf` / `__Host-atlaspm_csrf`.
 
 ## Codex Working Notes
 ### Current Handoff
-- Hypothesis: The current browser auth risk is not an execution bug but an architecture/documentation gap: `web-ui` still depends on `localStorage` bearer tokens, and the repo lacked an ADR defining the replacement session model.
-- Primary failure or risk: The review fix is merged into the branch and the thread is resolved; only GitHub's current `mergeStateStatus=UNSTABLE` remains to watch.
-- Last focused command: `gh pr view 334 --json isDraft,mergeStateStatus,reviewDecision,url`
-- Files changed: `docs/adr-browser-auth-session.md`
+- Hypothesis: The missing browser session transport is now directly reproducible in `core-api`: local login still issues only a JSON bearer token and no cookie/CSRF state, which keeps `web-ui` coupled to `localStorage`.
+- Primary failure or risk: There is no cookie-based browser session establishment path yet, and server auth still depends on bearer headers only.
+- Last focused command: `pnpm --filter @atlaspm/core-api exec vitest run test/dev-auth-environment.test.ts`
+- Files changed: `apps/core-api/test/dev-auth-environment.test.ts`
 - Next 1-3 actions:
-  1. Re-check PR #334 merge state after GitHub refreshes branch status.
-  2. If another review arrives, address it on the ADR without broadening scope.
-  3. Otherwise merge the ADR before implementation issues #331-#333 proceed.
+  1. Implement cookie/session issuance on the dev auth login path and preserve bearer compatibility for non-browser callers.
+  2. Extend auth verification to accept the new session transport, then add CSRF enforcement for state-changing browser requests.
+  3. Update `web-ui` login/API/logout flows off `localStorage` bearer handling and rerun focused auth tests.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
@@ -45,13 +39,13 @@ Next action: Review draft PR #334, or install workspace dependencies if stronger
   - `apps/web-ui/src/app/login/page.tsx` uses `POST /dev-auth/token` and stores the returned token in browser state.
   - `apps/web-ui/src/lib/api.ts` reads `atlaspm_token` from `localStorage` and attaches it as `Authorization: Bearer ...`.
   - `apps/core-api/src/auth/auth.service.ts` authenticates requests from that bearer header today.
+  - New reproducing test expects `POST /dev-auth/token` to emit session and CSRF cookies for browser login, but current response has no `Set-Cookie` headers.
 - Failure signature:
-  - `browser-auth-localstorage-bearer`
+  - `browser-auth-missing-session-cookie`
 - Current focused verification:
-  - `git diff -- docs/adr-browser-auth-session.md`
-  - `rg -n "__Host-atlaspm_session|atlaspm_session|__Host-atlaspm_csrf|atlaspm_csrf|plain HTTP|same session semantics" docs/adr-browser-auth-session.md`
-  - `gh api graphql -f query='mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{isResolved}}}' -F threadId=PRRT_kwDORWcwRc5zI8p1`
-  - `gh pr view 334 --json isDraft,mergeStateStatus,reviewDecision,url`
+  - `pnpm install`
+  - `pnpm --filter @atlaspm/core-api prisma:generate`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/dev-auth-environment.test.ts`
 - Implementation notes:
   - Chosen browser model: `core-api` managed opaque `HttpOnly` session cookie plus a readable CSRF cookie.
   - OIDC code exchange and refresh-token rotation stay server-side in `core-api`.
