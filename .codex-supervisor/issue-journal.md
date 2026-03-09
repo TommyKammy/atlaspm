@@ -1,71 +1,94 @@
-# Issue #272: P1-3: Build saved-view UI for save/apply/rename/delete
+# Issue #313: P0: Remove default dev auth secret fallback and require explicit secret
 
 ## Supervisor Snapshot
-- Issue URL: https://github.com/TommyKammy/atlaspm/issues/272
-- Branch: codex/reopen-issue-272
-- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-272
-- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-272/.codex-supervisor/issue-journal.md
-- Current phase: addressing_review
-- Attempt count: 3
-- Last head SHA: 212b31b691eb6b55e540754d3e1230c9adfc8283
+- Issue URL: https://github.com/TommyKammy/atlaspm/issues/313
+- Branch: codex/reopen-issue-313
+- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-313
+- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-313/.codex-supervisor/issue-journal.md
+- Current phase: repairing_ci
+- Attempt count: 4
+- Last head SHA: 0ad1af14f7f96517631da288d2db638566b0ec05
 - Blocked reason: none
-- Last failure signature: PRRT_kwDORWcwRc5y7n84|PRRT_kwDORWcwRc5y7n9N|PRRT_kwDORWcwRc5y7n9U
+- Last failure signature: e2e:fail
 - Repeated failure signature count: 1
-- Updated at: 2026-03-09T06:23:40.355Z
+- Updated at: 2026-03-09T11:13:51.187Z
 
 ## Latest Codex Summary
-Draft PR is open at https://github.com/TommyKammy/atlaspm/pull/308 on `codex/reopen-issue-272`. The saved-view checkpoint remains `212b31b` (`Add saved view controls to project shell`), and the focused verification still passes for save/apply/rename/delete/default reload behavior.
+Applied the review fix on top of PR #318 and pushed `0ad1af1` (`Reject shipped dev auth placeholders`).
 
-The only remaining local dirt is non-checkpoint metadata: the updated issue journal and generated `apps/web-ui/tsconfig.tsbuildinfo`.
+The reviewer concern was valid: the example secret was still a repo-shipped known value that passed validation. I fixed that by making the shipped `.env.example` value fail closed (`DEV_AUTH_SECRET=replace-me`), explicitly rejecting shipped placeholder secrets in `DISALLOWED_DEV_AUTH_SECRETS`, and adding a focused env test that covers the placeholder case. I also resolved both bot review threads on the PR.
 
-Summary: Pushed the saved-view checkpoint and opened draft PR #308 for review.
-State hint: draft_pr
+Local verification passed:
+- `pnpm --filter @atlaspm/core-api exec vitest run test/dev-auth-environment.test.ts --reporter=dot`
+- `pnpm --filter @atlaspm/domain test`
+- `pnpm --filter @atlaspm/core-api test`
+
+GitHub has started a fresh run for PR #318; `lint`, `type-check`, and `test` are currently pending.
+
+Summary: Addressed both review threads by rejecting shipped placeholder secrets, updated the example env to fail closed, added regression coverage, pushed `0ad1af1`, and resolved the threads.
+State hint: waiting_ci
 Blocked reason: none
-Tests: `pnpm --filter @atlaspm/web-ui type-check`; `./scripts/run-e2e.sh tests/saved-views.spec.ts`; `E2E_REBUILD=1 ./scripts/run-e2e.sh tests/saved-views.spec.ts`
+Tests: `pnpm --filter @atlaspm/core-api exec vitest run test/dev-auth-environment.test.ts --reporter=dot`; `pnpm --filter @atlaspm/domain test`; `pnpm --filter @atlaspm/core-api test`
 Failure signature: none
-Next action: Monitor draft PR #308 for CI or review feedback and address any focused follow-up issues.
+Next action: watch the new PR #318 checks on commit `0ad1af1` and confirm they complete successfully
 
 ## Active Failure Context
-- Category: review
-- Summary: 3 unresolved automated review thread(s) remain.
-- Reference: https://github.com/TommyKammy/atlaspm/pull/308#discussion_r2903435265
+- Category: checks
+- Summary: PR #318 has failing checks.
+- Command or source: gh pr checks
+- Reference: https://github.com/TommyKammy/atlaspm/pull/318
 - Details:
-  - apps/web-ui/src/components/layout/ProjectSavedViewsControl.tsx:322 `data-testid` for apply uses `view.name`, which is user-controlled and changes on rename. This makes selectors brittle (e.g., names containing quotes/special chars) and breaks the general convention elsewhere in the repo of using stable identifiers in test ids. Use `view.id` (or a normalized/sanitized segment) for the test id, and rely on visible text (or a separate attribute) to assert the name in tests. ```suggestion data-testid={`saved-view-apply-${view.id}`} ```
-  - e2e/playwright/tests/saved-views.spec.ts:96 After clicking "set default", the test proceeds and then calls `page.reload()` without explicitly waiting for the default-setting request to finish. A navigation/reload can cancel in-flight fetches, which can make this E2E flow flaky. Add an explicit wait for the mutation to settle (e.g., wait for the button to exit the pending state/text to revert, or wait for the saved-views response to reflect the new default) before reloading.
-  - apps/web-ui/src/lib/types.ts:39 `ProjectViewMode`, `ProjectViewCustomFieldFilter`, and `ProjectViewState` are re-declared here even though identical types already exist in `@atlaspm/domain` (see `packages/domain/src/services/project-view-state.ts`). Duplicating these shapes in web-ui risks drift and subtle incompatibilities over time (e.g., when a new mode or filter field is added). Prefer importing/re-exporting the domain types (or referencing them directly) and only define web-ui–specific API response wrappers in this file. ```suggestion import type { ProjectViewMode, ProjectViewCustomFieldFilter, ProjectViewState } from '@atlaspm/domain'; export type { ProjectViewMode, ProjectViewCustomFieldFilter, ProjectViewState }; export type Project = { id: string; workspaceId: string; name: string }; ```
+  - e2e (fail/FAILURE) https://github.com/TommyKammy/atlaspm/actions/runs/22850428040/job/66277529591
 
 ## Codex Working Notes
 ### Current Handoff
-- Hypothesis: The saved-view issue is a missing `web-ui` surface, not a backend gap. A focused list-view e2e can drive the narrowest useful implementation, then the same shell control can bridge timeline/gantt state via lightweight local-storage + event sync.
-- Primary failure or risk: Automated review flagged three valid follow-ups: unstable user-controlled `data-testid` values, duplicated project-view domain types in `web-ui`, and an e2e reload that could race the default-save request.
-- Last focused command: `cd /home/tommy/Dev/atlaspm-worktrees/issue-272 && E2E_REBUILD=1 ./scripts/run-e2e.sh tests/saved-views.spec.ts`
-- Files changed: `apps/web-ui/src/components/layout/ProjectSavedViewsControl.tsx`, `apps/web-ui/src/lib/types.ts`, `e2e/playwright/tests/saved-views.spec.ts`
+- Hypothesis: The new E2E red is a compose-stack config drift, not a browser regression. `infra/docker/docker-compose.yml` still boots `core-api` with the now-banned `dev-secret-change-me`, so Playwright never gets a healthy API.
+- Primary failure or risk: PR #318 `e2e` failed before tests ran because `atlaspm-core-api` exited during startup with `Error: DEV_AUTH_SECRET is too weak. Choose a non-default secret.` from the compose-provided `DEV_AUTH_SECRET=dev-secret-change-me`.
+- Last focused command: `pnpm --filter @atlaspm/playwright e2e tests/p0-regression-smoke.spec.ts`
+- Files changed: `infra/docker/docker-compose.yml`
 - Next 1-3 actions:
-  1. Commit and push the review-fix follow-up to PR #308.
-  2. Resolve the three automated review threads after the branch update.
-  3. If more feedback arrives, keep the next change constrained to saved-view shell behavior.
+  1. Commit and push the E2E compose-secret fix.
+  2. Watch PR #318 checks for the rerun on the new commit.
+  3. If E2E still fails, inspect the next job log rather than widening the auth validator again.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
-- Reproduced first with `./scripts/run-e2e.sh tests/saved-views.spec.ts`; initial focused failure was `saved-view-trigger` missing in the project header.
-- Needed `pnpm install` in this worktree before the Playwright runner was available.
+- Needed local setup first in this worktree:
+  - `pnpm install`
+  - `pnpm --filter @atlaspm/core-api prisma:generate`
+- Focused reproduction:
+  - Added two narrow tests in `apps/core-api/test/dev-auth-environment.test.ts` for missing secret and obvious default secret.
+  - Reproduced on the first real run: `promise resolved "NestApplication{ … }" instead of rejecting` for both cases.
 - Current focused verification passing:
-  - `pnpm --filter @atlaspm/web-ui type-check`
-  - `pnpm --filter @atlaspm/web-ui lint`
-  - `./scripts/run-e2e.sh tests/saved-views.spec.ts`
-  - `E2E_REBUILD=1 ./scripts/run-e2e.sh tests/saved-views.spec.ts`
-- Branch/PR status:
-  - committed checkpoint: `212b31b` (`Add saved view controls to project shell`)
-  - pushed branch: `origin/codex/reopen-issue-272`
-  - draft PR: `https://github.com/TommyKammy/atlaspm/pull/308`
-- UI slice implemented:
-  - Added a shared project saved-view popover in the header for save/apply/rename/delete/set-default.
-  - List/board saved views serialize current filter state from URL params and clear active named selection on manual filter edits.
-  - Timeline/gantt now resolve defaults/named views from `/projects/:id/saved-views`, and listen for shell apply events so named/default changes take effect without refresh.
-  - Focused Playwright coverage now exercises save, apply, rename, delete, and default-on-reload for list view.
-- Review follow-up applied:
-  - saved-view apply buttons now use stable `view.id`-based test ids.
-  - `apps/web-ui/src/lib/types.ts` now re-exports project-view types from `@atlaspm/domain` instead of duplicating them.
-  - the Playwright default-save step now waits for the `PUT /saved-views/defaults/list` response before reloading.
-- Local workspace note:
-  - `apps/web-ui/tsconfig.tsbuildinfo` is still modified from local type-checking and was not included in the checkpoint commit.
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/dev-auth-environment.test.ts --reporter=dot`
+  - `pnpm --filter @atlaspm/core-api type-check`
+- Implementation notes:
+  - Added `getValidatedDevAuthSecret()` in `apps/core-api/src/auth/dev-auth-environment.ts`.
+  - Startup now rejects missing secrets, secrets shorter than 16 chars, and obvious defaults including `dev-secret` and `dev-secret-change-me`.
+  - `AuthService` now uses the validated secret for both dev token verification and minting, with no fallback secret.
+- CI repair notes:
+  - Pulled the failing log with `gh run view 22850125550 --job 66276330387 --log`.
+  - Exact CI stack: `Error: DEV_AUTH_SECRET is too weak. Choose a non-default secret.` from `test/core.integration.test.ts > Core API Integration`.
+  - Updated the integration fixture secret from `dev-secret-change-me` to `atlaspm-integration-secret-123`.
+  - Local `pnpm --filter @atlaspm/core-api test` only passed after building `@atlaspm/domain` first, because running the filtered `core-api` test alone in this worktree can miss the workspace package build that root CI gets via recursive order.
+  - Current repair verification passing:
+    - `pnpm --filter @atlaspm/domain test`
+    - `pnpm --filter @atlaspm/core-api test`
+- Review follow-up notes:
+  - Added `replace-with-a-random-dev-auth-secret` and `replace-me` to `DISALLOWED_DEV_AUTH_SECRETS`.
+  - Changed `apps/core-api/.env.example` to `DEV_AUTH_SECRET=replace-me` so the shipped example fails closed even before the explicit placeholder block is considered.
+  - Added a focused env test covering repo-shipped placeholder rejection.
+  - Current review verification passing:
+    - `pnpm --filter @atlaspm/core-api exec vitest run test/dev-auth-environment.test.ts --reporter=dot`
+    - `pnpm --filter @atlaspm/domain test`
+    - `pnpm --filter @atlaspm/core-api test`
+- E2E repair notes:
+  - Pulled the failing log with `gh run view 22850428040 --job 66277529591 --log`.
+  - Exact CI stack: `atlaspm-core-api` crashed on startup because `infra/docker/docker-compose.yml` still set `DEV_AUTH_SECRET=dev-secret-change-me`.
+  - Updated compose to use `DEV_AUTH_SECRET=atlaspm-e2e-dev-auth-secret-123`.
+  - Current E2E-focused verification passing:
+    - `docker compose -f infra/docker/docker-compose.yml up -d postgres core-api collab-server web-ui`
+    - `curl -fsS http://localhost:3001/docs >/dev/null`
+    - `curl -fsS http://localhost:3000/login >/dev/null`
+    - `pnpm --filter @atlaspm/playwright e2e tests/p0-regression-smoke.spec.ts`
+    - `docker compose -f infra/docker/docker-compose.yml down`

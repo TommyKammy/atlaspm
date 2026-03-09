@@ -1,4 +1,15 @@
 const SAFE_DEV_AUTH_NODE_ENVS = new Set(['development', 'test']);
+const DEV_AUTH_SECRET_MIN_LENGTH = 16;
+const DISALLOWED_DEV_AUTH_SECRETS = new Set([
+  'dev-secret',
+  'dev-secret-change-me',
+  'replace-with-a-random-dev-auth-secret',
+  'replace-me',
+  'change-me',
+  'changeme',
+  'secret',
+  'password',
+]);
 
 function normalizeNodeEnv(nodeEnv: string | undefined): string | null {
   const normalized = nodeEnv?.trim().toLowerCase();
@@ -18,8 +29,31 @@ export function shouldRegisterDevAuthController(env: NodeJS.ProcessEnv = process
   return isDevAuthEnabled(env) && isSafeDevAuthEnvironment(env);
 }
 
+export function getValidatedDevAuthSecret(env: NodeJS.ProcessEnv = process.env): string {
+  const secret = env.DEV_AUTH_SECRET?.trim();
+  if (!secret) {
+    throw new Error('DEV_AUTH_SECRET must be set when DEV_AUTH_ENABLED=true.');
+  }
+
+  if (secret.length < DEV_AUTH_SECRET_MIN_LENGTH) {
+    throw new Error(`DEV_AUTH_SECRET is too weak. Use at least ${DEV_AUTH_SECRET_MIN_LENGTH} characters.`);
+  }
+
+  if (DISALLOWED_DEV_AUTH_SECRETS.has(secret.toLowerCase())) {
+    throw new Error('DEV_AUTH_SECRET is too weak. Choose a non-default secret.');
+  }
+
+  return secret;
+}
+
 export function assertSafeDevAuthEnvironment(env: NodeJS.ProcessEnv = process.env): void {
-  if (!isDevAuthEnabled(env) || isSafeDevAuthEnvironment(env)) {
+  if (!isDevAuthEnabled(env)) {
+    return;
+  }
+
+  getValidatedDevAuthSecret(env);
+
+  if (isSafeDevAuthEnvironment(env)) {
     return;
   }
 

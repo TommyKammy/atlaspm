@@ -27,7 +27,7 @@ services:
       PORT: 3001
       DATABASE_URL: postgresql://atlaspm:atlaspm@postgres:5432/atlaspm?schema=public
       DEV_AUTH_ENABLED: 'true'
-      DEV_AUTH_SECRET: dev-secret-change-me
+      DEV_AUTH_SECRET: atlaspm-e2e-dev-auth-secret-123
       DEV_AUTH_TOKEN_TTL: 8h
       COLLAB_JWT_SECRET: collab-jwt-secret-change-me
       COLLAB_SERVICE_TOKEN: collab-service-token-change-me

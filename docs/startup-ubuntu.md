@@ -63,6 +63,7 @@ For local dev login, set:
 
 - `apps/core-api/.env` -> `NODE_ENV=development`
 - `apps/core-api/.env` -> `DEV_AUTH_ENABLED=true`
+- `apps/core-api/.env` -> `DEV_AUTH_SECRET=<your own random secret, at least 16 chars>`
 - `apps/web-ui/.env.local` -> `NEXT_PUBLIC_DEV_AUTH_ENABLED=true`
 - This setting is for isolated local development only. Do not enable it in shared or internet-reachable environments.
 
