@@ -5167,5 +5167,69 @@ describe('Core API Integration', () => {
         }),
       ]),
     );
+    const retryingIndex = response.body.findIndex((item: any) => item.eventId === retryingEvent.id);
+    const deadLetteredIndex = response.body.findIndex((item: any) => item.eventId === deadLetteredEvent.id);
+    expect(deadLetteredIndex).toBeGreaterThanOrEqual(0);
+    expect(retryingIndex).toBeGreaterThanOrEqual(0);
+    expect(deadLetteredIndex).toBeLessThan(retryingIndex);
+  });
+
+  test('GET /notifications/delivery-failures paginates beyond unrelated failures to return admin project issues', async () => {
+    const auth = app.get(AuthService);
+    const ownerUserId = `delivery-pagination-owner-${Date.now()}`;
+    const ownerToken = await auth.mintDevToken(
+      ownerUserId,
+      `${ownerUserId}@example.com`,
+      'Delivery Pagination Owner',
+    );
+
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ workspaceId, name: `Notification Delivery Pagination ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const laterRetryAt = new Date(Date.now() + 120_000);
+    for (let index = 0; index < 120; index += 1) {
+      await prisma.outboxEvent.create({
+        data: {
+          type: 'task.updated',
+          payload: { projectId: `other-project-${index}`, taskId: `other-task-${index}` },
+          correlationId: `notif-delivery-other-${index}-${Date.now()}`,
+          deliveryAttempts: 1,
+          nextRetryAt: laterRetryAt,
+        },
+      });
+    }
+
+    const targetEvent = await prisma.outboxEvent.create({
+      data: {
+        type: 'task.updated',
+        payload: { projectId, taskId: 'owned-task' },
+        correlationId: `notif-delivery-owned-${Date.now()}`,
+        deliveryAttempts: 1,
+        nextRetryAt: laterRetryAt,
+        createdAt: new Date(Date.now() - 60_000),
+      },
+    });
+
+    const response = await request(app.getHttpServer())
+      .get('/notifications/delivery-failures?take=1')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .expect(200);
+
+    expect(response.body).toEqual([
+      expect.objectContaining({
+        eventId: targetEvent.id,
+        project: expect.objectContaining({ id: projectId }),
+      }),
+    ]);
   });
 });

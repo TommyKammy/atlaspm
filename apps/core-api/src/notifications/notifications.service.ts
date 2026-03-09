@@ -1,8 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ProjectRole } from '@prisma/client';
+import { Prisma, ProjectRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
-import { Prisma } from '@prisma/client';
 import {
   InboxNotificationType,
   NOTIFICATION_TYPE_APPROVAL_APPROVED,
@@ -372,21 +371,68 @@ export class NotificationsService {
     }
 
     const projectMap = new Map(adminMemberships.map((membership) => [membership.project.id, membership.project]));
-    const candidateEvents = await this.prisma.outboxEvent.findMany({
-      where: {
-        deliveredAt: null,
-        deliveryAttempts: { gt: 0 },
-      },
-      orderBy: [{ deadLetteredAt: 'desc' }, { nextRetryAt: 'asc' }, { createdAt: 'desc' }],
-      take: Math.max(input.take * 4, 100),
-    });
-    if (!candidateEvents.length) {
-      return [];
+    const pageSize = Math.max(input.take * 4, 100);
+    const maxScanned = Math.max(pageSize * 10, 1_000);
+    const results: Array<{
+      eventId: string;
+      type: string;
+      project: { id: string; name: string };
+      status: 'dead_lettered' | 'retrying';
+      deliveryAttempts: number;
+      nextRetryAt: Date | null;
+      deadLetteredAt: Date | null;
+      lastError: string | null;
+      createdAt: Date;
+      correlationId: string;
+      retryable: boolean;
+    }> = [];
+
+    for (let skip = 0; results.length < input.take && skip < maxScanned; skip += pageSize) {
+      const candidateEvents = await this.prisma.outboxEvent.findMany({
+        where: {
+          deliveredAt: null,
+          deliveryAttempts: { gt: 0 },
+        },
+        orderBy: [
+          { deadLetteredAt: { sort: 'desc', nulls: 'last' } },
+          { nextRetryAt: 'asc' },
+          { createdAt: 'desc' },
+        ],
+        take: pageSize,
+        skip,
+      });
+      if (!candidateEvents.length) {
+        break;
+      }
+
+      const mappedEvents = await this.mapDeliveryFailureEvents(candidateEvents, projectMap);
+      results.push(...mappedEvents);
+
+      if (candidateEvents.length < pageSize) {
+        break;
+      }
     }
 
+    return results.slice(0, input.take);
+  }
+
+  private async mapDeliveryFailureEvents(
+    events: Array<{
+      id: string;
+      type: string;
+      payload: Prisma.JsonValue;
+      deliveryAttempts: number;
+      nextRetryAt: Date | null;
+      deadLetteredAt: Date | null;
+      lastError: string | null;
+      createdAt: Date;
+      correlationId: string;
+    }>,
+    projectMap: Map<string, { id: string; name: string }>,
+  ) {
     const taskIds = new Set<string>();
     const sectionIds = new Set<string>();
-    for (const event of candidateEvents) {
+    for (const event of events) {
       for (const taskId of this.collectStringValues(event.payload, 'taskId')) {
         taskIds.add(taskId);
       }
@@ -412,7 +458,7 @@ export class NotificationsService {
     const taskProjectMap = new Map(taskRows.map((row) => [row.id, row.projectId]));
     const sectionProjectMap = new Map(sectionRows.map((row) => [row.id, row.projectId]));
 
-    return candidateEvents
+    return events
       .map((event) => {
         const projectId = this.resolveProjectIdForEvent(event.payload, projectMap, taskProjectMap, sectionProjectMap);
         if (!projectId) {
@@ -426,7 +472,7 @@ export class NotificationsService {
           eventId: event.id,
           type: event.type,
           project,
-          status: event.deadLetteredAt ? 'dead_lettered' : 'retrying',
+          status: (event.deadLetteredAt ? 'dead_lettered' : 'retrying') as 'dead_lettered' | 'retrying',
           deliveryAttempts: event.deliveryAttempts,
           nextRetryAt: event.nextRetryAt,
           deadLetteredAt: event.deadLetteredAt,
@@ -436,8 +482,7 @@ export class NotificationsService {
           retryable: Boolean(event.deadLetteredAt),
         };
       })
-      .filter((event): event is NonNullable<typeof event> => Boolean(event))
-      .slice(0, input.take);
+      .filter((event): event is NonNullable<typeof event> => Boolean(event));
   }
 
   private resolveProjectIdForEvent(

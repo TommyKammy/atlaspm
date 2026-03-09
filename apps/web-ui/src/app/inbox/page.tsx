@@ -53,6 +53,13 @@ function batchLabel(count: number, template: string) {
   return template.replace('{count}', String(count));
 }
 
+function localDayKey(date: Date) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function sectionLabel(date: Date, t: (key: string) => string) {
   const today = new Date();
   const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -71,12 +78,27 @@ function formatTimestamp(value: string | null | undefined) {
   }).format(new Date(value));
 }
 
+function isLaterNotification(candidate: InboxNotification, current: InboxNotification) {
+  return new Date(candidate.createdAt).getTime() > new Date(current.createdAt).getTime();
+}
+
+async function processInBatches<T>(
+  items: T[],
+  batchSize: number,
+  fn: (item: T) => Promise<void>,
+) {
+  for (let index = 0; index < items.length; index += batchSize) {
+    const batch = items.slice(index, index + batchSize);
+    await Promise.all(batch.map((item) => fn(item)));
+  }
+}
+
 function groupNotifications(notifications: InboxNotification[], t: (key: string) => string): NotificationSection[] {
   const sections = new Map<string, NotificationSection>();
 
   for (const notification of notifications) {
     const createdAt = new Date(notification.createdAt);
-    const dayKey = createdAt.toISOString().slice(0, 10);
+    const dayKey = localDayKey(createdAt);
     const batchKey = notification.statusUpdate
       ? `status-update:${notification.statusUpdate.id}`
       : notification.task?.id
@@ -110,6 +132,12 @@ function groupNotifications(notifications: InboxNotification[], t: (key: string)
     if (!notification.readAt) {
       batch.unreadCount += 1;
     }
+    if (isLaterNotification(notification, batch.latest)) {
+      batch.latest = notification;
+      batch.targetHref = targetHref(notification);
+      batch.targetLabel = targetLabel(notification, t('untitledTask'));
+      batch.actionLabel = notification.statusUpdate ? t('openUpdate') : t('openTask');
+    }
   }
 
   return [...sections.values()];
@@ -138,8 +166,8 @@ export default function InboxPage() {
 
   const setBatchRead = useMutation({
     mutationFn: async (input: { ids: string[]; read: boolean }) => {
-      await Promise.all(
-        input.ids.map((id) => api(`/notifications/${id}/read`, { method: 'POST', body: { read: input.read } })),
+      await processInBatches(input.ids, 10, (id) =>
+        api(`/notifications/${id}/read`, { method: 'POST', body: { read: input.read } }),
       );
     },
     onSuccess: async () => {
@@ -307,7 +335,7 @@ export default function InboxPage() {
                             onClick={() =>
                               setBatchRead.mutate({
                                 ids: batch.items.map((item) => item.id),
-                                read: batch.unreadCount === 0,
+                                read: batch.unreadCount > 0,
                               })
                             }
                             data-testid={`inbox-toggle-read-${batch.latest.id}`}
