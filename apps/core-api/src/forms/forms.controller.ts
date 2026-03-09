@@ -13,7 +13,6 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
 import {
   IsOptional,
   IsString,
@@ -32,7 +31,7 @@ import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { ProjectRole, FormQuestionType, Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
-import { THROTTLE_POLICIES } from '../common/throttling';
+import { PublicFormSubmissionThrottleGuard } from './public-form-submission-throttle.guard';
 
 class CreateFormDto {
   @IsString()
@@ -471,7 +470,7 @@ export class FormsController {
   }
 
   @Post('forms/:id/submit')
-  @Throttle({ default: THROTTLE_POLICIES.publicFormSubmission })
+  @UseGuards(PublicFormSubmissionThrottleGuard)
   async submit(
     @Param('id') formId: string,
     @Body() body: SubmitFormDto,

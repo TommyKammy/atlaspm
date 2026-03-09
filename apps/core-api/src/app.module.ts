@@ -32,6 +32,7 @@ import { ProjectViewsController } from './projects/project-views.controller';
 import { RecurringTasksController } from './recurring-tasks/recurring-tasks.controller';
 import { RecurringTaskWorker } from './recurring-tasks/recurring-task.worker';
 import { FormsController } from './forms/forms.controller';
+import { PublicFormSubmissionThrottleGuard } from './forms/public-form-submission-throttle.guard';
 import { TaskApprovalController } from './task-approvals/task-approval.controller';
 import { TaskTimeTrackingController } from './task-time-tracking/task-time-tracking.controller';
 import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
@@ -80,6 +81,7 @@ import { ApiThrottlingModule } from './common/throttling';
     TaskRetentionService,
     WebhookDeliveryService,
     NotificationsService,
+    PublicFormSubmissionThrottleGuard,
     ProjectRoleGuard,
     WorkspaceRoleGuard,
     RecurringTaskWorker,

@@ -7,6 +7,7 @@ import { AuthService } from '../src/auth/auth.service';
 import { CorrelationIdMiddleware } from '../src/common/correlation.middleware';
 import { GlobalErrorFilter } from '../src/common/error.filter';
 import { RequestLoggingMiddleware } from '../src/common/request-logging.middleware';
+import { THROTTLE_POLICIES } from '../src/common/throttling';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 const ENV_KEYS = [
@@ -29,7 +30,7 @@ const ENV_KEYS = [
   'DATABASE_URL',
 ] as const;
 
-const PUBLIC_FORM_SUBMISSION_LIMIT = 10;
+const PUBLIC_FORM_SUBMISSION_LIMIT = THROTTLE_POLICIES.publicFormSubmission.limit;
 
 function snapshotEnv(): Record<(typeof ENV_KEYS)[number], string | undefined> {
   return {
@@ -166,6 +167,19 @@ async function createPublicForm(app: INestApplication, token: string) {
   };
 }
 
+async function createPrivateForm(app: INestApplication, token: string) {
+  const { formId, questionId } = await createPublicForm(app, token);
+  const server = app.getHttpServer();
+
+  await request(server)
+    .put(`/forms/${formId}`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ isPublic: false })
+    .expect(200);
+
+  return { formId, questionId };
+}
+
 function buildSubmission(questionId: string, index: number) {
   return {
     submitterName: `Public Submitter ${index}`,
@@ -211,6 +225,21 @@ describe('public form abuse controls', () => {
       .send(buildSubmission(questionId, PUBLIC_FORM_SUBMISSION_LIMIT));
 
     expect(throttled.status).toBe(429);
+  });
+
+  test('does not apply the strict public throttle to non-public submissions', async () => {
+    const { app, token } = context!;
+    const { formId, questionId } = await createPrivateForm(app, token);
+    const server = app.getHttpServer();
+
+    for (let index = 0; index <= PUBLIC_FORM_SUBMISSION_LIMIT; index += 1) {
+      const response = await request(server)
+        .post(`/forms/${formId}/submit`)
+        .set('Authorization', `Bearer ${token}`)
+        .send(buildSubmission(questionId, index));
+
+      expect(response.status).toBe(409);
+    }
   });
 
   test('rejects obvious bot honeypot submissions and emits structured logs', async () => {

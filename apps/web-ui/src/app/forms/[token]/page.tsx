@@ -157,7 +157,10 @@ export default function FormSubmitPage() {
                     required
                   />
                 </div>
-                <div className="absolute -left-[10000px] top-auto h-px w-px overflow-hidden">
+                <div
+                  aria-hidden="true"
+                  className="absolute -left-[10000px] top-auto h-px w-px overflow-hidden"
+                >
                   <Label htmlFor="website">Website</Label>
                   <Input
                     id="website"
