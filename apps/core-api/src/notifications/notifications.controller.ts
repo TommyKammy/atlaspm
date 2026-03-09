@@ -56,6 +56,13 @@ export class NotificationsController {
     return { count };
   }
 
+  @Get('notifications/delivery-failures')
+  async deliveryFailures(@CurrentRequest() req: AppRequest, @Query() query: ListNotificationsQuery) {
+    const parsedTake = Number(query.take ?? 25);
+    const take = Number.isFinite(parsedTake) ? Math.max(1, Math.min(100, Math.trunc(parsedTake))) : 25;
+    return this.notifications.listDeliveryFailuresForUser({ userId: req.user.sub, take });
+  }
+
   @Post('notifications/read-all')
   async markAllRead(@CurrentRequest() req: AppRequest) {
     const unread = await this.prisma.inboxNotification.findMany({

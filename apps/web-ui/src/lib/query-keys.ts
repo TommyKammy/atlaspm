@@ -21,6 +21,7 @@ export const queryKeys = {
   projectCustomFields: (projectId: string) => ['project', projectId, 'custom-fields'] as const,
   notifications: (status: 'all' | 'unread' = 'all') => ['notifications', { status }] as const,
   notificationsUnreadCount: ['notifications', 'unread-count'] as const,
+  notificationDeliveryFailures: ['notifications', 'delivery-failures'] as const,
   taskDetail: (taskId: string) => ['task', taskId] as const,
   taskComments: (taskId: string) => ['task', taskId, 'comments'] as const,
   taskAudit: (taskId: string) => ['task', taskId, 'audit'] as const,
