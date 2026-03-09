@@ -36,6 +36,7 @@ services:
       OIDC_ISSUER: https://example.okta.com/oauth2/default
       OIDC_AUDIENCE: atlaspm
       OIDC_JWKS_URI: https://example.okta.com/oauth2/default/v1/keys
+      SLACK_SIGNING_SECRET: atlaspm-e2e-slack-signing-secret-123
     depends_on:
       postgres:
         condition: service_healthy
