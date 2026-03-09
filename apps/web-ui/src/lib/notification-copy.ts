@@ -1,4 +1,4 @@
-import type { InboxNotification } from './types';
+import type { InboxNotification, NotificationDeliveryIssue } from './types';
 
 export function actorLabel(notification: InboxNotification) {
   return (
@@ -36,5 +36,42 @@ export function notificationSummary(notification: InboxNotification, t: (key: st
       return `${actor} ${t('mentionedYou')}`;
     default:
       return `${actor} ${t('mentionedYou')}`;
+  }
+}
+
+export function formatNotificationTimestamp(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+export function formatBatchActorSummary(
+  actors: Array<{
+    id: string;
+    label: string;
+  }>,
+) {
+  if (!actors.length) return 'Someone';
+  if (actors.length === 1) return actors[0]?.label ?? 'Someone';
+  return `${actors[0]?.label ?? 'Someone'} +${actors.length - 1}`;
+}
+
+export function deliveryIssueEventLabel(issue: NotificationDeliveryIssue) {
+  switch (issue.eventType) {
+    case 'notification.created':
+      return 'notification created';
+    case 'notification.reopened':
+      return 'notification reopened';
+    case 'notification.read':
+      return 'notification read';
+    case 'notification.read_all':
+      return 'notifications marked read';
+    case 'task.reminder.sent':
+      return 'reminder delivery';
+    default:
+      return issue.eventType.replace(/\./g, ' ');
   }
 }

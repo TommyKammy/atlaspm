@@ -3879,6 +3879,78 @@ describe('Core API Integration', () => {
     });
   });
 
+  test('notification delivery issues expose dead-lettered notification events for admin projects only', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Notification Delivery Issues ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const createdAt = new Date();
+    const deadLetteredAt = new Date(createdAt.getTime() + 60_000);
+
+    await prisma.outboxEvent.create({
+      data: {
+        type: 'notification.created',
+        payload: {
+          projectId,
+          notificationId: 'notification-1',
+          userId: 'test-user',
+        },
+        correlationId: `notification-delivery-issue-${projectId}`,
+        createdAt,
+        deliveryAttempts: 3,
+        deadLetteredAt,
+        lastError: 'webhook-1:500',
+      },
+    });
+
+    await prisma.outboxEvent.create({
+      data: {
+        type: 'task.created',
+        payload: {
+          projectId,
+          taskId: 'task-ignore',
+        },
+        correlationId: `task-created-ignore-${projectId}`,
+        createdAt,
+        deliveryAttempts: 3,
+        deadLetteredAt,
+        lastError: 'webhook-1:500',
+      },
+    });
+
+    const response = await request(app.getHttpServer())
+      .get('/notifications/delivery-failures')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(response.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventId: expect.any(String),
+          type: 'notification.created',
+          status: 'dead_lettered',
+          deliveryAttempts: 3,
+          lastError: 'webhook-1:500',
+          retryable: true,
+          project: expect.objectContaining({
+            id: projectId,
+            name: projectRes.body.name,
+          }),
+        }),
+      ]),
+    );
+    expect(response.body.some((issue: any) => issue.type === 'task.created')).toBe(false);
+  });
+
   test('task description mention notifications stay distinct per task when sourceId is blank', async () => {
     const auth = app.get(AuthService);
     const workspaceRes = await request(app.getHttpServer())

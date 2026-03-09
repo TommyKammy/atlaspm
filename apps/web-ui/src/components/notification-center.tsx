@@ -1,11 +1,16 @@
 'use client';
 
+import { buildInboxNotificationBatches } from '@atlaspm/domain';
 import { Bell } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { notificationSummary } from '@/lib/notification-copy';
+import {
+  formatBatchActorSummary,
+  formatNotificationTimestamp,
+  notificationSummary,
+} from '@/lib/notification-copy';
 import { queryKeys } from '@/lib/query-keys';
 import { replaceSerializedStatusUpdateMentions } from '@/lib/status-update-mentions';
 import type { InboxNotification } from '@/lib/types';
@@ -40,8 +45,16 @@ export function NotificationCenter() {
   });
 
   const markRead = useMutation({
-    mutationFn: (input: { id: string; read: boolean }) =>
-      api(`/notifications/${input.id}/read`, { method: 'POST', body: { read: input.read } }),
+    mutationFn: async (input: { notifications: InboxNotification[]; read: boolean }) => {
+      const nextNotifications = input.notifications.filter((notification) =>
+        input.read ? !notification.readAt : Boolean(notification.readAt),
+      );
+      await Promise.all(
+        nextNotifications.map((notification) =>
+          api(`/notifications/${notification.id}/read`, { method: 'POST', body: { read: input.read } }),
+        ),
+      );
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.notifications('all') });
       await queryClient.invalidateQueries({ queryKey: queryKeys.notifications('unread') });
@@ -60,6 +73,7 @@ export function NotificationCenter() {
 
   const unreadCount = unreadCountQuery.data?.count ?? 0;
   const notifications = notificationsQuery.data ?? [];
+  const notificationBatches = buildInboxNotificationBatches(notifications);
 
   return (
     <DropdownMenu
@@ -107,12 +121,13 @@ export function NotificationCenter() {
         </div>
 
         <div className="max-h-80 overflow-y-auto">
-          {!notifications.length ? (
+          {!notificationBatches.length ? (
             <div className="px-3 py-6 text-center text-sm text-muted-foreground" data-testid="notification-empty">
               {t('noNotificationsYet')}
             </div>
           ) : (
-            notifications.map((item) => {
+            notificationBatches.map((batch) => {
+              const item = batch.latestNotification;
               const unread = !item.readAt;
               const targetHref = item.statusUpdate
                 ? `/projects/${item.project.id}?statusUpdate=${item.statusUpdate.id}`
@@ -127,17 +142,29 @@ export function NotificationCenter() {
                   data-testid={`notification-item-${item.id}`}
                   onClick={() => {
                     setOpen(false);
-                    if (unread) markRead.mutate({ id: item.id, read: true });
+                    if (unread) {
+                      markRead.mutate({ notifications: batch.notifications, read: true });
+                    }
                     router.push(targetHref);
                   }}
                 >
                   <div className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" style={{ opacity: unread ? 1 : 0 }} />
                   <div className="min-w-0 space-y-0.5">
-                    <p className="truncate text-xs font-medium">
-                      {notificationSummary(item, t)}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-xs font-medium">
+                        {notificationSummary(item, t)}
+                      </p>
+                      {batch.notificationCount > 1 ? (
+                        <Badge variant="secondary" className="shrink-0 text-[10px]">
+                          {batch.notificationCount} {t('updates')}
+                        </Badge>
+                      ) : null}
+                    </div>
                     <p className="truncate text-xs text-muted-foreground">
                       {item.project.name} · {targetLabel}
+                    </p>
+                    <p className="truncate text-[11px] text-muted-foreground/80">
+                      {formatBatchActorSummary(batch.actors)} · {formatNotificationTimestamp(batch.latestCreatedAt)}
                     </p>
                   </div>
                 </DropdownMenuItem>

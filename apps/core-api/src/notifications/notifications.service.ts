@@ -15,6 +15,15 @@ import {
   normalizeInboxNotificationType,
 } from './notification-taxonomy';
 
+const DELIVERY_ISSUE_EVENT_TYPES = new Set([
+  'notification.created',
+  'notification.reopened',
+  'notification.read',
+  'notification.read_all',
+  'notification.unread',
+  'task.reminder.sent',
+]);
+
 @Injectable()
 export class NotificationsService {
   constructor(
@@ -405,6 +414,7 @@ export class NotificationsService {
       const candidateEvents = await this.prisma.outboxEvent.findMany({
         where: {
           deliveredAt: null,
+          type: { in: [...DELIVERY_ISSUE_EVENT_TYPES] },
           deliveryAttempts: { gt: 0 },
         },
         orderBy: [
@@ -550,4 +560,5 @@ export class NotificationsService {
     walk(value);
     return [...result];
   }
+
 }
