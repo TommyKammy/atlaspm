@@ -17,6 +17,7 @@ export class RequestLoggingMiddleware {
 
     res.on('finish', () => {
       const durationMs = Date.now() - startedAt;
+      const userId = req.user?.sub ?? 'anonymous';
       console.info(
         JSON.stringify({
           level: 'info',
@@ -25,7 +26,7 @@ export class RequestLoggingMiddleware {
           path: req.path,
           statusCode: res.statusCode,
           durationMs,
-          userId: req.user?.sub ?? 'anonymous',
+          userId,
           correlationId,
         }),
       );

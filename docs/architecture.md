@@ -23,7 +23,7 @@
   - `core-api` accepts `x-correlation-id` (or generates one), stores it on request context, and returns it in response headers.
   - `collab-server` sends `x-correlation-id` when loading/saving snapshots to `core-api`.
 - Structured logs:
-  - `core-api` emits request start/end logs with `method`, `path`, `statusCode`, `durationMs`, `userId`, and `correlationId`.
+  - `core-api` emits `http.request.start` with `method`, `path`, `query`, and `correlationId`, then `http.request.end` with `statusCode`, `durationMs`, `userId`, and the same `correlationId` after auth has populated the request context.
   - `collab-server` emits auth/presence/snapshot logs with `correlationId`, `roomId`, and `taskId`.
 - Traceability target:
   - A single user action can be traced from HTTP request logs to audit/outbox entries and collab snapshot logs by `correlationId`.
