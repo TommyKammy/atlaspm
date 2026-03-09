@@ -102,23 +102,27 @@ The browser cookie stores only the opaque session id.
 
 Required cookies:
 
-- `__Host-atlaspm_session`
+- Session cookie
+  - Production / HTTPS: `__Host-atlaspm_session`
+  - Localhost HTTP dev: `atlaspm_session`
   - opaque session id
   - `HttpOnly`
-  - `Secure` outside localhost
+  - `Secure` required in production / HTTPS; omitted only on `http://localhost`
   - `Path=/`
   - `SameSite=Lax`
-- `__Host-atlaspm_csrf`
+- CSRF cookie
+  - Production / HTTPS: `__Host-atlaspm_csrf`
+  - Localhost HTTP dev: `atlaspm_csrf`
   - random CSRF secret or nonce
   - not `HttpOnly`
-  - `Secure` outside localhost
+  - `Secure` required in production / HTTPS; omitted only on `http://localhost`
   - `Path=/`
   - `SameSite=Lax`
 
 Rules:
 
-- Use the `__Host-` prefix in production-capable environments so the cookie cannot carry a `Domain` attribute and is pinned to the origin host.
-- Localhost development may fall back to non-`Secure` cookies, but keeps `HttpOnly`, `Path=/`, and `SameSite=Lax`.
+- Use the `__Host-` prefix only in HTTPS environments where the cookie can also be `Secure`, carry no `Domain`, and stay pinned to `Path=/`.
+- When running over plain HTTP on localhost, do not use `__Host-` cookie names; use the dev-only names above and keep `HttpOnly` where specified, `Path=/`, and `SameSite=Lax`.
 - Session cookies must be cleared on logout and on server-side session revocation.
 
 ### Request authentication
@@ -156,7 +160,7 @@ Important assumptions:
 Moving browser auth to cookies introduces CSRF risk on state-changing routes. AtlasPM will require both of the following for browser-originated unsafe methods (`POST`, `PUT`, `PATCH`, `DELETE`):
 
 - Double-submit CSRF token:
-  - browser reads `__Host-atlaspm_csrf`
+  - browser reads the current AtlasPM CSRF cookie (`__Host-atlaspm_csrf` on HTTPS, `atlaspm_csrf` on plain-HTTP localhost)
   - browser sends the same value in `x-atlaspm-csrf`
   - `core-api` rejects the request if header and cookie do not match
 - Origin enforcement:
@@ -223,9 +227,9 @@ Local development must stay simple, but it cannot preserve the production anti-p
 Decision for dev mode:
 
 - Keep `DEV_AUTH_ENABLED=true` as the local-only identity bypass.
-- Replace browser use of `POST /dev-auth/token` with a dev session endpoint that sets the same cookie shape as production login.
+- Replace browser use of `POST /dev-auth/token` with a dev session endpoint that sets the same session semantics as production, using non-`__Host-` cookie names on plain-HTTP localhost.
 - `POST /dev-auth/token` may remain temporarily for non-browser tests or scripts, but `web-ui` must stop depending on it.
-- Localhost may use non-`Secure` cookies because HTTPS is not guaranteed in local bring-up.
+- Localhost may omit `Secure` only when running over plain HTTP.
 
 This keeps local UX fast while ensuring the browser path exercises the same cookie/session semantics as production.
 
