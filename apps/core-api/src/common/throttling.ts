@@ -6,7 +6,8 @@ const ONE_MINUTE_MS = 60_000;
 
 export const THROTTLE_POLICIES = {
   default: {
-    limit: 60,
+    // General authenticated API traffic can legitimately burst during UI bootstrap and E2E setup.
+    limit: 300,
     ttl: ONE_MINUTE_MS,
   },
   strictPublicWebhook: {
@@ -14,7 +15,7 @@ export const THROTTLE_POLICIES = {
     ttl: ONE_MINUTE_MS,
   },
   safePublicRead: {
-    limit: 300,
+    limit: 1000,
     ttl: ONE_MINUTE_MS,
   },
 } as const;

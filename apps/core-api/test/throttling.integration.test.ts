@@ -4,6 +4,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import crypto from 'node:crypto';
 import { CorrelationIdMiddleware } from '../src/common/correlation.middleware';
+import { THROTTLE_POLICIES } from '../src/common/throttling';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 const ENV_KEYS = [
@@ -88,7 +89,7 @@ describe('Core API throttling', () => {
   test('applies the default throttling baseline to general API routes', async () => {
     const server = app.getHttpServer();
 
-    for (let index = 0; index < 60; index += 1) {
+    for (let index = 0; index < THROTTLE_POLICIES.default.limit; index += 1) {
       const response = await request(server)
         .post('/dev-auth/token')
         .send({ sub: `user-${index}`, email: `user-${index}@example.com`, name: 'Test User' });
@@ -98,7 +99,11 @@ describe('Core API throttling', () => {
 
     const response = await request(server)
       .post('/dev-auth/token')
-      .send({ sub: 'user-60', email: 'user-60@example.com', name: 'Test User' });
+      .send({
+        sub: `user-${THROTTLE_POLICIES.default.limit}`,
+        email: `user-${THROTTLE_POLICIES.default.limit}@example.com`,
+        name: 'Test User',
+      });
 
     expect(response.status).toBe(429);
   });
@@ -110,7 +115,7 @@ describe('Core API throttling', () => {
       challenge: 'challenge-token',
     });
 
-    for (let index = 0; index < 10; index += 1) {
+    for (let index = 0; index < THROTTLE_POLICIES.strictPublicWebhook.limit; index += 1) {
       const timestamp = `${Math.floor(Date.now() / 1000)}`;
       const signature = signSlackBody(body, process.env.SLACK_SIGNING_SECRET!, timestamp);
 
