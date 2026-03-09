@@ -5,48 +5,51 @@
 - Branch: codex/reopen-issue-313
 - Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-313
 - Journal: /home/tommy/Dev/atlaspm-worktrees/issue-313/.codex-supervisor/issue-journal.md
-- Current phase: addressing_review
-- Attempt count: 3
-- Last head SHA: c0f5e2d5a7596a28991efc2f3653cdf5cc1e0a79
+- Current phase: repairing_ci
+- Attempt count: 4
+- Last head SHA: 0ad1af14f7f96517631da288d2db638566b0ec05
 - Blocked reason: none
-- Last failure signature: PRRT_kwDORWcwRc5y_OUA|PRRT_kwDORWcwRc5y_OUb
+- Last failure signature: e2e:fail
 - Repeated failure signature count: 1
-- Updated at: 2026-03-09T11:02:02.550Z
+- Updated at: 2026-03-09T11:13:51.187Z
 
 ## Latest Codex Summary
-Pulled the failing Actions log, reproduced the actual CI breakage, and fixed the stale integration fixture. The failure was not in the validator itself; `apps/core-api/test/core.integration.test.ts` was still using `DEV_AUTH_SECRET='dev-secret-change-me'`, which the new guard now correctly rejects. I changed that fixture to a non-default secret, committed it as `c0f5e2d` (`Fix dev auth integration test secret`), and pushed `codex/reopen-issue-313` to update PR #318.
+Applied the review fix on top of PR #318 and pushed `0ad1af1` (`Reject shipped dev auth placeholders`).
 
-Local verification passed for the relevant CI path after matching workspace order:
+The reviewer concern was valid: the example secret was still a repo-shipped known value that passed validation. I fixed that by making the shipped `.env.example` value fail closed (`DEV_AUTH_SECRET=replace-me`), explicitly rejecting shipped placeholder secrets in `DISALLOWED_DEV_AUTH_SECRETS`, and adding a focused env test that covers the placeholder case. I also resolved both bot review threads on the PR.
+
+Local verification passed:
+- `pnpm --filter @atlaspm/core-api exec vitest run test/dev-auth-environment.test.ts --reporter=dot`
 - `pnpm --filter @atlaspm/domain test`
 - `pnpm --filter @atlaspm/core-api test`
 
-`gh pr checks 318` now reports no checks yet on the updated branch, so the rerun is still pending.
+GitHub has started a fresh run for PR #318; `lint`, `type-check`, and `test` are currently pending.
 
-Summary: Fixed the PR #318 test failure by replacing the banned default-style dev auth secret in `core.integration.test.ts`, verified locally, and pushed `c0f5e2d`.
+Summary: Addressed both review threads by rejecting shipped placeholder secrets, updated the example env to fail closed, added regression coverage, pushed `0ad1af1`, and resolved the threads.
 State hint: waiting_ci
 Blocked reason: none
-Tests: `gh run view 22850125550 --job 66276330387 --log`; `pnpm --filter @atlaspm/domain test`; `pnpm --filter @atlaspm/core-api test`
+Tests: `pnpm --filter @atlaspm/core-api exec vitest run test/dev-auth-environment.test.ts --reporter=dot`; `pnpm --filter @atlaspm/domain test`; `pnpm --filter @atlaspm/core-api test`
 Failure signature: none
-Next action: wait for PR #318 checks to start and confirm the `test` job passes on commit `c0f5e2d`
+Next action: watch the new PR #318 checks on commit `0ad1af1` and confirm they complete successfully
 
 ## Active Failure Context
-- Category: review
-- Summary: 2 unresolved automated review thread(s) remain.
-- Reference: https://github.com/TommyKammy/atlaspm/pull/318#discussion_r2904707249
+- Category: checks
+- Summary: PR #318 has failing checks.
+- Command or source: gh pr checks
+- Reference: https://github.com/TommyKammy/atlaspm/pull/318
 - Details:
-  - apps/core-api/.env.example:9 `DEV_AUTH_SECRET=replace-with-a-random-dev-auth-secret` is long enough to satisfy the new min-length check and isn't currently disallowed, so enabling `DEV_AUTH_ENABLED=true` with the example file will still run dev auth with a known secret. Update this example to a value that is guaranteed to be rejected by validation (or ensure the validator explicitly blocks this placeholder).
-  - apps/core-api/src/auth/dev-auth-environment.ts:10 The new `.env.example` placeholder (`replace-with-a-random-dev-auth-secret`) currently passes `getValidatedDevAuthSecret()` (>=16 chars and not in `DISALLOWED_DEV_AUTH_SECRETS`). This undermines the goal of rejecting obvious defaults—someone can enable dev auth with a known, repo-shipped secret. Consider either adding this placeholder (and any other shipped placeholders) to `DISALLOWED_DEV_AUTH_SECRETS`, or changing the example value to something that is guaranteed to fail validation (e.g., a short string) while keeping the docs instructive.
+  - e2e (fail/FAILURE) https://github.com/TommyKammy/atlaspm/actions/runs/22850428040/job/66277529591
 
 ## Codex Working Notes
 ### Current Handoff
-- Hypothesis: The open bot review is valid. The checked-in `.env.example` placeholder should be guaranteed-invalid, and the validator should explicitly reject repo-shipped placeholder secrets so copied example values cannot silently enable dev auth.
-- Primary failure or risk: `apps/core-api/.env.example` used `replace-with-a-random-dev-auth-secret`, which satisfied the current min-length rule and was not disallowed, so a known repo value could still enable dev auth if copied unchanged.
-- Last focused command: `pnpm --filter @atlaspm/core-api test`
-- Files changed: `apps/core-api/.env.example`, `apps/core-api/src/auth/dev-auth-environment.ts`, `apps/core-api/test/dev-auth-environment.test.ts`
+- Hypothesis: The new E2E red is a compose-stack config drift, not a browser regression. `infra/docker/docker-compose.yml` still boots `core-api` with the now-banned `dev-secret-change-me`, so Playwright never gets a healthy API.
+- Primary failure or risk: PR #318 `e2e` failed before tests ran because `atlaspm-core-api` exited during startup with `Error: DEV_AUTH_SECRET is too weak. Choose a non-default secret.` from the compose-provided `DEV_AUTH_SECRET=dev-secret-change-me`.
+- Last focused command: `pnpm --filter @atlaspm/playwright e2e tests/p0-regression-smoke.spec.ts`
+- Files changed: `infra/docker/docker-compose.yml`
 - Next 1-3 actions:
-  1. Commit and push the review follow-up for placeholder-secret rejection.
-  2. Resolve the two automated review threads on PR #318 if GitHub permits after the push.
-  3. Confirm checks remain green after the follow-up lands.
+  1. Commit and push the E2E compose-secret fix.
+  2. Watch PR #318 checks for the rerun on the new commit.
+  3. If E2E still fails, inspect the next job log rather than widening the auth validator again.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
@@ -79,3 +82,13 @@ Next action: wait for PR #318 checks to start and confirm the `test` job passes 
     - `pnpm --filter @atlaspm/core-api exec vitest run test/dev-auth-environment.test.ts --reporter=dot`
     - `pnpm --filter @atlaspm/domain test`
     - `pnpm --filter @atlaspm/core-api test`
+- E2E repair notes:
+  - Pulled the failing log with `gh run view 22850428040 --job 66277529591 --log`.
+  - Exact CI stack: `atlaspm-core-api` crashed on startup because `infra/docker/docker-compose.yml` still set `DEV_AUTH_SECRET=dev-secret-change-me`.
+  - Updated compose to use `DEV_AUTH_SECRET=atlaspm-e2e-dev-auth-secret-123`.
+  - Current E2E-focused verification passing:
+    - `docker compose -f infra/docker/docker-compose.yml up -d postgres core-api collab-server web-ui`
+    - `curl -fsS http://localhost:3001/docs >/dev/null`
+    - `curl -fsS http://localhost:3000/login >/dev/null`
+    - `pnpm --filter @atlaspm/playwright e2e tests/p0-regression-smoke.spec.ts`
+    - `docker compose -f infra/docker/docker-compose.yml down`
