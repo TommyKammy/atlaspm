@@ -319,7 +319,7 @@ export function ProjectSavedViewsControl({
                       type="button"
                       className="min-w-0 flex-1 text-left text-sm"
                       onClick={() => applyView(view)}
-                      data-testid={`saved-view-apply-${view.name}`}
+                      data-testid={`saved-view-apply-${view.id}`}
                     >
                       <span className="block truncate font-medium">{view.name}</span>
                       {activeNamedView?.id === view.id ? (

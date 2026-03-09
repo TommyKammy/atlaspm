@@ -77,7 +77,7 @@ test('saved views can save and reapply a named list view without refresh', async
   await page.fill('[data-testid="saved-view-name-input"]', 'Done only');
   await page.click('[data-testid="saved-view-save"]');
   await expect(page.locator('[data-testid="saved-view-active-name"]')).toContainText('Done only');
-  const savedViewApply = page.locator('[data-testid="saved-view-apply-Done only"]');
+  const savedViewApply = page.locator('[data-testid^="saved-view-apply-"]').filter({ hasText: 'Done only' });
   await expect(savedViewApply).toBeVisible();
 
   const renameButton = page.locator('[data-testid^="saved-view-rename-"]').first();
@@ -87,7 +87,15 @@ test('saved views can save and reapply a named list view without refresh', async
   await page.locator('[data-testid^="saved-view-rename-save-"]').first().click();
   await expect(page.locator('[data-testid="saved-view-active-name"]')).toContainText('Done renamed');
 
-  await page.click('[data-testid="saved-view-set-default"]');
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().includes(`/projects/${project.id}/saved-views/defaults/list`) &&
+        response.request().method() === 'PUT' &&
+        response.ok(),
+    ),
+    page.click('[data-testid="saved-view-set-default"]'),
+  ]);
 
   await page.click('[data-testid="project-filter-trigger"]');
   await page.click('[data-testid="project-filter-clear"]');
@@ -96,11 +104,11 @@ test('saved views can save and reapply a named list view without refresh', async
   await expect(page.locator(`[data-task-title="Todo Task ${stamp}"]`)).toHaveCount(0);
 
   await page.click('[data-testid="saved-view-trigger"]');
-  await page.click('[data-testid="saved-view-apply-Done renamed"]');
+  await page.locator('[data-testid^="saved-view-apply-"]').filter({ hasText: 'Done renamed' }).click();
   await expect(page.locator(`[data-task-title="Done Task ${stamp}"]`)).toBeVisible();
   await expect(page.locator(`[data-task-title="Todo Task ${stamp}"]`)).toHaveCount(0);
 
   await page.click('[data-testid="saved-view-trigger"]');
   await page.locator('[data-testid^="saved-view-delete-"]').first().click();
-  await expect(page.locator('[data-testid="saved-view-apply-Done renamed"]')).toHaveCount(0);
+  await expect(page.locator('[data-testid^="saved-view-apply-"]').filter({ hasText: 'Done renamed' })).toHaveCount(0);
 });
