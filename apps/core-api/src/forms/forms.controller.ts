@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Delete,
   Get,
@@ -30,6 +31,7 @@ import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { ProjectRole, FormQuestionType, Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
+import { PublicFormSubmissionThrottleGuard } from './public-form-submission-throttle.guard';
 
 class CreateFormDto {
   @IsString()
@@ -109,6 +111,10 @@ class SubmitFormDto {
   @IsEmail()
   submitterEmail: string;
 
+  @IsOptional()
+  @IsString()
+  website?: string;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => FormAnswerDto)
@@ -135,6 +141,24 @@ export class FormsController {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(DomainService) private readonly domain: DomainService,
   ) {}
+
+  private logPublicFormSubmission(
+    req: AppRequest,
+    form: { id: string; projectId: string; isPublic: boolean },
+    event: { outcome: 'accepted' } | { outcome: 'rejected'; reason: string },
+  ) {
+    console.info(
+      JSON.stringify({
+        level: 'info',
+        type: `form.submission.${event.outcome}`,
+        formId: form.id,
+        projectId: form.projectId,
+        isPublic: form.isPublic,
+        correlationId: req.correlationId,
+        reason: event.outcome === 'rejected' ? event.reason : undefined,
+      }),
+    );
+  }
 
   @Post('projects/:id/forms')
   @UseGuards(AuthGuard)
@@ -446,6 +470,7 @@ export class FormsController {
   }
 
   @Post('forms/:id/submit')
+  @UseGuards(PublicFormSubmissionThrottleGuard)
   async submit(
     @Param('id') formId: string,
     @Body() body: SubmitFormDto,
@@ -479,6 +504,11 @@ export class FormsController {
         throw new ConflictException('Authentication required for non-public forms');
       }
       await this.domain.requireProjectRole(form.projectId, req.user.sub, ProjectRole.MEMBER);
+    }
+
+    if (form.isPublic && body.website?.trim()) {
+      this.logPublicFormSubmission(req, form, { outcome: 'rejected', reason: 'honeypot' });
+      throw new BadRequestException('Spam detected');
     }
 
     if (form.questions.length === 0) {
@@ -582,10 +612,16 @@ export class FormsController {
         payload: { submissionId: submission.id, formId, taskId: task.id },
       });
 
-      return {
+      const result = {
         submissionId: submission.id,
         taskId: task.id,
       };
+
+      if (form.isPublic) {
+        this.logPublicFormSubmission(req, form, { outcome: 'accepted' });
+      }
+
+      return result;
     });
   }
 

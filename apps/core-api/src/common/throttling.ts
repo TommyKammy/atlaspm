@@ -10,6 +10,10 @@ export const THROTTLE_POLICIES = {
     limit: 300,
     ttl: ONE_MINUTE_MS,
   },
+  publicFormSubmission: {
+    limit: 10,
+    ttl: ONE_MINUTE_MS,
+  },
   strictPublicWebhook: {
     limit: 10,
     ttl: ONE_MINUTE_MS,

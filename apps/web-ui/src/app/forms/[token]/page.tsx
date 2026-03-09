@@ -22,6 +22,7 @@ export default function FormSubmitPage() {
   const [answers, setAnswers] = useState<Record<string, string | number | boolean | string[]>>({});
   const [submitterName, setSubmitterName] = useState('');
   const [submitterEmail, setSubmitterEmail] = useState('');
+  const [website, setWebsite] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [createdTaskId, setCreatedTaskId] = useState<string | null>(null);
 
@@ -35,6 +36,7 @@ export default function FormSubmitPage() {
     mutationFn: (data: {
       submitterName: string;
       submitterEmail: string;
+      website: string;
       answers: Array<{ questionId: string; value: string | number | boolean | string[] }>;
     }) => api(`/forms/${formQuery.data?.id}/submit`, { method: 'POST', body: data }) as Promise<{ submissionId: string; taskId: string }>,
     onSuccess: (data) => {
@@ -110,6 +112,7 @@ export default function FormSubmitPage() {
     submitForm.mutate({
       submitterName,
       submitterEmail,
+      website,
       answers: answersArray,
     });
   };
@@ -152,6 +155,20 @@ export default function FormSubmitPage() {
                     value={submitterEmail}
                     onChange={(e) => setSubmitterEmail(e.target.value)}
                     required
+                  />
+                </div>
+                <div
+                  aria-hidden="true"
+                  className="absolute -left-[10000px] top-auto h-px w-px overflow-hidden"
+                >
+                  <Label htmlFor="website">Website</Label>
+                  <Input
+                    id="website"
+                    name="website"
+                    tabIndex={-1}
+                    autoComplete="off"
+                    value={website}
+                    onChange={(e) => setWebsite(e.target.value)}
                   />
                 </div>
               </CardContent>
