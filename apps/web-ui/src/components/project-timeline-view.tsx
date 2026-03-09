@@ -14,14 +14,16 @@ import {
 } from '@atlaspm/domain';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 import TaskDetailDrawer from '@/components/task-detail-drawer';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useTimelineData, type TimelineTask } from '@/hooks/use-timeline-data';
 import { api } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import { PROJECT_SAVED_VIEW_PARAM, PROJECT_VIEW_STATE_APPLY_EVENT } from '@/lib/project-saved-views';
 import { queryKeys } from '@/lib/query-keys';
-import type { SectionTaskGroup, Task } from '@/lib/types';
+import type { ProjectSavedViewsResponse, SectionTaskGroup, Task } from '@/lib/types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const LEFT_RAIL_COL_WIDTH = 260;
@@ -630,27 +632,6 @@ function applySavedProjectViewState(
   applyTimelineViewState(savedProjectViewStateToTimelineViewState(mode, parsed), setters);
 }
 
-function buildViewStateForMode(
-  mode: TimelineMode,
-  snapshot: LocalTimelineViewStateSnapshot,
-): TimelineViewState {
-  return mode === 'timeline'
-    ? {
-        zoom: snapshot.zoom,
-        anchorDate: snapshot.anchorDate.toISOString(),
-        swimlane: snapshot.swimlane,
-        sortMode: snapshot.sortMode,
-        scheduleFilter: snapshot.scheduleFilter,
-        workingDaysOnly: snapshot.workingDaysOnly,
-      }
-    : {
-        zoom: snapshot.zoom,
-        anchorDate: snapshot.anchorDate.toISOString(),
-        ganttRiskFilterMode: snapshot.ganttRiskFilterMode,
-        ganttStrictMode: snapshot.ganttStrictMode,
-      };
-}
-
 function buildSavedProjectViewStateForMode(
   mode: TimelineMode,
   snapshot: LocalTimelineViewStateSnapshot,
@@ -1017,6 +998,7 @@ export function ProjectScheduleCanvas({
   initialTaskId?: string | null;
 }) {
   const { t } = useI18n();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const meQuery = useQuery<{ id: string }>({
     queryKey: queryKeys.me,
@@ -1151,6 +1133,11 @@ export function ProjectScheduleCanvas({
       api(`/projects/${projectId}/timeline/preferences`) as Promise<TimelinePreferences>,
     enabled: Boolean(projectId),
   });
+  const savedViewsQuery = useQuery<ProjectSavedViewsResponse>({
+    queryKey: queryKeys.projectSavedViews(projectId),
+    queryFn: () => api(`/projects/${projectId}/saved-views`) as Promise<ProjectSavedViewsResponse>,
+    enabled: Boolean(projectId),
+  });
 
   const timelineStorageBaseKey = useMemo(
     () => (projectId ? `${TIMELINE_VIEW_STORAGE_PREFIX}:${projectId}:${mode}` : null),
@@ -1167,17 +1154,16 @@ export function ProjectScheduleCanvas({
     () => createProjectViewFallbackState(mode, startOfDay(new Date()).toISOString()),
     [mode],
   );
-  const persistedDefaultViewState = useMemo(() => {
-    const candidate =
-      mode === 'timeline'
-        ? timelinePreferencesQuery.data?.timelineViewState
-        : timelinePreferencesQuery.data?.ganttViewState;
-    return parseSavedProjectViewState(mode, candidate);
-  }, [
-    mode,
-    timelinePreferencesQuery.data?.ganttViewState,
-    timelinePreferencesQuery.data?.timelineViewState,
-  ]);
+  const selectedSavedViewId = searchParams.get(PROJECT_SAVED_VIEW_PARAM);
+  const persistedDefaultViewState = useMemo(
+    () => savedViewsQuery.data?.defaultsByMode[mode] ?? null,
+    [mode, savedViewsQuery.data?.defaultsByMode],
+  );
+  const selectedNamedView = useMemo(
+    () =>
+      savedViewsQuery.data?.views.find((view) => view.id === selectedSavedViewId && view.mode === mode) ?? null,
+    [mode, savedViewsQuery.data?.views, selectedSavedViewId],
+  );
   const laneOrderGroupBy = mode === 'timeline' && isLaneOrderGroupBy(swimlane) ? swimlane : null;
   const manualLayoutGroupBy = mode === 'timeline' ? swimlane : null;
   const laneOrderStorageBaseKey = useMemo(
@@ -1216,7 +1202,7 @@ export function ProjectScheduleCanvas({
 
   useEffect(() => {
     if (hasRestoredTimelinePreferences.current) return;
-    if (!timelineStorageBaseKey || !timelinePreferencesQuery.isFetched) return;
+    if (!timelineStorageBaseKey || !timelinePreferencesQuery.isFetched || !savedViewsQuery.isFetched) return;
     setPreferencesHydrated(false);
     let restoredLocalState: SavedProjectViewState | null = null;
     if (typeof window !== 'undefined') {
@@ -1243,6 +1229,7 @@ export function ProjectScheduleCanvas({
       mode,
       fallbackState: fallbackViewState,
       savedDefaultState: persistedDefaultViewState,
+      selectedNamedView,
       workingState: restoredLocalState,
     }).state;
     applySavedProjectViewState(mode, preferredViewState, {
@@ -1260,9 +1247,11 @@ export function ProjectScheduleCanvas({
   }, [
     fallbackViewState,
     mode,
+    savedViewsQuery.isFetched,
     timelinePreferencesQuery.isFetched,
     persistedDefaultViewState,
     projectId,
+    selectedNamedView,
     timelineStorageBaseKey,
     timelineStorageUserKey,
   ]);
@@ -1321,82 +1310,60 @@ export function ProjectScheduleCanvas({
     };
   }, [preferencesHydrated, timelineStorageBaseKey, timelineStorageUserKey]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const applyExternalState = (
+      event: Event,
+    ) => {
+      const detail = (event as CustomEvent<{ mode: TimelineMode; state: SavedProjectViewState }>).detail;
+      if (!detail || detail.mode !== mode) return;
+      const nextState = normalizeProjectViewState(mode, detail.state);
+      applySavedProjectViewState(mode, nextState, {
+        setZoom,
+        setAnchorDate,
+        setSwimlane,
+        setSortMode,
+        setScheduleFilter,
+        setWorkingDaysOnly,
+        setGanttRiskFilterMode,
+        setGanttStrictMode,
+      });
+      if (timelineStorageBaseKey) {
+        window.localStorage.setItem(timelineStorageBaseKey, JSON.stringify(nextState));
+      }
+      if (timelineStorageUserKey) {
+        window.localStorage.setItem(timelineStorageUserKey, JSON.stringify(nextState));
+      }
+    };
+
+    window.addEventListener(PROJECT_VIEW_STATE_APPLY_EVENT, applyExternalState as EventListener);
+    return () => {
+      window.removeEventListener(PROJECT_VIEW_STATE_APPLY_EVENT, applyExternalState as EventListener);
+    };
+  }, [mode, timelineStorageBaseKey, timelineStorageUserKey]);
+
   const saveViewStateMutation = useMutation({
     mutationFn: async ({
       nextMode,
       viewState,
     }: {
       nextMode: TimelineMode;
-      viewState: TimelineViewState;
+      viewState: SavedProjectViewState;
     }) =>
-      (await api(`/projects/${projectId}/timeline/preferences/view-state/${nextMode}`, {
+      (await api(`/projects/${projectId}/saved-views/defaults/${nextMode}`, {
         method: 'PUT',
-        body: viewState,
-      })) as TimelinePreferences,
-    onMutate: async ({ nextMode, viewState }) => {
-      setRescheduleNotice(null);
-      await queryClient.cancelQueries({
-        queryKey: queryKeys.projectTimelinePreferences(projectId),
-      });
-      const previous = queryClient.getQueryData<TimelinePreferences>(
-        queryKeys.projectTimelinePreferences(projectId),
-      );
-      queryClient.setQueryData<TimelinePreferences>(
-        queryKeys.projectTimelinePreferences(projectId),
-        {
-          projectId,
-          userId: previous?.userId ?? meQuery.data?.id ?? '',
-          laneOrderBySection: previous?.laneOrderBySection ?? [],
-          laneOrderByAssignee: previous?.laneOrderByAssignee ?? [],
-          timelineManualLayout:
-            normalizeTimelineManualLayoutState(previous?.timelineManualLayout),
-          timelineViewState:
-            nextMode === 'timeline' ? viewState : (previous?.timelineViewState ?? null),
-          ganttViewState: nextMode === 'gantt' ? viewState : (previous?.ganttViewState ?? null),
-        },
-      );
-      return { previous };
-    },
-    onError: (_error, _variables, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData<TimelinePreferences>(
-          queryKeys.projectTimelinePreferences(projectId),
-          context.previous,
-        );
-      }
-      setRescheduleNotice({ type: 'error', message: t('timelineViewStateSaveFailed') });
-    },
-    onSettled: async () => {
+        body: { state: viewState },
+      })) as ProjectSavedViewsResponse,
+    onSuccess: async () => {
       await queryClient.invalidateQueries({
-        queryKey: queryKeys.projectTimelinePreferences(projectId),
+        queryKey: queryKeys.projectSavedViews(projectId),
       });
+    },
+    onError: () => {
+      setRescheduleNotice({ type: 'error', message: t('timelineViewStateSaveFailed') });
     },
   });
 
-  const currentModeViewState = useMemo(
-    () =>
-      buildViewStateForMode(mode, {
-        zoom,
-        anchorDate,
-        swimlane,
-        sortMode,
-        scheduleFilter,
-        workingDaysOnly,
-        ganttRiskFilterMode,
-        ganttStrictMode,
-      }),
-    [
-      anchorDate,
-      ganttRiskFilterMode,
-      ganttStrictMode,
-      mode,
-      scheduleFilter,
-      sortMode,
-      swimlane,
-      workingDaysOnly,
-      zoom,
-    ],
-  );
   const currentModeSavedViewState = useMemo(
     () =>
       buildSavedProjectViewStateForMode(mode, {
@@ -3513,7 +3480,7 @@ export function ProjectScheduleCanvas({
               onClick={() =>
                 saveViewStateMutation.mutate({
                   nextMode: mode,
-                  viewState: currentModeViewState,
+                  viewState: currentModeSavedViewState,
                 })
               }
             >

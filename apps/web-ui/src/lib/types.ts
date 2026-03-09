@@ -1,5 +1,60 @@
 export type Project = { id: string; workspaceId: string; name: string };
 
+export type ProjectViewMode = 'list' | 'board' | 'timeline' | 'gantt';
+
+export type ProjectViewCustomFieldFilter = {
+  fieldId: string;
+  type: 'SELECT' | 'BOOLEAN' | 'NUMBER' | 'DATE';
+  optionIds?: string[];
+  booleanValue?: boolean;
+  numberMin?: number | null;
+  numberMax?: number | null;
+  dateFrom?: string | null;
+  dateTo?: string | null;
+};
+
+export type ProjectViewState = {
+  grouping?: {
+    field: 'section' | 'assignee' | 'status';
+  };
+  sorting?: {
+    field: 'manual' | 'position' | 'title' | 'startAt' | 'dueAt' | 'priority' | 'status' | 'assignee';
+    direction?: 'asc' | 'desc';
+  };
+  filters?: {
+    statusIds?: string[];
+    assigneeIds?: string[];
+    schedule?: 'all' | 'scheduled' | 'unscheduled';
+    customFieldFilters?: ProjectViewCustomFieldFilter[];
+  };
+  zoom?: {
+    unit: 'day' | 'week' | 'month';
+    anchorDate?: string;
+    workingDaysOnly?: boolean;
+    ganttRiskFilterMode?: 'all' | 'risk';
+    ganttStrictMode?: boolean;
+  };
+  visibleFieldIds?: string[];
+};
+
+export type ProjectSavedView = {
+  id: string;
+  projectId: string;
+  userId: string;
+  name: string;
+  mode: ProjectViewMode;
+  state: ProjectViewState;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProjectSavedViewsResponse = {
+  projectId: string;
+  userId: string;
+  defaultsByMode: Record<ProjectViewMode, ProjectViewState | null>;
+  views: ProjectSavedView[];
+};
+
 export type Workspace = {
   id: string;
   name: string;

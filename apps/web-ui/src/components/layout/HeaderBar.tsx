@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { MobileNavSheet } from '@/components/layout/MobileNavSheet';
+import { ProjectSavedViewsControl } from '@/components/layout/ProjectSavedViewsControl';
 import { GlobalSearch } from '@/components/global-search';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -16,6 +17,7 @@ import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { CustomFieldDefinition, Project, ProjectMember, ReminderPreferences, Section, Task } from '@/lib/types';
 import { parseCustomFieldFilters, stringifyCustomFieldFilters, type CustomFieldFilter } from '@/lib/project-filters';
+import { PROJECT_SAVED_VIEW_PARAM } from '@/lib/project-saved-views';
 import { resolveProjectView } from '@/lib/project-views';
 import { DEFAULT_REMINDER_PREFERENCES, REMINDER_LEAD_TIME_OPTIONS } from '@/lib/reminder-preferences';
 import { useI18n } from '@/lib/i18n';
@@ -425,6 +427,7 @@ export function HeaderBar({
         statuses: nextStatuses.length ? nextStatuses.join(',') : null,
         assignees: nextAssignees.length ? nextAssignees.join(',') : null,
         cf: serializedCustomFieldFilters,
+        [PROJECT_SAVED_VIEW_PARAM]: null,
       });
     },
     [projectFilterStorageKey, updateProjectQueryParams],
@@ -604,6 +607,15 @@ export function HeaderBar({
       <div className="flex shrink-0 items-center gap-1 pl-1">
         {projectId ? (
           <>
+            <ProjectSavedViewsControl
+              projectId={projectId}
+              currentView={resolvedCurrentView}
+              searchParamsString={searchParamsString}
+              selectedStatuses={selectedStatuses}
+              selectedAssignees={selectedAssignees}
+              selectedCustomFieldFilters={selectedCustomFieldFilters}
+              updateProjectQueryParams={updateProjectQueryParams}
+            />
             <Popover open={sectionsOpen} onOpenChange={setSectionsOpen}>
               <PopoverTrigger asChild>
                 <Button
