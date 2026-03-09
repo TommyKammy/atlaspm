@@ -23,6 +23,7 @@ describe('Core API Integration', () => {
   let recurringWorker: RecurringTaskWorker;
 
   beforeAll(async () => {
+    process.env.NODE_ENV = 'test';
     process.env.DEV_AUTH_ENABLED = 'true';
     process.env.DEV_AUTH_SECRET = 'dev-secret-change-me';
     process.env.COLLAB_JWT_SECRET = 'collab-jwt-secret';
