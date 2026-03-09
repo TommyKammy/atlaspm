@@ -20,8 +20,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, apiBaseUrl } from '@/lib/api';
+import type { CustomFieldFilter } from '@/lib/project-filters';
 import { queryKeys } from '@/lib/query-keys';
-import type { ProjectMember, SectionTaskGroup, Task, TaskAttachment } from '@/lib/types';
+import type { CustomFieldDefinition, ProjectMember, SectionTaskGroup, Task, TaskAttachment } from '@/lib/types';
 import { useI18n } from '@/lib/i18n';
 
 function flattenTasks(groups: SectionTaskGroup[]) {
@@ -38,6 +39,38 @@ function taskMatchesFilters(
   const byStatus = statusFilter === 'ALL' || task.status === statusFilter;
   const byPriority = priorityFilter === 'ALL' || task.priority === priorityFilter;
   return bySearch && byStatus && byPriority;
+}
+
+function findTaskCustomFieldValue(task: Task, fieldId: string) {
+  return task.customFieldValues?.find((value) => value.fieldId === fieldId) ?? null;
+}
+
+function taskMatchesCustomFieldFilter(task: Task, filter: CustomFieldFilter): boolean {
+  const value = findTaskCustomFieldValue(task, filter.fieldId);
+  if (!value) return false;
+
+  if (filter.type === 'SELECT') {
+    if (!filter.optionIds?.length) return true;
+    return Boolean(value.optionId && filter.optionIds.includes(value.optionId));
+  }
+
+  if (filter.type === 'BOOLEAN') {
+    if (typeof filter.booleanValue !== 'boolean') return true;
+    return value.valueBoolean === filter.booleanValue;
+  }
+
+  if (filter.type === 'NUMBER') {
+    if (typeof value.valueNumber !== 'number') return false;
+    if (typeof filter.numberMin === 'number' && value.valueNumber < filter.numberMin) return false;
+    if (typeof filter.numberMax === 'number' && value.valueNumber > filter.numberMax) return false;
+    return true;
+  }
+
+  const valueDate = value.valueDate ? String(value.valueDate).slice(0, 10) : '';
+  if (!valueDate) return false;
+  if (filter.dateFrom && valueDate < filter.dateFrom) return false;
+  if (filter.dateTo && valueDate > filter.dateTo) return false;
+  return true;
 }
 
 function isApiConflictError(error: unknown): boolean {
@@ -150,11 +183,17 @@ export function ProjectBoardView({
   search,
   statusFilter,
   priorityFilter,
+  selectedStatuses,
+  selectedAssignees,
+  selectedCustomFieldFilters,
 }: {
   projectId: string;
   search: string;
   statusFilter: 'ALL' | Task['status'];
   priorityFilter: 'ALL' | NonNullable<Task['priority']>;
+  selectedStatuses: Task['status'][];
+  selectedAssignees: string[];
+  selectedCustomFieldFilters: CustomFieldFilter[];
 }) {
   const { t } = useI18n();
   const sensors = useSensors(useSensor(PointerSensor));
@@ -164,6 +203,10 @@ export function ProjectBoardView({
   const groupsQuery = useQuery<SectionTaskGroup[]>({
     queryKey: queryKeys.projectTasksGrouped(projectId),
     queryFn: () => api(`/projects/${projectId}/tasks?groupBy=section`),
+  });
+  const customFieldsQuery = useQuery<CustomFieldDefinition[]>({
+    queryKey: queryKeys.projectCustomFields(projectId),
+    queryFn: () => api(`/projects/${projectId}/custom-fields`),
   });
 
   const createTask = useMutation({
@@ -201,14 +244,43 @@ export function ProjectBoardView({
 
   const [draftBySection, setDraftBySection] = useState<Record<string, string>>({});
   const groups = groupsQuery.data ?? [];
+  const customFields = customFieldsQuery.data ?? [];
+  const activeCustomFieldFilters = useMemo(
+    () =>
+      selectedCustomFieldFilters.filter((filter) =>
+        customFields.some((field) => field.id === filter.fieldId && !field.archivedAt),
+      ),
+    [customFields, selectedCustomFieldFilters],
+  );
   const filteredGroups = useMemo(
     () =>
       groups.map((group) => ({
         ...group,
         sectionLabel: group.section.isDefault ? t('tasks') : group.section.name,
-        tasks: group.tasks.filter((task) => taskMatchesFilters(task, search, statusFilter, priorityFilter)),
+        tasks: group.tasks.filter((task) => {
+          const byBaseFilters = taskMatchesFilters(task, search, statusFilter, priorityFilter);
+          const bySelectedStatuses = selectedStatuses.length === 0 || selectedStatuses.includes(task.status);
+          const byAssignee =
+            selectedAssignees.length === 0 ||
+            selectedAssignees.some((assignee) =>
+              assignee === 'UNASSIGNED' ? !task.assigneeUserId : task.assigneeUserId === assignee,
+            );
+          const byCustomFields =
+            activeCustomFieldFilters.length === 0 ||
+            activeCustomFieldFilters.every((filter) => taskMatchesCustomFieldFilter(task, filter));
+          return byBaseFilters && bySelectedStatuses && byAssignee && byCustomFields;
+        }),
       })),
-    [groups, search, statusFilter, priorityFilter, t],
+    [
+      activeCustomFieldFilters,
+      groups,
+      priorityFilter,
+      search,
+      selectedAssignees,
+      selectedStatuses,
+      statusFilter,
+      t,
+    ],
   );
 
   if (groupsQuery.isLoading) {

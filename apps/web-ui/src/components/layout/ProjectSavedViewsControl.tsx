@@ -3,7 +3,7 @@
 import { Bookmark, Pencil, Star, Trash2 } from 'lucide-react';
 import { type ProjectViewMode } from '@atlaspm/domain';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -53,6 +53,7 @@ export function ProjectSavedViewsControl({
   const [nameDraft, setNameDraft] = useState('');
   const [editingViewId, setEditingViewId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+  const previousModeRef = useRef<SupportedProjectViewMode | null>(null);
 
   const mode = isSupportedMode(currentView) ? currentView : null;
   const selectedViewId = useMemo(
@@ -89,12 +90,13 @@ export function ProjectSavedViewsControl({
 
   useEffect(() => {
     if (!mode || (mode !== 'list' && mode !== 'board') || !savedViewsQuery.data || !listLikeWorkingState) return;
+    const modeChanged = previousModeRef.current !== null && previousModeRef.current !== mode;
 
     const resolved = resolveListLikeProjectViewState({
       mode,
       savedViews: savedViewsQuery.data,
       selectedViewId,
-      workingState: listLikeWorkingState,
+      workingState: modeChanged ? {} : listLikeWorkingState,
     });
     const nextViewId = resolved.source.namedViewId;
     const nextFilters = buildListLikeProjectViewQueryUpdates(resolved.state);
@@ -114,6 +116,10 @@ export function ProjectSavedViewsControl({
       [PROJECT_SAVED_VIEW_PARAM]: nextViewId,
     });
   }, [listLikeWorkingState, mode, savedViewsQuery.data, selectedViewId, updateProjectQueryParams]);
+
+  useEffect(() => {
+    previousModeRef.current = mode;
+  }, [mode]);
 
   const currentState = useMemo(() => {
     if (!projectId || !mode) return null;

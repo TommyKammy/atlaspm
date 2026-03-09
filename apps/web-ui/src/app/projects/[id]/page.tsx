@@ -459,6 +459,9 @@ export default function ProjectPage() {
           search={search}
           statusFilter={statusFilter}
           priorityFilter={priorityFilter}
+          selectedStatuses={statusFilters}
+          selectedAssignees={assigneeFilters}
+          selectedCustomFieldFilters={customFieldFilters}
         />
       ) : view === 'calendar' ? (
         <ProjectCalendarView
