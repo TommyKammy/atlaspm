@@ -36,10 +36,12 @@ import { TaskApprovalController } from './task-approvals/task-approval.controlle
 import { TaskTimeTrackingController } from './task-time-tracking/task-time-tracking.controller';
 import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
 import { TaskProjectLinksModule } from './task-project-links/task-project-links.module';
+import { ApiThrottlingModule } from './common/throttling';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ApiThrottlingModule,
     AuthModule,
     DevAuthModule.register(),
     SearchModule,
