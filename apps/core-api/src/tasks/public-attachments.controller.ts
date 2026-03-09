@@ -1,14 +1,17 @@
 import { Controller, Get, NotFoundException, Param, StreamableFile, Res } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { promises as fs } from 'node:fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveAttachmentPath } from './attachment-storage';
+import { THROTTLE_POLICIES } from '../common/throttling';
 
 @Controller('public')
 export class PublicAttachmentsController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Get('attachments/:id/:token')
+  @Throttle({ default: THROTTLE_POLICIES.safePublicRead })
   async content(
     @Param('id') id: string,
     @Param('token') token: string,

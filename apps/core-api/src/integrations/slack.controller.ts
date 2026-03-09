@@ -13,6 +13,7 @@ import { Throttle } from '@nestjs/throttler';
 import { SlackService } from './slack.service';
 import type { Request } from 'express';
 import * as crypto from 'crypto';
+import { THROTTLE_POLICIES } from '../common/throttling';
 
 interface RawBodyRequest extends Request {
   rawBody?: Buffer;
@@ -87,7 +88,7 @@ export class SlackWebhookController {
   constructor(private readonly slackService: SlackService) {}
 
   @Post('events')
-  @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 requests per minute
+  @Throttle({ default: THROTTLE_POLICIES.strictPublicWebhook })
   async handleEvent(
     @Req() req: RawBodyRequest,
     @Body() payload: SlackEvent,

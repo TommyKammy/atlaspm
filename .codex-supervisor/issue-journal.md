@@ -1,51 +1,43 @@
-# Issue #323: P1: Implement structured redaction in global error logging
+# Issue #324: P1: Introduce global API throttling baseline with route-specific overrides
 
 ## Supervisor Snapshot
-- Issue URL: https://github.com/TommyKammy/atlaspm/issues/323
-- Branch: codex/reopen-issue-323
-- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-323
-- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-323/.codex-supervisor/issue-journal.md
-- Current phase: addressing_review
-- Attempt count: 2
-- Last head SHA: 1ddea9a7288da8f0745d47a1f5bec579b94d4697
+- Issue URL: https://github.com/TommyKammy/atlaspm/issues/324
+- Branch: codex/reopen-issue-324
+- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-324
+- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-324/.codex-supervisor/issue-journal.md
+- Current phase: repairing_ci
+- Attempt count: 3
+- Last head SHA: c1608d9d7ffa6fc80f5a8520d60768f2e7e7e427
 - Blocked reason: none
-- Last failure signature: PRRT_kwDORWcwRc5zBtCd|PRRT_kwDORWcwRc5zBtC2|PRRT_kwDORWcwRc5zBtDK
+- Last failure signature: e2e:fail
 - Repeated failure signature count: 1
-- Updated at: 2026-03-09T13:51:30.505Z
+- Updated at: 2026-03-09T14:39:02.826Z
 
 ## Latest Codex Summary
-Addressed the configured-bot review on PR #326 in commit `27da3c6a4e97a6ea88f5c2dbb4e45868a70d89b3`.
+Investigated the failing PR #327 `e2e` job and confirmed it was caused by the new global baseline being too low for normal authenticated UI traffic.
 
-The follow-up extends [log-redaction.ts](/home/tommy/Dev/atlaspm-worktrees/issue-323/apps/core-api/src/common/log-redaction.ts) to redact `email` and invite-related keys, and updates [error.filter.ts](/home/tommy/Dev/atlaspm-worktrees/issue-323/apps/core-api/src/common/error.filter.ts) so `path` stays the concrete request path while `route` carries the route template when available. [error.filter.test.ts](/home/tommy/Dev/atlaspm-worktrees/issue-323/apps/core-api/test/error.filter.test.ts) now covers nested `inviterEmail`, `invitedEmail`, and `invitationId` redaction and asserts distinct `path` and `route` fields.
+The GitHub Actions log showed repeated `API 429` failures across Playwright timeline/workload specs. I raised the default baseline from `60/minute` to `300/minute`, raised the safe public attachment override to `1000/minute`, and updated the throttling regression test to assert 300 allowed baseline requests before the 301st is throttled.
 
-Verification passed with `pnpm --filter @atlaspm/core-api exec vitest run test/error.filter.test.ts test/request-logging.middleware.test.ts --reporter=dot` and `pnpm --filter @atlaspm/core-api type-check`. The branch was pushed to `origin/codex/reopen-issue-323`, and the three configured-bot review threads were resolved via `gh api graphql resolveReviewThread`.
-
-Summary: Addressed review feedback by redacting `email` and invite-related keys and by separating concrete request path from route template in the error log.
-State hint: waiting_ci
+Summary: Raised the general throttling baseline to avoid breaking legitimate UI/E2E traffic while preserving stricter and higher-volume overrides.
+State hint: repairing_ci
 Blocked reason: none
-Tests: `pnpm --filter @atlaspm/core-api exec vitest run test/error.filter.test.ts test/request-logging.middleware.test.ts --reporter=dot`; `pnpm --filter @atlaspm/core-api type-check`
-Failure signature: none
-Next action: Wait for the refreshed PR #326 CI run to complete and re-check merge state
+Tests: `gh run view 22858092874 --job 66304197200 --log`; `pnpm --filter @atlaspm/core-api exec vitest run test/throttling.integration.test.ts test/slack-webhook-signature.test.ts --reporter=dot`; `pnpm --filter @atlaspm/core-api type-check`; `E2E_REBUILD=1 pnpm e2e tests/timeline-root-cause.spec.ts`
+Failure signature: e2e:api-429-default-throttle-too-low
+Next action: Commit and push the higher baseline, then re-check PR #327 `e2e`.
 
 ## Active Failure Context
-- Category: review
-- Summary: 3 unresolved automated review thread(s) remain.
-- Reference: https://github.com/TommyKammy/atlaspm/pull/326#discussion_r2905556418
-- Details:
-  - apps/core-api/src/common/log-redaction.ts:13 The issue acceptance criteria explicitly lists `email` and `invite` as sensitive keys that must be redacted ("Recursively mask sensitive keys such as `token`, `authorization`, `password`, `secret`, `email`, `invite`, and attachment/access tokens"), but neither is present in `SENSITIVE_KEY_PATTERNS`. The test also confirms this gap — it asserts that `email: 'user@example.com'` remains unredacted in the log output (line 75), which contradicts the issue requirements. Both `email` and `invite` patterns should be added to `SENSITIVE_KEY_PATTERNS` and the test should be updated to reflect their redaction.
-  - apps/core-api/src/common/error.filter.ts:48 The log object now has both `path` and `route` set to the exact same value (`route = req.route?.path ?? req.path ?? req.url`). The original `path` field was `req.url` (raw URL), while the new `route` field provides the Express route template (e.g., `/projects/:id/tasks`). Emitting both as the same value is redundant. Consider keeping `route` for the Express route template and reverting `path` to `req.url` so that the two fields carry distinct, complementary information (the parametrised route and the actual request URL).
-  - apps/core-api/test/error.filter.test.ts:75 The test asserts `email: 'user@example.com'` is not redacted (line 75). This directly contradicts the issue's acceptance criteria which requires `email` to be masked. If (as noted in the `SENSITIVE_KEY_PATTERNS` comment) `email` is intentionally left unredacted, this should at minimum be documented with a comment explaining the decision. As written, the test confirms a gap, not a passing requirement.
+- None recorded.
 
 ## Codex Working Notes
 ### Current Handoff
-- Hypothesis: The configured-bot review was correct; `email` and invite-related keys also need redaction, and `path` should remain distinct from the route template.
-- Primary failure or risk: Local review follow-up is complete and pushed. The remaining work is remote verification while PR #326 checks rerun.
-- Last focused command: `gh pr view 326 --json url,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup,headRefName`
-- Files changed: `apps/core-api/src/common/error.filter.ts`, `apps/core-api/src/common/log-redaction.ts`, `apps/core-api/test/error.filter.test.ts`
+- Hypothesis: The issue was caused by throttling config living only in `IntegrationsModule` without a global `ThrottlerGuard`, so neither baseline routes nor Slack overrides were enforced.
+- Primary failure or risk: The runtime fix is ready locally; remaining risk is only CI confirmation after pushing the higher baseline. The targeted local Playwright run showed one unrelated flaky retry in `timeline-root-cause.spec.ts`, but no throttle failures.
+- Last focused command: `E2E_REBUILD=1 pnpm e2e tests/timeline-root-cause.spec.ts`
+- Files changed: `apps/core-api/src/common/throttling.ts`, `apps/core-api/test/throttling.integration.test.ts`
 - Next 1-3 actions:
-  1. Wait for the in-progress `type-check`, `lint`, and `test` jobs on PR #326 to finish.
-  2. Re-check PR #326 merge state once the refreshed CI run completes.
-  3. Merge or address any new review/CI signal if it appears.
+  1. Commit and push the higher default throttle baseline.
+  2. Re-check PR #327 CI, especially `e2e`.
+  3. If `e2e` still fails, inspect whether another handler needs an override instead of further raising the global baseline.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
@@ -55,16 +47,19 @@ Next action: Wait for the refreshed PR #326 CI run to complete and re-check merg
   - `pnpm --filter @atlaspm/shared-types build`
   - `pnpm --filter @atlaspm/core-api prisma:generate`
 - Focused reproduction:
-  - Added `apps/core-api/test/error.filter.test.ts`.
-  - Reproduced with raw sensitive values present in the logged object for nested `password`, `token`, `access_token`, `accessToken`, and `apiKey` fields.
+  - Added `apps/core-api/test/throttling.integration.test.ts`.
+  - Reproduced with `POST /dev-auth/token` still returning `201` on the 71st request and `POST /webhooks/slack/events` still returning `201` on the 11th request.
+- Failure signature:
+  - `throttling-not-enforced-app-or-slack`
 - Current focused verification passing:
-  - `pnpm --filter @atlaspm/core-api exec vitest run test/error.filter.test.ts test/request-logging.middleware.test.ts --reporter=dot`
+  - `gh run view 22858092874 --job 66304197200 --log`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/throttling.integration.test.ts test/slack-webhook-signature.test.ts --reporter=dot`
   - `pnpm --filter @atlaspm/core-api type-check`
-  - `gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -F id=PRRT_kwDORWcwRc5zBtCd`
-  - `gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -F id=PRRT_kwDORWcwRc5zBtC2`
-  - `gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -F id=PRRT_kwDORWcwRc5zBtDK`
+  - `E2E_REBUILD=1 pnpm e2e tests/timeline-root-cause.spec.ts`
 - Implementation notes:
-  - Added `redactLogData()` in `apps/core-api/src/common/log-redaction.ts` to recursively redact sensitive keys while preserving object/array shape.
-  - `GlobalErrorFilter` now redacts `req.body`, `req.query`, and `req.params` before logging unexpected errors.
-  - Review follow-up added `email` and invite-related key patterns, including nested `invitedEmail` and `invitationId` coverage in the regression test.
-  - Review follow-up changed the log shape to keep `path` as the concrete request path and `route` as the route template when available.
+  - Added `ApiThrottlingModule` with `ThrottlerModule.forRoot([{ name: 'default', limit: 300, ttl: 60000 }])` and registered `ThrottlerGuard` as an `APP_GUARD`.
+  - Removed the inert module-local `ThrottlerModule` registration from `IntegrationsModule`.
+  - Kept Slack on a stricter override (`10/minute`) and raised the safe public attachment override for `GET /public/attachments/:id/:token` to `1000/minute`.
+  - Review follow-up snapshots and restores the mutated env keys in `test/throttling.integration.test.ts`.
+  - Review follow-up now asserts 300 baseline successes before the 301st request gets `429`, and 10 Slack successes before the 11th gets `429`.
+  - CI diagnosis: the failing `e2e` job was returning `API 429` from normal authenticated requests during Playwright setup, especially on heavily reused routes like `/projects` and `/workspaces`.
