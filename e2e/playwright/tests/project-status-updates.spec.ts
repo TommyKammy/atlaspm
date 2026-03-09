@@ -180,7 +180,10 @@ test('inbox batches multiple task notifications for the same target', async ({ b
     const task = await api(`/projects/${projectId}/tasks`, ownerToken, 'POST', {
       sectionId: defaultSection.id,
       title: `Inbox batching task ${now}`,
+    });
+    await api(`/tasks/${task.id}`, ownerToken, 'PATCH', {
       assigneeUserId: memberSub,
+      version: task.version,
     });
 
     await api(`/tasks/${task.id}/comments`, ownerToken, 'POST', {
