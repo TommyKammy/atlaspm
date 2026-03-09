@@ -28,7 +28,9 @@ function restoreEnv(snapshot: Record<(typeof ENV_KEYS)[number], string | undefin
   }
 }
 
-async function createSlackApp(slackService: Pick<SlackService, 'isConfigured' | 'sendMentionResponse'>) {
+async function createSlackApp(
+  slackService: Pick<SlackService, 'isConfigured' | 'sendMentionResponse'>,
+): Promise<INestApplication> {
   const moduleRef = await Test.createTestingModule({
     imports: [ThrottlerModule.forRoot([{ ttl: 60000, limit: 10 }])],
     controllers: [SlackWebhookController],
