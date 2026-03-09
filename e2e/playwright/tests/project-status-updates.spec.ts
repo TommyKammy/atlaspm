@@ -152,3 +152,54 @@ test('project status update mentions notify project members and open back into t
     await memberContext.close();
   }
 });
+
+test('inbox batches multiple task notifications for the same target', async ({ browser, page }) => {
+  const now = Date.now();
+  const ownerToken = await loginAs(page, `e2e-inbox-owner-${now}`, `e2e-inbox-owner-${now}@example.com`);
+  const project = await createProject(ownerToken, `Inbox Batching ${now}`);
+  const projectId = project.id;
+  const workspaces = await api('/workspaces', ownerToken);
+  const workspaceId = workspaces[0].id as string;
+  const sections = await api(`/projects/${projectId}/sections`, ownerToken);
+  const defaultSection = sections.find((section: { isDefault: boolean }) => section.isDefault);
+  expect(defaultSection).toBeTruthy();
+
+  const memberSub = `e2e.inbox.member-${now}`;
+  const memberEmail = `${memberSub}@example.com`;
+  const memberContext = await browser.newContext();
+  const memberPage = await memberContext.newPage();
+
+  try {
+    const memberToken = await loginAs(memberPage, memberSub, memberEmail);
+    await inviteAndAcceptWorkspaceMember(ownerToken, workspaceId, memberEmail, memberToken);
+    await api(`/projects/${projectId}/members`, ownerToken, 'POST', {
+      userId: memberSub,
+      role: 'MEMBER',
+    });
+
+    const task = await api(`/projects/${projectId}/tasks`, ownerToken, 'POST', {
+      sectionId: defaultSection.id,
+      title: `Inbox batching task ${now}`,
+      assigneeUserId: memberSub,
+    });
+
+    await api(`/tasks/${task.id}/comments`, ownerToken, 'POST', {
+      body: `Please review this next @[${memberSub}|Inbox Member].`,
+    });
+
+    await memberPage.goto('/inbox');
+    const notifications = memberPage.locator('[data-testid^="inbox-notification-"]');
+    await expect(notifications).toHaveCount(1);
+
+    const batchedCard = notifications.first();
+    await expect(batchedCard).toContainText(/2\s+Unread/i);
+    await expect(batchedCard).toContainText('2 events');
+    await expect(batchedCard).toContainText('assigned you a task');
+    await expect(batchedCard).toContainText('commented on your task');
+
+    await batchedCard.getByRole('button', { name: 'Open task' }).click();
+    await expect(memberPage).toHaveURL(new RegExp(`/projects/${projectId}\\?task=`));
+  } finally {
+    await memberContext.close();
+  }
+});
