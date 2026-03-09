@@ -24,6 +24,7 @@ import {
 import {
   PROJECT_VIEW_MODES,
   normalizeProjectViewState,
+  type ProjectViewCustomFieldFilter,
   type ProjectViewMode,
   type ProjectViewState,
 } from '@atlaspm/domain';
@@ -62,6 +63,17 @@ class PatchProjectSavedViewDto {
 }
 
 type ProjectViewDbClient = Prisma.TransactionClient;
+type ProjectViewReadClient = Pick<PrismaService, 'projectMembership' | 'customFieldDefinition'>;
+type ProjectViewValidationContext = {
+  validAssigneeIds: Set<string>;
+  customFieldsById: Map<
+    string,
+    {
+      type: CustomFieldType;
+      optionIds: Set<string>;
+    }
+  >;
+};
 
 @Controller()
 @UseGuards(AuthGuard)
@@ -259,7 +271,7 @@ export class ProjectViewsController {
   }
 
   private async buildSavedViewsResponse(projectId: string, userId: string) {
-    const [preferences, views] = await Promise.all([
+    const [preferences, views, validationContext] = await Promise.all([
       this.prisma.projectViewPreference.findMany({
         where: { projectId, userId },
       }),
@@ -267,17 +279,21 @@ export class ProjectViewsController {
         where: { projectId, userId },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       }),
+      this.loadProjectViewValidationContext(this.prisma, projectId),
     ]);
 
     return {
       projectId,
       userId,
-      defaultsByMode: this.serializeDefaultsByMode(preferences),
-      views: views.map((view) => this.serializeSavedView(view)),
+      defaultsByMode: this.serializeDefaultsByMode(preferences, validationContext),
+      views: views.map((view) => this.serializeSavedView(view, validationContext)),
     };
   }
 
-  private serializeDefaultsByMode(preferences: ProjectViewPreference[]) {
+  private serializeDefaultsByMode(
+    preferences: ProjectViewPreference[],
+    validationContext: ProjectViewValidationContext,
+  ) {
     const defaultsByMode: Record<ProjectViewMode, ProjectViewState | null> = {
       list: null,
       board: null,
@@ -290,13 +306,14 @@ export class ProjectViewsController {
         continue;
       }
       const mode = preference.mode as ProjectViewMode;
-      defaultsByMode[mode] = this.normalizePersistedProjectViewState(mode, preference.state);
+      const state = this.sanitizePersistedProjectViewState(mode, preference.state, validationContext);
+      defaultsByMode[mode] = Object.keys(state).length > 0 ? state : null;
     }
 
     return defaultsByMode;
   }
 
-  private serializeSavedView(view: ProjectSavedView) {
+  private serializeSavedView(view: ProjectSavedView, validationContext?: ProjectViewValidationContext) {
     const mode = this.parseProjectViewMode(view.mode);
     return {
       id: view.id,
@@ -304,7 +321,9 @@ export class ProjectViewsController {
       userId: view.userId,
       name: view.name,
       mode,
-      state: this.normalizePersistedProjectViewState(mode, view.state),
+      state: validationContext
+        ? this.sanitizePersistedProjectViewState(mode, view.state, validationContext)
+        : this.normalizePersistedProjectViewState(mode, view.state),
       createdAt: view.createdAt,
       updatedAt: view.updatedAt,
     };
@@ -346,6 +365,62 @@ export class ProjectViewsController {
     return normalizeProjectViewState(mode, rawState as Partial<ProjectViewState>);
   }
 
+  private sanitizePersistedProjectViewState(
+    mode: ProjectViewMode,
+    rawState: Prisma.JsonValue,
+    validationContext: ProjectViewValidationContext,
+  ): ProjectViewState {
+    const normalizedState = this.normalizePersistedProjectViewState(mode, rawState);
+    const filters = normalizedState.filters;
+
+    if (!filters) {
+      return normalizedState;
+    }
+
+    const sanitizedFilters: NonNullable<ProjectViewState['filters']> = { ...filters };
+
+    if (sanitizedFilters.assigneeIds?.length) {
+      sanitizedFilters.assigneeIds = sanitizedFilters.assigneeIds.filter((assigneeId) =>
+        validationContext.validAssigneeIds.has(assigneeId),
+      );
+      if (!sanitizedFilters.assigneeIds.length) {
+        delete sanitizedFilters.assigneeIds;
+      }
+    }
+
+    if (sanitizedFilters.customFieldFilters?.length) {
+      sanitizedFilters.customFieldFilters = sanitizedFilters.customFieldFilters
+        .map((filter) => {
+          const field = validationContext.customFieldsById.get(filter.fieldId);
+          if (!field || field.type !== (filter.type as CustomFieldType)) {
+            return null;
+          }
+
+          if (filter.type === 'SELECT') {
+            const optionIds = (filter.optionIds ?? []).filter((optionId) => field.optionIds.has(optionId));
+            return optionIds.length ? { ...filter, optionIds } : null;
+          }
+
+          return filter;
+        })
+        .filter((filter): filter is ProjectViewCustomFieldFilter => Boolean(filter));
+
+      if (!sanitizedFilters.customFieldFilters.length) {
+        delete sanitizedFilters.customFieldFilters;
+      }
+    }
+
+    const nextState: ProjectViewState = {
+      ...normalizedState,
+      filters: Object.keys(sanitizedFilters).length > 0 ? sanitizedFilters : undefined,
+    };
+    if (!nextState.filters) {
+      delete nextState.filters;
+    }
+
+    return normalizeProjectViewState(mode, nextState);
+  }
+
   private async normalizeAndValidateProjectViewState(
     tx: ProjectViewDbClient,
     projectId: string,
@@ -362,6 +437,43 @@ export class ProjectViewsController {
     await this.validateCustomFieldFilters(tx, projectId, normalizedState);
 
     return normalizedState as Prisma.JsonObject;
+  }
+
+  private async loadProjectViewValidationContext(
+    client: ProjectViewReadClient,
+    projectId: string,
+  ): Promise<ProjectViewValidationContext> {
+    const [memberships, fields] = await Promise.all([
+      client.projectMembership.findMany({
+        where: { projectId },
+        select: { userId: true },
+      }),
+      client.customFieldDefinition.findMany({
+        where: {
+          projectId,
+          archivedAt: null,
+        },
+        include: {
+          options: {
+            where: { archivedAt: null },
+            select: { id: true },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      validAssigneeIds: new Set(memberships.map((membership) => membership.userId)),
+      customFieldsById: new Map(
+        fields.map((field) => [
+          field.id,
+          {
+            type: field.type,
+            optionIds: new Set(field.options.map((option) => option.id)),
+          },
+        ]),
+      ),
+    };
   }
 
   private async validateStatusIds(state: ProjectViewState) {

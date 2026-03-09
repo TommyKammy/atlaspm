@@ -31,6 +31,25 @@ async function api(path: string, token: string, method = 'GET', body?: unknown) 
   return JSON.parse(raw);
 }
 
+async function createProject(page: Page, token: string, name: string) {
+  const workspaces = (await api('/workspaces', token)) as Array<{ id: string }>;
+  const workspaceId = workspaces[0]?.id;
+  if (!workspaceId) throw new Error('Workspace not found');
+
+  const project = (await api('/projects', token, 'POST', {
+    workspaceId,
+    name,
+  })) as { id: string };
+  const sections = (await api(`/projects/${project.id}/sections`, token)) as Array<{
+    id: string;
+    isDefault?: boolean;
+  }>;
+  const defaultSectionId = sections.find((section) => section.isDefault)?.id ?? sections[0]?.id;
+  if (!defaultSectionId) throw new Error('Default section not found');
+
+  return { projectId: project.id, defaultSectionId };
+}
+
 test('saved views can save and reapply a named list view without refresh', async ({ page }) => {
   const stamp = Date.now();
   const sub = `e2e-saved-views-${stamp}`;
@@ -111,4 +130,114 @@ test('saved views can save and reapply a named list view without refresh', async
   await page.click('[data-testid="saved-view-trigger"]');
   await page.locator('[data-testid^="saved-view-delete-"]').first().click();
   await expect(page.locator('[data-testid^="saved-view-apply-"]').filter({ hasText: 'Done renamed' })).toHaveCount(0);
+});
+
+test('saved views apply per-mode state when switching from a named list view to a board default', async ({ page }) => {
+  const stamp = Date.now();
+  const sub = `e2e-saved-views-modes-${stamp}`;
+  await devLogin(page, sub, `e2e-saved-views-modes-${stamp}@example.com`);
+  const token = await getToken(page);
+  const { projectId, defaultSectionId } = await createProject(page, token, `Saved Views Modes ${stamp}`);
+
+  const doneTask = (await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: defaultSectionId,
+    title: `Done Cross View ${stamp}`,
+  })) as { id: string; version: number };
+  const todoTask = (await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: defaultSectionId,
+    title: `Todo Cross View ${stamp}`,
+  })) as { id: string };
+  await api(`/tasks/${doneTask.id}`, token, 'PATCH', { status: 'DONE', version: doneTask.version });
+
+  const listView = (await api(`/projects/${projectId}/saved-views`, token, 'POST', {
+    name: 'Done only',
+    mode: 'list',
+    state: {
+      filters: {
+        statusIds: ['DONE'],
+      },
+    },
+  })) as { id: string };
+  await api(`/projects/${projectId}/saved-views/defaults/board`, token, 'PUT', {
+    state: {
+      filters: {
+        statusIds: ['IN_PROGRESS'],
+      },
+    },
+  });
+
+  await page.goto(`/projects/${projectId}?savedView=${listView.id}`);
+  await expect(page.locator(`[data-task-title="Done Cross View ${stamp}"]`)).toBeVisible();
+  await expect(page.locator(`[data-task-title="Todo Cross View ${stamp}"]`)).toHaveCount(0);
+  await page.click('[data-testid="saved-view-trigger"]');
+  await expect(page.locator('[data-testid="saved-view-active-name"]')).toContainText('Done only');
+  await page.click('[data-testid="saved-view-trigger"]');
+
+  await page.click('[data-testid="project-view-board"]');
+  await expect(page.locator(`[data-task-title="Todo Cross View ${stamp}"]`)).toBeVisible();
+  await expect(page.locator(`[data-task-title="Done Cross View ${stamp}"]`)).toHaveCount(0);
+});
+
+test('saved view fallback drops archived custom field filters on reload', async ({ page }) => {
+  const stamp = Date.now();
+  const sub = `e2e-saved-views-fallback-${stamp}`;
+  await devLogin(page, sub, `e2e-saved-views-fallback-${stamp}@example.com`);
+  const token = await getToken(page);
+  const { projectId, defaultSectionId } = await createProject(page, token, `Saved Views Fallback ${stamp}`);
+
+  const taskAlpha = (await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: defaultSectionId,
+    title: `Fallback Alpha ${stamp}`,
+  })) as { id: string; version: number };
+  const taskBeta = (await api(`/projects/${projectId}/tasks`, token, 'POST', {
+    sectionId: defaultSectionId,
+    title: `Fallback Beta ${stamp}`,
+  })) as { id: string; version: number };
+
+  const field = (await api(`/projects/${projectId}/custom-fields`, token, 'POST', {
+    name: `Fallback Stage ${stamp}`,
+    type: 'SELECT',
+    options: [
+      { label: 'Keep', value: 'keep' },
+      { label: 'Focus', value: 'focus' },
+    ],
+  })) as { id: string; options: Array<{ id: string; value: string }> };
+  const focusOptionId = field.options.find((option) => option.value === 'focus')?.id;
+  if (!focusOptionId) throw new Error('Focus option not found');
+
+  await api(`/tasks/${taskBeta.id}/custom-fields`, token, 'PATCH', {
+    version: taskBeta.version,
+    values: [{ fieldId: field.id, value: focusOptionId }],
+  });
+
+  const savedView = (await api(`/projects/${projectId}/saved-views`, token, 'POST', {
+    name: 'Focus only',
+    mode: 'list',
+    state: {
+      filters: {
+        customFieldFilters: [
+          {
+            fieldId: field.id,
+            type: 'SELECT',
+            optionIds: [focusOptionId],
+          },
+        ],
+      },
+    },
+  })) as { id: string };
+
+  await page.goto(`/projects/${projectId}?savedView=${savedView.id}`);
+  await expect(page.locator(`[data-task-title="Fallback Beta ${stamp}"]`)).toBeVisible();
+  await expect(page.locator(`[data-task-title="Fallback Alpha ${stamp}"]`)).toHaveCount(0);
+  await page.click('[data-testid="saved-view-trigger"]');
+  await expect(page.locator('[data-testid="saved-view-active-name"]')).toContainText('Focus only');
+  await page.click('[data-testid="saved-view-trigger"]');
+
+  await api(`/custom-fields/${field.id}`, token, 'DELETE');
+
+  await page.reload();
+  await expect(page.locator(`[data-task-title="Fallback Alpha ${stamp}"]`)).toBeVisible();
+  await expect(page.locator(`[data-task-title="Fallback Beta ${stamp}"]`)).toBeVisible();
+  await page.click('[data-testid="saved-view-trigger"]');
+  await expect(page.locator('[data-testid="saved-view-active-name"]')).toContainText('Focus only');
 });

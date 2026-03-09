@@ -4411,6 +4411,141 @@ describe('Core API Integration', () => {
     expect(deletedAudit).toBeTruthy();
   });
 
+  test('saved view list sanitizes stale assignee and custom field references for fallback resolution', async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Saved View Fallback Project' })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const validAssigneeId = `saved-view-fallback-member-${projectId}`;
+    await prisma.user.upsert({
+      where: { id: validAssigneeId },
+      create: {
+        id: validAssigneeId,
+        email: `${validAssigneeId}@example.com`,
+        displayName: 'Saved View Fallback Member',
+        status: 'ACTIVE',
+      },
+      update: {},
+    });
+    await prisma.workspaceMembership.upsert({
+      where: { workspaceId_userId: { workspaceId, userId: validAssigneeId } },
+      create: { workspaceId, userId: validAssigneeId, role: 'WS_MEMBER' },
+      update: {},
+    });
+    await prisma.projectMembership.upsert({
+      where: { projectId_userId: { projectId, userId: validAssigneeId } },
+      create: { projectId, userId: validAssigneeId, role: 'VIEWER' },
+      update: {},
+    });
+
+    const staleField = await prisma.customFieldDefinition.create({
+      data: {
+        projectId,
+        name: 'Fallback Bucket',
+        type: 'SELECT',
+        position: 1000,
+        options: {
+          create: [
+            { label: 'Keep', value: 'keep', position: 1000 },
+            { label: 'Drop', value: 'drop', position: 2000 },
+          ],
+        },
+      },
+      include: {
+        options: {
+          where: { archivedAt: null },
+          orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+        },
+      },
+    });
+    const staleOptionId = staleField.options[0]?.id;
+    expect(staleOptionId).toBeTruthy();
+
+    await request(app.getHttpServer())
+      .put(`/projects/${projectId}/saved-views/defaults/list`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        state: {
+          grouping: { field: 'section' },
+          sorting: { field: 'position', direction: 'asc' },
+          filters: {
+            assigneeIds: [validAssigneeId],
+            customFieldFilters: [
+              {
+                fieldId: staleField.id,
+                type: 'SELECT',
+                optionIds: [staleOptionId],
+              },
+            ],
+          },
+          visibleFieldIds: ['name', 'status'],
+        },
+      })
+      .expect(200);
+
+    const namedViewRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/saved-views`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: 'Stale only',
+        mode: 'list',
+        state: {
+          filters: {
+            assigneeIds: [validAssigneeId],
+            customFieldFilters: [
+              {
+                fieldId: staleField.id,
+                type: 'SELECT',
+                optionIds: [staleOptionId],
+              },
+            ],
+          },
+        },
+      })
+      .expect(201);
+
+    await prisma.projectMembership.delete({
+      where: {
+        projectId_userId: {
+          projectId,
+          userId: validAssigneeId,
+        },
+      },
+    });
+    await prisma.customFieldOption.update({
+      where: { id: staleOptionId },
+      data: { archivedAt: new Date() },
+    });
+
+    const savedViewsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/saved-views`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(savedViewsRes.body.defaultsByMode.list).toEqual({
+      grouping: { field: 'section' },
+      sorting: { field: 'position', direction: 'asc' },
+      visibleFieldIds: ['name', 'status'],
+    });
+    expect(savedViewsRes.body.views).toEqual([
+      expect.objectContaining({
+        id: namedViewRes.body.id,
+        name: 'Stale only',
+        mode: 'list',
+        state: {},
+      }),
+    ]);
+  });
+
   test('timeline manual layout preserves legacy per-swimlane task order state when upgrading from #232', async () => {
     const workspaceRes = await request(app.getHttpServer())
       .get('/workspaces')
