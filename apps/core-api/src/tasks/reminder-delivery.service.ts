@@ -41,11 +41,23 @@ export class ReminderDeliveryService implements OnModuleInit, OnModuleDestroy {
         sentAt: null,
         remindAt: { lte: now },
         task: { deletedAt: null },
-        user: { status: UserStatus.ACTIVE },
+        user: {
+          status: UserStatus.ACTIVE,
+          OR: [
+            { reminderPreference: { is: null } },
+            { reminderPreference: { is: { enabled: true } } },
+          ],
+        },
       },
       include: {
         task: { select: { id: true, projectId: true, title: true } },
-        user: { select: { id: true, email: true, displayName: true } },
+        user: {
+          select: {
+            id: true,
+            email: true,
+            displayName: true,
+          },
+        },
       },
       orderBy: { remindAt: 'asc' },
       take: batchSize,

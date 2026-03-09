@@ -95,6 +95,7 @@ model User {
   triggeredNotifications InboxNotification[] @relation("NotificationTriggeredBy")
   dashboards           Dashboard[]
   reminders            TaskReminder[]
+  reminderPreference   UserReminderPreference?
   statusUpdates        ProjectStatusUpdate[]
   createdForms         Form[]
   taskApprovals        TaskApproval[]
@@ -498,6 +499,19 @@ model TaskReminder {
   @@index([taskId, userId])
   @@index([taskId, userId, deletedAt])
   @@map("task_reminders")
+}
+
+model UserReminderPreference {
+  id                     String   @id @default(uuid())
+  userId                 String   @unique @map("user_id")
+  enabled                Boolean  @default(true)
+  defaultLeadTimeMinutes Int      @default(60) @map("default_lead_time_minutes")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_reminder_preferences")
 }
 
 model TaskComment {

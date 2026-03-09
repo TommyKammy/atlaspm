@@ -29,6 +29,7 @@ import type {
   AuditEvent,
   ProjectMember,
   RecurringFrequency,
+  ReminderPreferences,
   RecurringRule,
   SectionTaskGroup,
   Task,
@@ -55,6 +56,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/lib/i18n';
+import { DEFAULT_REMINDER_PREFERENCES } from '@/lib/reminder-preferences';
 import { cn } from '@/lib/utils';
 
 const AUDIT_DIFF_IGNORED_KEYS = new Set([
@@ -295,6 +297,19 @@ function toDateInputValue(value?: string | null) {
   return dateOnlyInputValue(value);
 }
 
+function toDatetimeLocalInputValue(date: Date) {
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function buildDefaultReminderInputValue(dueAt: string | null | undefined, leadTimeMinutes: number) {
+  const dueDate = dateOnlyInputToLocalDate(dueAt);
+  if (!dueDate) return '';
+  const dueMorning = new Date(dueDate);
+  dueMorning.setHours(9, 0, 0, 0);
+  return toDatetimeLocalInputValue(new Date(dueMorning.getTime() - leadTimeMinutes * 60_000));
+}
+
 function countOpenSubtasks(nodes: TaskTree[]) {
   let count = 0;
   const queue = [...nodes];
@@ -467,6 +482,12 @@ export default function TaskDetailDrawer({
   const reminderQuery = useQuery<TaskReminder | null>({
     queryKey: taskId ? queryKeys.taskReminder(taskId) : ['task', 'none', 'reminder'],
     queryFn: () => api(`/tasks/${taskId}/reminder`),
+    enabled,
+  });
+
+  const reminderPreferencesQuery = useQuery<ReminderPreferences>({
+    queryKey: queryKeys.reminderPreferences,
+    queryFn: () => api('/me/reminder-preferences'),
     enabled,
   });
 
@@ -718,7 +739,17 @@ export default function TaskDetailDrawer({
     [activityQuery.data],
   );
   const dependencies = dependenciesQuery.data ?? [];
+  const currentTask = taskQuery.data;
   const blockingCount = dependencies.filter((dep) => dep.dependsOnTask && dep.dependsOnTask.status !== 'DONE').length;
+  const reminderPreferences = reminderPreferencesQuery.data ?? DEFAULT_REMINDER_PREFERENCES;
+  const reminderLocal = reminderQuery.data?.remindAt
+    ? toDatetimeLocalInputValue(new Date(reminderQuery.data.remindAt))
+    : '';
+  const defaultReminderInput =
+    !reminderQuery.data?.id && reminderPreferences.enabled
+      ? buildDefaultReminderInputValue(currentTask?.dueAt, reminderPreferences.defaultLeadTimeMinutes)
+      : '';
+  const reminderInput = reminderAtInput || reminderLocal || defaultReminderInput;
 
   const subtaskProgress = useMemo(() => {
     const walk = (nodes: TaskTree[]): { total: number; done: number } =>
@@ -737,11 +768,6 @@ export default function TaskDetailDrawer({
     return { ...counted, percent };
   }, [subtasksTreeQuery.data]);
 
-  const reminderLocal = reminderQuery.data?.remindAt
-    ? new Date(reminderQuery.data.remindAt).toISOString().slice(0, 16)
-    : '';
-  const reminderInput = reminderAtInput || reminderLocal;
-  const currentTask = taskQuery.data;
   const currentRecurringRule = useMemo(() => {
     if (!currentTask) return null;
     const rules = recurringRulesQuery.data ?? [];
@@ -1230,6 +1256,7 @@ export default function TaskDetailDrawer({
                         value={reminderInput}
                         onChange={(event) => setReminderAtInput(event.target.value)}
                         className="h-8 w-[250px] border-transparent bg-transparent shadow-none hover:bg-muted/30 focus-visible:border-border"
+                        disabled={!reminderPreferences.enabled}
                         data-testid="task-reminder-input"
                       />
                       <Button
@@ -1239,7 +1266,7 @@ export default function TaskDetailDrawer({
                           setReminder.mutate(iso);
                           setReminderAtInput('');
                         }}
-                        disabled={!reminderInput || setReminder.isPending}
+                        disabled={!reminderInput || setReminder.isPending || !reminderPreferences.enabled}
                         data-testid="task-reminder-save"
                       >
                         {setReminder.isPending ? t('saving') : t('saveReminder')}
@@ -1258,6 +1285,18 @@ export default function TaskDetailDrawer({
                         {t('clearReminder')}
                       </Button>
                     </div>
+                    {!reminderPreferences.enabled ? (
+                      <p className="px-1 text-xs text-muted-foreground" data-testid="task-reminder-disabled-note">
+                        {t('taskReminderDeliveryPaused')}
+                      </p>
+                    ) : (
+                      !reminderQuery.data?.id &&
+                      defaultReminderInput && (
+                        <p className="px-1 text-xs text-muted-foreground" data-testid="task-reminder-default-note">
+                          {t('taskReminderDefaultTimingHint')}
+                        </p>
+                      )
+                    )}
                   </section>
 
                   <section

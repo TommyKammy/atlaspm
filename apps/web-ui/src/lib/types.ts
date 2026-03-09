@@ -201,6 +201,11 @@ export type TaskReminder = {
   sentAt?: string | null;
 };
 
+export type ReminderPreferences = {
+  enabled: boolean;
+  defaultLeadTimeMinutes: number;
+};
+
 export type InboxNotificationType =
   | 'mention'
   | 'assignment'
