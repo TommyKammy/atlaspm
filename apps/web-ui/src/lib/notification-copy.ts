@@ -1,4 +1,4 @@
-import type { InboxNotification, NotificationDeliveryIssue } from './types';
+import type { InboxNotification } from './types';
 
 export function actorLabel(notification: InboxNotification) {
   return (
@@ -57,21 +57,4 @@ export function formatBatchActorSummary(
   if (!actors.length) return 'Someone';
   if (actors.length === 1) return actors[0]?.label ?? 'Someone';
   return `${actors[0]?.label ?? 'Someone'} +${actors.length - 1}`;
-}
-
-export function deliveryIssueEventLabel(issue: NotificationDeliveryIssue) {
-  switch (issue.eventType) {
-    case 'notification.created':
-      return 'notification created';
-    case 'notification.reopened':
-      return 'notification reopened';
-    case 'notification.read':
-      return 'notification read';
-    case 'notification.read_all':
-      return 'notifications marked read';
-    case 'task.reminder.sent':
-      return 'reminder delivery';
-    default:
-      return issue.eventType.replace(/\./g, ' ');
-  }
 }
