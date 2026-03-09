@@ -2420,7 +2420,7 @@ describe('Core API Integration', () => {
     expect((dateCreateOutbox?.payload as any)?.dueAt).toBeTruthy();
   });
 
-  test('GET /projects/:id/tasks rejects timezone-less due date query values', async () => {
+  test('GET /projects/:id/tasks rejects unsupported due date query values', async () => {
     const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
     const workspaceId = wsRes.body[0].id;
 
@@ -2448,12 +2448,25 @@ describe('Core API Integration', () => {
       })
       .expect(201);
 
-    const res = await request(app.getHttpServer())
+    const missingTimezoneRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/tasks?dueFrom=${encodeURIComponent('2026-03-10T12:30:00')}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(400);
 
-    expect(String(res.body.message)).toContain('dueFrom');
+    expect(missingTimezoneRes.body).toMatchObject({
+      code: 'INVALID_DATE_FORMAT',
+      message: expect.stringContaining('dueFrom'),
+    });
+
+    const invalidOffsetRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/tasks?dueTo=${encodeURIComponent('2026-03-12T23:59:59+14:30')}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(400);
+
+    expect(invalidOffsetRes.body).toMatchObject({
+      code: 'INVALID_DATE_FORMAT',
+      message: expect.stringContaining('dueTo'),
+    });
   });
 
   test('GET /projects/:id/tasks accepts explicit due date query formats', async () => {

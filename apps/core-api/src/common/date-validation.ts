@@ -32,7 +32,7 @@ function isValidDateParts(year: number, month: number, day: number): boolean {
 function invalidDateQuery(fieldName: string): BadRequestException {
   return new BadRequestException({
     code: 'INVALID_DATE_FORMAT',
-    message: `${fieldName} must use YYYY-MM-DD or ISO8601 datetime with timezone`,
+    message: `${fieldName} must use YYYY-MM-DD or ISO8601 datetime with 'Z' or ±HH:MM timezone offset`,
   });
 }
 
@@ -73,7 +73,7 @@ export function parseTaskDateQuery(value: string, fieldName: string): Date {
     const sign = dateTimeMatch[10] === '-' ? -1 : 1;
     const offsetHours = Number(dateTimeMatch[11]);
     const offsetMins = Number(dateTimeMatch[12]);
-    if (offsetHours > 23 || offsetMins > 59) {
+    if (offsetMins > 59 || offsetHours > 14 || (offsetHours === 14 && offsetMins !== 0)) {
       throw invalidDateQuery(fieldName);
     }
     offsetMinutes = sign * (offsetHours * 60 + offsetMins);
