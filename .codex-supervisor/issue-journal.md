@@ -24,13 +24,13 @@
 ## Codex Working Notes
 ### Current Handoff
 - Hypothesis: The main risk for issue #340 is undocumented controller ownership drift during future extraction, so the narrowest proof is an ADR-content test that fails if the explicit slice boundaries or migration controls are missing.
-- Primary failure or risk: Initial focused verification failed because this worktree had no installed dependencies (`tsc: not found` during `pnpm --filter @atlaspm/domain test`); after `pnpm install`, the ADR-content test passed.
+- Primary failure or risk: No local verification failure remains; draft PR #343 is open with the ADR and focused proof committed on branch `codex/reopen-issue-340`.
 - Last focused command: `pnpm --filter @atlaspm/domain test -- --test-name-pattern='task domain ADR defines explicit slices and migration controls'`
 - Files changed: `docs/adr-task-domain-decomposition.md`, `docs/architecture.md`, and `packages/domain/src/__tests__/task-domain-adr.test.ts`
 - Next 1-3 actions:
-  1. Commit the ADR and focused test on `codex/reopen-issue-340`.
-  2. Open or update the branch PR if one is required for supervisor flow.
-  3. Hand off with the branch ready for review.
+  1. Wait for review on PR #343.
+  2. Address any feedback on the ADR wording or slice boundaries.
+  3. Merge once approved.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
