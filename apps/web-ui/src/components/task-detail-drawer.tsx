@@ -44,6 +44,7 @@ import { ApprovalSection } from '@/components/task-approval-section';
 import { AuditActivityList } from '@/components/audit-activity-list';
 import { DependencyManager } from '@/components/dependency-manager';
 import TaskDescriptionEditor from '@/components/editor/TaskDescriptionEditor';
+import { FollowerToggle } from '@/components/follower-toggle';
 import { ProjectSelector } from '@/components/project-selector';
 import { SubtaskList } from '@/components/subtask-list';
 import { Badge } from '@/components/ui/badge';
@@ -220,6 +221,18 @@ function MetadataRow({
       <div>{children}</div>
     </div>
   );
+}
+
+type FollowerState = Pick<Task, 'followerCount' | 'isFollowedByCurrentUser'>;
+
+function toFollowerState(response: {
+  followerCount: number;
+  isFollowedByCurrentUser: boolean;
+}) {
+  return {
+    followerCount: response.followerCount,
+    isFollowedByCurrentUser: response.isFollowedByCurrentUser,
+  } satisfies FollowerState;
 }
 
 type RecurrenceDraft = {
@@ -519,6 +532,42 @@ export default function TaskDetailDrawer({
       setNewComment('');
       await queryClient.invalidateQueries({ queryKey: queryKeys.taskComments(taskId!) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
+    },
+  });
+
+  const syncFollowerState = (taskIdToUpdate: string, followerState: FollowerState) => {
+    queryClient.setQueryData<Task | undefined>(queryKeys.taskDetail(taskIdToUpdate), (current) =>
+      current ? { ...current, ...followerState } : current,
+    );
+    queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) =>
+      current.map((group) => ({
+        ...group,
+        tasks: group.tasks.map((task) => (task.id === taskIdToUpdate ? { ...task, ...followerState } : task)),
+      })),
+    );
+  };
+
+  const followTask = useMutation({
+    mutationFn: () =>
+      api(`/tasks/${taskId}/followers`, { method: 'POST' }) as Promise<{
+        followerCount: number;
+        isFollowedByCurrentUser: boolean;
+      }>,
+    onSuccess: (updated) => {
+      if (!taskId) return;
+      syncFollowerState(taskId, toFollowerState(updated));
+    },
+  });
+
+  const unfollowTask = useMutation({
+    mutationFn: () =>
+      api(`/tasks/${taskId}/followers/me`, { method: 'DELETE' }) as Promise<{
+        followerCount: number;
+        isFollowedByCurrentUser: boolean;
+      }>,
+    onSuccess: (updated) => {
+      if (!taskId) return;
+      syncFollowerState(taskId, toFollowerState(updated));
     },
   });
 
@@ -1106,6 +1155,29 @@ export default function TaskDetailDrawer({
                       ) : (
                         <span className="text-sm text-muted-foreground">{t('loading')}...</span>
                       )}
+                    </MetadataRow>
+
+                    <MetadataRow icon={<UserCircle2 className="h-3.5 w-3.5" />} label={t('followers')}>
+                      <FollowerToggle
+                        compact
+                        count={currentTask?.followerCount ?? 0}
+                        isFollowed={currentTask?.isFollowedByCurrentUser ?? false}
+                        isPending={followTask.isPending || unfollowTask.isPending}
+                        onToggle={() => {
+                          if (!currentTask || followTask.isPending || unfollowTask.isPending) return;
+                          if (currentTask.isFollowedByCurrentUser) {
+                            unfollowTask.mutate();
+                            return;
+                          }
+                          followTask.mutate();
+                        }}
+                        buttonTestId="task-follow-toggle"
+                        countTestId="task-follower-count"
+                        followLabel={t('follow')}
+                        followingLabel={t('following')}
+                        followerLabel={t('follower')}
+                        followersLabel={t('followers')}
+                      />
                     </MetadataRow>
 
                     {currentTask?.type === 'MILESTONE' && (

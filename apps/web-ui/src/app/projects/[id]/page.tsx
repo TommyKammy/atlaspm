@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Plus } from 'lucide-react';
 import { AuditActivityList } from '@/components/audit-activity-list';
+import { FollowerToggle } from '@/components/follower-toggle';
 import ProjectBoard from '@/components/project-board';
 import { ProjectBoardView, ProjectCalendarView, ProjectFilesView } from '@/components/project-alt-views';
 import { ProjectGanttShell } from '@/components/project-gantt-shell';
@@ -30,6 +31,17 @@ import {
 const TASK_STATUSES: Task['status'][] = ['TODO', 'IN_PROGRESS', 'DONE', 'BLOCKED'];
 type QuickAddIntent = { sectionId: string; nonce: number } | null;
 type CurrentUser = { id: string; email?: string | null; name?: string | null };
+type FollowerState = Pick<Project, 'followerCount' | 'isFollowedByCurrentUser'>;
+
+function toFollowerState(response: {
+  followerCount: number;
+  isFollowedByCurrentUser: boolean;
+}) {
+  return {
+    followerCount: response.followerCount,
+    isFollowedByCurrentUser: response.isFollowedByCurrentUser,
+  } satisfies FollowerState;
+}
 
 function parseListParam(raw: string | null): string[] {
   if (!raw) return [];
@@ -202,6 +214,34 @@ export default function ProjectPage() {
     },
   });
 
+  const syncProjectFollowerState = (followerState: FollowerState) => {
+    queryClient.setQueryData<Project[]>(queryKeys.projects, (current = []) =>
+      current.map((item) => (item.id === projectId ? { ...item, ...followerState } : item)),
+    );
+  };
+
+  const followProject = useMutation({
+    mutationFn: () =>
+      api(`/projects/${projectId}/followers`, { method: 'POST' }) as Promise<{
+        followerCount: number;
+        isFollowedByCurrentUser: boolean;
+      }>,
+    onSuccess: (updated) => {
+      syncProjectFollowerState(toFollowerState(updated));
+    },
+  });
+
+  const unfollowProject = useMutation({
+    mutationFn: () =>
+      api(`/projects/${projectId}/followers/me`, { method: 'DELETE' }) as Promise<{
+        followerCount: number;
+        isFollowedByCurrentUser: boolean;
+      }>,
+    onSuccess: (updated) => {
+      syncProjectFollowerState(toFollowerState(updated));
+    },
+  });
+
   if (!projectId) return <div>Loading...</div>;
 
   useEffect(() => {
@@ -247,6 +287,32 @@ export default function ProjectPage() {
 
   return (
     <div className="space-y-4">
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3">
+        <div>
+          <h1 className="text-lg font-semibold">{project?.name ?? t('project')}</h1>
+          <p className="text-sm text-muted-foreground">{t('projectFollowerHint')}</p>
+        </div>
+        <FollowerToggle
+          count={project?.followerCount ?? 0}
+          isFollowed={project?.isFollowedByCurrentUser ?? false}
+          isPending={followProject.isPending || unfollowProject.isPending}
+          onToggle={() => {
+            if (followProject.isPending || unfollowProject.isPending) return;
+            if (project?.isFollowedByCurrentUser) {
+              unfollowProject.mutate();
+              return;
+            }
+            followProject.mutate();
+          }}
+          buttonTestId="project-follow-toggle"
+          countTestId="project-follower-count"
+          followLabel={t('follow')}
+          followingLabel={t('following')}
+          followerLabel={t('follower')}
+          followersLabel={t('followers')}
+        />
+      </section>
+
       <Dialog open={trashOpen} onOpenChange={(open) => setProjectQueryParam('trash', open ? '1' : null)}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>

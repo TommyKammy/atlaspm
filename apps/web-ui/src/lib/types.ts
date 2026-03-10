@@ -2,7 +2,13 @@ import type { ProjectViewCustomFieldFilter, ProjectViewMode, ProjectViewState } 
 
 export type { ProjectViewCustomFieldFilter, ProjectViewMode, ProjectViewState };
 
-export type Project = { id: string; workspaceId: string; name: string };
+export type Project = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  followerCount?: number;
+  isFollowedByCurrentUser?: boolean;
+};
 
 export type ProjectSavedView = {
   id: string;
@@ -163,6 +169,8 @@ export type Task = {
   deletedByUserId?: string | null;
   version: number;
   position: number;
+  followerCount?: number;
+  isFollowedByCurrentUser?: boolean;
   tags?: string[];
   recurringRuleId?: string | null;
   subtaskMovePolicy?: TimelineSubtaskMovePolicy;

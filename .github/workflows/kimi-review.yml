@@ -1,0 +1,43 @@
+name: Kimi Code Review (Secure)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  kimi-review:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Kimi Configuration
+        id: kimi-config
+        run: |
+          if [ -z "${{ secrets.MOONSHOT_API_KEY }}" ]; then
+            echo "has_api_key=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping Kimi review because MOONSHOT_API_KEY is not configured."
+          else
+            echo "has_api_key=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run Kimi Code Review
+        if: steps.kimi-config.outputs.has_api_key == 'true'
+        uses: howardpen9/kimi-code-reviewer@main
+        with:
+          kimi_api_key: ${{ secrets.MOONSHOT_API_KEY }}
+          language: en
+          # fail_on: critical
