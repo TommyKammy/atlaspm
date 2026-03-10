@@ -42,6 +42,7 @@ import { AttachmentDownloadUrlService } from './tasks/attachment-download-url.se
 import { TaskCommentsController } from './tasks/task-comments.controller';
 import { TaskCommentsService } from './tasks/task-comments.service';
 import { TaskMentionsService } from './tasks/task-mentions.service';
+import { GoalsModule } from './goals/goals.module';
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { TaskMentionsService } from './tasks/task-mentions.service';
     DashboardsModule,
     IntegrationsModule,
     TaskProjectLinksModule,
+    GoalsModule,
   ],
   controllers: [
     WorkspacesController,

@@ -1,63 +1,69 @@
-# Issue #349: P2: Add regression coverage for follower subscriptions and notifications
+# Issue #355: P3: Add goal domain models and project linkage contracts
 
 ## Supervisor Snapshot
-- Issue URL: https://github.com/TommyKammy/atlaspm/issues/349
-- Branch: codex/reopen-issue-349
-- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-349
-- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-349/.codex-supervisor/issue-journal.md
-- Current phase: repairing_ci
-- Attempt count: 3
-- Last head SHA: 31729a1027a15045dd75a28a805dd87d6a28e24f
+- Issue URL: https://github.com/TommyKammy/atlaspm/issues/355
+- Branch: codex/reopen-issue-355
+- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-355
+- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-355/.codex-supervisor/issue-journal.md
+- Current phase: addressing_review
+- Attempt count: 2
+- Last head SHA: 712f511c8bb3411fbbcbf28ed9001e4e47880c22
 - Blocked reason: none
-- Last failure signature: e2e:fail
+- Last failure signature: PRRT_kwDORWcwRc5zbbJZ|PRRT_kwDORWcwRc5zbbJm|PRRT_kwDORWcwRc5zbbJx|PRRT_kwDORWcwRc5zbbKC|PRRT_kwDORWcwRc5zbbKL
 - Repeated failure signature count: 1
-- Updated at: 2026-03-10T15:58:16.272Z
+- Updated at: 2026-03-10T21:28:57.521Z
 
 ## Latest Codex Summary
-The first E2E repair landed in `31729a1`, but the next PR rerun exposed one more deterministic timeline drag failure: `tests/timeline.spec.ts:509:5 › timeline working-days drag skips weekends and Alt keeps calendar-day placement`. CI showed the task never moved off Friday (`2026-03-06`) when the test expected Monday (`2026-03-09`) under working-days mode.
+Addressed the five automated PR review threads on the goal slice.
 
-That test still used raw `page.mouse` dragging, so I aligned it to the same synthetic pointer-event helper style as the other stabilized timeline specs in [timeline.spec.ts](/home/tommy/Dev/atlaspm-worktrees/issue-349/e2e/playwright/tests/timeline.spec.ts). Local verification now passes for the isolated test, the whole `timeline.spec.ts` file, and the full Playwright suite. The full suite still reports retry-recovered flake in `gantt-risk.spec.ts`, `mvp.spec.ts`, and `timeline-root-cause.spec.ts`, but there is no remaining hard failure locally.
+Changes:
+- Switched goal owner DTO validation from `@IsUUID()` to `@IsString()` so auth subject-based user IDs are accepted on create and update.
+- Wrapped `GoalsService.addProjectLink()` in a `P2002` conflict translation so concurrent duplicate link creation returns `409` instead of bubbling as `500`.
+- Scoped the goal integration test’s outbox assertions to the current run (`createdAt >= testStartedAt`) and the specific `goalId`.
+- Scoped `GoalProjectLink` audit assertions to the concrete link IDs created by the test.
 
-Summary: Reproduced the second failing E2E rerun, fixed the remaining raw-mouse timeline drag path in `timeline.spec.ts`, and got the full Playwright suite green locally.
-State hint: repairing_ci
+Tests run:
+`pnpm --filter @atlaspm/core-api test -- test/goals.integration.test.ts`
+`pnpm --filter @atlaspm/core-api type-check`
+`pnpm --filter @atlaspm/core-api exec eslint src/goals/goals.controller.ts src/goals/goals.service.ts`
+
+Summary: Fixed the unresolved automated review findings for PR #359 and reverified the focused goal slice locally.
+State hint: addressing_review
 Blocked reason: none
-Tests: `gh run view 22911147396 --job 66483848975 --log-failed`; `pnpm --filter @atlaspm/playwright exec playwright test e2e/playwright/tests/timeline.spec.ts --grep 'timeline working-days drag skips weekends and Alt keeps calendar-day placement'`; `pnpm --filter @atlaspm/playwright exec playwright test e2e/playwright/tests/timeline.spec.ts`; `pnpm --filter @atlaspm/playwright exec playwright test`
+Tests: pnpm --filter @atlaspm/core-api test -- test/goals.integration.test.ts; pnpm --filter @atlaspm/core-api type-check; pnpm --filter @atlaspm/core-api exec eslint src/goals/goals.controller.ts src/goals/goals.service.ts
 Failure signature: none
-Next action: Commit and push the `timeline.spec.ts` drag-helper repair, then rerun/monitor PR #353’s E2E job.
+Next action: Commit the review fixes, push `codex/reopen-issue-355`, and resolve the five PR review threads.
 
 ## Active Failure Context
-- Category: checks
-- Summary: PR #353 has failing checks.
-- Command or source: gh pr checks
-- Reference: https://github.com/TommyKammy/atlaspm/pull/353
-- Details:
-  - e2e (fail/FAILURE) https://github.com/TommyKammy/atlaspm/actions/runs/22911147396/job/66483848975
+- None recorded.
 
 ## Codex Working Notes
 ### Current Handoff
-- Hypothesis: PR #353’s current failing `e2e` rerun is another stale raw-mouse timeline drag helper, this time in `timeline.spec.ts`, rather than a follower regression.
-- Primary failure or risk: The deterministic `timeline working-days drag skips weekends and Alt keeps calendar-day placement` failure is fixed locally. Remaining risk is broader browser-suite flake, not a known hard failure.
-- Last focused command: `pnpm --filter @atlaspm/playwright exec playwright test`
-- Files changed: `e2e/playwright/tests/timeline.spec.ts`
+- Hypothesis: Issue #355 was an unimplemented `core-api` slice. The narrowest missing contract was `POST /goals`, which returned `404` before implementation.
+- Primary failure or risk: The prior implementation was functionally okay, but five automated review comments identified DTO validation mismatches, a concurrency error mapping gap, and two test false-positive risks. Those fixes are now applied and passing locally.
+- Last focused command: `pnpm --filter @atlaspm/core-api exec eslint src/goals/goals.controller.ts src/goals/goals.service.ts`
+- Files changed: `apps/core-api/src/goals/goals.controller.ts`, `apps/core-api/src/goals/goals.service.ts`, `apps/core-api/test/goals.integration.test.ts`
 - Next 1-3 actions:
-  1. Commit the `timeline.spec.ts` pointer-event drag repair on `codex/reopen-issue-349`.
-  2. Push the branch to update PR #353 and rerun the failing E2E job.
-  3. Watch for repeat failures in the known flaky browser specs (`gantt-risk`, `mvp`, `timeline-root-cause`).
+  1. Commit the review-fix patch on `codex/reopen-issue-355`.
+  2. Push the branch and resolve the five PR review threads on #359.
+  3. Re-watch CI only if the PR picks up new failures after the push.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
-- Second CI repair reproduction:
-  - `gh run view 22911147396 --job 66483848975 --log-failed` showed a single hard failure in `tests/timeline.spec.ts:509:5 › timeline working-days drag skips weekends and Alt keeps calendar-day placement`.
-  - CI failure detail: after dragging one day with working-days mode enabled, the task stayed at `2026-03-06T00:00:00.000Z` instead of moving to `2026-03-09T00:00:00.000Z`.
-  - The isolated spec passed locally sometimes, but the raw-mouse drag path matched the same fragility pattern already fixed in the other timeline specs, so the repair was to switch this test to a synthetic pointer-event drag helper as well.
+- Reproduction:
+  - `pnpm --filter @atlaspm/core-api test -- test/goals.integration.test.ts` initially failed at `apps/core-api/test/goals.integration.test.ts:86` with `expected 201 "Created", got 404 "Not Found"` for `POST /goals`.
+- Environment prep needed in this worktree before the real reproduction:
+  - `pnpm install`
+  - `pnpm --filter @atlaspm/domain build`
+  - `pnpm --filter @atlaspm/shared-types build`
 - Failure signature:
-  - `timeline-working-days-drag-page-mouse`
+  - `goal-review-thread-fixes`
 - Current focused verification:
-  - `gh run view 22911147396 --job 66483848975 --log-failed`
-  - `pnpm --filter @atlaspm/playwright exec playwright test e2e/playwright/tests/timeline.spec.ts --grep 'timeline working-days drag skips weekends and Alt keeps calendar-day placement'`
-  - `pnpm --filter @atlaspm/playwright exec playwright test e2e/playwright/tests/timeline.spec.ts`
-  - `pnpm --filter @atlaspm/playwright exec playwright test`
+  - `pnpm --filter @atlaspm/core-api test -- test/goals.integration.test.ts`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/core-api exec eslint src/goals/goals.controller.ts src/goals/goals.service.ts`
 - Implementation notes:
-  - Added `timelineBarBox` and `dragTimelineBarHorizontally` helpers in `timeline.spec.ts` so the working-days drag test uses the same pointer-event model as the other stabilized timeline drag specs.
-  - Passed `altKey` through the synthetic pointer events so the calendar-day override path is exercised without depending on separate keyboard timing.
-  - Latest full local Playwright run exited green but still reported retry-recovered flake in `tests/gantt-risk.spec.ts`, `tests/mvp.spec.ts`, and `tests/timeline-root-cause.spec.ts`.
+  - `ownerUserId` validation now matches the actual `User.id` semantics (`sub` strings, not UUIDs).
+  - `addProjectLink()` now translates concurrent unique-constraint races to `ConflictException`.
+  - Goal outbox assertions are bounded to this test run and goal payloads.
+  - `GoalProjectLink` audit assertions are bounded to the created link IDs.

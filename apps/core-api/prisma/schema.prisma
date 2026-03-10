@@ -19,6 +19,14 @@ enum ProjectStatusHealth {
   OFF_TRACK
 }
 
+enum GoalStatus {
+  NOT_STARTED
+  ON_TRACK
+  AT_RISK
+  OFF_TRACK
+  COMPLETED
+}
+
 enum WorkspaceRole {
   WS_ADMIN
   WS_MEMBER
@@ -75,6 +83,7 @@ model Workspace {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   projects    Project[]
+  goals       Goal[]
   memberships WorkspaceMembership[]
   invitations Invitation[]
   portfolios  Portfolio[]
@@ -105,6 +114,7 @@ model User {
   savedViews           ProjectSavedView[]
   taskFollows          TaskFollower[]
   projectFollows       ProjectFollower[]
+  ownedGoals           Goal[]
 }
 
 model WorkspaceMembership {
@@ -163,6 +173,28 @@ model Project {
   viewPreferences ProjectViewPreference[]
   savedViews ProjectSavedView[]
   followers   ProjectFollower[]
+  goalLinks   GoalProjectLink[]
+}
+
+model Goal {
+  id              String      @id @default(uuid())
+  workspaceId      String      @map("workspace_id")
+  ownerUserId      String      @map("owner_user_id")
+  title           String
+  description     String?
+  status          GoalStatus   @default(NOT_STARTED)
+  progressPercent Int          @default(0) @map("progress_percent")
+  archivedAt      DateTime?    @map("archived_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  owner     User      @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  projectLinks GoalProjectLink[]
+
+  @@index([workspaceId, archivedAt, createdAt])
+  @@index([ownerUserId, archivedAt])
+  @@map("goals")
 }
 
 model ProjectStatusUpdate {
@@ -370,6 +402,23 @@ model ProjectFollower {
   @@index([projectId, createdAt])
   @@index([userId, createdAt])
   @@map("project_followers")
+}
+
+model GoalProjectLink {
+  id        String    @id @default(uuid())
+  goalId    String    @map("goal_id")
+  projectId String    @map("project_id")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  goal    Goal    @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([goalId, projectId])
+  @@index([goalId, deletedAt, createdAt])
+  @@index([projectId, deletedAt])
+  @@map("goal_project_links")
 }
 
 model TaskProjectLink {
