@@ -1,57 +1,52 @@
-# Issue #340: P2: Write ADR for task domain decomposition and controller split
+# Issue #341: P2: Extract task feature slices into dedicated controllers and services
 
 ## Supervisor Snapshot
-- Issue URL: https://github.com/TommyKammy/atlaspm/issues/340
-- Branch: codex/reopen-issue-340
-- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-340
-- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-340/.codex-supervisor/issue-journal.md
-- Current phase: addressing_review
-- Attempt count: 2
-- Last head SHA: 0363ce26b4aef3043de6b1604013312c781b06bb
+- Issue URL: https://github.com/TommyKammy/atlaspm/issues/341
+- Branch: codex/reopen-issue-341
+- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-341
+- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-341/.codex-supervisor/issue-journal.md
+- Current phase: reproducing
+- Attempt count: 1
+- Last head SHA: 1c8889e7aedfad31f8c85b23a565256aa2424bc0
 - Blocked reason: none
-- Last failure signature: PRRT_kwDORWcwRc5zSHS1|PRRT_kwDORWcwRc5zSHTV
-- Repeated failure signature count: 1
-- Updated at: 2026-03-10T12:15:04.313Z
+- Last failure signature: none
+- Repeated failure signature count: 0
+- Updated at: 2026-03-10T12:29:41.356Z
 
 ## Latest Codex Summary
-- Addressed PR #343 review feedback by improving the ADR-content test failure message and moving the task decomposition ADR link from `## Auth` to `## Boundaries` in `docs/architecture.md`.
-- Re-ran the focused `@atlaspm/domain` verification after the review fixes; the test and type-check both passed.
-- Pushed commit `ded5c39` and resolved review threads `PRRT_kwDORWcwRc5zSHS1` and `PRRT_kwDORWcwRc5zSHTV` on PR #343.
+- None yet.
 
 ## Active Failure Context
-- Category: review
-- Summary: 2 unresolved automated review thread(s) remain.
-- Reference: https://github.com/TommyKammy/atlaspm/pull/343#discussion_r2911323047
-- Details:
-  - packages/domain/src/__tests__/task-domain-adr.test.ts:27 The `assert.match` call on line 27 has no custom failure message. When a section or keyword is missing from the ADR, the test fails with a generic error like "The input did not match the regular expression /.../" without indicating which expected string was not found. Since the same `assert.match` is called in a loop over 12 different expected strings, a failure message should be passed as the third argument to identify which string was missing (e.g., `assert.match(adr, new RegExp(escapeRegExp(expected)), \`ADR is missing required content: ${expected}\`)`). ```suggestion assert.match(adr, new RegExp(escapeRegExp(expected)), `ADR is missing required content: ${expected}`); ```
-  - docs/architecture.md:15 The ADR cross-reference is placed inside the `## Auth` section (lines 8–16), but the task domain decomposition is entirely unrelated to authentication. The `## Boundaries` section at the top of the file (lines 3–6), or a dedicated `## ADRs` / `## Architecture Decisions` entry, would be a far more appropriate home for this link. As written, a reader scanning for controller architecture decisions would need to look inside the auth section to find it.
+- None recorded.
 
 ## Codex Working Notes
 ### Current Handoff
-- Hypothesis: The main risk for issue #340 is undocumented controller ownership drift during future extraction, so the narrowest proof is an ADR-content test that fails if the explicit slice boundaries or migration controls are missing.
-- Primary failure or risk: No local verification failure remains; PR #343 has the review fixes pushed and the bot threads resolved, but GitHub still reports `mergeStateStatus=UNSTABLE` and may need a refresh cycle before merge.
-- Last focused command: `pnpm --filter @atlaspm/domain test -- --test-name-pattern='task domain ADR defines explicit slices and migration controls'`
-- Files changed: `docs/adr-task-domain-decomposition.md`, `docs/architecture.md`, and `packages/domain/src/__tests__/task-domain-adr.test.ts`
+- Hypothesis: The safest first extraction for #341 is the `comments + mentions` slice because it has a small API surface, existing integration coverage, and one shared dependency seam for mention sync.
+- Primary failure or risk: The focused extraction test initially failed because comment and mention routes still lived in `TasksController`; the first test run also exposed missing worktree deps, and the existing broad integration flow needed a higher timeout than Vitest's 5s default.
+- Last focused command: `pnpm --filter @atlaspm/core-api exec vitest run test/core.integration.test.ts --testNamePattern='project/member/sections/tasks/rules/reorder/audit/outbox flow' --testTimeout=20000`
+- Files changed: `apps/core-api/src/app.module.ts`, `apps/core-api/src/tasks/tasks.controller.ts`, `apps/core-api/src/tasks/task-comments.controller.ts`, `apps/core-api/src/tasks/task-comments.service.ts`, `apps/core-api/src/tasks/task-mentions.service.ts`, and `apps/core-api/test/task-comments*.test.ts`
 - Next 1-3 actions:
-  1. Check whether PR #343 leaves `UNSTABLE` after GitHub refreshes branch state.
-  2. Merge PR #343 once the host reports a clean merge state.
-  3. Only revisit if another review comment appears.
+  1. Commit the extracted `comments + mentions` slice and focused tests.
+  2. Open or update the issue PR with the controller/service extraction summary.
+  3. Decide whether to extract the next task slice in a follow-up issue or keep #341 scoped to comments/mentions.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
 - Focused reproduction:
-  - Added `packages/domain/src/__tests__/task-domain-adr.test.ts` first so the issue could fail on a missing/incomplete ADR instead of relying on manual doc review.
-  - Initial failure: `tsc: not found` from `pnpm --filter @atlaspm/domain test -- --test-name-pattern='task domain ADR defines explicit slices and migration controls'` because the worktree had no installed dependencies.
-  - After `pnpm install`, the same focused test passed against the new ADR.
+  - Added `apps/core-api/test/task-comments-slice.test.ts` first so the branch failed on routes still being owned by `TasksController` and on missing dedicated controller/service wiring.
+  - Initial failure: `prisma: not found` from `pnpm --filter @atlaspm/core-api test -- --run apps/core-api/test/task-comments-slice.test.ts` because the worktree had no installed dependencies.
+  - After `pnpm install`, the focused slice test failed as intended on `@Get('tasks/:id/comments')` still existing in `apps/core-api/src/tasks/tasks.controller.ts`.
 - Failure signature:
-  - `missing-worktree-deps-tsc-not-found`
+  - `task-comments-still-in-tasks-controller`
 - Current focused verification:
   - `pnpm install`
-  - `pnpm --filter @atlaspm/domain test -- --test-name-pattern='task domain ADR defines explicit slices and migration controls'`
-  - `pnpm --filter @atlaspm/domain type-check`
+  - `pnpm --filter @atlaspm/core-api prisma:generate`
+  - `pnpm --filter @atlaspm/domain build`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/task-comments-slice.test.ts test/task-comments.controller.test.ts test/task-comments.service.test.ts`
+  - `pnpm --filter @atlaspm/core-api test -- --testNamePattern='project/member/sections/tasks/rules/reorder/audit/outbox flow'`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/core.integration.test.ts --testNamePattern='project/member/sections/tasks/rules/reorder/audit/outbox flow' --testTimeout=20000`
 - Implementation notes:
-  - The ADR maps the current `TasksController` routes into six explicit slices: `task-core`, `comments-mentions`, `attachments`, `reminders`, `dependencies-subtasks`, and `timeline`.
-  - The ADR defines the extraction order as `task-core` first and `timeline` last, with test ownership and rollback constraints called out per slice.
-  - The ADR link in `docs/architecture.md` now lives under `## Boundaries`, which matches the controller-split subject matter better than `## Auth`.
-  - The ADR-content test now includes a per-string assertion message so failures identify the missing required section or boundary explicitly.
-  - Review threads `PRRT_kwDORWcwRc5zSHS1` and `PRRT_kwDORWcwRc5zSHTV` were resolved after pushing `ded5c39`.
+  - Added `TaskCommentsController` to own `GET /tasks/:id/mentions`, `GET/POST /tasks/:id/comments`, `PATCH /comments/:id`, and `DELETE /comments/:id`.
+  - Added `TaskCommentsService` for the transactional comment logic and `TaskMentionsService` for reusable mention parsing/sync so `PATCH /tasks/:id/description` keeps the same audit/outbox behavior.
+  - `TasksController` now delegates description mention sync through `TaskMentionsService` and no longer owns the extracted comment/mention routes.
+  - The existing broad integration flow passed once rerun with `--testTimeout=20000`; the earlier failure was timeout-only, not a behavior regression.

@@ -71,6 +71,7 @@ import {
   type TaskCustomFieldFilter,
 } from '../custom-fields/custom-field.validation';
 import { AttachmentDownloadUrlService } from './attachment-download-url.service';
+import { TaskMentionsService } from './task-mentions.service';
 
 class TaskQuery {
   @IsOptional()
@@ -425,18 +426,6 @@ class PatchDescriptionDto {
   expectedVersion!: number;
 }
 
-class CreateTaskCommentDto {
-  @IsString()
-  @MaxLength(5000)
-  body!: string;
-}
-
-class PatchTaskCommentDto {
-  @IsString()
-  @MaxLength(5000)
-  body!: string;
-}
-
 class InitiateAttachmentDto {
   @IsString()
   @MaxLength(255)
@@ -506,7 +495,6 @@ class AddDependencyDto {
 
 const MAX_DESCRIPTION_DOC_BYTES = 200_000;
 const MAX_DESCRIPTION_TEXT_LENGTH = 20_000;
-const MAX_COMMENT_BODY_LENGTH = 5000;
 const MAX_IMAGE_UPLOAD_BYTES = 5_000_000;
 const IMAGE_MIME_ALLOWLIST = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const TIMELINE_LANE_ORDER_BASE_LIMIT = 500;
@@ -590,6 +578,7 @@ export class TasksController {
     @Inject(SearchService) private readonly searchService: SearchService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
     @Inject(AttachmentDownloadUrlService) private readonly attachmentDownloadUrls: AttachmentDownloadUrlService,
+    @Inject(TaskMentionsService) private readonly mentions: TaskMentionsService,
   ) {}
 
   @Get('projects/:id/tasks')
@@ -1849,238 +1838,17 @@ export class TasksController {
         outboxType: 'task.description.updated',
         payload: { taskId: id, descriptionVersion: updated.descriptionVersion },
       });
-      await this.syncTaskMentions(
+      await this.mentions.syncTaskMentions(
         tx,
         {
           taskId: id,
           sourceType: 'description',
           sourceId: '',
-          mentionedUserIds: this.extractMentionUserIdsFromDoc(body.descriptionDoc),
+          mentionedUserIds: this.mentions.extractMentionUserIdsFromDoc(body.descriptionDoc),
         },
         req,
       );
       return updated;
-    });
-  }
-
-  @Get('tasks/:id/mentions')
-  async listMentions(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
-
-    const mentions = await this.prisma.taskMention.findMany({
-      where: { taskId },
-      orderBy: { createdAt: 'asc' },
-    });
-    const users = await this.prisma.user.findMany({
-      where: { id: { in: mentions.map((item) => item.mentionedUserId) } },
-    });
-    const userMap = new Map(users.map((user) => [user.id, user]));
-    return mentions.map((mention) => ({
-      ...mention,
-      user: userMap.get(mention.mentionedUserId)
-        ? {
-            id: mention.mentionedUserId,
-            displayName:
-              userMap.get(mention.mentionedUserId)?.displayName ??
-              userMap.get(mention.mentionedUserId)?.email ??
-              mention.mentionedUserId,
-            email: userMap.get(mention.mentionedUserId)?.email ?? null,
-          }
-        : null,
-    }));
-  }
-
-  @Get('tasks/:id/comments')
-  async listComments(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
-    const comments = await this.prisma.taskComment.findMany({
-      where: { taskId, deletedAt: null },
-      include: { task: { select: { projectId: true } } },
-      orderBy: { createdAt: 'asc' },
-    });
-
-    const users = await this.prisma.user.findMany({
-      where: { id: { in: comments.map((comment) => comment.authorUserId) } },
-    });
-    const usersById = new Map(users.map((user) => [user.id, user]));
-
-    return comments.map((comment) => {
-      const user = usersById.get(comment.authorUserId);
-      return {
-        id: comment.id,
-        taskId: comment.taskId,
-        authorUserId: comment.authorUserId,
-        body: comment.body,
-        createdAt: comment.createdAt,
-        updatedAt: comment.updatedAt,
-        deletedAt: comment.deletedAt,
-        author: {
-          id: comment.authorUserId,
-          displayName: user?.displayName ?? user?.email ?? comment.authorUserId,
-          email: user?.email ?? null,
-        },
-      };
-    });
-  }
-
-  @Post('tasks/:id/comments')
-  async createComment(
-    @Param('id') taskId: string,
-    @Body() body: CreateTaskCommentDto,
-    @CurrentRequest() req: AppRequest,
-  ) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
-    const trimmedBody = body.body.trim();
-    if (!trimmedBody) throw new ConflictException('Comment body cannot be empty');
-    if (trimmedBody.length > MAX_COMMENT_BODY_LENGTH) throw new ConflictException('Comment is too long');
-
-    return this.prisma.$transaction(async (tx) => {
-      const comment = await tx.taskComment.create({
-        data: {
-          taskId,
-          authorUserId: req.user.sub,
-          body: trimmedBody,
-        },
-      });
-      await this.domain.appendAuditOutbox({
-        tx,
-        actor: req.user.sub,
-        entityType: 'Task',
-        entityId: taskId,
-        action: 'task.comment.created',
-        afterJson: comment,
-        correlationId: req.correlationId,
-        outboxType: 'task.comment.created',
-        payload: { taskId, commentId: comment.id },
-      });
-      await this.syncTaskMentions(
-        tx,
-        {
-          taskId,
-          sourceType: 'comment',
-          sourceId: comment.id,
-          mentionedUserIds: this.extractMentionUserIdsFromComment(trimmedBody),
-        },
-        req,
-      );
-
-      const taskAssigneeId = task.assigneeUserId;
-      const assigneeShouldBeNotified = taskAssigneeId && taskAssigneeId !== req.user.sub;
-      if (assigneeShouldBeNotified) {
-        await this.notifications.createCommentNotification(tx, {
-          userId: taskAssigneeId,
-          projectId: task.projectId,
-          taskId,
-          commentId: comment.id,
-          triggeredByUserId: req.user.sub,
-          actor: req.user.sub,
-          correlationId: req.correlationId,
-        });
-      }
-
-      return comment;
-    });
-  }
-
-  @Patch('comments/:id')
-  async patchComment(
-    @Param('id') id: string,
-    @Body() body: PatchTaskCommentDto,
-    @CurrentRequest() req: AppRequest,
-  ) {
-    const comment = await this.prisma.taskComment.findUniqueOrThrow({ where: { id }, include: { task: true } });
-    await this.domain.requireProjectRole(comment.task.projectId, req.user.sub, ProjectRole.MEMBER);
-    if (comment.deletedAt) throw new NotFoundException('Comment not found');
-    if (comment.authorUserId !== req.user.sub) throw new ForbiddenException('Can only edit your own comment');
-    const trimmedBody = body.body.trim();
-    if (!trimmedBody) throw new ConflictException('Comment body cannot be empty');
-    if (trimmedBody.length > MAX_COMMENT_BODY_LENGTH) throw new ConflictException('Comment is too long');
-
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.taskComment.update({
-        where: { id },
-        data: { body: trimmedBody },
-      });
-      await this.domain.appendAuditOutbox({
-        tx,
-        actor: req.user.sub,
-        entityType: 'Task',
-        entityId: comment.taskId,
-        action: 'task.comment.updated',
-        beforeJson: comment,
-        afterJson: updated,
-        correlationId: req.correlationId,
-        outboxType: 'task.comment.updated',
-        payload: { taskId: comment.taskId, commentId: id },
-      });
-      await this.syncTaskMentions(
-        tx,
-        {
-          taskId: comment.taskId,
-          sourceType: 'comment',
-          sourceId: id,
-          mentionedUserIds: this.extractMentionUserIdsFromComment(trimmedBody),
-        },
-        req,
-      );
-      return updated;
-    });
-  }
-
-  @Delete('comments/:id')
-  async deleteComment(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
-    const comment = await this.prisma.taskComment.findUniqueOrThrow({ where: { id }, include: { task: true } });
-    await this.domain.requireProjectRole(comment.task.projectId, req.user.sub, ProjectRole.MEMBER);
-    if (comment.deletedAt) return comment;
-    if (comment.authorUserId !== req.user.sub) throw new ForbiddenException('Can only delete your own comment');
-
-    return this.prisma.$transaction(async (tx) => {
-      const deleted = await tx.taskComment.update({
-        where: { id },
-        data: { deletedAt: new Date() },
-      });
-      const existingMentions = await tx.taskMention.findMany({
-        where: { taskId: comment.taskId, sourceType: 'comment', sourceId: id },
-      });
-      if (existingMentions.length) {
-        await tx.taskMention.deleteMany({
-          where: { id: { in: existingMentions.map((item) => item.id) } },
-        });
-        for (const mention of existingMentions) {
-          await this.domain.appendAuditOutbox({
-            tx,
-            actor: req.user.sub,
-            entityType: 'Task',
-            entityId: comment.taskId,
-            action: 'task.mention.deleted',
-            beforeJson: mention,
-            correlationId: req.correlationId,
-            outboxType: 'task.mention.deleted',
-            payload: {
-              taskId: comment.taskId,
-              mentionedUserId: mention.mentionedUserId,
-              sourceType: 'comment',
-              sourceId: id,
-            },
-          });
-        }
-      }
-      await this.domain.appendAuditOutbox({
-        tx,
-        actor: req.user.sub,
-        entityType: 'Task',
-        entityId: comment.taskId,
-        action: 'task.comment.deleted',
-        beforeJson: comment,
-        afterJson: deleted,
-        correlationId: req.correlationId,
-        outboxType: 'task.comment.deleted',
-        payload: { taskId: comment.taskId, commentId: id },
-      });
-      return deleted;
     });
   }
 
@@ -2860,131 +2628,6 @@ export class TasksController {
 
   private sanitizeFileName(value: string) {
     return value.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'upload.bin';
-  }
-
-  private extractMentionUserIdsFromComment(body: string) {
-    const ids = new Set<string>();
-    const regex = /@\[(?<id>[a-zA-Z0-9:_-]+)\|[^\]]+\]/g;
-    let match = regex.exec(body);
-    while (match) {
-      const id = match.groups?.id?.trim();
-      if (id) ids.add(id);
-      match = regex.exec(body);
-    }
-    return [...ids];
-  }
-
-  private extractMentionUserIdsFromDoc(node: unknown): string[] {
-    const ids = new Set<string>();
-    const walk = (value: unknown) => {
-      if (!value || typeof value !== 'object') return;
-      if (Array.isArray(value)) {
-        for (const item of value) walk(item);
-        return;
-      }
-      const item = value as Record<string, unknown>;
-      if (item.type === 'mention' && item.attrs && typeof item.attrs === 'object') {
-        const mentionId = (item.attrs as Record<string, unknown>).id;
-        if (typeof mentionId === 'string' && mentionId.trim()) ids.add(mentionId.trim());
-      }
-      if (Array.isArray(item.marks)) {
-        for (const mark of item.marks) {
-          if (
-            mark &&
-            typeof mark === 'object' &&
-            (mark as Record<string, unknown>).type === 'mention' &&
-            (mark as Record<string, unknown>).attrs &&
-            typeof (mark as Record<string, unknown>).attrs === 'object'
-          ) {
-            const mentionId = ((mark as Record<string, unknown>).attrs as Record<string, unknown>).id;
-            if (typeof mentionId === 'string' && mentionId.trim()) ids.add(mentionId.trim());
-          }
-        }
-      }
-      walk(item.content);
-    };
-    walk(node);
-    return [...ids];
-  }
-
-  private async syncTaskMentions(
-    tx: Prisma.TransactionClient,
-    input: { taskId: string; sourceType: 'description' | 'comment'; sourceId: string; mentionedUserIds: string[] },
-    req: AppRequest,
-  ) {
-    const sourceId = input.sourceId ?? '';
-    const task = await tx.task.findUniqueOrThrow({ where: { id: input.taskId }, select: { projectId: true } });
-    const uniqueIncoming = [...new Set(input.mentionedUserIds)].filter(Boolean);
-    const validUsers = uniqueIncoming.length
-      ? await tx.projectMembership.findMany({
-          where: {
-            projectId: task.projectId,
-            userId: { in: uniqueIncoming },
-          },
-          select: { userId: true },
-        })
-      : [];
-    const validUserIds = new Set(validUsers.map((item) => item.userId));
-    const finalUserIds = uniqueIncoming.filter((id) => validUserIds.has(id));
-
-    const existing = await tx.taskMention.findMany({
-      where: { taskId: input.taskId, sourceType: input.sourceType, sourceId },
-    });
-    const existingSet = new Set(existing.map((item) => item.mentionedUserId));
-    const toCreate = finalUserIds.filter((id) => !existingSet.has(id));
-    const toDelete = existing.filter((item) => !finalUserIds.includes(item.mentionedUserId));
-
-    for (const userId of toCreate) {
-      const created = await tx.taskMention.create({
-        data: { taskId: input.taskId, mentionedUserId: userId, sourceType: input.sourceType, sourceId },
-      });
-      await this.domain.appendAuditOutbox({
-        tx,
-        actor: req.user.sub,
-        entityType: 'Task',
-        entityId: input.taskId,
-        action: 'task.mention.created',
-        afterJson: created,
-        correlationId: req.correlationId,
-        outboxType: 'task.mention.created',
-        payload: {
-          taskId: input.taskId,
-          mentionedUserId: userId,
-          sourceType: input.sourceType,
-          sourceId,
-        },
-      });
-      await this.notifications.upsertMentionNotification(tx, {
-        userId,
-        projectId: task.projectId,
-        taskId: input.taskId,
-        sourceType: input.sourceType,
-        sourceId,
-        triggeredByUserId: req.user.sub,
-        actor: req.user.sub,
-        correlationId: req.correlationId,
-      });
-    }
-
-    for (const mention of toDelete) {
-      await tx.taskMention.delete({ where: { id: mention.id } });
-      await this.domain.appendAuditOutbox({
-        tx,
-        actor: req.user.sub,
-        entityType: 'Task',
-        entityId: input.taskId,
-        action: 'task.mention.deleted',
-        beforeJson: mention,
-        correlationId: req.correlationId,
-        outboxType: 'task.mention.deleted',
-        payload: {
-          taskId: input.taskId,
-          mentionedUserId: mention.mentionedUserId,
-          sourceType: input.sourceType,
-          sourceId,
-        },
-      });
-    }
   }
 
   private extractPlainTextFromDoc(node: unknown): string {
