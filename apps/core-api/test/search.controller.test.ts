@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SearchController } from '../src/search/search.controller';
-
-const BATCH_SIZE = 1000;
+import { SearchController, SEARCH_REINDEX_BATCH_SIZE } from '../src/search/search.controller';
 
 function buildTask(id: number) {
   return {
@@ -23,8 +21,10 @@ function buildTask(id: number) {
 
 describe('SearchController reindexAll', () => {
   it('streams deterministic batches and fetches custom field values per chunk', async () => {
-    const firstBatch = Array.from({ length: BATCH_SIZE }, (_, index) => buildTask(index + 1));
-    const secondBatch = [buildTask(BATCH_SIZE + 1)];
+    const firstBatch = Array.from({ length: SEARCH_REINDEX_BATCH_SIZE }, (_, index) =>
+      buildTask(index + 1),
+    );
+    const secondBatch = [buildTask(SEARCH_REINDEX_BATCH_SIZE + 1)];
     const reindexedBatches: Array<{
       tasks: Array<{ id: string }>;
       metadataByTaskId?: Map<string, { customFieldText?: string | null }>;
@@ -95,18 +95,18 @@ describe('SearchController reindexAll', () => {
 
     expect(result).toEqual({
       success: true,
-      message: `Reindexed ${BATCH_SIZE + 1} tasks`,
-      count: BATCH_SIZE + 1,
+      message: `Reindexed ${SEARCH_REINDEX_BATCH_SIZE + 1} tasks`,
+      count: SEARCH_REINDEX_BATCH_SIZE + 1,
     });
 
     expect(prisma.task.findMany).toHaveBeenCalledTimes(3);
     expect(prisma.task.findMany.mock.calls[0]?.[0]).toMatchObject({
       orderBy: { id: 'asc' },
-      take: BATCH_SIZE,
+      take: SEARCH_REINDEX_BATCH_SIZE,
     });
     expect(prisma.task.findMany.mock.calls[1]?.[0]).toMatchObject({
       orderBy: { id: 'asc' },
-      take: BATCH_SIZE,
+      take: SEARCH_REINDEX_BATCH_SIZE,
       cursor: { id: firstBatch[firstBatch.length - 1].id },
       skip: 1,
     });
@@ -114,9 +114,17 @@ describe('SearchController reindexAll', () => {
 
     const firstCustomFieldArgs = prisma.taskCustomFieldValue.findMany.mock.calls[0]?.[0];
     const secondCustomFieldArgs = prisma.taskCustomFieldValue.findMany.mock.calls[1]?.[0];
-    expect(firstCustomFieldArgs.where.taskId.in).toHaveLength(BATCH_SIZE);
+    expect(firstCustomFieldArgs.where.taskId.in).toHaveLength(SEARCH_REINDEX_BATCH_SIZE);
     expect(firstCustomFieldArgs.where.taskId.in[0]).toBe(firstBatch[0].id);
     expect(firstCustomFieldArgs.where.taskId.in.at(-1)).toBe(firstBatch[firstBatch.length - 1].id);
+    expect(firstCustomFieldArgs.select).toEqual({
+      taskId: true,
+      valueText: true,
+      valueNumber: true,
+      valueDate: true,
+      valueBoolean: true,
+      option: { select: { label: true, value: true } },
+    });
     expect(secondCustomFieldArgs.where.taskId.in).toEqual([secondBatch[0].id]);
 
     expect(reindexedBatches).toHaveLength(2);

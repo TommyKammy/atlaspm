@@ -242,7 +242,12 @@ export class SearchController {
           taskId: { in: taskIds },
           field: { archivedAt: null },
         },
-        include: {
+        select: {
+          taskId: true,
+          valueText: true,
+          valueNumber: true,
+          valueDate: true,
+          valueBoolean: true,
           option: { select: { label: true, value: true } },
         },
       });

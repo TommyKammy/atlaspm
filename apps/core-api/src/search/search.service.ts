@@ -132,9 +132,12 @@ export class SearchService implements OnModuleInit {
     }
   }
 
-  async indexTasks(tasks: Task[], metadataByTaskId?: Map<string, { customFieldText?: string | null }>): Promise<void> {
+  async indexTasks(
+    tasks: Task[],
+    metadataByTaskId?: Map<string, { customFieldText?: string | null }>,
+  ): Promise<boolean> {
     if (!this.isEnabled || !this.client || tasks.length === 0) {
-      return;
+      return false;
     }
 
     try {
@@ -164,8 +167,10 @@ export class SearchService implements OnModuleInit {
         batchWriteParams: { requests },
       });
       this.logger.debug(`Indexed ${tasks.length} tasks`);
+      return true;
     } catch (error) {
       this.disableSearch('Failed to index tasks batch. Falling back to disabled mode.', error);
+      return false;
     }
   }
 
@@ -332,7 +337,13 @@ export class SearchService implements OnModuleInit {
         if (batch.tasks.length === 0) {
           continue;
         }
-        await this.indexTasks(batch.tasks, batch.metadataByTaskId);
+        const indexed = await this.indexTasks(batch.tasks, batch.metadataByTaskId);
+        if (!indexed) {
+          this.logger.warn(
+            `Stopping full reindex after batch ${batchCount + 1} because the search backend is unavailable`,
+          );
+          break;
+        }
         processed += batch.tasks.length;
         batchCount += 1;
         this.logger.log(`Indexed reindex batch ${batchCount}; processed ${processed} tasks total`);
