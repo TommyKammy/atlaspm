@@ -356,4 +356,82 @@ describe('Goals Integration', () => {
       }),
     ]);
   });
+
+  test('project viewers can read linked goals but cannot change goal alignment', async () => {
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
+
+    const workspacesRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspacesRes.body[0].id as string;
+
+    const project = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Goal Viewer Project ${Date.now()}` })
+      .expect(201);
+
+    const createdGoal = await request(app.getHttpServer())
+      .post('/goals')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        workspaceId,
+        title: `Viewer-visible goal ${Date.now()}`,
+        ownerUserId: 'goals-test-user',
+      })
+      .expect(201);
+    const goalId = createdGoal.body.id as string;
+
+    await request(app.getHttpServer())
+      .post(`/goals/${goalId}/projects`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ projectId: project.body.id })
+      .expect(201);
+
+    const viewerId = `goal-viewer-${Date.now()}`;
+    const viewerEmail = `${viewerId}@example.com`;
+    const viewerToken = await auth.mintDevToken(viewerId, viewerEmail, 'Goal Viewer');
+
+    const invitation = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ email: viewerEmail, role: 'WS_MEMBER' })
+      .expect(201);
+    const inviteToken = String(invitation.body.inviteLink).split('inviteToken=')[1];
+
+    await request(app.getHttpServer())
+      .post('/invitations/accept')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({ token: inviteToken })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/projects/${project.body.id}/members`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: viewerId, role: 'VIEWER' })
+      .expect(201);
+
+    const projectGoals = await request(app.getHttpServer())
+      .get(`/projects/${project.body.id}/goals`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(200);
+    expect(projectGoals.body).toEqual([
+      expect.objectContaining({
+        id: goalId,
+        title: createdGoal.body.title,
+      }),
+    ]);
+
+    await request(app.getHttpServer())
+      .post(`/goals/${goalId}/projects`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({ projectId: project.body.id })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .delete(`/goals/${goalId}/projects/${project.body.id}`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(403);
+  });
 });

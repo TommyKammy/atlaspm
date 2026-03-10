@@ -18,9 +18,11 @@ import { queryKeys } from '@/lib/query-keys';
 export function ProjectGoalsCard({
   projectId,
   workspaceId,
+  canEdit = true,
 }: {
   projectId: string;
   workspaceId: string;
+  canEdit?: boolean;
 }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
@@ -72,31 +74,33 @@ export function ProjectGoalsCard({
           <CardTitle>{t('projectAlignment')}</CardTitle>
           <CardDescription>{t('projectAlignmentDescription')}</CardDescription>
         </div>
-        <Popover open={isAddOpen} onOpenChange={setIsAddOpen}>
-          <PopoverTrigger asChild>
-            <Button size="sm" variant="outline" disabled={goalsQuery.isLoading || availableGoals.length === 0}>
-              <Plus className="mr-2 h-4 w-4" />
-              {t('addGoalAlignment')}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-80 p-0" align="end">
-            <Command>
-              <CommandInput placeholder={t('searchGoals')} />
-              <CommandEmpty>{t('noGoalsAvailable')}</CommandEmpty>
-              <CommandGroup>
-                {availableGoals.map((goal) => (
-                  <CommandItem
-                    key={goal.id}
-                    onSelect={() => addAlignment.mutate(goal.id)}
-                    disabled={addAlignment.isPending}
-                  >
-                    {goal.title}
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </Command>
-          </PopoverContent>
-        </Popover>
+        {canEdit ? (
+          <Popover open={isAddOpen} onOpenChange={setIsAddOpen}>
+            <PopoverTrigger asChild>
+              <Button size="sm" variant="outline" disabled={goalsQuery.isLoading || availableGoals.length === 0}>
+                <Plus className="mr-2 h-4 w-4" />
+                {t('addGoalAlignment')}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-80 p-0" align="end">
+              <Command>
+                <CommandInput placeholder={t('searchGoals')} />
+                <CommandEmpty>{t('noGoalsAvailable')}</CommandEmpty>
+                <CommandGroup>
+                  {availableGoals.map((goal) => (
+                    <CommandItem
+                      key={goal.id}
+                      onSelect={() => addAlignment.mutate(goal.id)}
+                      disabled={addAlignment.isPending}
+                    >
+                      {goal.title}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        ) : null}
       </CardHeader>
       <CardContent className="space-y-4">
         {isLoadingAlignment ? <p className="text-sm text-muted-foreground">{t('loading')}</p> : null}
@@ -125,15 +129,17 @@ export function ProjectGoalsCard({
                   <p className="text-sm text-muted-foreground">{goal.description}</p>
                 ) : null}
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => removeAlignment.mutate(goal.id)}
-                disabled={removeAlignment.isPending}
-                aria-label={t('unlinkProject')}
-              >
-                <Trash2 className="h-4 w-4 text-destructive" />
-              </Button>
+              {canEdit ? (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => removeAlignment.mutate(goal.id)}
+                  disabled={removeAlignment.isPending}
+                  aria-label={t('unlinkProject')}
+                >
+                  <Trash2 className="h-4 w-4 text-destructive" />
+                </Button>
+              ) : null}
             </div>
             <div className="mt-3 space-y-1">
               <div className="flex items-center justify-between text-sm">

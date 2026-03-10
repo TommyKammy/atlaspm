@@ -381,7 +381,7 @@ export default function ProjectPage() {
       />
 
       {project?.workspaceId ? (
-        <ProjectGoalsCard projectId={projectId} workspaceId={project.workspaceId} />
+        <ProjectGoalsCard projectId={projectId} workspaceId={project.workspaceId} canEdit={canEditProject} />
       ) : null}
 
       {view === 'list' ? (

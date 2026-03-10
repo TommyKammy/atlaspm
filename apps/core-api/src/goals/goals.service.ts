@@ -264,7 +264,7 @@ export class GoalsService {
   }
 
   async listProjectGoals(projectId: string, actorUserId: string) {
-    await this.requireProject(projectId, actorUserId, ProjectRole.MEMBER);
+    await this.requireProject(projectId, actorUserId, ProjectRole.VIEWER);
 
     const links = await this.prisma.goalProjectLink.findMany({
       where: {
