@@ -8,13 +8,15 @@ import {
   Inject,
 } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
-import { SearchService, SearchFilters } from './search.service';
+import { SearchService, SearchFilters, SearchReindexBatch } from './search.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { IsOptional, IsString, IsEnum, IsInt, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Priority, Prisma, TaskStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+
+export const SEARCH_REINDEX_BATCH_SIZE = 1000;
 
 class SearchQueryDto {
   @IsString()
@@ -206,26 +208,72 @@ export class SearchController {
       };
     }
 
-    const tasks = await this.prisma.task.findMany();
-    const taskIds = tasks.map((task) => task.id);
-    const customFieldValues = taskIds.length
-      ? await this.prisma.taskCustomFieldValue.findMany({
-          where: {
-            taskId: { in: taskIds },
-            field: { archivedAt: null },
-          },
-          include: {
-            option: { select: { label: true, value: true } },
-          },
-        })
-      : [];
+    const count = await this.searchService.reindexAll(this.streamReindexBatches());
+
+    return {
+      success: true,
+      message: `Reindexed ${count} tasks`,
+      count,
+    };
+  }
+
+  private async *streamReindexBatches(): AsyncGenerator<SearchReindexBatch> {
+    let cursor: string | undefined;
+
+    while (true) {
+      const tasks = await this.prisma.task.findMany({
+        orderBy: { id: 'asc' },
+        take: SEARCH_REINDEX_BATCH_SIZE,
+        ...(cursor
+          ? {
+              cursor: { id: cursor },
+              skip: 1,
+            }
+          : {}),
+      });
+
+      if (tasks.length === 0) {
+        return;
+      }
+
+      const taskIds = tasks.map((task) => task.id);
+      const customFieldValues = await this.prisma.taskCustomFieldValue.findMany({
+        where: {
+          taskId: { in: taskIds },
+          field: { archivedAt: null },
+        },
+        include: {
+          option: { select: { label: true, value: true } },
+        },
+      });
+
+      yield {
+        tasks,
+        metadataByTaskId: this.buildReindexMetadata(customFieldValues),
+      };
+
+      cursor = tasks[tasks.length - 1]?.id;
+    }
+  }
+
+  private buildReindexMetadata(
+    customFieldValues: Array<{
+      taskId: string;
+      option?: { label: string; value: string } | null;
+      valueText?: string | null;
+      valueNumber?: number | Prisma.Decimal | null;
+      valueDate?: Date | null;
+      valueBoolean?: boolean | null;
+    }>,
+  ) {
     const customFieldTextByTaskId = new Map<string, string[]>();
+
     for (const value of customFieldValues) {
       const text =
         value.option?.label ||
         value.option?.value ||
         value.valueText ||
-        (value.valueNumber !== null ? String(value.valueNumber) : null) ||
+        (value.valueNumber !== null && value.valueNumber !== undefined ? String(value.valueNumber) : null) ||
         (value.valueDate ? value.valueDate.toISOString() : null) ||
         (typeof value.valueBoolean === 'boolean' ? (value.valueBoolean ? 'true' : 'false') : null);
       if (!text) continue;
@@ -233,17 +281,13 @@ export class SearchController {
       if (bucket) bucket.push(text);
       else customFieldTextByTaskId.set(value.taskId, [text]);
     }
+
     const metadata = new Map<string, { customFieldText?: string | null }>();
     for (const [taskId, values] of customFieldTextByTaskId) {
       metadata.set(taskId, { customFieldText: values.join(' ') });
     }
-    await this.searchService.reindexAll(tasks, metadata);
 
-    return {
-      success: true,
-      message: `Reindexed ${tasks.length} tasks`,
-      count: tasks.length,
-    };
+    return metadata;
   }
 
 }
