@@ -4,6 +4,7 @@
 - `web-ui` communicates with `core-api` via HTTP only.
 - `core-api` owns persistence, authorization, auditing, rules, and outbox.
 - `packages/*` are app-agnostic and must not depend on `apps/*`.
+- Task controller decomposition decision: see `docs/adr-task-domain-decomposition.md`.
 
 ## Auth
 - Production mode: OIDC JWT verification using issuer/audience and JWKS.
