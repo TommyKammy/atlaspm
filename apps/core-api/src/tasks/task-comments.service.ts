@@ -55,7 +55,6 @@ export class TaskCommentsService {
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
     const comments = await this.prisma.taskComment.findMany({
       where: { taskId, deletedAt: null },
-      include: { task: { select: { projectId: true } } },
       orderBy: { createdAt: 'asc' },
     });
 

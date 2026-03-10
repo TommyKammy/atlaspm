@@ -8,16 +8,21 @@ const taskCommentsControllerPath = path.join(repoRoot, 'src', 'tasks', 'task-com
 const taskCommentsServicePath = path.join(repoRoot, 'src', 'tasks', 'task-comments.service.ts');
 const appModulePath = path.join(repoRoot, 'src', 'app.module.ts');
 
+function routeDecoratorPattern(method: string, routePath: string) {
+  const escapedRoutePath = routePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`@${method}\\s*\\(\\s*['"\`]${escapedRoutePath}['"\`]\\s*\\)`);
+}
+
 describe('task comments slice extraction', () => {
   test('moves comment and mention routes out of TasksController into dedicated controller/service wiring', () => {
     const tasksControllerSource = readFileSync(tasksControllerPath, 'utf8');
     const appModuleSource = readFileSync(appModulePath, 'utf8');
 
-    expect(tasksControllerSource).not.toContain("@Get('tasks/:id/comments')");
-    expect(tasksControllerSource).not.toContain("@Post('tasks/:id/comments')");
-    expect(tasksControllerSource).not.toContain("@Patch('comments/:id')");
-    expect(tasksControllerSource).not.toContain("@Delete('comments/:id')");
-    expect(tasksControllerSource).not.toContain("@Get('tasks/:id/mentions')");
+    expect(tasksControllerSource).not.toMatch(routeDecoratorPattern('Get', 'tasks/:id/comments'));
+    expect(tasksControllerSource).not.toMatch(routeDecoratorPattern('Post', 'tasks/:id/comments'));
+    expect(tasksControllerSource).not.toMatch(routeDecoratorPattern('Patch', 'comments/:id'));
+    expect(tasksControllerSource).not.toMatch(routeDecoratorPattern('Delete', 'comments/:id'));
+    expect(tasksControllerSource).not.toMatch(routeDecoratorPattern('Get', 'tasks/:id/mentions'));
 
     expect(existsSync(taskCommentsControllerPath)).toBe(true);
     expect(existsSync(taskCommentsServicePath)).toBe(true);
@@ -26,11 +31,11 @@ describe('task comments slice extraction', () => {
     const taskCommentsServiceSource = readFileSync(taskCommentsServicePath, 'utf8');
 
     expect(taskCommentsControllerSource).toContain('export class TaskCommentsController');
-    expect(taskCommentsControllerSource).toContain("@Get('tasks/:id/comments')");
-    expect(taskCommentsControllerSource).toContain("@Post('tasks/:id/comments')");
-    expect(taskCommentsControllerSource).toContain("@Patch('comments/:id')");
-    expect(taskCommentsControllerSource).toContain("@Delete('comments/:id')");
-    expect(taskCommentsControllerSource).toContain("@Get('tasks/:id/mentions')");
+    expect(taskCommentsControllerSource).toMatch(routeDecoratorPattern('Get', 'tasks/:id/comments'));
+    expect(taskCommentsControllerSource).toMatch(routeDecoratorPattern('Post', 'tasks/:id/comments'));
+    expect(taskCommentsControllerSource).toMatch(routeDecoratorPattern('Patch', 'comments/:id'));
+    expect(taskCommentsControllerSource).toMatch(routeDecoratorPattern('Delete', 'comments/:id'));
+    expect(taskCommentsControllerSource).toMatch(routeDecoratorPattern('Get', 'tasks/:id/mentions'));
 
     expect(taskCommentsServiceSource).toContain('export class TaskCommentsService');
 
