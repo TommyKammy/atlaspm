@@ -261,6 +261,174 @@ export class NotificationsService {
     });
   }
 
+  async fanOutTaskCommentNotification(
+    tx: Prisma.TransactionClient,
+    input: {
+      projectId: string;
+      taskId: string;
+      commentId: string;
+      assigneeUserId?: string | null;
+      triggeredByUserId?: string;
+      actor: string;
+      correlationId: string;
+    },
+  ) {
+    const recipients = await this.collectTaskNotificationRecipients(tx, {
+      taskId: input.taskId,
+      assigneeUserId: input.assigneeUserId,
+      excludeUserIds: [input.triggeredByUserId],
+    });
+
+    for (const userId of recipients) {
+      await this.createCommentNotification(tx, {
+        userId,
+        projectId: input.projectId,
+        taskId: input.taskId,
+        commentId: input.commentId,
+        triggeredByUserId: input.triggeredByUserId,
+        actor: input.actor,
+        correlationId: input.correlationId,
+      });
+    }
+  }
+
+  async fanOutDueDateNotification(
+    tx: Prisma.TransactionClient,
+    input: {
+      projectId: string;
+      taskId: string;
+      assigneeUserId?: string | null;
+      triggeredByUserId?: string;
+      actor: string;
+      correlationId: string;
+    },
+  ) {
+    const recipients = await this.collectTaskNotificationRecipients(tx, {
+      taskId: input.taskId,
+      assigneeUserId: input.assigneeUserId,
+      excludeUserIds: [input.triggeredByUserId],
+    });
+
+    for (const userId of recipients) {
+      await this.createDueDateNotification(tx, {
+        userId,
+        projectId: input.projectId,
+        taskId: input.taskId,
+        triggeredByUserId: input.triggeredByUserId,
+        actor: input.actor,
+        correlationId: input.correlationId,
+      });
+    }
+  }
+
+  async fanOutStatusChangeNotification(
+    tx: Prisma.TransactionClient,
+    input: {
+      projectId: string;
+      taskId: string;
+      assigneeUserId?: string | null;
+      triggeredByUserId?: string;
+      actor: string;
+      correlationId: string;
+    },
+  ) {
+    const recipients = await this.collectTaskNotificationRecipients(tx, {
+      taskId: input.taskId,
+      assigneeUserId: input.assigneeUserId,
+      excludeUserIds: [input.triggeredByUserId],
+    });
+
+    for (const userId of recipients) {
+      await this.createStatusChangeNotification(tx, {
+        userId,
+        projectId: input.projectId,
+        taskId: input.taskId,
+        triggeredByUserId: input.triggeredByUserId,
+        actor: input.actor,
+        correlationId: input.correlationId,
+      });
+    }
+  }
+
+  async fanOutProjectStatusUpdateNotification(
+    tx: Prisma.TransactionClient,
+    input: {
+      projectId: string;
+      statusUpdateId: string;
+      excludeUserIds?: Array<string | undefined | null>;
+      triggeredByUserId?: string;
+      actor: string;
+      correlationId: string;
+    },
+  ) {
+    const recipients = await this.collectProjectFollowerRecipients(tx, {
+      projectId: input.projectId,
+      excludeUserIds: [input.triggeredByUserId, ...(input.excludeUserIds ?? [])],
+    });
+
+    for (const userId of recipients) {
+      await this.upsertNotification(tx, {
+        userId,
+        projectId: input.projectId,
+        statusUpdateId: input.statusUpdateId,
+        type: NOTIFICATION_TYPE_STATUS,
+        sourceType: 'project_status_update',
+        sourceId: input.statusUpdateId,
+        triggeredByUserId: input.triggeredByUserId,
+        actor: input.actor,
+        correlationId: input.correlationId,
+      });
+    }
+  }
+
+  private async collectTaskNotificationRecipients(
+    tx: Prisma.TransactionClient,
+    input: {
+      taskId: string;
+      assigneeUserId?: string | null;
+      excludeUserIds?: Array<string | undefined | null>;
+    },
+  ) {
+    const followers = await tx.taskFollower.findMany({
+      where: { taskId: input.taskId },
+      select: { userId: true },
+    });
+
+    const recipientIds = new Set(followers.map((follower) => follower.userId));
+    if (input.assigneeUserId) {
+      recipientIds.add(input.assigneeUserId);
+    }
+    for (const userId of input.excludeUserIds ?? []) {
+      if (userId) {
+        recipientIds.delete(userId);
+      }
+    }
+
+    return [...recipientIds];
+  }
+
+  private async collectProjectFollowerRecipients(
+    tx: Prisma.TransactionClient,
+    input: {
+      projectId: string;
+      excludeUserIds?: Array<string | undefined | null>;
+    },
+  ) {
+    const followers = await tx.projectFollower.findMany({
+      where: { projectId: input.projectId },
+      select: { userId: true },
+    });
+
+    const recipientIds = new Set(followers.map((follower) => follower.userId));
+    for (const userId of input.excludeUserIds ?? []) {
+      if (userId) {
+        recipientIds.delete(userId);
+      }
+    }
+
+    return [...recipientIds];
+  }
+
   async createApprovalRequestedNotification(
     tx: Prisma.TransactionClient,
     input: {

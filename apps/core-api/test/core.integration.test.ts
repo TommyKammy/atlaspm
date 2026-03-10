@@ -1335,6 +1335,222 @@ describe('Core API Integration', () => {
     );
   });
 
+  test('task comments and project status updates notify followers without duplicate delivery', async () => {
+    const auth = app.get(AuthService);
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Follower Notifications ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const followerOnlyId = `notif-follower-only-${projectId}`;
+    const followerOnlyEmail = `${followerOnlyId}@example.com`;
+    await prisma.user.upsert({
+      where: { id: followerOnlyId },
+      create: {
+        id: followerOnlyId,
+        email: followerOnlyEmail,
+        displayName: 'Follower Only',
+        status: 'ACTIVE',
+      },
+      update: {
+        email: followerOnlyEmail,
+        displayName: 'Follower Only',
+        status: 'ACTIVE',
+      },
+    });
+    await prisma.workspaceMembership.upsert({
+      where: { workspaceId_userId: { workspaceId, userId: followerOnlyId } },
+      create: { workspaceId, userId: followerOnlyId, role: 'WS_MEMBER' },
+      update: { role: 'WS_MEMBER' },
+    });
+    await prisma.projectMembership.upsert({
+      where: { projectId_userId: { projectId, userId: followerOnlyId } },
+      create: { projectId, userId: followerOnlyId, role: 'VIEWER' },
+      update: { role: 'VIEWER' },
+    });
+
+    const assigneeFollowerId = `notif-assignee-follower-${projectId}`;
+    const assigneeFollowerEmail = `${assigneeFollowerId}@example.com`;
+    await prisma.user.upsert({
+      where: { id: assigneeFollowerId },
+      create: {
+        id: assigneeFollowerId,
+        email: assigneeFollowerEmail,
+        displayName: 'Assignee Follower',
+        status: 'ACTIVE',
+      },
+      update: {
+        email: assigneeFollowerEmail,
+        displayName: 'Assignee Follower',
+        status: 'ACTIVE',
+      },
+    });
+    await prisma.workspaceMembership.upsert({
+      where: { workspaceId_userId: { workspaceId, userId: assigneeFollowerId } },
+      create: { workspaceId, userId: assigneeFollowerId, role: 'WS_MEMBER' },
+      update: { role: 'WS_MEMBER' },
+    });
+    await prisma.projectMembership.upsert({
+      where: { projectId_userId: { projectId, userId: assigneeFollowerId } },
+      create: { projectId, userId: assigneeFollowerId, role: 'MEMBER' },
+      update: { role: 'MEMBER' },
+    });
+
+    const followerOnlyToken = await auth.mintDevToken(followerOnlyId, followerOnlyEmail, 'Follower Only');
+    const assigneeFollowerToken = await auth.mintDevToken(
+      assigneeFollowerId,
+      assigneeFollowerEmail,
+      'Assignee Follower',
+    );
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSectionId =
+      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
+        sectionsRes.body[0])?.id as string;
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        sectionId: defaultSectionId,
+        title: 'Follower notification task',
+        assigneeUserId: assigneeFollowerId,
+      })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+    const nextStatus = taskRes.body.status === 'TODO' ? 'IN_PROGRESS' : 'DONE';
+
+    await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/followers`)
+      .set('Authorization', `Bearer ${followerOnlyToken}`)
+      .expect(201);
+    await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/followers`)
+      .set('Authorization', `Bearer ${assigneeFollowerToken}`)
+      .expect(201);
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/followers`)
+      .set('Authorization', `Bearer ${followerOnlyToken}`)
+      .expect(201);
+
+    const commentRes = await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/comments`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ body: 'Follower fan-out comment' })
+      .expect(201);
+
+    const followerOnlyNotifications = await request(app.getHttpServer())
+      .get('/notifications?status=unread')
+      .set('Authorization', `Bearer ${followerOnlyToken}`)
+      .expect(200);
+    const followerOnlyCommentNotifications = followerOnlyNotifications.body.filter(
+      (item: any) => item.type === 'comment' && item.sourceType === 'comment' && item.taskId === taskId,
+    );
+    expect(followerOnlyCommentNotifications).toHaveLength(1);
+    expect(followerOnlyCommentNotifications[0]).toMatchObject({
+      taskId,
+      sourceId: commentRes.body.id,
+      project: { id: projectId },
+      triggeredBy: { id: 'test-user' },
+    });
+
+    const assigneeFollowerNotifications = await request(app.getHttpServer())
+      .get('/notifications?status=unread')
+      .set('Authorization', `Bearer ${assigneeFollowerToken}`)
+      .expect(200);
+    const assigneeFollowerCommentNotifications = assigneeFollowerNotifications.body.filter(
+      (item: any) => item.type === 'comment' && item.sourceType === 'comment' && item.taskId === taskId,
+    );
+    expect(assigneeFollowerCommentNotifications).toHaveLength(1);
+
+    await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ dueAt: '2026-04-15' })
+      .expect(200);
+
+    const followerOnlyNotificationsAfterDueDate = await request(app.getHttpServer())
+      .get('/notifications?status=unread')
+      .set('Authorization', `Bearer ${followerOnlyToken}`)
+      .expect(200);
+    const followerOnlyDueDateNotifications = followerOnlyNotificationsAfterDueDate.body.filter(
+      (item: any) => item.type === 'due_date' && item.sourceType === 'task' && item.taskId === taskId,
+    );
+    expect(followerOnlyDueDateNotifications).toHaveLength(1);
+
+    const assigneeFollowerNotificationsAfterDueDate = await request(app.getHttpServer())
+      .get('/notifications?status=unread')
+      .set('Authorization', `Bearer ${assigneeFollowerToken}`)
+      .expect(200);
+    const assigneeFollowerDueDateNotifications = assigneeFollowerNotificationsAfterDueDate.body.filter(
+      (item: any) => item.type === 'due_date' && item.sourceType === 'task' && item.taskId === taskId,
+    );
+    expect(assigneeFollowerDueDateNotifications).toHaveLength(1);
+
+    await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: nextStatus })
+      .expect(200);
+
+    const followerOnlyNotificationsAfterStatusChange = await request(app.getHttpServer())
+      .get('/notifications?status=unread')
+      .set('Authorization', `Bearer ${followerOnlyToken}`)
+      .expect(200);
+    const followerOnlyStatusNotifications = followerOnlyNotificationsAfterStatusChange.body.filter(
+      (item: any) => item.type === 'status' && item.sourceType === 'task' && item.taskId === taskId,
+    );
+    expect(followerOnlyStatusNotifications).toHaveLength(1);
+
+    const assigneeFollowerNotificationsAfterStatusChange = await request(app.getHttpServer())
+      .get('/notifications?status=unread')
+      .set('Authorization', `Bearer ${assigneeFollowerToken}`)
+      .expect(200);
+    const assigneeFollowerStatusNotifications = assigneeFollowerNotificationsAfterStatusChange.body.filter(
+      (item: any) => item.type === 'status' && item.sourceType === 'task' && item.taskId === taskId,
+    );
+    expect(assigneeFollowerStatusNotifications).toHaveLength(1);
+
+    const statusUpdateRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/status-updates`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        health: 'ON_TRACK',
+        summary: 'Follower-only users should receive this project update.',
+        blockers: [],
+        nextSteps: ['Confirm follower inbox routing.'],
+      })
+      .expect(201);
+
+    const followerOnlyNotificationsAfterProjectUpdate = await request(app.getHttpServer())
+      .get('/notifications?status=unread')
+      .set('Authorization', `Bearer ${followerOnlyToken}`)
+      .expect(200);
+    const followerProjectUpdateNotifications = followerOnlyNotificationsAfterProjectUpdate.body.filter(
+      (item: any) => item.type === 'status' && item.sourceType === 'project_status_update' && item.project?.id === projectId,
+    );
+    expect(followerProjectUpdateNotifications).toHaveLength(1);
+    expect(followerProjectUpdateNotifications[0]).toMatchObject({
+      sourceId: statusUpdateRes.body.id,
+      statusUpdate: {
+        id: statusUpdateRes.body.id,
+        summary: 'Follower-only users should receive this project update.',
+      },
+      triggeredBy: { id: 'test-user' },
+    });
+  });
+
   test('attachment list responses do not expose persistent download tokens', async () => {
     await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
 
@@ -4358,6 +4574,9 @@ describe('Core API Integration', () => {
       create: { projectId, userId: mentionedUserId, role: 'MEMBER' },
       update: { role: 'MEMBER' },
     });
+    await prisma.projectFollower.create({
+      data: { projectId, userId: mentionedUserId },
+    });
 
     const mentionedToken = await app
       .get(AuthService)
@@ -4386,6 +4605,9 @@ describe('Core API Integration', () => {
     const mentionNotification = memberNotifications.body.find(
       (item: any) => item.type === 'mention' && item.sourceType === 'project_status_update',
     );
+    const statusNotification = memberNotifications.body.find(
+      (item: any) => item.type === 'status' && item.sourceType === 'project_status_update',
+    );
 
     expect(mentionNotification).toMatchObject({
       userId: mentionedUserId,
@@ -4396,6 +4618,7 @@ describe('Core API Integration', () => {
         summary: `Need input from @${mentionedUserId} before launch.`,
       },
     });
+    expect(statusNotification).toBeUndefined();
 
     const createOutbox = await prisma.outboxEvent.findFirst({
       where: {
