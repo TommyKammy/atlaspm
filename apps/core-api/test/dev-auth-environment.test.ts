@@ -176,4 +176,32 @@ describe('Dev auth environment guardrails', () => {
       await app.close();
     }
   }, 15_000);
+
+  test('clears the browser auth cookies on logout', async () => {
+    process.env.NODE_ENV = 'test';
+    process.env.DEV_AUTH_ENABLED = 'true';
+    process.env.DEV_AUTH_SECRET = 'atlaspm-test-secret-123';
+
+    const app = await createAuthApp();
+    await app.init();
+
+    try {
+      const response = await request(app.getHttpServer()).post('/auth/logout').expect(204);
+      const setCookie = response.headers['set-cookie'] ?? [];
+      const sessionCookie = setCookie.find((cookie) => /(?:__Host-)?atlaspm_session=;/i.test(cookie));
+      const csrfCookie = setCookie.find((cookie) => /(?:__Host-)?atlaspm_csrf=;/i.test(cookie));
+
+      expect(sessionCookie).toBeDefined();
+      expect(sessionCookie).toMatch(/;\s*Expires=/i);
+      expect(sessionCookie).toMatch(/;\s*HttpOnly\b/i);
+      expect(sessionCookie).toMatch(/;\s*SameSite=Lax\b/i);
+
+      expect(csrfCookie).toBeDefined();
+      expect(csrfCookie).toMatch(/;\s*Expires=/i);
+      expect(csrfCookie).not.toMatch(/;\s*HttpOnly\b/i);
+      expect(csrfCookie).toMatch(/;\s*SameSite=Lax\b/i);
+    } finally {
+      await app.close();
+    }
+  }, 15_000);
 });

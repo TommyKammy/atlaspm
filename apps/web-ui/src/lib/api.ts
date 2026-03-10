@@ -23,32 +23,45 @@ export type ApiOptions = {
   headers?: Record<string, string>;
 };
 
-export function getToken() {
-  if (typeof window === 'undefined') return '';
-  return localStorage.getItem('atlaspm_token') ?? '';
+function isUnsafeMethod(method: string) {
+  return !['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase());
 }
 
-export function setToken(token: string) {
-  if (typeof window !== 'undefined') localStorage.setItem('atlaspm_token', token);
+function readCookie(name: string) {
+  if (typeof document === 'undefined') return '';
+  const cookie = document.cookie
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${name}=`));
+  if (!cookie) return '';
+  return decodeURIComponent(cookie.slice(name.length + 1));
+}
+
+function getCsrfToken() {
+  return readCookie('__Host-atlaspm_csrf') || readCookie('atlaspm_csrf');
 }
 
 export async function api(path: string, options: ApiOptions = {}) {
-  const token = options.token ?? getToken();
+  const method = options.method ?? 'GET';
   const isFormData = options.body instanceof FormData;
+  const csrfToken = isUnsafeMethod(method) ? getCsrfToken() : '';
+  const url = path.startsWith('http://') || path.startsWith('https://') ? path : `${API_URL}${path}`;
   const init: RequestInit = {
-    method: options.method ?? 'GET',
+    method,
     headers: {
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
       ...(isFormData ? {} : { 'content-type': 'application/json' }),
+      ...(csrfToken ? { 'x-atlaspm-csrf': csrfToken } : {}),
       ...(options.headers ?? {}),
     },
     cache: 'no-store',
+    credentials: 'include',
   };
   if (options.body !== undefined) {
     init.body = isFormData ? (options.body as FormData) : JSON.stringify(options.body);
   }
 
-  const res = await fetch(`${API_URL}${path}`, init);
+  const res = await fetch(url, init);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`API ${res.status}: ${text}`);
