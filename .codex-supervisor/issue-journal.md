@@ -16,6 +16,7 @@
 ## Latest Codex Summary
 - Addressed PR #343 review feedback by improving the ADR-content test failure message and moving the task decomposition ADR link from `## Auth` to `## Boundaries` in `docs/architecture.md`.
 - Re-ran the focused `@atlaspm/domain` verification after the review fixes; the test and type-check both passed.
+- Pushed commit `ded5c39` and resolved review threads `PRRT_kwDORWcwRc5zSHS1` and `PRRT_kwDORWcwRc5zSHTV` on PR #343.
 
 ## Active Failure Context
 - Category: review
@@ -28,13 +29,13 @@
 ## Codex Working Notes
 ### Current Handoff
 - Hypothesis: The main risk for issue #340 is undocumented controller ownership drift during future extraction, so the narrowest proof is an ADR-content test that fails if the explicit slice boundaries or migration controls are missing.
-- Primary failure or risk: No local verification failure remains; the remaining work is to push the review-fix commit and clear the two configured-bot review threads on PR #343.
+- Primary failure or risk: No local verification failure remains; PR #343 has the review fixes pushed and the bot threads resolved, but GitHub still reports `mergeStateStatus=UNSTABLE` and may need a refresh cycle before merge.
 - Last focused command: `pnpm --filter @atlaspm/domain test -- --test-name-pattern='task domain ADR defines explicit slices and migration controls'`
 - Files changed: `docs/adr-task-domain-decomposition.md`, `docs/architecture.md`, and `packages/domain/src/__tests__/task-domain-adr.test.ts`
 - Next 1-3 actions:
-  1. Commit and push the review fixes on `codex/reopen-issue-340`.
-  2. Resolve review threads `PRRT_kwDORWcwRc5zSHS1` and `PRRT_kwDORWcwRc5zSHTV`.
-  3. Merge PR #343 once the review state is clean.
+  1. Check whether PR #343 leaves `UNSTABLE` after GitHub refreshes branch state.
+  2. Merge PR #343 once the host reports a clean merge state.
+  3. Only revisit if another review comment appears.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
@@ -53,3 +54,4 @@
   - The ADR defines the extraction order as `task-core` first and `timeline` last, with test ownership and rollback constraints called out per slice.
   - The ADR link in `docs/architecture.md` now lives under `## Boundaries`, which matches the controller-split subject matter better than `## Auth`.
   - The ADR-content test now includes a per-string assertion message so failures identify the missing required section or boundary explicitly.
+  - Review threads `PRRT_kwDORWcwRc5zSHS1` and `PRRT_kwDORWcwRc5zSHTV` were resolved after pushing `ded5c39`.
