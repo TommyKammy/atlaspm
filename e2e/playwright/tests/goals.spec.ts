@@ -181,7 +181,7 @@ test('project viewers can see aligned goals but not edit goal alignment or statu
     await viewerPage.goto(`/projects/${project.id}`);
 
     await expect(viewerPage.getByText(goal.title)).toBeVisible();
-    await expect(viewerPage.getByRole('button', { name: 'Add goal alignment' })).toHaveCount(0);
+    await expect(viewerPage.getByRole('button', { name: 'Add goal' })).toHaveCount(0);
     await expect(viewerPage.getByRole('button', { name: 'Unlink project' })).toHaveCount(0);
     await expect(viewerPage.getByTestId('status-update-compose-trigger')).toHaveCount(0);
     await viewerPage.reload();
