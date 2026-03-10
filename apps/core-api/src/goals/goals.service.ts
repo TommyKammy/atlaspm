@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { GoalStatus, Prisma, ProjectRole, WorkspaceRole } from '@prisma/client';
+import { GoalStatus, Prisma, ProjectRole, ProjectStatusHealth, WorkspaceRole } from '@prisma/client';
 import { DomainService } from '../common/domain.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -21,6 +21,16 @@ type GoalRecord = {
   createdAt: Date;
   updatedAt: Date;
 };
+
+type GoalHistoryRecord = {
+  action: string;
+  status: GoalStatus;
+  progressPercent: number;
+  actor: string;
+  createdAt: Date;
+};
+
+const DEFAULT_GOAL_HISTORY_TAKE = 100;
 
 @Injectable()
 export class GoalsService {
@@ -88,6 +98,53 @@ export class GoalsService {
   async getGoal(goalId: string, actorUserId: string) {
     const goal = await this.requireGoal(goalId, actorUserId);
     return this.serializeGoal(goal);
+  }
+
+  async getGoalHistory(
+    goalId: string,
+    actorUserId: string,
+    take: number | string = DEFAULT_GOAL_HISTORY_TAKE,
+  ): Promise<GoalHistoryRecord[]> {
+    await this.requireGoal(goalId, actorUserId);
+    const boundedTake = this.normalizeHistoryTake(take);
+    const events = await this.prisma.auditEvent.findMany({
+      where: {
+        entityType: 'Goal',
+        entityId: goalId,
+        action: {
+          in: ['goal.created', 'goal.updated', 'goal.status_rollup_updated'],
+        },
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: boundedTake,
+    });
+
+    return events.flatMap((event) => {
+      const snapshot = this.readGoalSnapshot(event.afterJson);
+      if (!snapshot) {
+        return [];
+      }
+
+      const beforeSnapshot = this.readGoalSnapshot(event.beforeJson);
+      if (
+        event.action === 'goal.updated' &&
+        beforeSnapshot &&
+        beforeSnapshot.status === snapshot.status &&
+        beforeSnapshot.progressPercent === snapshot.progressPercent
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          action: event.action,
+          status: snapshot.status,
+          progressPercent: snapshot.progressPercent,
+          actor: event.actor,
+          createdAt: event.createdAt,
+        },
+      ];
+    });
   }
 
   async updateGoal(
@@ -250,6 +307,8 @@ export class GoalsService {
           },
         });
 
+        await this.refreshGoalRollup(goalId, actorUserId, correlationId, tx);
+
         return {
           id: link.id,
           goalId: link.goalId,
@@ -301,8 +360,35 @@ export class GoalsService {
         },
       });
 
+      await this.refreshGoalRollup(goalId, actorUserId, correlationId, tx);
+
       return { ok: true };
     });
+  }
+
+  async refreshGoalRollupsForProject(
+    projectId: string,
+    actorUserId: string,
+    correlationId: string,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = tx ?? this.prisma;
+    const linkedGoals = await client.goalProjectLink.findMany({
+      where: {
+        projectId,
+        deletedAt: null,
+        goal: {
+          archivedAt: null,
+        },
+      },
+      select: {
+        goalId: true,
+      },
+    });
+
+    for (const linkedGoal of linkedGoals) {
+      await this.refreshGoalRollup(linkedGoal.goalId, actorUserId, correlationId, client);
+    }
   }
 
   private async requireGoal(
@@ -359,5 +445,152 @@ export class GoalsService {
       createdAt: goal.createdAt,
       updatedAt: goal.updatedAt,
     };
+  }
+
+  private async refreshGoalRollup(
+    goalId: string,
+    actorUserId: string,
+    correlationId: string,
+    tx: Prisma.TransactionClient | PrismaService,
+  ) {
+    const goal = await tx.goal.findUnique({
+      where: { id: goalId },
+    });
+    if (!goal || goal.archivedAt) {
+      return;
+    }
+
+    const links = await tx.goalProjectLink.findMany({
+      where: {
+        goalId,
+        deletedAt: null,
+      },
+      select: {
+        projectId: true,
+      },
+    });
+
+    const projectIds = links.map((link) => link.projectId);
+    const latestHealthByProject = new Map<string, ProjectStatusHealth>();
+    const latestUpdates = await Promise.all(
+      projectIds.map((projectId) =>
+        tx.projectStatusUpdate.findFirst({
+          where: { projectId },
+          select: {
+            projectId: true,
+            health: true,
+          },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        }),
+      ),
+    );
+
+    for (const update of latestUpdates) {
+      if (update) {
+        latestHealthByProject.set(update.projectId, update.health);
+      }
+    }
+
+    const nextProgressPercent =
+      projectIds.length === 0
+        ? 0
+        : Math.round(
+            projectIds.reduce((sum, projectId) => {
+              return sum + this.projectHealthToProgress(latestHealthByProject.get(projectId));
+            }, 0) / projectIds.length,
+          );
+    const nextStatus = this.rollupGoalStatus(projectIds, latestHealthByProject);
+
+    if (goal.status === nextStatus && goal.progressPercent === nextProgressPercent) {
+      return;
+    }
+
+    const updated = await tx.goal.update({
+      where: { id: goalId },
+      data: {
+        status: nextStatus,
+        progressPercent: nextProgressPercent,
+      },
+    });
+
+    await this.domain.appendAuditOutbox({
+      tx,
+      actor: actorUserId,
+      entityType: 'Goal',
+      entityId: goalId,
+      action: 'goal.status_rollup_updated',
+      beforeJson: goal,
+      afterJson: updated,
+      correlationId,
+      outboxType: 'goal.status_rollup_updated',
+      payload: {
+        id: updated.id,
+        workspaceId: updated.workspaceId,
+        status: updated.status,
+        progressPercent: updated.progressPercent,
+      },
+    });
+  }
+
+  private rollupGoalStatus(
+    projectIds: string[],
+    latestHealthByProject: Map<string, ProjectStatusHealth>,
+  ): GoalStatus {
+    if (projectIds.length === 0) {
+      return GoalStatus.NOT_STARTED;
+    }
+
+    const latestHealths = projectIds
+      .map((projectId) => latestHealthByProject.get(projectId))
+      .filter((health): health is ProjectStatusHealth => health !== undefined);
+
+    if (latestHealths.includes(ProjectStatusHealth.OFF_TRACK)) {
+      return GoalStatus.OFF_TRACK;
+    }
+    if (latestHealths.includes(ProjectStatusHealth.AT_RISK)) {
+      return GoalStatus.AT_RISK;
+    }
+    if (latestHealths.includes(ProjectStatusHealth.ON_TRACK)) {
+      return GoalStatus.ON_TRACK;
+    }
+    return GoalStatus.NOT_STARTED;
+  }
+
+  private projectHealthToProgress(health: ProjectStatusHealth | undefined) {
+    switch (health) {
+      case ProjectStatusHealth.ON_TRACK:
+        return 100;
+      case ProjectStatusHealth.AT_RISK:
+        return 50;
+      case ProjectStatusHealth.OFF_TRACK:
+      default:
+        return 0;
+    }
+  }
+
+  private readGoalSnapshot(value: Prisma.JsonValue | null): Pick<GoalHistoryRecord, 'status' | 'progressPercent'> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+
+    const record = value as Record<string, Prisma.JsonValue>;
+    const status = record.status;
+    const progressPercent = record.progressPercent;
+    if (!Object.values(GoalStatus).includes(status as GoalStatus) || typeof progressPercent !== 'number') {
+      return null;
+    }
+
+    return {
+      status: status as GoalStatus,
+      progressPercent,
+    };
+  }
+
+  private normalizeHistoryTake(take: number | string) {
+    const numericTake = typeof take === 'string' ? Number.parseInt(take, 10) : take;
+    if (!Number.isFinite(numericTake)) {
+      return DEFAULT_GOAL_HISTORY_TAKE;
+    }
+    return Math.max(1, Math.min(100, Math.trunc(numericTake)));
   }
 }

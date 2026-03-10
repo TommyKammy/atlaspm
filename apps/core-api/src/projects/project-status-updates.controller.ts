@@ -27,6 +27,7 @@ import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { NotificationsService } from '../notifications/notifications.service';
+import { GoalsService } from '../goals/goals.service';
 
 const STATUS_UPDATE_MENTION_ID_PATTERN = '[-a-zA-Z0-9._:]+';
 
@@ -68,6 +69,7 @@ export class ProjectStatusUpdatesController {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(DomainService) private readonly domain: DomainService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
+    @Inject(GoalsService) private readonly goalsService: GoalsService,
   ) {}
 
   @Post('projects/:id/status-updates')
@@ -158,6 +160,13 @@ export class ProjectStatusUpdatesController {
         actor: req.user.sub,
         correlationId: req.correlationId,
       });
+
+      await this.goalsService.refreshGoalRollupsForProject(
+        projectId,
+        req.user.sub,
+        req.correlationId,
+        tx,
+      );
 
       return statusUpdate;
     });
