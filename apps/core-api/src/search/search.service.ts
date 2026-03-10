@@ -28,6 +28,11 @@ export interface TaskSearchHit {
   updatedAt: Date;
 }
 
+export interface SearchReindexBatch {
+  tasks: Task[];
+  metadataByTaskId?: Map<string, { customFieldText?: string | null }>;
+}
+
 @Injectable()
 export class SearchService implements OnModuleInit {
   private readonly logger = new Logger(SearchService.name);
@@ -127,9 +132,12 @@ export class SearchService implements OnModuleInit {
     }
   }
 
-  async indexTasks(tasks: Task[], metadataByTaskId?: Map<string, { customFieldText?: string | null }>): Promise<void> {
+  async indexTasks(
+    tasks: Task[],
+    metadataByTaskId?: Map<string, { customFieldText?: string | null }>,
+  ): Promise<boolean> {
     if (!this.isEnabled || !this.client || tasks.length === 0) {
-      return;
+      return false;
     }
 
     try {
@@ -159,8 +167,10 @@ export class SearchService implements OnModuleInit {
         batchWriteParams: { requests },
       });
       this.logger.debug(`Indexed ${tasks.length} tasks`);
+      return true;
     } catch (error) {
       this.disableSearch('Failed to index tasks batch. Falling back to disabled mode.', error);
+      return false;
     }
   }
 
@@ -310,29 +320,40 @@ export class SearchService implements OnModuleInit {
     return conditions.join(' AND ');
   }
 
-  async reindexAll(
-    tasks: Task[],
-    metadataByTaskId?: Map<string, { customFieldText?: string | null }>,
-  ): Promise<void> {
+  async reindexAll(batches: AsyncIterable<SearchReindexBatch>): Promise<number> {
     if (!this.isEnabled || !this.client) {
-      return;
+      return 0;
     }
 
     try {
-      this.logger.log(`Starting full reindex of ${tasks.length} tasks...`);
-      
+      this.logger.log('Starting full reindex');
+
       await this.client.clearObjects({ indexName: this.indexName });
-      
-      const batchSize = 1000;
-      for (let i = 0; i < tasks.length; i += batchSize) {
-        const batch = tasks.slice(i, i + batchSize);
-        await this.indexTasks(batch, metadataByTaskId);
-        this.logger.log(`Indexed ${Math.min(i + batchSize, tasks.length)}/${tasks.length} tasks`);
+
+      let processed = 0;
+      let batchCount = 0;
+
+      for await (const batch of batches) {
+        if (batch.tasks.length === 0) {
+          continue;
+        }
+        const indexed = await this.indexTasks(batch.tasks, batch.metadataByTaskId);
+        if (!indexed) {
+          this.logger.warn(
+            `Stopping full reindex after batch ${batchCount + 1} because the search backend is unavailable`,
+          );
+          break;
+        }
+        processed += batch.tasks.length;
+        batchCount += 1;
+        this.logger.log(`Indexed reindex batch ${batchCount}; processed ${processed} tasks total`);
       }
-      
-      this.logger.log('Full reindex complete');
+
+      this.logger.log(`Full reindex complete; processed ${processed} tasks across ${batchCount} batches`);
+      return processed;
     } catch (error) {
       this.disableSearch('Full reindex failed. Falling back to disabled mode.', error);
+      return 0;
     }
   }
 
