@@ -1,68 +1,65 @@
-# Issue #341: P2: Extract task feature slices into dedicated controllers and services
+# Issue #346: P2: Add task and project follower domain models and API contracts
 
 ## Supervisor Snapshot
-- Issue URL: https://github.com/TommyKammy/atlaspm/issues/341
-- Branch: codex/reopen-issue-341
-- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-341
-- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-341/.codex-supervisor/issue-journal.md
+- Issue URL: https://github.com/TommyKammy/atlaspm/issues/346
+- Branch: codex/reopen-issue-346
+- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-346
+- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-346/.codex-supervisor/issue-journal.md
 - Current phase: addressing_review
 - Attempt count: 2
-- Last head SHA: 0a2d05e78bc077b6fbae4a23318ea39851d0afc9
+- Last head SHA: d178fe680e9f97f229ad030496491e448c0f3aff
 - Blocked reason: none
-- Last failure signature: PRRT_kwDORWcwRc5zSh8C|PRRT_kwDORWcwRc5zSh8j
+- Last failure signature: PRRT_kwDORWcwRc5zTLx8|PRRT_kwDORWcwRc5zTLyo|PRRT_kwDORWcwRc5zTLzH
 - Repeated failure signature count: 1
-- Updated at: 2026-03-10T12:40:30.478Z
+- Updated at: 2026-03-10T13:21:38.122Z
 
 ## Latest Codex Summary
-Extracted the `comments + mentions` slice out of `TasksController` into a dedicated controller/service pair and shared mention-sync service. `TasksController` now keeps description updates but delegates mention sync through the shared service, so audit/outbox behavior stays aligned with the extracted comment routes.
+Addressed the three automated review comments on PR #350, pushed the follow-up commit, and resolved the configured-bot review threads.
 
-Added focused slice tests plus light controller/service tests, then reran the existing integration flow that exercises comments/mentions. The broad integration test needed a higher timeout when run in isolation, but it passed once rerun with `--testTimeout=20000`. Checkpoint commit: `0a2d05e` (`Extract task comments slice`).
+This switches task/project follower summary hydration from row scans to aggregate queries (`groupBy` for counts plus a current-user filtered lookup for follow state) and makes the follower slice schema assertions whitespace-tolerant. Focused slice and integration verification still pass after the review fixes.
 
-Summary: Extracted task comments and mentions into dedicated controller/services with focused tests and preserved end-to-end behavior.
-State hint: implementing
+Summary: Landed the follower review follow-up and resolved the three automated review threads
+State hint: pr_open
 Blocked reason: none
-Tests: `pnpm install`; `pnpm --filter @atlaspm/core-api prisma:generate`; `pnpm --filter @atlaspm/domain build`; `pnpm --filter @atlaspm/core-api exec vitest run test/task-comments-slice.test.ts test/task-comments.controller.test.ts test/task-comments.service.test.ts`; `pnpm --filter @atlaspm/core-api test -- --testNamePattern='project/member/sections/tasks/rules/reorder/audit/outbox flow'` (timed out at default 5s); `pnpm --filter @atlaspm/core-api exec vitest run test/core.integration.test.ts --testNamePattern='project/member/sections/tasks/rules/reorder/audit/outbox flow' --testTimeout=20000`
+Tests: `pnpm --filter @atlaspm/core-api build`; `pnpm --filter @atlaspm/core-api exec vitest run test/followers-slice.test.ts`; `DATABASE_URL=${DATABASE_URL:-postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public} pnpm --filter @atlaspm/core-api exec vitest run test/core.integration.test.ts --testNamePattern='task and project followers expose follow state, prevent duplicates, and enforce authorization'`
 Failure signature: none
-Next action: Open or update the draft PR with commit `0a2d05e` and this extracted comments/mentions slice summary.
+Next action: Monitor PR #350 for any new review or CI changes; otherwise the branch is ready for final human review
 
 ## Active Failure Context
 - Category: review
-- Summary: 2 unresolved automated review thread(s) remain.
-- Reference: https://github.com/TommyKammy/atlaspm/pull/344#discussion_r2911466734
+- Summary: 3 unresolved automated review thread(s) remain.
+- Reference: https://github.com/TommyKammy/atlaspm/pull/350#discussion_r2911694895
 - Details:
-  - apps/core-api/src/tasks/task-comments.service.ts:60 `listComments` adds `include: { task: { select: { projectId: true } } }`, but the returned `comment.task` data is never used when building the response. This causes an unnecessary join / extra payload on every comments list query; consider removing the `include` (or using it in place of the separate `task.findFirstOrThrow` if that was the intent).
-  - apps/core-api/test/task-comments-slice.test.ts:20 This slice-extraction test asserts route movement via exact string matches like `@Get('tasks/:id/comments')`. That makes the test brittle to harmless formatting changes (quote style, spacing, decorator ordering) and can create noisy failures during refactors. Consider using a regex that's tolerant to quoting/whitespace, or (more robust) asserting via a lightweight TypeScript AST parse for the relevant decorators.
+  - apps/core-api/src/projects/projects.controller.ts:307 `hydrateProjectsWithFollowerState` fetches all `(projectId, userId)` follower rows for the listed projects and then counts them in memory. If projects have many followers, this will pull a lot of rows just to compute aggregates. Consider switching to `groupBy({ by: ['projectId'], _count: { _all: true } })` for follower counts and a separate query restricted to the current `userId` to compute `isFollowedByCurrentUser`.
+  - apps/core-api/test/followers-slice.test.ts:46 The schema assertions are exact string matches (e.g. `'@@unique([taskId, userId])'`), which makes this slice test brittle to harmless formatting changes in `schema.prisma` (spacing, line wrapping). Using a regex similar to `routeDecoratorPattern` (tolerant to whitespace) would reduce noisy failures during refactors.
+  - apps/core-api/src/tasks/tasks.controller.ts:2661 `hydrateTasksWithFollowerState` loads one row per follower (taskId/userId) for all tasks in the response just to compute `followerCount` and `isFollowedByCurrentUser`. This scales with total follower rows (could be large) and can slow down task list/detail responses. Consider using a `groupBy`/aggregate query for counts by `taskId`, plus a separate `findMany` filtered to `userId = req.user.sub` (and `taskId in [...]`) to compute the followed-id set without scanning all follower rows.
 
 ## Codex Working Notes
 ### Current Handoff
-- Hypothesis: The safest first extraction for #341 is the `comments + mentions` slice because it has a small API surface, existing integration coverage, and one shared dependency seam for mention sync.
-- Primary failure or risk: The remaining risk was limited to the two bot review comments: one legitimate unnecessary join in `TaskCommentsService.listComments`, and one legitimate brittleness issue in the slice-structure test.
-- Last focused command: `pnpm --filter @atlaspm/core-api exec vitest run test/core.integration.test.ts --testNamePattern='project/member/sections/tasks/rules/reorder/audit/outbox flow' --testTimeout=20000`
-- Files changed: `apps/core-api/src/app.module.ts`, `apps/core-api/src/tasks/tasks.controller.ts`, `apps/core-api/src/tasks/task-comments.controller.ts`, `apps/core-api/src/tasks/task-comments.service.ts`, `apps/core-api/src/tasks/task-mentions.service.ts`, and `apps/core-api/test/task-comments*.test.ts`
+- Hypothesis: All three configured-bot comments were legitimate but low-risk review follow-ups: two performance improvements in follower summary hydration and one brittleness reduction in the slice test.
+- Primary failure or risk: Remaining risk is limited to any new human review feedback or unexpected CI drift; the known configured-bot review items are addressed and resolved.
+- Last focused command: `DATABASE_URL=${DATABASE_URL:-postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public} pnpm --filter @atlaspm/core-api exec vitest run test/core.integration.test.ts --testNamePattern='task and project followers expose follow state, prevent duplicates, and enforce authorization'`
+- Files changed: `apps/core-api/src/projects/projects.controller.ts`, `apps/core-api/src/tasks/tasks.controller.ts`, and `apps/core-api/test/followers-slice.test.ts`
 - Next 1-3 actions:
-  1. Commit the review follow-up fixes for the unused join and regex-tolerant slice test.
-  2. Push the branch and resolve the two automated review threads on PR #344.
-  3. Re-check PR merge state after GitHub refreshes branch status.
+  1. Watch PR #350 for any new review/CI changes.
+  2. If no new feedback arrives, proceed with normal merge readiness flow.
+  3. If broader confidence is needed, run an adjacent task/project CRUD regression slice.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
 - Focused reproduction:
-  - Added `apps/core-api/test/task-comments-slice.test.ts` first so the branch failed on routes still being owned by `TasksController` and on missing dedicated controller/service wiring.
-  - Initial failure: `prisma: not found` from `pnpm --filter @atlaspm/core-api test -- --run apps/core-api/test/task-comments-slice.test.ts` because the worktree had no installed dependencies.
-  - After `pnpm install`, the focused slice test failed as intended on `@Get('tasks/:id/comments')` still existing in `apps/core-api/src/tasks/tasks.controller.ts`.
+  - Added `apps/core-api/test/followers-slice.test.ts` first so the branch failed on the missing `TaskFollower`/`ProjectFollower` models and follow-route contract.
+  - Initial focused runner failures were environmental in this worktree: `vitest: not found` / `prisma: not found` until `pnpm install`, then `@atlaspm/domain` unresolved until `pnpm --filter @atlaspm/domain build`.
+  - After dependencies were present, the slice test failed as intended on missing `model TaskFollower`.
 - Failure signature:
-  - `PRRT_kwDORWcwRc5zSh8C|PRRT_kwDORWcwRc5zSh8j`
+  - `missing-task-project-follower-contract`
 - Current focused verification:
-  - `pnpm install`
-  - `pnpm --filter @atlaspm/core-api prisma:generate`
-  - `pnpm --filter @atlaspm/domain build`
-  - `pnpm --filter @atlaspm/core-api exec vitest run test/task-comments-slice.test.ts test/task-comments.controller.test.ts test/task-comments.service.test.ts`
-  - `pnpm --filter @atlaspm/core-api test -- --testNamePattern='project/member/sections/tasks/rules/reorder/audit/outbox flow'`
-  - `pnpm --filter @atlaspm/core-api exec vitest run test/core.integration.test.ts --testNamePattern='project/member/sections/tasks/rules/reorder/audit/outbox flow' --testTimeout=20000`
+  - `pnpm --filter @atlaspm/core-api build`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/followers-slice.test.ts`
+  - `DATABASE_URL=${DATABASE_URL:-postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public} pnpm --filter @atlaspm/core-api exec vitest run test/core.integration.test.ts --testNamePattern='task and project followers expose follow state, prevent duplicates, and enforce authorization'`
 - Implementation notes:
-  - Added `TaskCommentsController` to own `GET /tasks/:id/mentions`, `GET/POST /tasks/:id/comments`, `PATCH /comments/:id`, and `DELETE /comments/:id`.
-  - Added `TaskCommentsService` for the transactional comment logic and `TaskMentionsService` for reusable mention parsing/sync so `PATCH /tasks/:id/description` keeps the same audit/outbox behavior.
-  - `TasksController` now delegates description mention sync through `TaskMentionsService` and no longer owns the extracted comment/mention routes.
-  - The existing broad integration flow passed once rerun with `--testTimeout=20000`; the earlier failure was timeout-only, not a behavior regression.
-  - Review follow-up: removed the unused `include.task` join from `TaskCommentsService.listComments`.
-  - Review follow-up: replaced exact decorator string checks in `task-comments-slice.test.ts` with quote/whitespace-tolerant regex matching to reduce false failures during harmless formatting changes.
+  - `hydrateProjectsWithFollowerState` now uses `projectFollower.groupBy({ by: ['projectId'], _count: { _all: true } })` plus a `findMany` restricted to the current `userId`, instead of loading all follower rows into memory.
+  - `hydrateTasksWithFollowerState` now uses the same aggregate pattern on `taskFollower`.
+  - `followers-slice.test.ts` now matches schema snippets with whitespace-tolerant regex instead of exact string comparisons for the unique-constraint assertions.
+  - Follow-up commit: `f8c2de3` (`Address follower review feedback`).
+  - Pushed `codex/reopen-issue-346` and resolved review threads `PRRT_kwDORWcwRc5zTLx8`, `PRRT_kwDORWcwRc5zTLyo`, and `PRRT_kwDORWcwRc5zTLzH` via GitHub GraphQL.
