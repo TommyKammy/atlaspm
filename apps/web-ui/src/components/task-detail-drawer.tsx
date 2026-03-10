@@ -1157,28 +1157,30 @@ export default function TaskDetailDrawer({
                       )}
                     </MetadataRow>
 
-                    <MetadataRow icon={<UserCircle2 className="h-3.5 w-3.5" />} label={t('followers')}>
-                      <FollowerToggle
-                        compact
-                        count={currentTask?.followerCount ?? 0}
-                        isFollowed={currentTask?.isFollowedByCurrentUser ?? false}
-                        isPending={followTask.isPending || unfollowTask.isPending}
-                        onToggle={() => {
-                          if (!currentTask || followTask.isPending || unfollowTask.isPending) return;
-                          if (currentTask.isFollowedByCurrentUser) {
-                            unfollowTask.mutate();
-                            return;
-                          }
-                          followTask.mutate();
-                        }}
-                        buttonTestId="task-follow-toggle"
-                        countTestId="task-follower-count"
-                        followLabel={t('follow')}
-                        followingLabel={t('following')}
-                        followerLabel={t('follower')}
-                        followersLabel={t('followers')}
-                      />
-                    </MetadataRow>
+                    {currentTask ? (
+                      <MetadataRow icon={<UserCircle2 className="h-3.5 w-3.5" />} label={t('followers')}>
+                        <FollowerToggle
+                          compact
+                          count={currentTask.followerCount ?? 0}
+                          isFollowed={currentTask.isFollowedByCurrentUser ?? false}
+                          isPending={followTask.isPending || unfollowTask.isPending}
+                          onToggle={() => {
+                            if (followTask.isPending || unfollowTask.isPending) return;
+                            if (currentTask.isFollowedByCurrentUser) {
+                              unfollowTask.mutate();
+                              return;
+                            }
+                            followTask.mutate();
+                          }}
+                          buttonTestId="task-follow-toggle"
+                          countTestId="task-follower-count"
+                          followLabel={t('follow')}
+                          followingLabel={t('following')}
+                          followerLabel={t('follower')}
+                          followersLabel={t('followers')}
+                        />
+                      </MetadataRow>
+                    ) : null}
 
                     {currentTask?.type === 'MILESTONE' && (
                       <div className="flex items-center gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">
