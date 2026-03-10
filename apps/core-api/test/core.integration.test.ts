@@ -903,10 +903,13 @@ describe('Core API Integration', () => {
       .expect(200);
     expect(attachments.body.some((a: any) => a.id === attachmentInit.body.attachmentId)).toBe(true);
 
-    await request(app.getHttpServer())
+    const deletedAttachmentRes = await request(app.getHttpServer())
       .delete(`/attachments/${attachmentInit.body.attachmentId}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
+    expect(deletedAttachmentRes.body.uploadToken).toBeUndefined();
+    expect(deletedAttachmentRes.body.storageKey).toBeUndefined();
+    expect(deletedAttachmentRes.body.url).toBeNull();
 
     const attachmentsAfterDelete = await request(app.getHttpServer())
       .get(`/tasks/${t1.body.id}/attachments`)
@@ -921,11 +924,15 @@ describe('Core API Integration', () => {
     const deletedAttachment = attachmentsIncludingDeleted.body.find((a: any) => a.id === attachmentInit.body.attachmentId);
     expect(deletedAttachment).toBeTruthy();
     expect(Boolean(deletedAttachment.deletedAt)).toBe(true);
+    expect(deletedAttachment.url).toBeNull();
 
-    await request(app.getHttpServer())
+    const restoredAttachmentRes = await request(app.getHttpServer())
       .post(`/attachments/${attachmentInit.body.attachmentId}/restore`)
       .set('Authorization', `Bearer ${token}`)
       .expect(201);
+    expect(restoredAttachmentRes.body.uploadToken).toBeUndefined();
+    expect(restoredAttachmentRes.body.storageKey).toBeUndefined();
+    expect(typeof restoredAttachmentRes.body.url).toBe('string');
 
     const attachmentsAfterRestore = await request(app.getHttpServer())
       .get(`/tasks/${t1.body.id}/attachments`)
@@ -1168,6 +1175,8 @@ describe('Core API Integration', () => {
 
   test('attachment public download URLs expire after a short TTL', async () => {
     const frozenNow = new Date('2026-03-10T03:00:00.000Z');
+    const previousAttachmentDownloadTtl = process.env.ATTACHMENT_DOWNLOAD_URL_TTL_SEC;
+    process.env.ATTACHMENT_DOWNLOAD_URL_TTL_SEC = '300';
     vi.useFakeTimers();
     vi.setSystemTime(frozenNow);
 
@@ -1231,6 +1240,11 @@ describe('Core API Integration', () => {
 
       await request(app.getHttpServer()).get(downloadUrl).expect(404);
     } finally {
+      if (previousAttachmentDownloadTtl === undefined) {
+        delete process.env.ATTACHMENT_DOWNLOAD_URL_TTL_SEC;
+      } else {
+        process.env.ATTACHMENT_DOWNLOAD_URL_TTL_SEC = previousAttachmentDownloadTtl;
+      }
       vi.useRealTimers();
     }
   });

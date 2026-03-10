@@ -2237,7 +2237,7 @@ export class TasksController {
       include: { task: true },
     });
     await this.domain.requireProjectRole(attachment.task.projectId, req.user.sub, ProjectRole.MEMBER);
-    if (attachment.deletedAt) return attachment;
+    if (attachment.deletedAt) return this.serializeAttachment(attachment);
     return this.prisma.$transaction(async (tx) => {
       const deleted = await tx.taskAttachment.update({
         where: { id },
@@ -2255,7 +2255,7 @@ export class TasksController {
         outboxType: 'task.attachment.deleted',
         payload: { taskId: attachment.taskId, attachmentId: id },
       });
-      return deleted;
+      return this.serializeAttachment(deleted);
     });
   }
 
@@ -2266,7 +2266,7 @@ export class TasksController {
       include: { task: true },
     });
     await this.domain.requireProjectRole(attachment.task.projectId, req.user.sub, ProjectRole.MEMBER);
-    if (!attachment.deletedAt) return attachment;
+    if (!attachment.deletedAt) return this.serializeAttachment(attachment);
     return this.prisma.$transaction(async (tx) => {
       const restored = await tx.taskAttachment.update({
         where: { id },
@@ -2284,7 +2284,7 @@ export class TasksController {
         outboxType: 'task.attachment.restored',
         payload: { taskId: attachment.taskId, attachmentId: id },
       });
-      return restored;
+      return this.serializeAttachment(restored);
     });
   }
 
@@ -2310,7 +2310,10 @@ export class TasksController {
       completedAt: item.completedAt,
       createdAt: item.createdAt,
       deletedAt: item.deletedAt,
-      url: this.attachmentDownloadUrls.buildUrl(item),
+      url:
+        item.deletedAt || !item.completedAt
+          ? null
+          : this.attachmentDownloadUrls.buildUrl(item),
     };
   }
 
