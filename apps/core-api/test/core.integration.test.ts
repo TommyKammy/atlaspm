@@ -1111,6 +1111,230 @@ describe('Core API Integration', () => {
     expect(defaultSection).toBeTruthy();
   });
 
+  test('task and project followers expose follow state, prevent duplicates, and enforce authorization', async () => {
+    const auth = app.get(AuthService);
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: 'Follower Contract Project' })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+    expect(projectRes.body.followerCount).toBe(0);
+    expect(projectRes.body.isFollowedByCurrentUser).toBe(false);
+
+    const viewerId = `follower-viewer-${projectId}`;
+    await prisma.user.upsert({
+      where: { id: viewerId },
+      create: {
+        id: viewerId,
+        email: `${viewerId}@example.com`,
+        displayName: 'Follower Viewer',
+        status: 'ACTIVE',
+      },
+      update: {},
+    });
+    await prisma.workspaceMembership.upsert({
+      where: { workspaceId_userId: { workspaceId, userId: viewerId } },
+      create: { workspaceId, userId: viewerId, role: 'WS_MEMBER' },
+      update: {},
+    });
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/members`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: viewerId, role: 'VIEWER' })
+      .expect(201);
+
+    const viewerToken = await auth.mintDevToken(viewerId, `${viewerId}@example.com`, 'Follower Viewer');
+    const outsiderId = `follower-outsider-${projectId}`;
+    const outsiderToken = await auth.mintDevToken(outsiderId, `${outsiderId}@example.com`, 'Follower Outsider');
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSectionId =
+      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
+        sectionsRes.body[0])?.id as string;
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sectionId: defaultSectionId, title: 'Follower Contract Task' })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+    expect(taskRes.body.followerCount).toBe(0);
+    expect(taskRes.body.isFollowedByCurrentUser).toBe(false);
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/followers`)
+      .set('Authorization', `Bearer ${outsiderToken}`)
+      .expect(404);
+
+    const projectFollowRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/followers`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(201);
+    expect(projectFollowRes.body.followerCount).toBe(1);
+    expect(projectFollowRes.body.isFollowedByCurrentUser).toBe(true);
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/followers`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(409);
+
+    const projectFollowersRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/followers`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(200);
+    expect(projectFollowersRes.body.followerCount).toBe(1);
+    expect(projectFollowersRes.body.isFollowedByCurrentUser).toBe(true);
+    expect(projectFollowersRes.body.followers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          projectId,
+          userId: viewerId,
+          user: expect.objectContaining({ id: viewerId }),
+        }),
+      ]),
+    );
+
+    const viewerProjectsRes = await request(app.getHttpServer())
+      .get('/projects')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(200);
+    expect(viewerProjectsRes.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: projectId,
+          followerCount: 1,
+          isFollowedByCurrentUser: true,
+        }),
+      ]),
+    );
+
+    const ownerProjectsRes = await request(app.getHttpServer())
+      .get('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(ownerProjectsRes.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: projectId,
+          followerCount: 1,
+          isFollowedByCurrentUser: false,
+        }),
+      ]),
+    );
+
+    await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/followers`)
+      .set('Authorization', `Bearer ${outsiderToken}`)
+      .expect(404);
+
+    const taskFollowRes = await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/followers`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(201);
+    expect(taskFollowRes.body.followerCount).toBe(1);
+    expect(taskFollowRes.body.isFollowedByCurrentUser).toBe(true);
+
+    await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/followers`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(409);
+
+    const taskFollowersRes = await request(app.getHttpServer())
+      .get(`/tasks/${taskId}/followers`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(200);
+    expect(taskFollowersRes.body.followerCount).toBe(1);
+    expect(taskFollowersRes.body.isFollowedByCurrentUser).toBe(true);
+    expect(taskFollowersRes.body.followers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          taskId,
+          userId: viewerId,
+          user: expect.objectContaining({ id: viewerId }),
+        }),
+      ]),
+    );
+
+    const viewerTaskListRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(200);
+    expect(viewerTaskListRes.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: taskId,
+          followerCount: 1,
+          isFollowedByCurrentUser: true,
+        }),
+      ]),
+    );
+
+    const ownerTaskDetailRes = await request(app.getHttpServer())
+      .get(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(ownerTaskDetailRes.body.followerCount).toBe(1);
+    expect(ownerTaskDetailRes.body.isFollowedByCurrentUser).toBe(false);
+
+    await request(app.getHttpServer())
+      .delete(`/tasks/${taskId}/followers/me`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(200);
+    await request(app.getHttpServer())
+      .delete(`/projects/${projectId}/followers/me`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(200);
+
+    const finalTaskDetailRes = await request(app.getHttpServer())
+      .get(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(200);
+    expect(finalTaskDetailRes.body.followerCount).toBe(0);
+    expect(finalTaskDetailRes.body.isFollowedByCurrentUser).toBe(false);
+
+    const finalProjectFollowersRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/followers`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(200);
+    expect(finalProjectFollowersRes.body.followerCount).toBe(0);
+    expect(finalProjectFollowersRes.body.isFollowedByCurrentUser).toBe(false);
+    expect(finalProjectFollowersRes.body.followers).toEqual([]);
+
+    const followerAuditActions = await prisma.auditEvent.findMany({
+      where: {
+        action: {
+          in: ['project.followed', 'project.unfollowed', 'task.followed', 'task.unfollowed'],
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(followerAuditActions.map((event) => event.action)).toEqual(
+      expect.arrayContaining(['project.followed', 'project.unfollowed', 'task.followed', 'task.unfollowed']),
+    );
+
+    const followerOutboxEvents = await prisma.outboxEvent.findMany({
+      where: {
+        type: {
+          in: ['project.followed', 'project.unfollowed', 'task.followed', 'task.unfollowed'],
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(followerOutboxEvents.map((event) => event.type)).toEqual(
+      expect.arrayContaining(['project.followed', 'project.unfollowed', 'task.followed', 'task.unfollowed']),
+    );
+  });
+
   test('attachment list responses do not expose persistent download tokens', async () => {
     await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
 

@@ -1,11 +1,11 @@
 import { Body, ConflictException, Controller, Delete, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Prisma, ProjectRole, WorkspaceRole } from '@prisma/client';
 import { IsEnum, IsString, IsUUID } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
-import { ProjectRole, WorkspaceRole } from '@prisma/client';
 import { ProjectRoleGuard, RequireProjectRole, RequireWorkspaceRole, WorkspaceRoleGuard } from '../auth/role.guard';
 
 class CreateProjectDto {
@@ -39,10 +39,11 @@ export class ProjectsController {
 
   @Get()
   async list(@CurrentRequest() req: AppRequest) {
-    return this.prisma.project.findMany({
+    const projects = await this.prisma.project.findMany({
       where: { memberships: { some: { userId: req.user.sub } } },
       orderBy: { createdAt: 'asc' },
     });
+    return this.hydrateProjectsWithFollowerState(projects, req.user.sub);
   }
 
   @Post()
@@ -57,7 +58,7 @@ export class ProjectsController {
       });
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const project = await this.prisma.$transaction(async (tx) => {
       const project = await tx.project.create({
         data: { workspaceId: body.workspaceId, name: body.name },
       });
@@ -77,6 +78,99 @@ export class ProjectsController {
       });
       await this.domain.ensureProjectDefaultsInTx(tx, project.id, req.user.sub, req.correlationId);
       return project;
+    });
+    return this.hydrateProjectWithFollowerState(project, req.user.sub);
+  }
+
+  @Get(':id/followers')
+  @RequireProjectRole(ProjectRole.VIEWER)
+  async followers(@Param('id') projectId: string, @CurrentRequest() req: AppRequest) {
+    const followers = await this.prisma.projectFollower.findMany({
+      where: { projectId },
+      include: { user: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return {
+      followerCount: followers.length,
+      isFollowedByCurrentUser: followers.some((follower) => follower.userId === req.user.sub),
+      followers: followers.map((follower) => ({
+        id: follower.id,
+        projectId: follower.projectId,
+        userId: follower.userId,
+        createdAt: follower.createdAt,
+        user: {
+          id: follower.user.id,
+          email: follower.user.email,
+          displayName: follower.user.displayName ?? follower.user.email ?? follower.user.id,
+          avatarUrl: null,
+        },
+      })),
+    };
+  }
+
+  @Post(':id/followers')
+  @RequireProjectRole(ProjectRole.VIEWER)
+  async follow(@Param('id') projectId: string, @CurrentRequest() req: AppRequest) {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const follower = await tx.projectFollower.create({
+          data: { projectId, userId: req.user.sub },
+        });
+        await this.domain.appendAuditOutbox({
+          tx,
+          actor: req.user.sub,
+          entityType: 'ProjectFollower',
+          entityId: follower.id,
+          action: 'project.followed',
+          afterJson: follower,
+          correlationId: req.correlationId,
+          outboxType: 'project.followed',
+          payload: { projectId, userId: req.user.sub },
+        });
+        const followerCount = await tx.projectFollower.count({ where: { projectId } });
+        return {
+          id: follower.id,
+          projectId: follower.projectId,
+          userId: follower.userId,
+          createdAt: follower.createdAt,
+          followerCount,
+          isFollowedByCurrentUser: true,
+        };
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException('Project already followed');
+      }
+      throw error;
+    }
+  }
+
+  @Delete(':id/followers/me')
+  @RequireProjectRole(ProjectRole.VIEWER)
+  async unfollow(@Param('id') projectId: string, @CurrentRequest() req: AppRequest) {
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.projectFollower.findUnique({
+        where: { projectId_userId: { projectId, userId: req.user.sub } },
+      });
+      if (existing) {
+        await tx.projectFollower.delete({ where: { id: existing.id } });
+        await this.domain.appendAuditOutbox({
+          tx,
+          actor: req.user.sub,
+          entityType: 'ProjectFollower',
+          entityId: existing.id,
+          action: 'project.unfollowed',
+          beforeJson: existing,
+          correlationId: req.correlationId,
+          outboxType: 'project.unfollowed',
+          payload: { projectId, userId: req.user.sub },
+        });
+      }
+      const followerCount = await tx.projectFollower.count({ where: { projectId } });
+      return { ok: true, followerCount, isFollowedByCurrentUser: false };
     });
   }
 
@@ -197,5 +291,34 @@ export class ProjectsController {
       });
       return { ok: true };
     });
+  }
+
+  private async hydrateProjectWithFollowerState<T extends { id: string }>(project: T, userId: string) {
+    const [hydratedProject] = await this.hydrateProjectsWithFollowerState([project], userId);
+    return hydratedProject;
+  }
+
+  private async hydrateProjectsWithFollowerState<T extends { id: string }>(projects: T[], userId: string) {
+    if (!projects.length) return [];
+
+    const followers = await this.prisma.projectFollower.findMany({
+      where: { projectId: { in: projects.map((project) => project.id) } },
+      select: { projectId: true, userId: true },
+    });
+
+    const counts = new Map<string, number>();
+    const followedProjectIds = new Set<string>();
+    for (const follower of followers) {
+      counts.set(follower.projectId, (counts.get(follower.projectId) ?? 0) + 1);
+      if (follower.userId === userId) {
+        followedProjectIds.add(follower.projectId);
+      }
+    }
+
+    return projects.map((project) => ({
+      ...project,
+      followerCount: counts.get(project.id) ?? 0,
+      isFollowedByCurrentUser: followedProjectIds.has(project.id),
+    }));
   }
 }

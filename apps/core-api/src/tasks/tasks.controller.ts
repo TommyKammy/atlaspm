@@ -644,9 +644,10 @@ export class TasksController {
 
     const tasks = await this.prisma.task.findMany({ where, orderBy });
     const hydratedTasksRaw = await this.hydrateTasksWithCustomFieldValues(tasks);
+    const hydratedTasksWithFollowers = await this.hydrateTasksWithFollowerState(hydratedTasksRaw, req.user.sub);
     const hydratedTasks = customFieldSort
-      ? this.sortHydratedTasksByCustomField(hydratedTasksRaw, customFieldSort.fieldId, customFieldSort.order)
-      : hydratedTasksRaw;
+      ? this.sortHydratedTasksByCustomField(hydratedTasksWithFollowers, customFieldSort.fieldId, customFieldSort.order)
+      : hydratedTasksWithFollowers;
     const hasExplicitSort = Boolean(query.sortBy || customFieldSort);
     if (query.groupBy === 'section') {
       const sections = await this.prisma.section.findMany({ where: { projectId }, orderBy: { position: 'asc' } });
@@ -873,8 +874,106 @@ export class TasksController {
   async getOne(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
     await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
-    const [hydratedTask] = await this.hydrateTasksWithCustomFieldValues([task]);
-    return hydratedTask;
+    return this.hydrateTaskWithFollowerState(task, req.user.sub);
+  }
+
+  @Get('tasks/:id/followers')
+  async followers(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+
+    const followers = await this.prisma.taskFollower.findMany({
+      where: { taskId: id },
+      include: { user: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return {
+      followerCount: followers.length,
+      isFollowedByCurrentUser: followers.some((follower) => follower.userId === req.user.sub),
+      followers: followers.map((follower) => ({
+        id: follower.id,
+        taskId: follower.taskId,
+        userId: follower.userId,
+        createdAt: follower.createdAt,
+        user: {
+          id: follower.user.id,
+          email: follower.user.email,
+          displayName: follower.user.displayName ?? follower.user.email ?? follower.user.id,
+          avatarUrl: null,
+        },
+      })),
+    };
+  }
+
+  @Post('tasks/:id/followers')
+  async follow(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const follower = await tx.taskFollower.create({
+          data: { taskId: id, userId: req.user.sub },
+        });
+        await this.domain.appendAuditOutbox({
+          tx,
+          actor: req.user.sub,
+          entityType: 'TaskFollower',
+          entityId: follower.id,
+          action: 'task.followed',
+          afterJson: follower,
+          correlationId: req.correlationId,
+          outboxType: 'task.followed',
+          payload: { taskId: id, userId: req.user.sub, projectId: task.projectId },
+        });
+        const followerCount = await tx.taskFollower.count({ where: { taskId: id } });
+        return {
+          id: follower.id,
+          taskId: follower.taskId,
+          userId: follower.userId,
+          createdAt: follower.createdAt,
+          followerCount,
+          isFollowedByCurrentUser: true,
+        };
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException('Task already followed');
+      }
+      throw error;
+    }
+  }
+
+  @Delete('tasks/:id/followers/me')
+  async unfollow(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
+    const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
+    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.taskFollower.findUnique({
+        where: { taskId_userId: { taskId: id, userId: req.user.sub } },
+      });
+      if (existing) {
+        await tx.taskFollower.delete({ where: { id: existing.id } });
+        await this.domain.appendAuditOutbox({
+          tx,
+          actor: req.user.sub,
+          entityType: 'TaskFollower',
+          entityId: existing.id,
+          action: 'task.unfollowed',
+          beforeJson: existing,
+          correlationId: req.correlationId,
+          outboxType: 'task.unfollowed',
+          payload: { taskId: id, userId: req.user.sub, projectId: task.projectId },
+        });
+      }
+      const followerCount = await tx.taskFollower.count({ where: { taskId: id } });
+      return { ok: true, followerCount, isFollowedByCurrentUser: false };
+    });
   }
 
   @Post('projects/:id/tasks')
@@ -951,9 +1050,9 @@ export class TasksController {
       });
       await this.applyProgressRules(tx, task.id, req.correlationId);
       return task;
-    }).then((task) => {
+    }).then(async (task) => {
       void this.indexTaskWithCustomFields(task);
-      return task;
+      return this.hydrateTaskWithFollowerState(task, req.user.sub);
     });
   }
 
@@ -1082,9 +1181,9 @@ export class TasksController {
       }
 
       return updated;
-    }).then((updated) => {
+    }).then(async (updated) => {
       void this.indexTaskWithCustomFields(updated);
-      return updated;
+      return this.hydrateTaskWithFollowerState(updated, req.user.sub);
     });
   }
 
@@ -2535,6 +2634,45 @@ export class TasksController {
     return tasks.map((task) => ({
       ...task,
       customFieldValues: byTaskId.get(task.id) ?? [],
+    }));
+  }
+
+  private async hydrateTaskWithFollowerState<T extends Record<string, unknown> & { id: string }>(task: T, userId: string) {
+    const [hydratedTask] = await this.hydrateTasksWithCustomFieldValues([task]);
+    if (!hydratedTask) {
+      throw new NotFoundException('Task not found');
+    }
+    const [taskWithFollowers] = await this.hydrateTasksWithFollowerState([hydratedTask], userId);
+    if (!taskWithFollowers) {
+      throw new NotFoundException('Task not found');
+    }
+    return taskWithFollowers;
+  }
+
+  private async hydrateTasksWithFollowerState<T extends Record<string, unknown> & { id: string }>(
+    tasks: T[],
+    userId: string,
+  ): Promise<Array<T & { followerCount: number; isFollowedByCurrentUser: boolean }>> {
+    if (!tasks.length) return [];
+
+    const followers = await this.prisma.taskFollower.findMany({
+      where: { taskId: { in: tasks.map((task) => task.id) } },
+      select: { taskId: true, userId: true },
+    });
+
+    const counts = new Map<string, number>();
+    const followedTaskIds = new Set<string>();
+    for (const follower of followers) {
+      counts.set(follower.taskId, (counts.get(follower.taskId) ?? 0) + 1);
+      if (follower.userId === userId) {
+        followedTaskIds.add(follower.taskId);
+      }
+    }
+
+    return tasks.map((task) => ({
+      ...task,
+      followerCount: counts.get(task.id) ?? 0,
+      isFollowedByCurrentUser: followedTaskIds.has(task.id),
     }));
   }
 
