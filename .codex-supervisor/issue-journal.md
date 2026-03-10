@@ -16,7 +16,7 @@
 ## Latest Codex Summary
 - Addressed the five configured-bot review comments on PR #336.
 - Tightened the `web-ui` regression test to assert `localStorage.getItem` is not called, made logout redirect via `try/finally`, added `Path=/` assertions to the logout cookie test, and switched the Vitest alias to `fileURLToPath(new URL(..., import.meta.url))`.
-- Focused verification passed for the touched tests and `web-ui` type-check.
+- Focused verification passed for the touched tests and `web-ui` type-check. Follow-up commit: `e9af3b4` (`Address auth client review feedback`), pushed to `codex/reopen-issue-332`, and all five configured-bot threads were resolved.
 
 ## Active Failure Context
 - None recorded.
@@ -25,12 +25,12 @@
 ### Current Handoff
 - Hypothesis: The review queue is narrow and resolved by test hardening plus a small logout control-flow fix; no broader behavior change was needed.
 - Primary failure or risk: This patch still relies on the temporary dev-session model that stores the dev JWT in the session cookie; full production session persistence and broader CSRF/origin enforcement remain follow-up work.
-- Last focused command: `pnpm --filter @atlaspm/web-ui type-check`
+- Last focused command: `gh pr view 336 --json isDraft,reviewDecision,mergeStateStatus,headRefName,statusCheckRollup`
 - Files changed: `apps/web-ui/src/lib/api.test.ts`, `apps/web-ui/src/components/layout/HeaderBar.tsx`, `apps/web-ui/vitest.config.ts`, `apps/core-api/test/dev-auth-environment.test.ts`
 - Next 1-3 actions:
-  1. Commit and push the review-fix follow-up for PR #336.
-  2. Resolve the configured-bot review threads as addressed.
-  3. Recheck PR merge state and remaining CI/e2e status.
+  1. Watch PR #336 CI until the new `type-check` / `lint` / `test` runs finish.
+  2. Recheck merge state once those runs settle.
+  3. Continue only if CI or reviewer follow-up uncovers a new issue.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
@@ -43,6 +43,9 @@
   - `pnpm --filter @atlaspm/web-ui test -- src/lib/api.test.ts`
   - `pnpm --filter @atlaspm/core-api exec vitest run test/dev-auth-environment.test.ts`
   - `pnpm --filter @atlaspm/web-ui type-check`
+  - `git push origin codex/reopen-issue-332`
+  - `gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{id isResolved}}}' -F id=...` for all 5 review thread ids
+  - `gh pr view 336 --json isDraft,reviewDecision,mergeStateStatus,headRefName,statusCheckRollup`
 - Implementation notes:
   - Chosen browser model: `core-api` managed opaque `HttpOnly` session cookie plus a readable CSRF cookie.
   - OIDC code exchange and refresh-token rotation stay server-side in `core-api`.
@@ -52,3 +55,4 @@
   - `apps/web-ui/src/components/layout/HeaderBar.tsx` now navigates to `/login` even if `/auth/logout` fails.
   - `apps/core-api/test/dev-auth-environment.test.ts` now verifies `Path=/` on both cleared cookies.
   - `apps/web-ui/vitest.config.ts` now uses an ESM-safe alias path derived from `import.meta.url`.
+  - PR remote status after push: not draft, no review decision yet, merge state `UNSTABLE` because fresh CI runs for `type-check`, `lint`, and `test` were still `IN_PROGRESS` when checked.
