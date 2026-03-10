@@ -1,60 +1,63 @@
-# Issue #331: P1: Introduce secure cookie or session transport for web-ui authentication
+# Issue #332: P1: Migrate web-ui auth client flow away from localStorage token handling
 
 ## Supervisor Snapshot
-- Issue URL: https://github.com/TommyKammy/atlaspm/issues/331
-- Branch: codex/reopen-issue-331
-- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-331
-- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-331/.codex-supervisor/issue-journal.md
-- Current phase: addressing_review
+- Issue URL: https://github.com/TommyKammy/atlaspm/issues/332
+- Branch: codex/reopen-issue-332
+- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-332
+- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-332/.codex-supervisor/issue-journal.md
+- Current phase: repairing_ci
 - Attempt count: 3
-- Last head SHA: 8e714a4ca8a49f14eee082f39f39e05144332e23
+- Last head SHA: 694b3b18a163249950ec367b695cab8a8eee194b
 - Blocked reason: none
-- Last failure signature: PRRT_kwDORWcwRc5zJPYu|PRRT_kwDORWcwRc5zJPY7
+- Last failure signature: e2e:cancel
 - Repeated failure signature count: 1
-- Updated at: 2026-03-10T00:59:15.581Z
+- Updated at: 2026-03-10T02:20:06.101Z
 
 ## Latest Codex Summary
-- PR review follow-up: the stale bot comment about a failing-test-only PR is no longer accurate because implementation and green CI are already on the branch.
-- Applied the valid bot suggestion by strengthening `apps/core-api/test/dev-auth-environment.test.ts` to assert `HttpOnly`, `SameSite=Lax`, and `Path=/` on the session cookie, and to assert that the CSRF cookie omits `HttpOnly` while still carrying `SameSite=Lax` and `Path=/`.
-- The tightened focused test still passes locally with `pnpm --filter @atlaspm/core-api exec vitest run test/dev-auth-environment.test.ts`.
+- Reproduced the e2e breakage locally against fresh images and traced the cancelled CI job to repeated auth failures, not a random cancellation.
+- Root causes:
+  1. `core-api` CORS still used permissive defaults, which is incompatible with credentialed browser requests.
+  2. Playwright specs were still scraping `atlaspm_token` from browser `localStorage`, so the new cookie-backed flow left many spec-side API helpers without a bearer token.
+- Added explicit credentialed CORS configuration plus a focused unit test, and switched Playwright specs onto a shared auth fixture that captures the dev-auth response token for test-only API setup while leaving `web-ui` itself off `localStorage`.
 
 ## Active Failure Context
-- Category: review
-- Summary: 2 unresolved automated review thread(s) remain.
-- Reference: https://github.com/TommyKammy/atlaspm/pull/335#discussion_r2908201337
-- Details:
-  - apps/core-api/test/dev-auth-environment.test.ts:146 This PR is titled "Introduce secure cookie or session transport" but only contains a **failing test** with no implementation. The `DevAuthController.create()` method at `src/auth/dev-auth.controller.ts:22-26` returns only `{ token }` and never sets any cookies, so this test will always fail in the current state. If this is intentionally a "reproduce-first" commit that will be followed up with implementation, consider: 1. Marking the test as `test.skip` or `test.todo` so CI doesn't break on the known-failing assertion. 2. Or alternatively, including the implementation (cookie issuance in the controller) in this same PR so it ships as a green changeset. Merging a knowingly-failing test will cause CI failures on `main` and block other PRs.
-  - apps/core-api/test/dev-auth-environment.test.ts:142 Once the implementation is added, the test should also assert the security attributes required by the ADR (`docs/adr-browser-auth-session.md:101-120`). In particular: - The session cookie should be `HttpOnly`, `SameSite=Lax`, and `Path=/`. - The CSRF cookie should **not** be `HttpOnly` (it must be readable by JS), and should have `SameSite=Lax` and `Path=/`. Without these assertions, a future implementation could set the cookies with insecure defaults and the test would still pass. ```suggestion const sessionCookie = setCookie.find((cookie) => /(?:__Host-)?atlaspm_session=/.test(cookie)); expect(sessionCookie).toBeDefined(); expect(sessionCookie).toMatch(/;\s*HttpOnly\b/i); expect(sessionCookie).toMatch(/;\s*SameSite=Lax\b/i); expect(sessionCookie).toMatch(/;\s*Path=\//i); const csrfCookie = setCookie.find((cookie) => /(?:__Host-)?atlaspm_csrf=/.test(cookie)); expect(csrfCookie).toBeDefined(); expect(csrfCookie).not.toMatch(/;\s*HttpOnly\b/i); expect(csrfCookie).toMatch(/;\s*SameSite=Lax\b/i); expect(csrfCookie).toMatch(/;\s*Path=\//i); ```
+- None recorded.
 
 ## Codex Working Notes
 ### Current Handoff
-- Hypothesis: The remaining review work is narrow: resolve the stale bot thread as obsolete and land the valid test-hardening suggestion that verifies cookie security attributes.
-- Primary failure or risk: This branch still only covers the dev auth cookie path plus server-side cookie fallback; the full browser migration and CSRF enforcement remain follow-up work outside these review threads.
-- Last focused command: `pnpm --filter @atlaspm/core-api exec vitest run test/dev-auth-environment.test.ts`
-- Files changed: `apps/core-api/test/dev-auth-environment.test.ts`
+- Hypothesis: The current CI failure is fixed by two focused compatibility repairs: credentialed CORS in `core-api` and Playwright-side token capture for spec helpers still using bearer setup calls.
+- Primary failure or risk: This patch still relies on the temporary dev-session model that stores the dev JWT in the session cookie; full production session persistence and broader CSRF/origin enforcement remain follow-up work.
+- Last focused command: `pnpm --filter @atlaspm/playwright exec playwright test --list`
+- Files changed: `apps/core-api/src/main.ts`, `apps/core-api/src/cors-options.ts`, `apps/core-api/test/cors-options.test.ts`, `apps/core-api/.env.example`, `e2e/playwright/tests/helpers/browser-auth.ts`, and the top-level Playwright spec imports under `e2e/playwright/tests/*.spec.ts`
 - Next 1-3 actions:
-  1. Commit and push the tightened cookie-attribute assertions.
-  2. Resolve the fixed and stale bot review threads on PR #335.
-  3. Continue the remaining browser-session work in follow-up changes after the review queue is clear.
+  1. Commit and push the CI repair for PR #336.
+  2. Re-run or watch the PR e2e check on the updated branch.
+  3. Recheck merge state once the fresh CI run settles.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
 - Focused reproduction:
-  - `apps/web-ui/src/app/login/page.tsx` uses `POST /dev-auth/token` and stores the returned token in browser state.
-  - `apps/web-ui/src/lib/api.ts` reads `atlaspm_token` from `localStorage` and attaches it as `Authorization: Bearer ...`.
-  - `apps/core-api/src/auth/auth.service.ts` authenticates requests from that bearer header today.
-  - The previously failing reproducing test now passes after `POST /dev-auth/token` was updated to emit session and CSRF cookies.
-  - Review hardening added assertions for `HttpOnly` / `SameSite=Lax` / `Path=/` on the session cookie and for readable CSRF cookie attributes.
+  - `gh run view 22882863385 --job 66389407743 --log` showed the e2e job repeatedly failing the same first few specs for ~2.1m each before timing out the whole 45-minute job.
+  - Downloaded Playwright artifacts showed failures on the login path and confirmed the cancelled job was spending its time retrying auth-dependent specs.
+  - `E2E_REBUILD=1 pnpm e2e e2e/playwright/tests/admin.spec.ts e2e/playwright/tests/custom-fields-filter.spec.ts` reproduced the fresh-image failure locally.
+  - First rebuilt local result: `admin.spec.ts` failed with `Error: Missing token` after the browser-session login path succeeded, confirming stale Playwright localStorage assumptions.
 - Failure signature:
-  - `PRRT_kwDORWcwRc5zJPYu|PRRT_kwDORWcwRc5zJPY7`
+  - `e2e-auth-missing-token`
 - Current focused verification:
-  - `pnpm install`
-  - `pnpm --filter @atlaspm/core-api prisma:generate`
-  - `pnpm --filter @atlaspm/core-api exec vitest run test/dev-auth-environment.test.ts`
-  - `pnpm --filter @atlaspm/core-api type-check`
+  - `gh pr checks 336`
+  - `gh run view 22882863385 --json conclusion,status,event,headSha,headBranch,displayTitle,jobs,url`
+  - `gh run download 22882863385 -n playwright-test-results -D /tmp/issue-332-e2e-artifacts.*`
+  - `gh run view 22882863385 --job 66389407743 --log`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/cors-options.test.ts test/dev-auth-environment.test.ts`
+  - `E2E_REBUILD=1 pnpm e2e e2e/playwright/tests/admin.spec.ts e2e/playwright/tests/custom-fields-filter.spec.ts`
+  - `pnpm e2e e2e/playwright/tests/admin.spec.ts e2e/playwright/tests/audit-activity.spec.ts e2e/playwright/tests/custom-fields-filter.spec.ts`
+  - `pnpm --filter @atlaspm/playwright exec playwright test --list`
 - Implementation notes:
   - Chosen browser model: `core-api` managed opaque `HttpOnly` session cookie plus a readable CSRF cookie.
   - OIDC code exchange and refresh-token rotation stay server-side in `core-api`.
   - Bearer auth remains temporarily for non-browser clients and transition compatibility.
   - Review follow-up: production / HTTPS keeps `__Host-*` cookie names, while plain-HTTP localhost uses dev-only `atlaspm_session` / `atlaspm_csrf` names because `__Host-*` requires `Secure`.
-  - Current tactical implementation for CI repair stores the existing dev JWT inside the `HttpOnly` session cookie so browser transport is no longer header-only, while avoiding new persistence/state tables in this patch.
+  - `apps/core-api/src/cors-options.ts` now constrains CORS to an explicit allowlist and enables credentials, defaulting to `http://localhost:3000` unless `CORS_ALLOWED_ORIGINS` overrides it.
+  - `apps/core-api/test/cors-options.test.ts` covers the allowed localhost origin and rejection of non-allowlisted origins.
+  - `e2e/playwright/tests/helpers/browser-auth.ts` adds a Playwright-only init script that captures the dev-auth JSON response token into `localStorage` for spec-side API helpers; it covers both the default test context and explicit `browser.newContext()` cases.
+  - All top-level Playwright specs now import `test`/`expect` from the shared auth fixture module instead of directly from `@playwright/test`.

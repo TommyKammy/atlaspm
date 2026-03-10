@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './helpers/browser-auth';
 import path from 'node:path';
 
 const API = process.env.E2E_CORE_API_URL ?? 'http://localhost:3001';

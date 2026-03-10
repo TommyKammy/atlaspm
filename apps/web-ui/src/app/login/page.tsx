@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { setToken } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useI18n } from '@/lib/i18n';
@@ -21,10 +20,13 @@ export default function LoginPage() {
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ sub, email, name: sub }),
     });
-    const data = await res.json();
-    setToken(data.token);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Login failed: ${text}`);
+    }
     router.push('/');
   };
 

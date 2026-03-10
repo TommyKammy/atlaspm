@@ -189,9 +189,12 @@ function PersonalSettingsMenu() {
           <DropdownMenuItem disabled>{t('security')}</DropdownMenuItem>
           <DropdownMenuItem disabled>{t('helpSupport')}</DropdownMenuItem>
           <DropdownMenuItem
-            onClick={() => {
-              localStorage.removeItem('atlaspm_token');
-              router.push('/login');
+            onClick={async () => {
+              try {
+                await api('/auth/logout', { method: 'POST' });
+              } finally {
+                router.push('/login');
+              }
             }}
           >
             {t('signOut')}
