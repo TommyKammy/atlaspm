@@ -153,6 +153,7 @@ export class ProjectStatusUpdatesController {
       await this.notifications.fanOutProjectStatusUpdateNotification(tx, {
         projectId,
         statusUpdateId: statusUpdate.id,
+        excludeUserIds: mentionedUserIds,
         triggeredByUserId: req.user.sub,
         actor: req.user.sub,
         correlationId: req.correlationId,

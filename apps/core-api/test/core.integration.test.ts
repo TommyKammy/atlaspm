@@ -1429,6 +1429,7 @@ describe('Core API Integration', () => {
       })
       .expect(201);
     const taskId = taskRes.body.id as string;
+    const nextStatus = taskRes.body.status === 'TODO' ? 'IN_PROGRESS' : 'DONE';
 
     await request(app.getHttpServer())
       .post(`/tasks/${taskId}/followers`)
@@ -1472,6 +1473,54 @@ describe('Core API Integration', () => {
       (item: any) => item.type === 'comment' && item.sourceType === 'comment' && item.taskId === taskId,
     );
     expect(assigneeFollowerCommentNotifications).toHaveLength(1);
+
+    await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ dueAt: '2026-04-15' })
+      .expect(200);
+
+    const followerOnlyNotificationsAfterDueDate = await request(app.getHttpServer())
+      .get('/notifications?status=unread')
+      .set('Authorization', `Bearer ${followerOnlyToken}`)
+      .expect(200);
+    const followerOnlyDueDateNotifications = followerOnlyNotificationsAfterDueDate.body.filter(
+      (item: any) => item.type === 'due_date' && item.sourceType === 'task' && item.taskId === taskId,
+    );
+    expect(followerOnlyDueDateNotifications).toHaveLength(1);
+
+    const assigneeFollowerNotificationsAfterDueDate = await request(app.getHttpServer())
+      .get('/notifications?status=unread')
+      .set('Authorization', `Bearer ${assigneeFollowerToken}`)
+      .expect(200);
+    const assigneeFollowerDueDateNotifications = assigneeFollowerNotificationsAfterDueDate.body.filter(
+      (item: any) => item.type === 'due_date' && item.sourceType === 'task' && item.taskId === taskId,
+    );
+    expect(assigneeFollowerDueDateNotifications).toHaveLength(1);
+
+    await request(app.getHttpServer())
+      .patch(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: nextStatus })
+      .expect(200);
+
+    const followerOnlyNotificationsAfterStatusChange = await request(app.getHttpServer())
+      .get('/notifications?status=unread')
+      .set('Authorization', `Bearer ${followerOnlyToken}`)
+      .expect(200);
+    const followerOnlyStatusNotifications = followerOnlyNotificationsAfterStatusChange.body.filter(
+      (item: any) => item.type === 'status' && item.sourceType === 'task' && item.taskId === taskId,
+    );
+    expect(followerOnlyStatusNotifications).toHaveLength(1);
+
+    const assigneeFollowerNotificationsAfterStatusChange = await request(app.getHttpServer())
+      .get('/notifications?status=unread')
+      .set('Authorization', `Bearer ${assigneeFollowerToken}`)
+      .expect(200);
+    const assigneeFollowerStatusNotifications = assigneeFollowerNotificationsAfterStatusChange.body.filter(
+      (item: any) => item.type === 'status' && item.sourceType === 'task' && item.taskId === taskId,
+    );
+    expect(assigneeFollowerStatusNotifications).toHaveLength(1);
 
     const statusUpdateRes = await request(app.getHttpServer())
       .post(`/projects/${projectId}/status-updates`)
@@ -4525,6 +4574,9 @@ describe('Core API Integration', () => {
       create: { projectId, userId: mentionedUserId, role: 'MEMBER' },
       update: { role: 'MEMBER' },
     });
+    await prisma.projectFollower.create({
+      data: { projectId, userId: mentionedUserId },
+    });
 
     const mentionedToken = await app
       .get(AuthService)
@@ -4553,6 +4605,9 @@ describe('Core API Integration', () => {
     const mentionNotification = memberNotifications.body.find(
       (item: any) => item.type === 'mention' && item.sourceType === 'project_status_update',
     );
+    const statusNotification = memberNotifications.body.find(
+      (item: any) => item.type === 'status' && item.sourceType === 'project_status_update',
+    );
 
     expect(mentionNotification).toMatchObject({
       userId: mentionedUserId,
@@ -4563,6 +4618,7 @@ describe('Core API Integration', () => {
         summary: `Need input from @${mentionedUserId} before launch.`,
       },
     });
+    expect(statusNotification).toBeUndefined();
 
     const createOutbox = await prisma.outboxEvent.findFirst({
       where: {

@@ -355,6 +355,7 @@ export class NotificationsService {
     input: {
       projectId: string;
       statusUpdateId: string;
+      excludeUserIds?: Array<string | undefined | null>;
       triggeredByUserId?: string;
       actor: string;
       correlationId: string;
@@ -362,7 +363,7 @@ export class NotificationsService {
   ) {
     const recipients = await this.collectProjectFollowerRecipients(tx, {
       projectId: input.projectId,
-      excludeUserIds: [input.triggeredByUserId],
+      excludeUserIds: [input.triggeredByUserId, ...(input.excludeUserIds ?? [])],
     });
 
     for (const userId of recipients) {
