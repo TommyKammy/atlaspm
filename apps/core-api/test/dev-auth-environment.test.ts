@@ -137,9 +137,18 @@ describe('Dev auth environment guardrails', () => {
         .expect(201);
 
       const setCookie = response.headers['set-cookie'] ?? [];
+      const sessionCookie = setCookie.find((cookie) => /(?:__Host-)?atlaspm_session=/.test(cookie));
+      const csrfCookie = setCookie.find((cookie) => /(?:__Host-)?atlaspm_csrf=/.test(cookie));
 
-      expect(setCookie.some((cookie) => /(?:__Host-)?atlaspm_session=/.test(cookie))).toBe(true);
-      expect(setCookie.some((cookie) => /(?:__Host-)?atlaspm_csrf=/.test(cookie))).toBe(true);
+      expect(sessionCookie).toBeDefined();
+      expect(sessionCookie).toMatch(/;\s*HttpOnly\b/i);
+      expect(sessionCookie).toMatch(/;\s*SameSite=Lax\b/i);
+      expect(sessionCookie).toMatch(/;\s*Path=\//i);
+
+      expect(csrfCookie).toBeDefined();
+      expect(csrfCookie).not.toMatch(/;\s*HttpOnly\b/i);
+      expect(csrfCookie).toMatch(/;\s*SameSite=Lax\b/i);
+      expect(csrfCookie).toMatch(/;\s*Path=\//i);
     } finally {
       await app.close();
     }

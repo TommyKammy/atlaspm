@@ -5,38 +5,37 @@
 - Branch: codex/reopen-issue-331
 - Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-331
 - Journal: /home/tommy/Dev/atlaspm-worktrees/issue-331/.codex-supervisor/issue-journal.md
-- Current phase: repairing_ci
-- Attempt count: 2
-- Last head SHA: 50b1424a3df9c05fd3425919ff9b04c0586c8b51
+- Current phase: addressing_review
+- Attempt count: 3
+- Last head SHA: 8e714a4ca8a49f14eee082f39f39e05144332e23
 - Blocked reason: none
-- Last failure signature: test:fail
+- Last failure signature: PRRT_kwDORWcwRc5zJPYu|PRRT_kwDORWcwRc5zJPY7
 - Repeated failure signature count: 1
-- Updated at: 2026-03-09T22:10:07.477Z
+- Updated at: 2026-03-10T00:59:15.581Z
 
 ## Latest Codex Summary
-- Repaired the failing auth test by updating `core-api` to set browser session and CSRF cookies on `POST /dev-auth/token` while preserving the existing JSON token response for compatibility.
-- Added cookie-name helpers in `apps/core-api/src/auth/session-cookie.ts` and updated `AuthService` / `AuthGuard` so authenticated requests can fall back to the session cookie when there is no bearer header.
-- Extended `apps/core-api/test/dev-auth-environment.test.ts` with a direct cookie-auth credential test; the focused file now passes locally.
+- PR review follow-up: the stale bot comment about a failing-test-only PR is no longer accurate because implementation and green CI are already on the branch.
+- Applied the valid bot suggestion by strengthening `apps/core-api/test/dev-auth-environment.test.ts` to assert `HttpOnly`, `SameSite=Lax`, and `Path=/` on the session cookie, and to assert that the CSRF cookie omits `HttpOnly` while still carrying `SameSite=Lax` and `Path=/`.
+- The tightened focused test still passes locally with `pnpm --filter @atlaspm/core-api exec vitest run test/dev-auth-environment.test.ts`.
 
 ## Active Failure Context
-- Category: checks
-- Summary: PR #335 has failing checks.
-- Command or source: gh pr checks
-- Reference: https://github.com/TommyKammy/atlaspm/pull/335
+- Category: review
+- Summary: 2 unresolved automated review thread(s) remain.
+- Reference: https://github.com/TommyKammy/atlaspm/pull/335#discussion_r2908201337
 - Details:
-  - test (fail/FAILURE) https://github.com/TommyKammy/atlaspm/actions/runs/22877010783/job/66370995258
-  - Local reproduction was the previously failing `test/dev-auth-environment.test.ts`; after the auth cookie patch it passes locally and needs CI rerun confirmation.
+  - apps/core-api/test/dev-auth-environment.test.ts:146 This PR is titled "Introduce secure cookie or session transport" but only contains a **failing test** with no implementation. The `DevAuthController.create()` method at `src/auth/dev-auth.controller.ts:22-26` returns only `{ token }` and never sets any cookies, so this test will always fail in the current state. If this is intentionally a "reproduce-first" commit that will be followed up with implementation, consider: 1. Marking the test as `test.skip` or `test.todo` so CI doesn't break on the known-failing assertion. 2. Or alternatively, including the implementation (cookie issuance in the controller) in this same PR so it ships as a green changeset. Merging a knowingly-failing test will cause CI failures on `main` and block other PRs.
+  - apps/core-api/test/dev-auth-environment.test.ts:142 Once the implementation is added, the test should also assert the security attributes required by the ADR (`docs/adr-browser-auth-session.md:101-120`). In particular: - The session cookie should be `HttpOnly`, `SameSite=Lax`, and `Path=/`. - The CSRF cookie should **not** be `HttpOnly` (it must be readable by JS), and should have `SameSite=Lax` and `Path=/`. Without these assertions, a future implementation could set the cookies with insecure defaults and the test would still pass. ```suggestion const sessionCookie = setCookie.find((cookie) => /(?:__Host-)?atlaspm_session=/.test(cookie)); expect(sessionCookie).toBeDefined(); expect(sessionCookie).toMatch(/;\s*HttpOnly\b/i); expect(sessionCookie).toMatch(/;\s*SameSite=Lax\b/i); expect(sessionCookie).toMatch(/;\s*Path=\//i); const csrfCookie = setCookie.find((cookie) => /(?:__Host-)?atlaspm_csrf=/.test(cookie)); expect(csrfCookie).toBeDefined(); expect(csrfCookie).not.toMatch(/;\s*HttpOnly\b/i); expect(csrfCookie).toMatch(/;\s*SameSite=Lax\b/i); expect(csrfCookie).toMatch(/;\s*Path=\//i); ```
 
 ## Codex Working Notes
 ### Current Handoff
-- Hypothesis: The immediate CI failure was caused by the reproducing test added in the previous turn; the narrow repair is now in place in `core-api` auth and should clear that failing check once CI reruns.
-- Primary failure or risk: This patch only introduces cookie-backed transport on the dev auth path plus cookie fallback in auth verification; broader web-ui migration and CSRF enforcement are still outstanding for the full issue.
-- Last focused command: `pnpm --filter @atlaspm/core-api type-check`
-- Files changed: `apps/core-api/src/auth/session-cookie.ts`, `apps/core-api/src/auth/auth.service.ts`, `apps/core-api/src/auth/auth.guard.ts`, `apps/core-api/src/auth/dev-auth.controller.ts`, `apps/core-api/test/dev-auth-environment.test.ts`
+- Hypothesis: The remaining review work is narrow: resolve the stale bot thread as obsolete and land the valid test-hardening suggestion that verifies cookie security attributes.
+- Primary failure or risk: This branch still only covers the dev auth cookie path plus server-side cookie fallback; the full browser migration and CSRF enforcement remain follow-up work outside these review threads.
+- Last focused command: `pnpm --filter @atlaspm/core-api exec vitest run test/dev-auth-environment.test.ts`
+- Files changed: `apps/core-api/test/dev-auth-environment.test.ts`
 - Next 1-3 actions:
-  1. Commit and push the focused CI repair so PR #335 can rerun the `test` job.
-  2. If CI still fails, inspect the exact failing test from the Actions log and reproduce that command locally.
-  3. After CI is green, continue the remaining browser-session work: CSRF enforcement and `web-ui` migration off `localStorage` bearer auth.
+  1. Commit and push the tightened cookie-attribute assertions.
+  2. Resolve the fixed and stale bot review threads on PR #335.
+  3. Continue the remaining browser-session work in follow-up changes after the review queue is clear.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
@@ -45,8 +44,9 @@
   - `apps/web-ui/src/lib/api.ts` reads `atlaspm_token` from `localStorage` and attaches it as `Authorization: Bearer ...`.
   - `apps/core-api/src/auth/auth.service.ts` authenticates requests from that bearer header today.
   - The previously failing reproducing test now passes after `POST /dev-auth/token` was updated to emit session and CSRF cookies.
+  - Review hardening added assertions for `HttpOnly` / `SameSite=Lax` / `Path=/` on the session cookie and for readable CSRF cookie attributes.
 - Failure signature:
-  - `test:fail`
+  - `PRRT_kwDORWcwRc5zJPYu|PRRT_kwDORWcwRc5zJPY7`
 - Current focused verification:
   - `pnpm install`
   - `pnpm --filter @atlaspm/core-api prisma:generate`
