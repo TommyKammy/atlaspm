@@ -1,0 +1,39 @@
+name: Kimi Code Review (Secure)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    # 必要に応じて特定ブランチのみ対象にする場合は以下を有効化
+    # branches:
+    #   - main
+    #   - develop
+
+permissions:
+  contents: read          # コード読み取りのみ
+  pull-requests: write    # PRコメント投稿用
+  checks: write          # GitHub Checks API（インライン注釈）用
+
+# 同じPRで新しいコミットがpushされた場合、実行中の古いレビューをキャンセル
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  kimi-review:
+    runs-on: ubuntu-latest
+    # 最重要: ForkからのPRではスキップ（ForkではSecretsにアクセスできないため）
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 全コミット履歴を取得し、baseとの差分を正確に検出
+      
+      - name: Run Kimi Code Review
+        uses: howardpen9/kimi-code-reviewer@main
+        with:
+          kimi_api_key: ${{ secrets.MOONSHOT_API_KEY }}
+          language: en
+          # オプション: 重大な問題を検出した場合にCIを失敗させる場合は以下を有効化
+          # fail_on: critical
