@@ -38,6 +38,7 @@ import { TaskTimeTrackingController } from './task-time-tracking/task-time-track
 import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
 import { TaskProjectLinksModule } from './task-project-links/task-project-links.module';
 import { ApiThrottlingModule } from './common/throttling';
+import { AttachmentDownloadUrlService } from './tasks/attachment-download-url.service';
 
 @Module({
   imports: [
@@ -81,6 +82,7 @@ import { ApiThrottlingModule } from './common/throttling';
     TaskRetentionService,
     WebhookDeliveryService,
     NotificationsService,
+    AttachmentDownloadUrlService,
     PublicFormSubmissionThrottleGuard,
     ProjectRoleGuard,
     WorkspaceRoleGuard,
