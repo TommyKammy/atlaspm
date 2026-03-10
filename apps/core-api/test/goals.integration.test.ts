@@ -191,6 +191,7 @@ describe('Goals Integration', () => {
     expect(auditActions.map((event) => event.action)).toEqual([
       'goal.created',
       'goal.updated',
+      'goal.status_rollup_updated',
       'goal.archived',
     ]);
 
@@ -202,6 +203,7 @@ describe('Goals Integration', () => {
             in: [
               'goal.created',
               'goal.updated',
+              'goal.status_rollup_updated',
               'goal.archived',
               'goal.project_linked',
               'goal.project_unlinked',
@@ -230,5 +232,105 @@ describe('Goals Integration', () => {
     });
     expect(goalProjectLinks.map((event) => event.action)).toContain('goal.project_linked');
     expect(goalProjectLinks.map((event) => event.action)).toContain('goal.project_unlinked');
+  });
+
+  test('linked project status updates roll up goal progress and expose goal status history', async () => {
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
+
+    const workspacesRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspacesRes.body[0].id as string;
+
+    const projectA = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Goal Rollup Project A ${Date.now()}` })
+      .expect(201);
+
+    const projectB = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Goal Rollup Project B ${Date.now()}` })
+      .expect(201);
+
+    const createdGoal = await request(app.getHttpServer())
+      .post('/goals')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        workspaceId,
+        title: `Cross-project rollup ${Date.now()}`,
+        description: 'Goal should follow linked project health',
+        ownerUserId: 'goals-test-user',
+      })
+      .expect(201);
+    const goalId = createdGoal.body.id as string;
+
+    await request(app.getHttpServer())
+      .post(`/goals/${goalId}/projects`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ projectId: projectA.body.id })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/goals/${goalId}/projects`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ projectId: projectB.body.id })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectA.body.id}/status-updates`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        health: 'ON_TRACK',
+        summary: 'Project A is on track.',
+      })
+      .expect(201);
+
+    const afterFirstRollup = await request(app.getHttpServer())
+      .get(`/goals/${goalId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(afterFirstRollup.body.status).toBe('ON_TRACK');
+    expect(afterFirstRollup.body.progressPercent).toBe(50);
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectB.body.id}/status-updates`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        health: 'AT_RISK',
+        summary: 'Project B is at risk.',
+      })
+      .expect(201);
+
+    const afterSecondRollup = await request(app.getHttpServer())
+      .get(`/goals/${goalId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(afterSecondRollup.body.status).toBe('AT_RISK');
+    expect(afterSecondRollup.body.progressPercent).toBe(75);
+
+    const historyRes = await request(app.getHttpServer())
+      .get(`/goals/${goalId}/history`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(historyRes.body).toEqual([
+      expect.objectContaining({
+        action: 'goal.created',
+        status: 'NOT_STARTED',
+        progressPercent: 0,
+      }),
+      expect.objectContaining({
+        action: 'goal.status_rollup_updated',
+        status: 'ON_TRACK',
+        progressPercent: 50,
+      }),
+      expect.objectContaining({
+        action: 'goal.status_rollup_updated',
+        status: 'AT_RISK',
+        progressPercent: 75,
+      }),
+    ]);
   });
 });

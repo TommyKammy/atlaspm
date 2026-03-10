@@ -104,6 +104,11 @@ export class GoalsController {
     return this.goalsService.getGoal(goalId, req.user.sub);
   }
 
+  @Get('goals/:id/history')
+  history(@Param('id') goalId: string, @CurrentRequest() req: AppRequest) {
+    return this.goalsService.getGoalHistory(goalId, req.user.sub);
+  }
+
   @Patch('goals/:id')
   update(
     @Param('id') goalId: string,

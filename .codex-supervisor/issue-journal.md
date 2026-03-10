@@ -1,69 +1,47 @@
-# Issue #355: P3: Add goal domain models and project linkage contracts
+# Issue #356: P3: Implement goal progress rollups and status history
 
 ## Supervisor Snapshot
-- Issue URL: https://github.com/TommyKammy/atlaspm/issues/355
-- Branch: codex/reopen-issue-355
-- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-355
-- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-355/.codex-supervisor/issue-journal.md
-- Current phase: addressing_review
-- Attempt count: 2
-- Last head SHA: 712f511c8bb3411fbbcbf28ed9001e4e47880c22
+- Issue URL: https://github.com/TommyKammy/atlaspm/issues/356
+- Branch: codex/reopen-issue-356
+- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-356
+- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-356/.codex-supervisor/issue-journal.md
+- Current phase: reproducing
+- Attempt count: 1
+- Last head SHA: b13813d88059e62725fd0865ffeaf14fcb41b857
 - Blocked reason: none
-- Last failure signature: PRRT_kwDORWcwRc5zbbJZ|PRRT_kwDORWcwRc5zbbJm|PRRT_kwDORWcwRc5zbbJx|PRRT_kwDORWcwRc5zbbKC|PRRT_kwDORWcwRc5zbbKL
-- Repeated failure signature count: 1
-- Updated at: 2026-03-10T21:28:57.521Z
+- Last failure signature: none
+- Repeated failure signature count: 0
+- Updated at: 2026-03-10T21:44:25.320Z
 
 ## Latest Codex Summary
-Addressed the five automated PR review threads on the goal slice.
-
-Changes:
-- Switched goal owner DTO validation from `@IsUUID()` to `@IsString()` so auth subject-based user IDs are accepted on create and update.
-- Wrapped `GoalsService.addProjectLink()` in a `P2002` conflict translation so concurrent duplicate link creation returns `409` instead of bubbling as `500`.
-- Scoped the goal integration test’s outbox assertions to the current run (`createdAt >= testStartedAt`) and the specific `goalId`.
-- Scoped `GoalProjectLink` audit assertions to the concrete link IDs created by the test.
-
-Tests run:
-`pnpm --filter @atlaspm/core-api test -- test/goals.integration.test.ts`
-`pnpm --filter @atlaspm/core-api type-check`
-`pnpm --filter @atlaspm/core-api exec eslint src/goals/goals.controller.ts src/goals/goals.service.ts`
-
-Summary: Fixed the unresolved automated review findings for PR #359 and reverified the focused goal slice locally.
-State hint: addressing_review
-Blocked reason: none
-Tests: pnpm --filter @atlaspm/core-api test -- test/goals.integration.test.ts; pnpm --filter @atlaspm/core-api type-check; pnpm --filter @atlaspm/core-api exec eslint src/goals/goals.controller.ts src/goals/goals.service.ts
-Failure signature: none
-Next action: Commit the review fixes, push `codex/reopen-issue-355`, and resolve the five PR review threads.
+- None yet.
 
 ## Active Failure Context
 - None recorded.
 
 ## Codex Working Notes
 ### Current Handoff
-- Hypothesis: Issue #355 was an unimplemented `core-api` slice. The narrowest missing contract was `POST /goals`, which returned `404` before implementation.
-- Primary failure or risk: The prior implementation was functionally okay, but five automated review comments identified DTO validation mismatches, a concurrency error mapping gap, and two test false-positive risks. Those fixes are now applied and passing locally.
-- Last focused command: `pnpm --filter @atlaspm/core-api exec eslint src/goals/goals.controller.ts src/goals/goals.service.ts`
-- Files changed: `apps/core-api/src/goals/goals.controller.ts`, `apps/core-api/src/goals/goals.service.ts`, `apps/core-api/test/goals.integration.test.ts`
+- Hypothesis: Goal rollups were still unimplemented after the basic goals slice landed. The narrowest missing contract was that linked project status updates did not change goal `status`/`progressPercent`, and there was no queryable goal history endpoint.
+- Primary failure or risk: `GoalsService` stored manual status/progress only. `POST /projects/:id/status-updates` left linked goals at `NOT_STARTED`, and `GET /goals/:id/history` did not exist.
+- Last focused command: `pnpm --filter @atlaspm/core-api exec eslint src/goals/goals.controller.ts src/goals/goals.module.ts src/goals/goals.service.ts src/projects/project-status-updates.controller.ts`
+- Files changed: `apps/core-api/src/goals/goals.controller.ts`, `apps/core-api/src/goals/goals.module.ts`, `apps/core-api/src/goals/goals.service.ts`, `apps/core-api/src/projects/project-status-updates.controller.ts`, `apps/core-api/test/goals.integration.test.ts`
 - Next 1-3 actions:
-  1. Commit the review-fix patch on `codex/reopen-issue-355`.
-  2. Push the branch and resolve the five PR review threads on #359.
-  3. Re-watch CI only if the PR picks up new failures after the push.
+  1. Commit the goal rollup/history checkpoint on `codex/reopen-issue-356`.
+  2. Decide whether to broaden rollups beyond project health snapshots or keep this first pass scoped to latest linked project status updates.
+  3. If a PR does not exist yet for #356, open a draft PR from this checkpoint.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
 - Reproduction:
-  - `pnpm --filter @atlaspm/core-api test -- test/goals.integration.test.ts` initially failed at `apps/core-api/test/goals.integration.test.ts:86` with `expected 201 "Created", got 404 "Not Found"` for `POST /goals`.
-- Environment prep needed in this worktree before the real reproduction:
-  - `pnpm install`
-  - `pnpm --filter @atlaspm/domain build`
-  - `pnpm --filter @atlaspm/shared-types build`
+  - After `pnpm install`, `pnpm --filter @atlaspm/domain build`, and `pnpm --filter @atlaspm/shared-types build`, the new goal rollup test failed at `apps/core-api/test/goals.integration.test.ts:293` with `expected 'NOT_STARTED' to be 'ON_TRACK'` after creating a linked project status update.
 - Failure signature:
-  - `goal-review-thread-fixes`
+  - `goal-rollup-not-applied`
 - Current focused verification:
   - `pnpm --filter @atlaspm/core-api test -- test/goals.integration.test.ts`
   - `pnpm --filter @atlaspm/core-api type-check`
-  - `pnpm --filter @atlaspm/core-api exec eslint src/goals/goals.controller.ts src/goals/goals.service.ts`
+  - `pnpm --filter @atlaspm/core-api exec eslint src/goals/goals.controller.ts src/goals/goals.module.ts src/goals/goals.service.ts src/projects/project-status-updates.controller.ts`
 - Implementation notes:
-  - `ownerUserId` validation now matches the actual `User.id` semantics (`sub` strings, not UUIDs).
-  - `addProjectLink()` now translates concurrent unique-constraint races to `ConflictException`.
-  - Goal outbox assertions are bounded to this test run and goal payloads.
-  - `GoalProjectLink` audit assertions are bounded to the created link IDs.
+  - Goal rollup uses each linked project's latest `ProjectStatusUpdate.health`: `ON_TRACK=100`, `AT_RISK=50`, `OFF_TRACK=0`, then averages across active links for `progressPercent`.
+  - Goal status rollup takes the worst latest linked health: any `OFF_TRACK` wins, else any `AT_RISK`, else any `ON_TRACK`, else `NOT_STARTED`.
+  - `POST /projects/:id/status-updates` now refreshes linked goal rollups inside the same transaction.
+  - `GET /goals/:id/history` exposes status/progress snapshots from goal audit events, including dedicated `goal.status_rollup_updated` events.

@@ -9,5 +9,6 @@ import { GoalsService } from './goals.service';
   imports: [AuthModule],
   controllers: [GoalsController],
   providers: [GoalsService, PrismaService, DomainService],
+  exports: [GoalsService],
 })
 export class GoalsModule {}
