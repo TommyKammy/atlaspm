@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './helpers/browser-auth';
 
 async function devLogin(page: Page, sub: string, email: string) {
   await page.goto('/login');

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './helpers/browser-auth';
 
 async function login(page: Page) {
   const sub = `e2e-rules-user-${Date.now()}`;

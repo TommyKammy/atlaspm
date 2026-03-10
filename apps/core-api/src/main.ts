@@ -5,6 +5,7 @@ import { AppModule } from './app.module';
 import { CorrelationIdMiddleware } from './common/correlation.middleware';
 import { GlobalErrorFilter } from './common/error.filter';
 import { RequestLoggingMiddleware } from './common/request-logging.middleware';
+import { buildCorsOptions } from './cors-options';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
@@ -19,7 +20,7 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, document);
 
-  app.enableCors();
+  app.enableCors(buildCorsOptions());
   const port = Number(process.env.PORT ?? 3001);
   await app.listen(port);
 }

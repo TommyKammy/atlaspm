@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { expect, test, type APIRequestContext } from './helpers/browser-auth';
 
 const API = process.env.E2E_CORE_API_URL ?? 'http://localhost:3001';
 const SLACK_SIGNING_SECRET =

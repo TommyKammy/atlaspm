@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './helpers/browser-auth';
 
 const API = process.env.E2E_CORE_API_URL ?? 'http://localhost:3001';
 const DAY_MS = 24 * 60 * 60 * 1000;
