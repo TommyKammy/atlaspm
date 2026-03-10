@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { GoalStatus, ProjectRole, WorkspaceRole } from '@prisma/client';
+import { GoalStatus, Prisma, ProjectRole, WorkspaceRole } from '@prisma/client';
 import { DomainService } from '../common/domain.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -213,51 +213,58 @@ export class GoalsService {
       throw new BadRequestException('goal and project must be in the same workspace');
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const existing = await tx.goalProjectLink.findUnique({
-        where: { goalId_projectId: { goalId, projectId } },
-      });
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const existing = await tx.goalProjectLink.findUnique({
+          where: { goalId_projectId: { goalId, projectId } },
+        });
 
-      if (existing && !existing.deletedAt) {
+        if (existing && !existing.deletedAt) {
+          throw new ConflictException('goal is already linked to this project');
+        }
+
+        const link = existing
+          ? await tx.goalProjectLink.update({
+              where: { id: existing.id },
+              data: { deletedAt: null },
+            })
+          : await tx.goalProjectLink.create({
+              data: { goalId, projectId },
+            });
+
+        await this.domain.appendAuditOutbox({
+          tx,
+          actor: actorUserId,
+          entityType: 'GoalProjectLink',
+          entityId: link.id,
+          action: 'goal.project_linked',
+          beforeJson: existing ?? null,
+          afterJson: link,
+          correlationId,
+          outboxType: 'goal.project_linked',
+          payload: {
+            goalId,
+            projectId,
+            workspaceId: goal.workspaceId,
+            linkId: link.id,
+          },
+        });
+
+        return {
+          id: link.id,
+          goalId: link.goalId,
+          projectId: link.projectId,
+          createdAt: link.createdAt,
+          updatedAt: link.updatedAt,
+          deletedAt: link.deletedAt,
+        };
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ConflictException('goal is already linked to this project');
       }
-
-      const link = existing
-        ? await tx.goalProjectLink.update({
-            where: { id: existing.id },
-            data: { deletedAt: null },
-          })
-        : await tx.goalProjectLink.create({
-            data: { goalId, projectId },
-          });
-
-      await this.domain.appendAuditOutbox({
-        tx,
-        actor: actorUserId,
-        entityType: 'GoalProjectLink',
-        entityId: link.id,
-        action: 'goal.project_linked',
-        beforeJson: existing ?? null,
-        afterJson: link,
-        correlationId,
-        outboxType: 'goal.project_linked',
-        payload: {
-          goalId,
-          projectId,
-          workspaceId: goal.workspaceId,
-          linkId: link.id,
-        },
-      });
-
-      return {
-        id: link.id,
-        goalId: link.goalId,
-        projectId: link.projectId,
-        createdAt: link.createdAt,
-        updatedAt: link.updatedAt,
-        deletedAt: link.deletedAt,
-      };
-    });
+      throw error;
+    }
   }
 
   async removeProjectLink(goalId: string, projectId: string, actorUserId: string, correlationId: string) {

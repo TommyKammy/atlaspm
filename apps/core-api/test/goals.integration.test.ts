@@ -61,6 +61,7 @@ describe('Goals Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     const workspaceId = workspacesRes.body[0].id as string;
+    const testStartedAt = new Date();
 
     const projectA = await request(app.getHttpServer())
       .post('/projects')
@@ -104,6 +105,7 @@ describe('Goals Integration', () => {
       .patch(`/goals/${goalId}`)
       .set('Authorization', `Bearer ${token}`)
       .send({
+        ownerUserId: 'goals-test-user',
         status: 'AT_RISK',
         progressPercent: 60,
         title: 'Ship Q2 launch rev 2',
@@ -118,13 +120,13 @@ describe('Goals Integration', () => {
     expect(fetched.body.progressPercent).toBe(60);
     expect(fetched.body.title).toBe('Ship Q2 launch rev 2');
 
-    await request(app.getHttpServer())
+    const linkA = await request(app.getHttpServer())
       .post(`/goals/${goalId}/projects`)
       .set('Authorization', `Bearer ${token}`)
       .send({ projectId: projectA.body.id })
       .expect(201);
 
-    await request(app.getHttpServer())
+    const linkB = await request(app.getHttpServer())
       .post(`/goals/${goalId}/projects`)
       .set('Authorization', `Bearer ${token}`)
       .send({ projectId: projectB.body.id })
@@ -195,14 +197,25 @@ describe('Goals Integration', () => {
     const outboxTypes = (
       await prisma.outboxEvent.findMany({
         where: {
-          OR: [
-            { type: { in: ['goal.created', 'goal.updated', 'goal.archived'] } },
-            { type: { in: ['goal.project_linked', 'goal.project_unlinked'] } },
-          ],
+          createdAt: { gte: testStartedAt },
+          type: {
+            in: [
+              'goal.created',
+              'goal.updated',
+              'goal.archived',
+              'goal.project_linked',
+              'goal.project_unlinked',
+            ],
+          },
         },
         orderBy: { createdAt: 'asc' },
       })
-    ).map((event) => event.type);
+    )
+      .filter((event) => {
+        const payload = event.payload as Record<string, unknown>;
+        return payload.id === goalId || payload.goalId === goalId;
+      })
+      .map((event) => event.type);
     expect(outboxTypes).toContain('goal.created');
     expect(outboxTypes).toContain('goal.updated');
     expect(outboxTypes).toContain('goal.archived');
@@ -210,7 +223,10 @@ describe('Goals Integration', () => {
     expect(outboxTypes).toContain('goal.project_unlinked');
 
     const goalProjectLinks = await prisma.auditEvent.findMany({
-      where: { entityType: 'GoalProjectLink' },
+      where: {
+        entityType: 'GoalProjectLink',
+        entityId: { in: [linkA.body.id as string, linkB.body.id as string] },
+      },
     });
     expect(goalProjectLinks.map((event) => event.action)).toContain('goal.project_linked');
     expect(goalProjectLinks.map((event) => event.action)).toContain('goal.project_unlinked');

@@ -16,9 +16,9 @@ import {
   IsInt,
   IsOptional,
   IsString,
-  IsUUID,
   Max,
   Min,
+  IsUUID,
 } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentRequest } from '../common/current-request';
@@ -37,7 +37,7 @@ class CreateGoalDto {
   description?: string;
 
   @IsOptional()
-  @IsUUID()
+  @IsString()
   ownerUserId?: string;
 
   @IsOptional()
@@ -61,7 +61,7 @@ class UpdateGoalDto {
   description?: string | null;
 
   @IsOptional()
-  @IsUUID()
+  @IsString()
   ownerUserId?: string;
 
   @IsOptional()
