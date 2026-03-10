@@ -2655,19 +2655,24 @@ export class TasksController {
   ): Promise<Array<T & { followerCount: number; isFollowedByCurrentUser: boolean }>> {
     if (!tasks.length) return [];
 
-    const followers = await this.prisma.taskFollower.findMany({
-      where: { taskId: { in: tasks.map((task) => task.id) } },
-      select: { taskId: true, userId: true },
-    });
+    const taskIds = tasks.map((task) => task.id);
+    const [followerCounts, followedTasks] = await Promise.all([
+      this.prisma.taskFollower.groupBy({
+        by: ['taskId'],
+        where: { taskId: { in: taskIds } },
+        _count: { _all: true },
+      }),
+      this.prisma.taskFollower.findMany({
+        where: { taskId: { in: taskIds }, userId },
+        select: { taskId: true },
+      }),
+    ]);
 
     const counts = new Map<string, number>();
-    const followedTaskIds = new Set<string>();
-    for (const follower of followers) {
-      counts.set(follower.taskId, (counts.get(follower.taskId) ?? 0) + 1);
-      if (follower.userId === userId) {
-        followedTaskIds.add(follower.taskId);
-      }
+    for (const followerCount of followerCounts) {
+      counts.set(followerCount.taskId, followerCount._count._all);
     }
+    const followedTaskIds = new Set(followedTasks.map((task) => task.taskId));
 
     return tasks.map((task) => ({
       ...task,

@@ -16,6 +16,12 @@ function controllerDecoratorPattern(routePath: string) {
   return new RegExp(`@Controller\\s*\\(\\s*['"\`]${escapedRoutePath}['"\`]\\s*\\)`);
 }
 
+function schemaPattern(snippet: string) {
+  const escapedSnippet = snippet.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const whitespaceTolerant = escapedSnippet.replace(/\s+/g, '\\s*');
+  return new RegExp(whitespaceTolerant);
+}
+
 function collectTypeScriptSources(dirPath: string): string[] {
   const { readdirSync } = require('node:fs') as typeof import('node:fs');
   const entries = readdirSync(dirPath, { withFileTypes: true });
@@ -40,10 +46,10 @@ describe('task and project follower slice', () => {
     const schemaSource = readFileSync(schemaPath, 'utf8');
     const sourceFiles = collectTypeScriptSources(srcRoot);
 
-    expect(schemaSource).toContain('model TaskFollower');
-    expect(schemaSource).toContain('model ProjectFollower');
-    expect(schemaSource).toContain('@@unique([taskId, userId])');
-    expect(schemaSource).toContain('@@unique([projectId, userId])');
+    expect(schemaSource).toMatch(schemaPattern('model TaskFollower'));
+    expect(schemaSource).toMatch(schemaPattern('model ProjectFollower'));
+    expect(schemaSource).toMatch(schemaPattern('@@unique([taskId, userId])'));
+    expect(schemaSource).toMatch(schemaPattern('@@unique([projectId, userId])'));
 
     expect(sourceFiles.some((source) => routeDecoratorPattern('Get', 'tasks/:id/followers').test(source))).toBe(true);
     expect(sourceFiles.some((source) => routeDecoratorPattern('Post', 'tasks/:id/followers').test(source))).toBe(true);

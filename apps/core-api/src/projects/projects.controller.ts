@@ -301,19 +301,24 @@ export class ProjectsController {
   private async hydrateProjectsWithFollowerState<T extends { id: string }>(projects: T[], userId: string) {
     if (!projects.length) return [];
 
-    const followers = await this.prisma.projectFollower.findMany({
-      where: { projectId: { in: projects.map((project) => project.id) } },
-      select: { projectId: true, userId: true },
-    });
+    const projectIds = projects.map((project) => project.id);
+    const [followerCounts, followedProjects] = await Promise.all([
+      this.prisma.projectFollower.groupBy({
+        by: ['projectId'],
+        where: { projectId: { in: projectIds } },
+        _count: { _all: true },
+      }),
+      this.prisma.projectFollower.findMany({
+        where: { projectId: { in: projectIds }, userId },
+        select: { projectId: true },
+      }),
+    ]);
 
     const counts = new Map<string, number>();
-    const followedProjectIds = new Set<string>();
-    for (const follower of followers) {
-      counts.set(follower.projectId, (counts.get(follower.projectId) ?? 0) + 1);
-      if (follower.userId === userId) {
-        followedProjectIds.add(follower.projectId);
-      }
+    for (const followerCount of followerCounts) {
+      counts.set(followerCount.projectId, followerCount._count._all);
     }
+    const followedProjectIds = new Set(followedProjects.map((project) => project.projectId));
 
     return projects.map((project) => ({
       ...project,
