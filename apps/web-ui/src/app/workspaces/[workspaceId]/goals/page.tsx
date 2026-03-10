@@ -110,7 +110,7 @@ export default function GoalsPage() {
                   <Label htmlFor="goal-status">{t('status')}</Label>
                   <select
                     id="goal-status"
-                    className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                    className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring focus-visible:outline-none"
                     value={draft.status}
                     onChange={(event) =>
                       setDraft((current) => ({

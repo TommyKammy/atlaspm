@@ -55,22 +55,25 @@ export type GoalProjectLink = {
   id: string;
   goalId: string;
   projectId: string;
+  deletedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GoalProjectLinkWithProject = GoalProjectLink & {
   project: {
     id: string;
     name: string;
     workspaceId: string;
   };
-  createdAt: string;
-  updatedAt: string;
 };
 
 export type GoalHistoryItem = {
-  id: string;
   action: string;
   status: GoalStatus;
   progressPercent: number;
   createdAt: string;
-  actorUserId?: string | null;
+  actor: string | null;
 };
 
 export type WorkspaceUserRow = {

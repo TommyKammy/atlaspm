@@ -131,7 +131,7 @@ export default function GoalDetailPage() {
                     <Label htmlFor="edit-goal-status">{t('status')}</Label>
                     <select
                       id="edit-goal-status"
-                      className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                      className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring focus-visible:outline-none"
                       value={draft.status}
                       onChange={(event) =>
                         setDraft((current) => ({
@@ -291,7 +291,7 @@ export default function GoalDetailPage() {
               <p className="text-sm text-muted-foreground">{t('noGoalHistory')}</p>
             ) : null}
             {goalHistoryQuery.data?.map((entry) => (
-              <div key={entry.id} className="rounded-lg border px-4 py-3">
+              <div key={`${entry.createdAt}-${entry.action}`} className="rounded-lg border px-4 py-3">
                 <div className="flex items-center justify-between gap-3">
                   <p className="font-medium">{goalHistoryActionLabel(entry.action, t)}</p>
                   <time className="text-xs text-muted-foreground" dateTime={entry.createdAt}>

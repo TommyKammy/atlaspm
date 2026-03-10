@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { apiBaseUrl } from '@/lib/api';
 import {
   archiveGoal,
   createGoal,
@@ -52,57 +53,57 @@ describe('goals api client', () => {
 
     expect(calls).toEqual([
       {
-        url: 'http://localhost:3001/workspaces/ws-1/goals',
+        url: `${apiBaseUrl}/workspaces/ws-1/goals`,
         method: 'GET',
         body: undefined,
       },
       {
-        url: 'http://localhost:3001/workspaces/ws-1/goals?includeArchived=true',
+        url: `${apiBaseUrl}/workspaces/ws-1/goals?includeArchived=true`,
         method: 'GET',
         body: undefined,
       },
       {
-        url: 'http://localhost:3001/goals/goal-1',
+        url: `${apiBaseUrl}/goals/goal-1`,
         method: 'GET',
         body: undefined,
       },
       {
-        url: 'http://localhost:3001/goals/goal-1/history',
+        url: `${apiBaseUrl}/goals/goal-1/history`,
         method: 'GET',
         body: undefined,
       },
       {
-        url: 'http://localhost:3001/goals/goal-1/history?take=25',
+        url: `${apiBaseUrl}/goals/goal-1/history?take=25`,
         method: 'GET',
         body: undefined,
       },
       {
-        url: 'http://localhost:3001/goals/goal-1/projects',
+        url: `${apiBaseUrl}/goals/goal-1/projects`,
         method: 'GET',
         body: undefined,
       },
       {
-        url: 'http://localhost:3001/goals',
+        url: `${apiBaseUrl}/goals`,
         method: 'POST',
         body: JSON.stringify({ workspaceId: 'ws-1', title: 'Launch expansion' }),
       },
       {
-        url: 'http://localhost:3001/goals/goal-1',
+        url: `${apiBaseUrl}/goals/goal-1`,
         method: 'PATCH',
         body: JSON.stringify({ progressPercent: 40, status: 'AT_RISK' }),
       },
       {
-        url: 'http://localhost:3001/goals/goal-1/projects',
+        url: `${apiBaseUrl}/goals/goal-1/projects`,
         method: 'POST',
         body: JSON.stringify({ projectId: 'project-1' }),
       },
       {
-        url: 'http://localhost:3001/goals/goal-1/projects/project-1',
+        url: `${apiBaseUrl}/goals/goal-1/projects/project-1`,
         method: 'DELETE',
         body: undefined,
       },
       {
-        url: 'http://localhost:3001/goals/goal-1',
+        url: `${apiBaseUrl}/goals/goal-1`,
         method: 'DELETE',
         body: undefined,
       },

@@ -3,7 +3,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type { Goal, GoalHistoryItem, GoalProjectLink, GoalStatus } from '@/lib/types';
+import type {
+  Goal,
+  GoalHistoryItem,
+  GoalProjectLink,
+  GoalProjectLinkWithProject,
+  GoalStatus,
+} from '@/lib/types';
 
 type GoalListOptions = {
   includeArchived?: boolean;
@@ -28,6 +34,10 @@ export type UpdateGoalInput = {
   ownerUserId?: string;
   status?: GoalStatus;
   progressPercent?: number;
+};
+
+export type ApiOkResponse = {
+  ok: true;
 };
 
 function buildGoalListPath(workspaceId: string, options?: GoalListOptions) {
@@ -63,8 +73,12 @@ export async function getGoalHistory(
   return (await api(buildGoalHistoryPath(goalId, options))) as GoalHistoryItem[];
 }
 
-export async function getGoalProjects(goalId: string): Promise<GoalProjectLink[]> {
-  return (await api(`/goals/${goalId}/projects`)) as GoalProjectLink[];
+export async function getGoalProjects(goalId: string): Promise<GoalProjectLinkWithProject[]> {
+  return (await api(`/goals/${goalId}/projects`)) as GoalProjectLinkWithProject[];
+}
+
+export async function getProjectGoals(projectId: string): Promise<Goal[]> {
+  return (await api(`/projects/${projectId}/goals`)) as Goal[];
 }
 
 export async function createGoal(input: CreateGoalInput): Promise<Goal> {
@@ -81,10 +95,10 @@ export async function updateGoal(goalId: string, input: UpdateGoalInput): Promis
   })) as Goal;
 }
 
-export async function archiveGoal(goalId: string): Promise<Goal> {
+export async function archiveGoal(goalId: string): Promise<ApiOkResponse> {
   return (await api(`/goals/${goalId}`, {
     method: 'DELETE',
-  })) as Goal;
+  })) as ApiOkResponse;
 }
 
 export async function linkGoalProject(goalId: string, projectId: string): Promise<GoalProjectLink> {
@@ -94,10 +108,10 @@ export async function linkGoalProject(goalId: string, projectId: string): Promis
   })) as GoalProjectLink;
 }
 
-export async function unlinkGoalProject(goalId: string, projectId: string): Promise<GoalProjectLink> {
+export async function unlinkGoalProject(goalId: string, projectId: string): Promise<ApiOkResponse> {
   return (await api(`/goals/${goalId}/projects/${projectId}`, {
     method: 'DELETE',
-  })) as GoalProjectLink;
+  })) as ApiOkResponse;
 }
 
 export function useGoals(workspaceId: string, options?: GoalListOptions) {
@@ -129,6 +143,14 @@ export function useGoalProjects(goalId: string) {
     queryKey: queryKeys.goalProjects(goalId),
     queryFn: () => getGoalProjects(goalId),
     enabled: !!goalId,
+  });
+}
+
+export function useProjectGoals(projectId: string) {
+  return useQuery({
+    queryKey: queryKeys.projectGoals(projectId),
+    queryFn: () => getProjectGoals(projectId),
+    enabled: !!projectId,
   });
 }
 

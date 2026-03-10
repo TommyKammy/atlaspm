@@ -5,49 +5,71 @@
 - Branch: codex/reopen-issue-357
 - Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-357
 - Journal: /home/tommy/Dev/atlaspm-worktrees/issue-357/.codex-supervisor/issue-journal.md
-- Current phase: reproducing
-- Attempt count: 1
-- Last head SHA: f0d10ece2e1d352cb1bc034e58786e3ac0edb5bb
+- Current phase: repairing_ci
+- Attempt count: 2
+- Last head SHA: 1308c57685e348eca80e8a125671c6504310b045
 - Blocked reason: none
-- Last failure signature: none
-- Repeated failure signature count: 0
-- Updated at: 2026-03-10T22:10:46.729Z
+- Last failure signature: e2e:fail
+- Repeated failure signature count: 1
+- Updated at: 2026-03-10T22:29:05.490Z
 
 ## Latest Codex Summary
-- Added initial `web-ui` goal management surface on top of the public goal API: workspace goal list/detail pages, goal API client/hooks, sidebar entry, and a project-page alignment card with live rollup status/progress.
-- Added a focused reproducing test for the missing goal API client (`apps/web-ui/src/lib/api/goals.test.ts`), then implemented the client so the test now passes.
-- Focused verification is green for `web-ui` test/lint/type-check. `pnpm --filter @atlaspm/web-ui build` still fails on a pre-existing workspace resolution problem where existing files cannot resolve `@atlaspm/domain`.
+Implemented the `web-ui` goal surface and committed it as `1308c57` (`Add web goal management UI`).
+
+The new slice adds workspace goal list/detail pages at [goals/page.tsx](/home/tommy/Dev/atlaspm-worktrees/issue-357/apps/web-ui/src/app/workspaces/[workspaceId]/goals/page.tsx) and [goals/[goalId]/page.tsx](/home/tommy/Dev/atlaspm-worktrees/issue-357/apps/web-ui/src/app/workspaces/[workspaceId]/goals/[goalId]/page.tsx), a public goal API client plus focused reproducing test at [goals.ts](/home/tommy/Dev/atlaspm-worktrees/issue-357/apps/web-ui/src/lib/api/goals.ts) and [goals.test.ts](/home/tommy/Dev/atlaspm-worktrees/issue-357/apps/web-ui/src/lib/api/goals.test.ts), a sidebar entry, and a project-context alignment card at [project-goals-card.tsx](/home/tommy/Dev/atlaspm-worktrees/issue-357/apps/web-ui/src/components/project-goals-card.tsx). I also wired project status updates to invalidate goal queries so linked goal rollups refresh without manual reload.
+
+Focused verification passed for the new goal client and `web-ui` static checks. `pnpm --filter @atlaspm/web-ui build` still fails, but on a pre-existing Turbopack/module-resolution issue in existing `@atlaspm/domain` imports outside this goal patch.
+
+Summary: Added minimal goal management and project-alignment UI in `web-ui`, with focused test coverage and a checkpoint commit at `1308c57`.
+State hint: implementing
+Blocked reason: none
+Tests: `pnpm install`; `pnpm --filter @atlaspm/web-ui test -- src/lib/api/goals.test.ts`; `pnpm --filter @atlaspm/web-ui type-check`; `pnpm --filter @atlaspm/web-ui lint`; `pnpm --filter @atlaspm/web-ui build` (fails on pre-existing `@atlaspm/domain` resolution errors)
+Failure signature: preexisting-web-ui-domain-build-resolution
+Next action: Manually review the new goal list/detail and project alignment flows, then decide whether to fix the baseline `@atlaspm/domain` build-resolution issue in this branch or treat this UI checkpoint as ready for PR follow-up.
 
 ## Active Failure Context
-- None recorded.
+- Category: checks
+- Summary: PR #361 has failing checks.
+- Command or source: gh pr checks
+- Reference: https://github.com/TommyKammy/atlaspm/pull/361
+- Details:
+  - e2e (fail/FAILURE) https://github.com/TommyKammy/atlaspm/actions/runs/22926873488/job/66539471180
 
 ## Codex Working Notes
 ### Current Handoff
-- Hypothesis: Issue #357 was mostly unimplemented in `web-ui`; the smallest proof was the absence of a goal API client and routes. The new list/detail/alignment UI is now present and wired only through the public goal endpoints.
-- Primary failure or risk: Remaining risk is baseline app build health, not the new goal UI itself. `next build` fails in existing files because Turbopack cannot resolve `@atlaspm/domain` imports from multiple pre-existing modules.
-- Last focused command: `pnpm --filter @atlaspm/web-ui build`
-- Files changed: `apps/web-ui/src/app/workspaces/[workspaceId]/goals/page.tsx`, `apps/web-ui/src/app/workspaces/[workspaceId]/goals/[goalId]/page.tsx`, `apps/web-ui/src/components/project-goals-card.tsx`, `apps/web-ui/src/components/goal-utils.ts`, `apps/web-ui/src/lib/api/goals.ts`, `apps/web-ui/src/lib/api/goals.test.ts`, plus shared `Sidebar`, `project-status-updates`, `query-keys`, `types`, and `i18n` wiring.
+- Hypothesis: The red PR signal is a flaky timeline marquee e2e rather than a deterministic regression from the goal UI. I could not reproduce the failing Playwright case locally, but I used the repairing-CI turn to remove the open review risks and cut the project-page goal lookup from N+1 requests to a single endpoint.
+- Primary failure or risk: CI `e2e` may still be unstable until rerun, but the exact failing test (`timeline marquee selection can shift multiple tasks together immediately`) passed locally on repeated targeted runs. The remaining local verification gap is `core-api` integration under Node 24, which still hits the workspace `@atlaspm/domain` resolution issue in Vitest/Vite.
+- Last focused command: `E2E_KEEP_UP=1 pnpm --filter @atlaspm/playwright exec playwright test tests/timeline.spec.ts -g "timeline marquee selection can shift multiple tasks together immediately" --repeat-each=5`
+- Files changed: `apps/core-api/src/goals/goals.controller.ts`, `apps/core-api/src/goals/goals.service.ts`, `apps/core-api/test/goals.integration.test.ts`, `apps/web-ui/src/components/project-goals-card.tsx`, `apps/web-ui/src/components/project-status-updates.tsx`, `apps/web-ui/src/lib/api/goals.ts`, `apps/web-ui/src/lib/api/goals.test.ts`, `apps/web-ui/src/lib/query-keys.ts`, `apps/web-ui/src/lib/types.ts`, and both goal pages.
 - Next 1-3 actions:
-  1. Review the new goal UI in-browser and decide whether to keep this as the first checkpoint or extend coverage (for example archived-goal toggles or richer history/alignment UX).
-  2. If a full repo build gate is required for this issue, fix the existing `@atlaspm/domain` module-resolution problem in `apps/web-ui` before relying on `next build`.
-  3. Commit the current `web-ui` goal management checkpoint once the journal update is recorded.
+  1. Commit and push the review-fix patch so PR #361 reruns CI.
+  2. If `e2e` fails again on the same timeline marquee test, treat it as a flaky or deeper timeline regression and pull the uploaded Playwright artifact for screenshot/video comparison against local runs.
+  3. Resolve or reply to the configured-bot review threads, especially the project-goals N+1 thread, once the new single-query endpoint is on the PR branch.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
 - Reproduction:
-  - `apps/web-ui` had no goal routes, no goal API client, no sidebar entry, and no project-to-goal alignment UI.
-  - Added `apps/web-ui/src/lib/api/goals.test.ts` first; it would not run until `pnpm install` because this worktree had no `node_modules`.
+  - CI failure from `gh run view 22926873488 --job 66539471180 --log`: only `tests/timeline.spec.ts:432` failed, expecting selected tasks to shift from `dayIso(0)/dayIso(4)` to `dayIso(2)/dayIso(6)` after marquee drag, but both tasks stayed at their original start dates.
+  - Local reproduction via Docker-backed Playwright did not fail once:
+    - single run passed
+    - `--repeat-each=5` passed all five runs
 - Failure signature:
-  - `missing-web-ui-goals-surface`
+  - `timeline-marquee-ci-nonrepro`
 - Current focused verification:
-  - `pnpm install`
+  - `gh pr checks 361`
+  - `gh run view 22926873488 --job 66539471180 --log`
+  - `E2E_KEEP_UP=1 ./scripts/run-e2e.sh e2e/playwright/tests/timeline.spec.ts -g "timeline marquee selection can shift multiple tasks together immediately"`
+  - `E2E_KEEP_UP=1 pnpm --filter @atlaspm/playwright exec playwright test tests/timeline.spec.ts -g "timeline marquee selection can shift multiple tasks together immediately" --repeat-each=5`
   - `pnpm --filter @atlaspm/web-ui test -- src/lib/api/goals.test.ts`
   - `pnpm --filter @atlaspm/web-ui type-check`
   - `pnpm --filter @atlaspm/web-ui lint`
-  - `pnpm --filter @atlaspm/web-ui build`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/core-api test -- test/goals.integration.test.ts` (fails locally on existing `@atlaspm/domain` package resolution under Node 24/Vite)
 - Implementation notes:
-  - New `web-ui` goal client exposes list/detail/history/project-link CRUD through public endpoints only.
-  - Added workspace goal list and goal detail routes under `/workspaces/[workspaceId]/goals`.
-  - Added project-page goal alignment card that resolves linked goals via workspace goal list + per-goal project-link reads and allows link/unlink mutations.
-  - `ProjectStatusUpdates` now invalidates goal queries after posting a project status update so linked goal rollups refresh without a manual page reload.
-  - Build blocker is unrelated to this patch: existing files such as `audit-activity-list.tsx`, `project-timeline-view.tsx`, `task-detail-drawer.tsx`, `use-timeline-data.ts`, and `project-saved-views.ts` fail Turbopack resolution for `@atlaspm/domain`.
+  - Added `GET /projects/:id/goals` to the goal API and switched the project page to use that single linked-goals query instead of one `/goals/:id/projects` request per goal.
+  - Aligned `web-ui` goal typings with the actual API contract:
+    - goal history entries no longer assume `id` / `actorUserId`
+    - archive/unlink return `{ ok: true }`
+    - link mutation returns the raw goal-project-link shape without nested `project`
+  - Goal page selects now use the same focus-ring pattern as other selects in the app.
+  - `ProjectStatusUpdates` now invalidates both active and `includeArchived` workspace-goal queries after rollup-affecting project status updates.

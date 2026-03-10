@@ -144,6 +144,12 @@ describe('Goals Integration', () => {
       .expect(200);
     expect(linkedProjects.body.map((link: any) => link.projectId)).toEqual([projectA.body.id, projectB.body.id]);
 
+    const projectGoals = await request(app.getHttpServer())
+      .get(`/projects/${projectB.body.id}/goals`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(projectGoals.body.map((goal: any) => goal.id)).toContain(goalId);
+
     await request(app.getHttpServer())
       .delete(`/goals/${goalId}/projects/${projectA.body.id}`)
       .set('Authorization', `Bearer ${token}`)

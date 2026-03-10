@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { goalStatusBadgeClass, goalStatusLabel } from '@/components/goal-utils';
@@ -11,15 +11,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Progress } from '@/components/ui/progress';
-import { getGoalProjects, linkGoalProject, useGoals, unlinkGoalProject } from '@/lib/api/goals';
+import { linkGoalProject, useGoals, useProjectGoals, unlinkGoalProject } from '@/lib/api/goals';
 import { useI18n } from '@/lib/i18n';
 import { queryKeys } from '@/lib/query-keys';
-import type { Goal, GoalProjectLink } from '@/lib/types';
-
-type LinkedGoal = {
-  goal: Goal;
-  link: GoalProjectLink;
-};
 
 export function ProjectGoalsCard({
   projectId,
@@ -32,43 +26,20 @@ export function ProjectGoalsCard({
   const queryClient = useQueryClient();
   const [isAddOpen, setIsAddOpen] = useState(false);
   const goalsQuery = useGoals(workspaceId);
-
-  const goalProjectsQueries = useQueries({
-    queries: (goalsQuery.data ?? []).map((goal) => ({
-      queryKey: queryKeys.goalProjects(goal.id),
-      queryFn: () => getGoalProjects(goal.id),
-      enabled: Boolean(goal.id),
-    })),
-  });
-
-  const alignmentRows = useMemo(() => {
-    return (goalsQuery.data ?? []).map((goal, index) => ({
-      goal,
-      projects: goalProjectsQueries[index]?.data ?? [],
-      isLoading: goalProjectsQueries[index]?.isLoading ?? false,
-    }));
-  }, [goalProjectsQueries, goalsQuery.data]);
-
-  const linkedGoals = useMemo<LinkedGoal[]>(
-    () =>
-      alignmentRows.flatMap(({ goal, projects }) => {
-        const link = projects.find((item) => item.projectId === projectId);
-        return link ? [{ goal, link }] : [];
-      }),
-    [alignmentRows, projectId],
-  );
+  const projectGoalsQuery = useProjectGoals(projectId);
 
   const availableGoals = useMemo(
     () =>
-      alignmentRows
-        .filter(({ projects }) => !projects.some((item) => item.projectId === projectId))
-        .map(({ goal }) => goal),
-    [alignmentRows, projectId],
+      (goalsQuery.data ?? []).filter(
+        (goal) => !projectGoalsQuery.data?.some((linkedGoal) => linkedGoal.id === goal.id),
+      ),
+    [goalsQuery.data, projectGoalsQuery.data],
   );
 
   const refreshAlignment = async (goalId: string) => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.workspaceGoals(workspaceId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectGoals(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.goal(goalId) }),
       queryClient.invalidateQueries({ queryKey: ['goal', goalId, 'history'] }),
       queryClient.invalidateQueries({ queryKey: queryKeys.goalProjects(goalId) }),
@@ -86,14 +57,13 @@ export function ProjectGoalsCard({
 
   const removeAlignment = useMutation({
     mutationFn: async (goalId: string) => {
-      const removed = await unlinkGoalProject(goalId, projectId);
+      await unlinkGoalProject(goalId, projectId);
       await refreshAlignment(goalId);
-      return removed;
     },
   });
 
   const isLoadingAlignment =
-    goalsQuery.isLoading || goalProjectsQueries.some((query) => query.isLoading);
+    goalsQuery.isLoading || projectGoalsQuery.isLoading;
 
   return (
     <Card>
@@ -130,7 +100,7 @@ export function ProjectGoalsCard({
       </CardHeader>
       <CardContent className="space-y-4">
         {isLoadingAlignment ? <p className="text-sm text-muted-foreground">{t('loading')}</p> : null}
-        {!isLoadingAlignment && linkedGoals.length === 0 ? (
+        {!isLoadingAlignment && (projectGoalsQuery.data?.length ?? 0) === 0 ? (
           <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
             <p>{t('noLinkedGoals')}</p>
             <Link className="mt-3 inline-flex text-sm font-medium text-primary" href={`/workspaces/${workspaceId}/goals`}>
@@ -138,8 +108,8 @@ export function ProjectGoalsCard({
             </Link>
           </div>
         ) : null}
-        {linkedGoals.map(({ goal, link }) => (
-          <div key={link.id} className="rounded-lg border px-4 py-3">
+        {projectGoalsQuery.data?.map((goal) => (
+          <div key={goal.id} className="rounded-lg border px-4 py-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">

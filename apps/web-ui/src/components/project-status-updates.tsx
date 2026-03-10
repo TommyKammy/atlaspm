@@ -131,6 +131,9 @@ export function ProjectStatusUpdates({
       queryClient.invalidateQueries({ queryKey: ['goal'] });
       if (workspaceId) {
         queryClient.invalidateQueries({ queryKey: queryKeys.workspaceGoals(workspaceId) });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.workspaceGoals(workspaceId, { includeArchived: true }),
+        });
       }
       setHealth('ON_TRACK');
       setSummary('');
