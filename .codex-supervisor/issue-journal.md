@@ -37,13 +37,13 @@ Next action: Open or update the draft PR for issue #356 from commit `d145c2a`, t
 ## Codex Working Notes
 ### Current Handoff
 - Hypothesis: The remaining PR risk is review-thread cleanup, not missing feature behavior. The implementation works, but `getGoalHistory()` and `refreshGoalRollup()` needed tightening for bounded reads.
-- Primary failure or risk: Three automated review comments were valid: unbounded goal history reads, a redundant `distinct` on goal-link lookup, and rollup recomputation reading all project status updates instead of the latest row per linked project.
-- Last focused command: `pnpm --filter @atlaspm/core-api exec eslint src/goals/goals.controller.ts src/goals/goals.service.ts`
+- Primary failure or risk: The review issues are fixed locally and pushed in `fe548e3`, but PR #360 is `UNSTABLE` because CI restarted on the new commit and is still running.
+- Last focused command: `gh pr view 360 --json isDraft,mergeStateStatus,reviewDecision,commits,statusCheckRollup`
 - Files changed: `apps/core-api/src/goals/goals.controller.ts`, `apps/core-api/src/goals/goals.service.ts`, `apps/core-api/test/goals.integration.test.ts`
 - Next 1-3 actions:
-  1. Commit and push the review-thread fixes on `codex/reopen-issue-356`.
-  2. Resolve the three automated review threads on PR #360.
-  3. Recheck PR status only if new CI or review failures appear after the push.
+  1. Watch CI on PR #360 for `fe548e3`.
+  2. If any new failures appear, repair them in this worktree rather than opening a new branch.
+  3. If CI passes cleanly, move the issue state forward from review handling.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
@@ -55,6 +55,10 @@ Next action: Open or update the draft PR for issue #356 from commit `d145c2a`, t
   - `pnpm --filter @atlaspm/core-api test -- test/goals.integration.test.ts`
   - `pnpm --filter @atlaspm/core-api type-check`
   - `pnpm --filter @atlaspm/core-api exec eslint src/goals/goals.controller.ts src/goals/goals.service.ts`
+  - `git push origin codex/reopen-issue-356`
+  - `gh api graphql -f query='mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{isResolved}}}' -F threadId=PRRT_kwDORWcwRc5zbuo0`
+  - `gh api graphql -f query='mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{isResolved}}}' -F threadId=PRRT_kwDORWcwRc5zbuo-`
+  - `gh api graphql -f query='mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{isResolved}}}' -F threadId=PRRT_kwDORWcwRc5zbupF`
 - Implementation notes:
   - Goal rollup uses each linked project's latest `ProjectStatusUpdate.health`: `ON_TRACK=100`, `AT_RISK=50`, `OFF_TRACK=0`, then averages across active links for `progressPercent`.
   - Goal status rollup takes the worst latest linked health: any `OFF_TRACK` wins, else any `AT_RISK`, else any `ON_TRACK`, else `NOT_STARTED`.
@@ -64,3 +68,6 @@ Next action: Open or update the draft PR for issue #356 from commit `d145c2a`, t
     - `GET /goals/:id/history` now accepts bounded `take` input and clamps at 100.
     - `refreshGoalRollupsForProject()` no longer uses redundant `distinct`.
     - `refreshGoalRollup()` now fetches one latest status row per linked project instead of scanning full project status history.
+  - PR follow-up:
+    - Review-thread fix commit: `fe548e3` (`Address goal rollup review feedback`)
+    - All three configured-bot review threads were resolved after the push.
