@@ -14,7 +14,7 @@
 - Updated at: 2026-03-10T11:48:08.218Z
 
 ## Latest Codex Summary
-Addressed the three automated review threads on PR #342. The regression test now imports `SEARCH_REINDEX_BATCH_SIZE` from production code, the chunked custom-field fetch now uses a narrow `select`, and `SearchService.reindexAll()` now stops without overcounting when a batch indexing failure disables search. Added a focused `search.service.test.ts` regression for the mid-reindex failure path.
+Addressed the three automated review threads on PR #342. The regression test now imports `SEARCH_REINDEX_BATCH_SIZE` from production code, the chunked custom-field fetch now uses a narrow `select`, and `SearchService.reindexAll()` now stops without overcounting when a batch indexing failure disables search. Added a focused `search.service.test.ts` regression for the mid-reindex failure path, committed it as `5344601` (`Fix search reindex review feedback`), pushed the branch, and resolved the three configured-bot review threads.
 
 ## Active Failure Context
 - None recorded.
@@ -22,13 +22,13 @@ Addressed the three automated review threads on PR #342. The regression test now
 ## Codex Working Notes
 ### Current Handoff
 - Hypothesis: Reindex memory pressure comes from controller-side full-corpus `task.findMany()` and `taskCustomFieldValue.findMany()`, so the fix is to page tasks by stable cursor and fetch metadata only for the current chunk.
-- Primary failure or risk: Review-thread fixes are local and verified, but the branch still needs a push and thread resolution on PR #342.
-- Last focused command: `pnpm --filter @atlaspm/core-api type-check`
+- Primary failure or risk: No local failure remains; branch head `5344601` is pushed, but PR #342 may still need manual review or CI re-check visibility from GitHub.
+- Last focused command: `gh api graphql -f query='mutation($threadId: ID!) { resolveReviewThread(input: {threadId: $threadId}) { thread { isResolved } } }' -F threadId=PRRT_kwDORWcwRc5zRsyM`
 - Files changed: `apps/core-api/src/search/search.controller.ts`, `apps/core-api/src/search/search.service.ts`, `apps/core-api/test/search.controller.test.ts`, and `apps/core-api/test/search.service.test.ts`
 - Next 1-3 actions:
-  1. Commit the review-thread fixes on `codex/reopen-issue-339`.
-  2. Push the branch and update PR #342.
-  3. Resolve the automated review threads if no new issues appear.
+  1. Confirm PR #342 reflects commit `5344601`.
+  2. Wait for any follow-up review or CI signal.
+  3. Merge when approved.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
