@@ -30,6 +30,8 @@ type GoalHistoryRecord = {
   createdAt: Date;
 };
 
+const DEFAULT_GOAL_HISTORY_TAKE = 100;
+
 @Injectable()
 export class GoalsService {
   constructor(
@@ -98,8 +100,13 @@ export class GoalsService {
     return this.serializeGoal(goal);
   }
 
-  async getGoalHistory(goalId: string, actorUserId: string): Promise<GoalHistoryRecord[]> {
+  async getGoalHistory(
+    goalId: string,
+    actorUserId: string,
+    take: number | string = DEFAULT_GOAL_HISTORY_TAKE,
+  ): Promise<GoalHistoryRecord[]> {
     await this.requireGoal(goalId, actorUserId);
+    const boundedTake = this.normalizeHistoryTake(take);
     const events = await this.prisma.auditEvent.findMany({
       where: {
         entityType: 'Goal',
@@ -109,6 +116,7 @@ export class GoalsService {
         },
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: boundedTake,
     });
 
     return events.flatMap((event) => {
@@ -376,7 +384,6 @@ export class GoalsService {
       select: {
         goalId: true,
       },
-      distinct: ['goalId'],
     });
 
     for (const linkedGoal of linkedGoals) {
@@ -464,18 +471,22 @@ export class GoalsService {
     });
 
     const projectIds = links.map((link) => link.projectId);
-    const updates = projectIds.length
-      ? await tx.projectStatusUpdate.findMany({
-          where: {
-            projectId: { in: projectIds },
+    const latestHealthByProject = new Map<string, ProjectStatusHealth>();
+    const latestUpdates = await Promise.all(
+      projectIds.map((projectId) =>
+        tx.projectStatusUpdate.findFirst({
+          where: { projectId },
+          select: {
+            projectId: true,
+            health: true,
           },
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        })
-      : [];
+        }),
+      ),
+    );
 
-    const latestHealthByProject = new Map<string, ProjectStatusHealth>();
-    for (const update of updates) {
-      if (!latestHealthByProject.has(update.projectId)) {
+    for (const update of latestUpdates) {
+      if (update) {
         latestHealthByProject.set(update.projectId, update.health);
       }
     }
@@ -573,5 +584,13 @@ export class GoalsService {
       status: status as GoalStatus,
       progressPercent,
     };
+  }
+
+  private normalizeHistoryTake(take: number | string) {
+    const numericTake = typeof take === 'string' ? Number.parseInt(take, 10) : take;
+    if (!Number.isFinite(numericTake)) {
+      return DEFAULT_GOAL_HISTORY_TAKE;
+    }
+    return Math.max(1, Math.min(100, Math.trunc(numericTake)));
   }
 }

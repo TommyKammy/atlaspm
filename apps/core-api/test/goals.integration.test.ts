@@ -332,5 +332,22 @@ describe('Goals Integration', () => {
         progressPercent: 75,
       }),
     ]);
+
+    const limitedHistoryRes = await request(app.getHttpServer())
+      .get(`/goals/${goalId}/history?take=2`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(limitedHistoryRes.body).toEqual([
+      expect.objectContaining({
+        action: 'goal.created',
+        status: 'NOT_STARTED',
+        progressPercent: 0,
+      }),
+      expect.objectContaining({
+        action: 'goal.status_rollup_updated',
+        status: 'ON_TRACK',
+        progressPercent: 50,
+      }),
+    ]);
   });
 });

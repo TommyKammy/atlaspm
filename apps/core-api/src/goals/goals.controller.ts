@@ -20,6 +20,7 @@ import {
   Min,
   IsUUID,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
@@ -80,6 +81,15 @@ class LinkProjectDto {
   projectId!: string;
 }
 
+class GoalHistoryQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  take?: number;
+}
+
 @Controller()
 @UseGuards(AuthGuard)
 export class GoalsController {
@@ -105,8 +115,12 @@ export class GoalsController {
   }
 
   @Get('goals/:id/history')
-  history(@Param('id') goalId: string, @CurrentRequest() req: AppRequest) {
-    return this.goalsService.getGoalHistory(goalId, req.user.sub);
+  history(
+    @Param('id') goalId: string,
+    @Query() query: GoalHistoryQueryDto,
+    @CurrentRequest() req: AppRequest,
+  ) {
+    return this.goalsService.getGoalHistory(goalId, req.user.sub, query.take);
   }
 
   @Patch('goals/:id')

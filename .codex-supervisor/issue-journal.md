@@ -5,43 +5,62 @@
 - Branch: codex/reopen-issue-356
 - Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-356
 - Journal: /home/tommy/Dev/atlaspm-worktrees/issue-356/.codex-supervisor/issue-journal.md
-- Current phase: reproducing
-- Attempt count: 1
-- Last head SHA: b13813d88059e62725fd0865ffeaf14fcb41b857
+- Current phase: addressing_review
+- Attempt count: 2
+- Last head SHA: d145c2a8a4c5ceb811cd2a1d0e8b1bd2ff9d6bac
 - Blocked reason: none
-- Last failure signature: none
-- Repeated failure signature count: 0
-- Updated at: 2026-03-10T21:44:25.320Z
+- Last failure signature: PRRT_kwDORWcwRc5zbuo0|PRRT_kwDORWcwRc5zbuo-|PRRT_kwDORWcwRc5zbupF
+- Repeated failure signature count: 1
+- Updated at: 2026-03-10T21:54:31.873Z
 
 ## Latest Codex Summary
-- None yet.
+Implemented goal rollups and queryable history in `core-api`, with the behavior proven first by a failing integration test and then fixed in the code. The core changes are in [goals.service.ts](/home/tommy/Dev/atlaspm-worktrees/issue-356/apps/core-api/src/goals/goals.service.ts), [goals.controller.ts](/home/tommy/Dev/atlaspm-worktrees/issue-356/apps/core-api/src/goals/goals.controller.ts), [goals.module.ts](/home/tommy/Dev/atlaspm-worktrees/issue-356/apps/core-api/src/goals/goals.module.ts), and [project-status-updates.controller.ts](/home/tommy/Dev/atlaspm-worktrees/issue-356/apps/core-api/src/projects/project-status-updates.controller.ts). Goals now recompute from each linked project’s latest status update, emit `goal.status_rollup_updated` audit/outbox events when rollups change, and expose history at `GET /goals/:id/history`.
+
+The focused contract was added in [goals.integration.test.ts](/home/tommy/Dev/atlaspm-worktrees/issue-356/apps/core-api/test/goals.integration.test.ts). I also updated the issue journal and committed the checkpoint as `d145c2a` (`Add goal progress rollups and history API`).
+
+Summary: Added goal progress/status rollups from linked project health plus a goal history API, and committed the checkpoint at `d145c2a`.
+State hint: implementing
+Blocked reason: none
+Tests: `pnpm install`; `pnpm --filter @atlaspm/domain build`; `pnpm --filter @atlaspm/shared-types build`; `pnpm --filter @atlaspm/core-api test -- test/goals.integration.test.ts`; `pnpm --filter @atlaspm/core-api type-check`; `pnpm --filter @atlaspm/core-api exec eslint src/goals/goals.controller.ts src/goals/goals.module.ts src/goals/goals.service.ts src/projects/project-status-updates.controller.ts`
+Failure signature: none
+Next action: Open or update the draft PR for issue #356 from commit `d145c2a`, then decide whether rollups should stay scoped to latest project health or expand to additional project inputs.
 
 ## Active Failure Context
-- None recorded.
+- Category: review
+- Summary: 3 unresolved automated review thread(s) remain.
+- Reference: https://github.com/TommyKammy/atlaspm/pull/360#discussion_r2914684817
+- Details:
+  - apps/core-api/src/goals/goals.service.ts:475 `refreshGoalRollup()` fetches *all* `projectStatusUpdate` rows for the linked projects and then derives the latest per project in memory. For projects with lots of status updates, this can become expensive and will run inside the calling transaction. Consider changing the query to return only the latest status update per project (e.g., via a `DISTINCT ON (projectId)`-style query, a `groupBy`/join approach, or a bounded per-project `findFirst`), so the amount of data read is proportional to the number of linked projects rather than total updates. ```suggestion // Fetch only the latest status update per project to avoid scanning all historical updates. const latestUpdateGroups = projectIds.length ? await tx.projectStatusUpdate.groupBy({ by: ['projectId'], where: { projectId: { in: projectIds }, }, _max: { createdAt: true, id: true, }, }) : []; const latestUpdateIds = latestUpdateGroups .map((group) => group._max?.id) .filter((id): id is string => !!id); const updates = latestUpdateIds.length ? await tx.projectStatusUpdate.findMany({ where: { id: { in: latestUpdateIds }, }, }) : []; ```
+  - apps/core-api/src/goals/goals.service.ts:379 In `refreshGoalRollupsForProject()`, `distinct: ['goalId']` is redundant because `GoalProjectLink` has a `@@unique([goalId, projectId])`, so for a given `projectId` each row already has a unique `goalId`. Removing `distinct` would simplify the query and avoid relying on DB-specific distinct behavior. ```suggestion ```
+  - apps/core-api/src/goals/goals.service.ts:113 `getGoalHistory()` loads the full audit-event history for a goal with no limit/cursor. Since this is backed by `auditEvent.findMany()` and ordered ascending, a long-lived goal could return an unbounded payload and slow queries. Consider adding pagination parameters (e.g., `take` + `cursor` with a max) similar to other list endpoints, or at least applying a reasonable default/maximum limit.
 
 ## Codex Working Notes
 ### Current Handoff
-- Hypothesis: Goal rollups were still unimplemented after the basic goals slice landed. The narrowest missing contract was that linked project status updates did not change goal `status`/`progressPercent`, and there was no queryable goal history endpoint.
-- Primary failure or risk: `GoalsService` stored manual status/progress only. `POST /projects/:id/status-updates` left linked goals at `NOT_STARTED`, and `GET /goals/:id/history` did not exist.
-- Last focused command: `pnpm --filter @atlaspm/core-api exec eslint src/goals/goals.controller.ts src/goals/goals.module.ts src/goals/goals.service.ts src/projects/project-status-updates.controller.ts`
-- Files changed: `apps/core-api/src/goals/goals.controller.ts`, `apps/core-api/src/goals/goals.module.ts`, `apps/core-api/src/goals/goals.service.ts`, `apps/core-api/src/projects/project-status-updates.controller.ts`, `apps/core-api/test/goals.integration.test.ts`
+- Hypothesis: The remaining PR risk is review-thread cleanup, not missing feature behavior. The implementation works, but `getGoalHistory()` and `refreshGoalRollup()` needed tightening for bounded reads.
+- Primary failure or risk: Three automated review comments were valid: unbounded goal history reads, a redundant `distinct` on goal-link lookup, and rollup recomputation reading all project status updates instead of the latest row per linked project.
+- Last focused command: `pnpm --filter @atlaspm/core-api exec eslint src/goals/goals.controller.ts src/goals/goals.service.ts`
+- Files changed: `apps/core-api/src/goals/goals.controller.ts`, `apps/core-api/src/goals/goals.service.ts`, `apps/core-api/test/goals.integration.test.ts`
 - Next 1-3 actions:
-  1. Commit the goal rollup/history checkpoint on `codex/reopen-issue-356`.
-  2. Decide whether to broaden rollups beyond project health snapshots or keep this first pass scoped to latest linked project status updates.
-  3. If a PR does not exist yet for #356, open a draft PR from this checkpoint.
+  1. Commit and push the review-thread fixes on `codex/reopen-issue-356`.
+  2. Resolve the three automated review threads on PR #360.
+  3. Recheck PR status only if new CI or review failures appear after the push.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
 - Reproduction:
-  - After `pnpm install`, `pnpm --filter @atlaspm/domain build`, and `pnpm --filter @atlaspm/shared-types build`, the new goal rollup test failed at `apps/core-api/test/goals.integration.test.ts:293` with `expected 'NOT_STARTED' to be 'ON_TRACK'` after creating a linked project status update.
+  - Review follow-up, not a fresh feature gap: the open threads pointed to `apps/core-api/src/goals/goals.service.ts` for bounded history reads and rollup query cost.
 - Failure signature:
-  - `goal-rollup-not-applied`
+  - `goal-rollup-review-followups`
 - Current focused verification:
   - `pnpm --filter @atlaspm/core-api test -- test/goals.integration.test.ts`
   - `pnpm --filter @atlaspm/core-api type-check`
-  - `pnpm --filter @atlaspm/core-api exec eslint src/goals/goals.controller.ts src/goals/goals.module.ts src/goals/goals.service.ts src/projects/project-status-updates.controller.ts`
+  - `pnpm --filter @atlaspm/core-api exec eslint src/goals/goals.controller.ts src/goals/goals.service.ts`
 - Implementation notes:
   - Goal rollup uses each linked project's latest `ProjectStatusUpdate.health`: `ON_TRACK=100`, `AT_RISK=50`, `OFF_TRACK=0`, then averages across active links for `progressPercent`.
   - Goal status rollup takes the worst latest linked health: any `OFF_TRACK` wins, else any `AT_RISK`, else any `ON_TRACK`, else `NOT_STARTED`.
   - `POST /projects/:id/status-updates` now refreshes linked goal rollups inside the same transaction.
   - `GET /goals/:id/history` exposes status/progress snapshots from goal audit events, including dedicated `goal.status_rollup_updated` events.
+  - Review fixes applied:
+    - `GET /goals/:id/history` now accepts bounded `take` input and clamps at 100.
+    - `refreshGoalRollupsForProject()` no longer uses redundant `distinct`.
+    - `refreshGoalRollup()` now fetches one latest status row per linked project instead of scanning full project status history.
