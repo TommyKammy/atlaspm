@@ -150,6 +150,14 @@ export class ProjectStatusUpdatesController {
         });
       }
 
+      await this.notifications.fanOutProjectStatusUpdateNotification(tx, {
+        projectId,
+        statusUpdateId: statusUpdate.id,
+        triggeredByUserId: req.user.sub,
+        actor: req.user.sub,
+        correlationId: req.correlationId,
+      });
+
       return statusUpdate;
     });
   }

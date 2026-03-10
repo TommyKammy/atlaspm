@@ -117,19 +117,15 @@ export class TaskCommentsService {
         req,
       );
 
-      const taskAssigneeId = task.assigneeUserId;
-      const assigneeShouldBeNotified = taskAssigneeId && taskAssigneeId !== req.user.sub;
-      if (assigneeShouldBeNotified) {
-        await this.notifications.createCommentNotification(tx, {
-          userId: taskAssigneeId,
-          projectId: task.projectId,
-          taskId,
-          commentId: comment.id,
-          triggeredByUserId: req.user.sub,
-          actor: req.user.sub,
-          correlationId: req.correlationId,
-        });
-      }
+      await this.notifications.fanOutTaskCommentNotification(tx, {
+        projectId: task.projectId,
+        taskId,
+        commentId: comment.id,
+        assigneeUserId: task.assigneeUserId,
+        triggeredByUserId: req.user.sub,
+        actor: req.user.sub,
+        correlationId: req.correlationId,
+      });
 
       return comment;
     });

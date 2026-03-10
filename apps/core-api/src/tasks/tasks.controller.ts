@@ -1147,7 +1147,7 @@ export class TasksController {
 
       const postUpdateAssigneeId = updated.assigneeUserId;
       let dueDateChanged = false;
-      if (body.dueAt !== undefined && postUpdateAssigneeId) {
+      if (body.dueAt !== undefined) {
         if (body.dueAt === null) {
           dueDateChanged = task.dueAt !== null;
         } else {
@@ -1156,11 +1156,11 @@ export class TasksController {
           dueDateChanged = newDueDate !== oldDueDate;
         }
       }
-      if (dueDateChanged && postUpdateAssigneeId) {
-        await this.notifications.createDueDateNotification(tx, {
-          userId: postUpdateAssigneeId,
+      if (dueDateChanged) {
+        await this.notifications.fanOutDueDateNotification(tx, {
           projectId: task.projectId,
           taskId: id,
+          assigneeUserId: postUpdateAssigneeId,
           triggeredByUserId: req.user.sub,
           actor: req.user.sub,
           correlationId: req.correlationId,
@@ -1168,12 +1168,11 @@ export class TasksController {
       }
 
       const statusChanged = status !== task.status;
-      const shouldNotifyAssigneeOfStatus = statusChanged && postUpdateAssigneeId && postUpdateAssigneeId !== req.user.sub;
-      if (shouldNotifyAssigneeOfStatus) {
-        await this.notifications.createStatusChangeNotification(tx, {
-          userId: postUpdateAssigneeId,
+      if (statusChanged) {
+        await this.notifications.fanOutStatusChangeNotification(tx, {
           projectId: task.projectId,
           taskId: id,
+          assigneeUserId: postUpdateAssigneeId,
           triggeredByUserId: req.user.sub,
           actor: req.user.sub,
           correlationId: req.correlationId,
