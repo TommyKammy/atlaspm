@@ -223,6 +223,18 @@ function MetadataRow({
   );
 }
 
+type FollowerState = Pick<Task, 'followerCount' | 'isFollowedByCurrentUser'>;
+
+function toFollowerState(response: {
+  followerCount: number;
+  isFollowedByCurrentUser: boolean;
+}) {
+  return {
+    followerCount: response.followerCount,
+    isFollowedByCurrentUser: response.isFollowedByCurrentUser,
+  } satisfies FollowerState;
+}
+
 type RecurrenceDraft = {
   frequency: RecurringFrequency;
   interval: string;
@@ -523,7 +535,7 @@ export default function TaskDetailDrawer({
     },
   });
 
-  const syncFollowerState = (taskIdToUpdate: string, followerState: Pick<Task, 'followerCount' | 'isFollowedByCurrentUser'>) => {
+  const syncFollowerState = (taskIdToUpdate: string, followerState: FollowerState) => {
     queryClient.setQueryData<Task | undefined>(queryKeys.taskDetail(taskIdToUpdate), (current) =>
       current ? { ...current, ...followerState } : current,
     );
@@ -537,19 +549,25 @@ export default function TaskDetailDrawer({
 
   const followTask = useMutation({
     mutationFn: () =>
-      api(`/tasks/${taskId}/followers`, { method: 'POST' }) as Promise<Pick<Task, 'followerCount' | 'isFollowedByCurrentUser'>>,
+      api(`/tasks/${taskId}/followers`, { method: 'POST' }) as Promise<{
+        followerCount: number;
+        isFollowedByCurrentUser: boolean;
+      }>,
     onSuccess: (updated) => {
       if (!taskId) return;
-      syncFollowerState(taskId, updated);
+      syncFollowerState(taskId, toFollowerState(updated));
     },
   });
 
   const unfollowTask = useMutation({
     mutationFn: () =>
-      api(`/tasks/${taskId}/followers/me`, { method: 'DELETE' }) as Promise<Pick<Task, 'followerCount' | 'isFollowedByCurrentUser'>>,
+      api(`/tasks/${taskId}/followers/me`, { method: 'DELETE' }) as Promise<{
+        followerCount: number;
+        isFollowedByCurrentUser: boolean;
+      }>,
     onSuccess: (updated) => {
       if (!taskId) return;
-      syncFollowerState(taskId, updated);
+      syncFollowerState(taskId, toFollowerState(updated));
     },
   });
 

@@ -1,9 +1,8 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 function readSource(relativePath: string) {
-  return readFileSync(resolve(__dirname, relativePath), 'utf8');
+  return readFileSync(new URL(relativePath, import.meta.url), 'utf8');
 }
 
 describe('follower UI slice', () => {

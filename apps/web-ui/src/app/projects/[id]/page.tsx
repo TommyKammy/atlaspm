@@ -31,6 +31,17 @@ import {
 const TASK_STATUSES: Task['status'][] = ['TODO', 'IN_PROGRESS', 'DONE', 'BLOCKED'];
 type QuickAddIntent = { sectionId: string; nonce: number } | null;
 type CurrentUser = { id: string; email?: string | null; name?: string | null };
+type FollowerState = Pick<Project, 'followerCount' | 'isFollowedByCurrentUser'>;
+
+function toFollowerState(response: {
+  followerCount: number;
+  isFollowedByCurrentUser: boolean;
+}) {
+  return {
+    followerCount: response.followerCount,
+    isFollowedByCurrentUser: response.isFollowedByCurrentUser,
+  } satisfies FollowerState;
+}
 
 function parseListParam(raw: string | null): string[] {
   if (!raw) return [];
@@ -203,7 +214,7 @@ export default function ProjectPage() {
     },
   });
 
-  const syncProjectFollowerState = (followerState: Pick<Project, 'followerCount' | 'isFollowedByCurrentUser'>) => {
+  const syncProjectFollowerState = (followerState: FollowerState) => {
     queryClient.setQueryData<Project[]>(queryKeys.projects, (current = []) =>
       current.map((item) => (item.id === projectId ? { ...item, ...followerState } : item)),
     );
@@ -211,17 +222,23 @@ export default function ProjectPage() {
 
   const followProject = useMutation({
     mutationFn: () =>
-      api(`/projects/${projectId}/followers`, { method: 'POST' }) as Promise<Pick<Project, 'followerCount' | 'isFollowedByCurrentUser'>>,
+      api(`/projects/${projectId}/followers`, { method: 'POST' }) as Promise<{
+        followerCount: number;
+        isFollowedByCurrentUser: boolean;
+      }>,
     onSuccess: (updated) => {
-      syncProjectFollowerState(updated);
+      syncProjectFollowerState(toFollowerState(updated));
     },
   });
 
   const unfollowProject = useMutation({
     mutationFn: () =>
-      api(`/projects/${projectId}/followers/me`, { method: 'DELETE' }) as Promise<Pick<Project, 'followerCount' | 'isFollowedByCurrentUser'>>,
+      api(`/projects/${projectId}/followers/me`, { method: 'DELETE' }) as Promise<{
+        followerCount: number;
+        isFollowedByCurrentUser: boolean;
+      }>,
     onSuccess: (updated) => {
-      syncProjectFollowerState(updated);
+      syncProjectFollowerState(toFollowerState(updated));
     },
   });
 
