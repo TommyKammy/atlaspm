@@ -14,16 +14,16 @@
 - Updated at: 2026-03-10T13:21:38.122Z
 
 ## Latest Codex Summary
-Addressed the three automated review comments on PR #350 with no contract changes.
+Addressed the three automated review comments on PR #350, pushed the follow-up commit, and resolved the configured-bot review threads.
 
 This switches task/project follower summary hydration from row scans to aggregate queries (`groupBy` for counts plus a current-user filtered lookup for follow state) and makes the follower slice schema assertions whitespace-tolerant. Focused slice and integration verification still pass after the review fixes.
 
-Summary: Addressed the follower review comments with aggregate queries and a less brittle slice test
-State hint: addressing_review
+Summary: Landed the follower review follow-up and resolved the three automated review threads
+State hint: pr_open
 Blocked reason: none
 Tests: `pnpm --filter @atlaspm/core-api build`; `pnpm --filter @atlaspm/core-api exec vitest run test/followers-slice.test.ts`; `DATABASE_URL=${DATABASE_URL:-postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public} pnpm --filter @atlaspm/core-api exec vitest run test/core.integration.test.ts --testNamePattern='task and project followers expose follow state, prevent duplicates, and enforce authorization'`
 Failure signature: none
-Next action: Commit and push the review-fix follow-up, then resolve the three automated PR review threads
+Next action: Monitor PR #350 for any new review or CI changes; otherwise the branch is ready for final human review
 
 ## Active Failure Context
 - Category: review
@@ -37,13 +37,13 @@ Next action: Commit and push the review-fix follow-up, then resolve the three au
 ## Codex Working Notes
 ### Current Handoff
 - Hypothesis: All three configured-bot comments were legitimate but low-risk review follow-ups: two performance improvements in follower summary hydration and one brittleness reduction in the slice test.
-- Primary failure or risk: Remaining risk is mainly whether the PR needs any broader regression beyond the focused follower coverage; the review comments themselves are addressed.
+- Primary failure or risk: Remaining risk is limited to any new human review feedback or unexpected CI drift; the known configured-bot review items are addressed and resolved.
 - Last focused command: `DATABASE_URL=${DATABASE_URL:-postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public} pnpm --filter @atlaspm/core-api exec vitest run test/core.integration.test.ts --testNamePattern='task and project followers expose follow state, prevent duplicates, and enforce authorization'`
 - Files changed: `apps/core-api/src/projects/projects.controller.ts`, `apps/core-api/src/tasks/tasks.controller.ts`, and `apps/core-api/test/followers-slice.test.ts`
 - Next 1-3 actions:
-  1. Commit the review-fix follow-up on `codex/reopen-issue-346`.
-  2. Push the branch to update PR #350.
-  3. Resolve the three configured-bot review threads if GitHub accepts the new commit as the fix.
+  1. Watch PR #350 for any new review/CI changes.
+  2. If no new feedback arrives, proceed with normal merge readiness flow.
+  3. If broader confidence is needed, run an adjacent task/project CRUD regression slice.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
@@ -61,3 +61,5 @@ Next action: Commit and push the review-fix follow-up, then resolve the three au
   - `hydrateProjectsWithFollowerState` now uses `projectFollower.groupBy({ by: ['projectId'], _count: { _all: true } })` plus a `findMany` restricted to the current `userId`, instead of loading all follower rows into memory.
   - `hydrateTasksWithFollowerState` now uses the same aggregate pattern on `taskFollower`.
   - `followers-slice.test.ts` now matches schema snippets with whitespace-tolerant regex instead of exact string comparisons for the unique-constraint assertions.
+  - Follow-up commit: `f8c2de3` (`Address follower review feedback`).
+  - Pushed `codex/reopen-issue-346` and resolved review threads `PRRT_kwDORWcwRc5zTLx8`, `PRRT_kwDORWcwRc5zTLyo`, and `PRRT_kwDORWcwRc5zTLzH` via GitHub GraphQL.
