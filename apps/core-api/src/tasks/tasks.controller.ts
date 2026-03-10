@@ -70,6 +70,7 @@ import {
   type ParsedCustomFieldValue,
   type TaskCustomFieldFilter,
 } from '../custom-fields/custom-field.validation';
+import { AttachmentDownloadUrlService } from './attachment-download-url.service';
 
 class TaskQuery {
   @IsOptional()
@@ -588,6 +589,7 @@ export class TasksController {
     @Inject(SubtaskService) private readonly subtaskService: SubtaskService,
     @Inject(SearchService) private readonly searchService: SearchService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
+    @Inject(AttachmentDownloadUrlService) private readonly attachmentDownloadUrls: AttachmentDownloadUrlService,
   ) {}
 
   @Get('projects/:id/tasks')
@@ -2100,10 +2102,7 @@ export class TasksController {
       where,
       orderBy: { createdAt: 'desc' },
     });
-    return attachments.map((item) => ({
-      ...item,
-      url: `/public/attachments/${item.id}/${item.uploadToken}`,
-    }));
+    return attachments.map((item) => this.serializeAttachment(item));
   }
 
   @Post('tasks/:id/attachments/initiate')
@@ -2227,10 +2226,7 @@ export class TasksController {
         outboxType: 'task.attachment.created',
         payload: { taskId, attachmentId: completed.id },
       });
-      return {
-        ...completed,
-        url: `/public/attachments/${completed.id}/${accessToken}`,
-      };
+      return this.serializeAttachment(completed);
     });
   }
 
@@ -2274,7 +2270,7 @@ export class TasksController {
     return this.prisma.$transaction(async (tx) => {
       const restored = await tx.taskAttachment.update({
         where: { id },
-        data: { deletedAt: null },
+        data: { deletedAt: null, uploadToken: randomBytes(16).toString('hex') },
       });
       await this.domain.appendAuditOutbox({
         tx,
@@ -2290,6 +2286,32 @@ export class TasksController {
       });
       return restored;
     });
+  }
+
+  private serializeAttachment(item: {
+    id: string;
+    taskId: string;
+    uploaderUserId: string;
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    completedAt: Date | null;
+    createdAt: Date;
+    deletedAt: Date | null;
+    uploadToken: string | null;
+  }) {
+    return {
+      id: item.id,
+      taskId: item.taskId,
+      uploaderUserId: item.uploaderUserId,
+      fileName: item.fileName,
+      mimeType: item.mimeType,
+      sizeBytes: item.sizeBytes,
+      completedAt: item.completedAt,
+      createdAt: item.createdAt,
+      deletedAt: item.deletedAt,
+      url: this.attachmentDownloadUrls.buildUrl(item),
+    };
   }
 
   @Get('tasks/:id/reminder')

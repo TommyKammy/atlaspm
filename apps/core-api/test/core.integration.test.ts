@@ -895,7 +895,7 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ attachmentId: attachmentInit.body.attachmentId })
       .expect(201);
-    expect(attachmentComplete.body.url).toContain(`/public/attachments/${attachmentInit.body.attachmentId}/`);
+    expect(attachmentComplete.body.url).toContain(`/public/attachments/${attachmentInit.body.attachmentId}`);
 
     const attachments = await request(app.getHttpServer())
       .get(`/tasks/${t1.body.id}/attachments`)
@@ -1102,6 +1102,201 @@ describe('Core API Integration', () => {
     ).toBe(true);
 
     expect(defaultSection).toBeTruthy();
+  });
+
+  test('attachment list responses do not expose persistent download tokens', async () => {
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
+
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Attachment list tokens ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSectionId =
+      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
+        sectionsRes.body[0])?.id as string;
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sectionId: defaultSectionId, title: 'Attachment list token leak' })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+
+    const onePxPng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7aY9kAAAAASUVORK5CYII=',
+      'base64',
+    );
+    const attachmentInit = await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/attachments/initiate`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ fileName: 'tiny.png', mimeType: 'image/png', sizeBytes: onePxPng.length })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(String(attachmentInit.body.uploadUrl))
+      .set('Authorization', `Bearer ${token}`)
+      .attach('file', onePxPng, { filename: 'tiny.png', contentType: 'image/png' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/attachments/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ attachmentId: attachmentInit.body.attachmentId })
+      .expect(201);
+
+    const attachmentsRes = await request(app.getHttpServer())
+      .get(`/tasks/${taskId}/attachments`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const attachment = attachmentsRes.body.find((item: any) => item.id === attachmentInit.body.attachmentId);
+    expect(attachment).toBeTruthy();
+    expect(attachment.uploadToken).toBeUndefined();
+  });
+
+  test('attachment public download URLs expire after a short TTL', async () => {
+    const frozenNow = new Date('2026-03-10T03:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(frozenNow);
+
+    try {
+      await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
+
+      const workspaceRes = await request(app.getHttpServer())
+        .get('/workspaces')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const workspaceId = workspaceRes.body[0].id as string;
+
+      const projectRes = await request(app.getHttpServer())
+        .post('/projects')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ workspaceId, name: `Attachment download TTL ${Date.now()}` })
+        .expect(201);
+      const projectId = projectRes.body.id as string;
+
+      const sectionsRes = await request(app.getHttpServer())
+        .get(`/projects/${projectId}/sections`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const defaultSectionId =
+        (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
+          sectionsRes.body[0])?.id as string;
+
+      const taskRes = await request(app.getHttpServer())
+        .post(`/projects/${projectId}/tasks`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ sectionId: defaultSectionId, title: 'Attachment download TTL' })
+        .expect(201);
+      const taskId = taskRes.body.id as string;
+
+      const onePxPng = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7aY9kAAAAASUVORK5CYII=',
+        'base64',
+      );
+      const attachmentInit = await request(app.getHttpServer())
+        .post(`/tasks/${taskId}/attachments/initiate`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ fileName: 'tiny.png', mimeType: 'image/png', sizeBytes: onePxPng.length })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post(String(attachmentInit.body.uploadUrl))
+        .set('Authorization', `Bearer ${token}`)
+        .attach('file', onePxPng, { filename: 'tiny.png', contentType: 'image/png' })
+        .expect(201);
+
+      const attachmentComplete = await request(app.getHttpServer())
+        .post(`/tasks/${taskId}/attachments/complete`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ attachmentId: attachmentInit.body.attachmentId })
+        .expect(201);
+      const downloadUrl = String(attachmentComplete.body.url);
+
+      await request(app.getHttpServer()).get(downloadUrl).expect(200);
+
+      vi.setSystemTime(new Date(frozenNow.getTime() + 10 * 60 * 1000));
+
+      await request(app.getHttpServer()).get(downloadUrl).expect(404);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('attachment public download URLs are revoked when an attachment is deleted', async () => {
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
+
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Attachment revoke ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSectionId =
+      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
+        sectionsRes.body[0])?.id as string;
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sectionId: defaultSectionId, title: 'Attachment revoke' })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+
+    const onePxPng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7aY9kAAAAASUVORK5CYII=',
+      'base64',
+    );
+    const attachmentInit = await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/attachments/initiate`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ fileName: 'tiny.png', mimeType: 'image/png', sizeBytes: onePxPng.length })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(String(attachmentInit.body.uploadUrl))
+      .set('Authorization', `Bearer ${token}`)
+      .attach('file', onePxPng, { filename: 'tiny.png', contentType: 'image/png' })
+      .expect(201);
+
+    const attachmentComplete = await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/attachments/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ attachmentId: attachmentInit.body.attachmentId })
+      .expect(201);
+    const downloadUrl = String(attachmentComplete.body.url);
+
+    await request(app.getHttpServer()).get(downloadUrl).expect(200);
+
+    await request(app.getHttpServer())
+      .delete(`/attachments/${attachmentInit.body.attachmentId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    await request(app.getHttpServer()).get(downloadUrl).expect(404);
   });
 
   test('GET /projects/:id/audit includes project-scoped member and rule changes', async () => {
