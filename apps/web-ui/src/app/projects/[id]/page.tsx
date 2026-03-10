@@ -7,6 +7,7 @@ import { ChevronDown, Plus } from 'lucide-react';
 import { AuditActivityList } from '@/components/audit-activity-list';
 import { FollowerToggle } from '@/components/follower-toggle';
 import ProjectBoard from '@/components/project-board';
+import { ProjectGoalsCard } from '@/components/project-goals-card';
 import { ProjectBoardView, ProjectCalendarView, ProjectFilesView } from '@/components/project-alt-views';
 import { ProjectGanttShell } from '@/components/project-gantt-shell';
 import { ProjectStatusUpdates } from '@/components/project-status-updates';
@@ -373,10 +374,15 @@ export default function ProjectPage() {
 
       <ProjectStatusUpdates
         projectId={projectId}
+        workspaceId={project?.workspaceId}
         canEdit={canEditProject}
         members={projectMembersQuery.data ?? []}
         highlightedStatusUpdateId={highlightedStatusUpdateId}
       />
+
+      {project?.workspaceId ? (
+        <ProjectGoalsCard projectId={projectId} workspaceId={project.workspaceId} />
+      ) : null}
 
       {view === 'list' ? (
         <>

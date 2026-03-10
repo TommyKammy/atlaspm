@@ -36,6 +36,43 @@ export type Workspace = {
   role: 'WS_ADMIN' | 'WS_MEMBER';
 };
 
+export type GoalStatus = 'NOT_STARTED' | 'ON_TRACK' | 'AT_RISK' | 'OFF_TRACK' | 'COMPLETED';
+
+export type Goal = {
+  id: string;
+  workspaceId: string;
+  ownerUserId?: string | null;
+  title: string;
+  description?: string | null;
+  status: GoalStatus;
+  progressPercent: number;
+  archivedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GoalProjectLink = {
+  id: string;
+  goalId: string;
+  projectId: string;
+  project: {
+    id: string;
+    name: string;
+    workspaceId: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GoalHistoryItem = {
+  id: string;
+  action: string;
+  status: GoalStatus;
+  progressPercent: number;
+  createdAt: string;
+  actorUserId?: string | null;
+};
+
 export type WorkspaceUserRow = {
   id: string;
   email?: string | null;
