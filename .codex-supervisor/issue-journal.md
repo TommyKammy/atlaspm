@@ -1,49 +1,50 @@
-# Issue #339: P2: Refactor search reindex to streaming or chunked processing
+# Issue #340: P2: Write ADR for task domain decomposition and controller split
 
 ## Supervisor Snapshot
-- Issue URL: https://github.com/TommyKammy/atlaspm/issues/339
-- Branch: codex/reopen-issue-339
-- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-339
-- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-339/.codex-supervisor/issue-journal.md
-- Current phase: addressing_review
-- Attempt count: 2
-- Last head SHA: 22f7865eefbb031791036cecf6320750a43f01ba
+- Issue URL: https://github.com/TommyKammy/atlaspm/issues/340
+- Branch: codex/reopen-issue-340
+- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-340
+- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-340/.codex-supervisor/issue-journal.md
+- Current phase: reproducing
+- Attempt count: 1
+- Last head SHA: b442bd9fb3b604c541784982487ce51c2cafc802
 - Blocked reason: none
-- Last failure signature: PRRT_kwDORWcwRc5zRsxa|PRRT_kwDORWcwRc5zRsxz|PRRT_kwDORWcwRc5zRsyM
-- Repeated failure signature count: 1
-- Updated at: 2026-03-10T11:48:08.218Z
+- Last failure signature: none
+- Repeated failure signature count: 0
+- Updated at: 2026-03-10T12:06:10.815Z
 
 ## Latest Codex Summary
-Addressed the three automated review threads on PR #342. The regression test now imports `SEARCH_REINDEX_BATCH_SIZE` from production code, the chunked custom-field fetch now uses a narrow `select`, and `SearchService.reindexAll()` now stops without overcounting when a batch indexing failure disables search. Added a focused `search.service.test.ts` regression for the mid-reindex failure path, committed it as `5344601` (`Fix search reindex review feedback`), pushed the branch, and resolved the three configured-bot review threads.
+- Added `docs/adr-task-domain-decomposition.md` to define explicit `TasksController` feature slices, extraction order, test ownership, and rollback constraints before refactoring.
+- Added `packages/domain/src/__tests__/task-domain-adr.test.ts` to assert the ADR exists and names the required module boundaries and control sections.
+- Added an architecture cross-reference to the new ADR in `docs/architecture.md`.
 
 ## Active Failure Context
 - None recorded.
 
 ## Codex Working Notes
 ### Current Handoff
-- Hypothesis: Reindex memory pressure comes from controller-side full-corpus `task.findMany()` and `taskCustomFieldValue.findMany()`, so the fix is to page tasks by stable cursor and fetch metadata only for the current chunk.
-- Primary failure or risk: No local failure remains; branch head `5344601` is pushed, but PR #342 may still need manual review or CI re-check visibility from GitHub.
-- Last focused command: `gh api graphql -f query='mutation($threadId: ID!) { resolveReviewThread(input: {threadId: $threadId}) { thread { isResolved } } }' -F threadId=PRRT_kwDORWcwRc5zRsyM`
-- Files changed: `apps/core-api/src/search/search.controller.ts`, `apps/core-api/src/search/search.service.ts`, `apps/core-api/test/search.controller.test.ts`, and `apps/core-api/test/search.service.test.ts`
+- Hypothesis: The main risk for issue #340 is undocumented controller ownership drift during future extraction, so the narrowest proof is an ADR-content test that fails if the explicit slice boundaries or migration controls are missing.
+- Primary failure or risk: Initial focused verification failed because this worktree had no installed dependencies (`tsc: not found` during `pnpm --filter @atlaspm/domain test`); after `pnpm install`, the ADR-content test passed.
+- Last focused command: `pnpm --filter @atlaspm/domain test -- --test-name-pattern='task domain ADR defines explicit slices and migration controls'`
+- Files changed: `docs/adr-task-domain-decomposition.md`, `docs/architecture.md`, and `packages/domain/src/__tests__/task-domain-adr.test.ts`
 - Next 1-3 actions:
-  1. Confirm PR #342 reflects commit `5344601`.
-  2. Wait for any follow-up review or CI signal.
-  3. Merge when approved.
+  1. Commit the ADR and focused test on `codex/reopen-issue-340`.
+  2. Open or update the branch PR if one is required for supervisor flow.
+  3. Hand off with the branch ready for review.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
 - Focused reproduction:
-  - Added `apps/core-api/test/search.controller.test.ts` with a mocked `SearchService.reindexAll()` consumer that iterates an async batch stream.
-  - Initial failure: `TypeError: Cannot read properties of undefined (reading 'length')` because the controller still passed a fully materialized task array instead of batch objects.
-  - Dependency install was required in this worktree before tests would run: `pnpm install`.
+  - Added `packages/domain/src/__tests__/task-domain-adr.test.ts` first so the issue could fail on a missing/incomplete ADR instead of relying on manual doc review.
+  - Initial failure: `tsc: not found` from `pnpm --filter @atlaspm/domain test -- --test-name-pattern='task domain ADR defines explicit slices and migration controls'` because the worktree had no installed dependencies.
+  - After `pnpm install`, the same focused test passed against the new ADR.
 - Failure signature:
-  - `none`
+  - `missing-worktree-deps-tsc-not-found`
 - Current focused verification:
-  - `pnpm --filter @atlaspm/core-api test -- test/search.controller.test.ts test/search.service.test.ts`
-  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm install`
+  - `pnpm --filter @atlaspm/domain test -- --test-name-pattern='task domain ADR defines explicit slices and migration controls'`
+  - `pnpm --filter @atlaspm/domain type-check`
 - Implementation notes:
-  - `SearchController.reindexAll()` now passes `this.streamReindexBatches()` into the service instead of materializing all tasks and custom-field values up front.
-  - Batches are ordered by `task.id ASC` with `take: 1000` and `cursor + skip: 1` pagination.
-  - Each batch fetches only the scalar fields needed for metadata (`taskId`, `value*`, `option.label/value`) before building `metadataByTaskId`.
-  - `SearchService.indexTasks()` now returns a success flag so `reindexAll()` can stop without inflating the processed count after a backend failure disables search.
-  - Added `apps/core-api/test/search.service.test.ts` to prove a mid-reindex Algolia failure stops subsequent batches and only reports successfully indexed tasks.
+  - The ADR maps the current `TasksController` routes into six explicit slices: `task-core`, `comments-mentions`, `attachments`, `reminders`, `dependencies-subtasks`, and `timeline`.
+  - The ADR defines the extraction order as `task-core` first and `timeline` last, with test ownership and rollback constraints called out per slice.
+  - `docs/architecture.md` now links to the ADR so the decomposition decision is discoverable beside the existing auth ADR reference.
