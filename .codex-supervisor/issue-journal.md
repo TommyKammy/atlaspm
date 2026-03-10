@@ -5,32 +5,36 @@
 - Branch: codex/reopen-issue-340
 - Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-340
 - Journal: /home/tommy/Dev/atlaspm-worktrees/issue-340/.codex-supervisor/issue-journal.md
-- Current phase: reproducing
-- Attempt count: 1
-- Last head SHA: b442bd9fb3b604c541784982487ce51c2cafc802
+- Current phase: addressing_review
+- Attempt count: 2
+- Last head SHA: 0363ce26b4aef3043de6b1604013312c781b06bb
 - Blocked reason: none
-- Last failure signature: none
-- Repeated failure signature count: 0
-- Updated at: 2026-03-10T12:06:10.815Z
+- Last failure signature: PRRT_kwDORWcwRc5zSHS1|PRRT_kwDORWcwRc5zSHTV
+- Repeated failure signature count: 1
+- Updated at: 2026-03-10T12:15:04.313Z
 
 ## Latest Codex Summary
-- Added `docs/adr-task-domain-decomposition.md` to define explicit `TasksController` feature slices, extraction order, test ownership, and rollback constraints before refactoring.
-- Added `packages/domain/src/__tests__/task-domain-adr.test.ts` to assert the ADR exists and names the required module boundaries and control sections.
-- Added an architecture cross-reference to the new ADR in `docs/architecture.md`.
+- Addressed PR #343 review feedback by improving the ADR-content test failure message and moving the task decomposition ADR link from `## Auth` to `## Boundaries` in `docs/architecture.md`.
+- Re-ran the focused `@atlaspm/domain` verification after the review fixes; the test and type-check both passed.
 
 ## Active Failure Context
-- None recorded.
+- Category: review
+- Summary: 2 unresolved automated review thread(s) remain.
+- Reference: https://github.com/TommyKammy/atlaspm/pull/343#discussion_r2911323047
+- Details:
+  - packages/domain/src/__tests__/task-domain-adr.test.ts:27 The `assert.match` call on line 27 has no custom failure message. When a section or keyword is missing from the ADR, the test fails with a generic error like "The input did not match the regular expression /.../" without indicating which expected string was not found. Since the same `assert.match` is called in a loop over 12 different expected strings, a failure message should be passed as the third argument to identify which string was missing (e.g., `assert.match(adr, new RegExp(escapeRegExp(expected)), \`ADR is missing required content: ${expected}\`)`). ```suggestion assert.match(adr, new RegExp(escapeRegExp(expected)), `ADR is missing required content: ${expected}`); ```
+  - docs/architecture.md:15 The ADR cross-reference is placed inside the `## Auth` section (lines 8–16), but the task domain decomposition is entirely unrelated to authentication. The `## Boundaries` section at the top of the file (lines 3–6), or a dedicated `## ADRs` / `## Architecture Decisions` entry, would be a far more appropriate home for this link. As written, a reader scanning for controller architecture decisions would need to look inside the auth section to find it.
 
 ## Codex Working Notes
 ### Current Handoff
 - Hypothesis: The main risk for issue #340 is undocumented controller ownership drift during future extraction, so the narrowest proof is an ADR-content test that fails if the explicit slice boundaries or migration controls are missing.
-- Primary failure or risk: No local verification failure remains; draft PR #343 is open with the ADR and focused proof committed on branch `codex/reopen-issue-340`.
+- Primary failure or risk: No local verification failure remains; the remaining work is to push the review-fix commit and clear the two configured-bot review threads on PR #343.
 - Last focused command: `pnpm --filter @atlaspm/domain test -- --test-name-pattern='task domain ADR defines explicit slices and migration controls'`
 - Files changed: `docs/adr-task-domain-decomposition.md`, `docs/architecture.md`, and `packages/domain/src/__tests__/task-domain-adr.test.ts`
 - Next 1-3 actions:
-  1. Wait for review on PR #343.
-  2. Address any feedback on the ADR wording or slice boundaries.
-  3. Merge once approved.
+  1. Commit and push the review fixes on `codex/reopen-issue-340`.
+  2. Resolve review threads `PRRT_kwDORWcwRc5zSHS1` and `PRRT_kwDORWcwRc5zSHTV`.
+  3. Merge PR #343 once the review state is clean.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
@@ -47,4 +51,5 @@
 - Implementation notes:
   - The ADR maps the current `TasksController` routes into six explicit slices: `task-core`, `comments-mentions`, `attachments`, `reminders`, `dependencies-subtasks`, and `timeline`.
   - The ADR defines the extraction order as `task-core` first and `timeline` last, with test ownership and rollback constraints called out per slice.
-  - `docs/architecture.md` now links to the ADR so the decomposition decision is discoverable beside the existing auth ADR reference.
+  - The ADR link in `docs/architecture.md` now lives under `## Boundaries`, which matches the controller-split subject matter better than `## Auth`.
+  - The ADR-content test now includes a per-string assertion message so failures identify the missing required section or boundary explicitly.

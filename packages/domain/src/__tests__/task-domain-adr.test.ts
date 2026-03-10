@@ -24,7 +24,7 @@ test('task domain ADR defines explicit slices and migration controls', () => {
     '`dependencies-subtasks`',
     '`timeline`',
   ]) {
-    assert.match(adr, new RegExp(escapeRegExp(expected)));
+    assert.match(adr, new RegExp(escapeRegExp(expected)), `ADR is missing required content: ${expected}`);
   }
 });
 

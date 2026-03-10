@@ -4,6 +4,7 @@
 - `web-ui` communicates with `core-api` via HTTP only.
 - `core-api` owns persistence, authorization, auditing, rules, and outbox.
 - `packages/*` are app-agnostic and must not depend on `apps/*`.
+- Task controller decomposition decision: see `docs/adr-task-domain-decomposition.md`.
 
 ## Auth
 - Production mode: OIDC JWT verification using issuer/audience and JWKS.
@@ -12,7 +13,6 @@
 - Risk is conditional: when `DEV_AUTH_ENABLED=true`, `POST /dev-auth/token` can mint tokens for arbitrary identities and must not be exposed beyond trusted local use.
 - Production guardrail: enforce `DEV_AUTH_ENABLED=false` in deployed environments.
 - Browser-session transport decision: see `docs/adr-browser-auth-session.md`.
-- Task controller decomposition decision: see `docs/adr-task-domain-decomposition.md`.
 - Planned browser model: `core-api` managed `HttpOnly` session cookie plus CSRF protection; bearer headers remain only for non-browser clients and migration compatibility.
 
 ## Audit + Outbox
