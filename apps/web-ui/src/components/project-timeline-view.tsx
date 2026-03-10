@@ -467,6 +467,26 @@ function findTaskInGroups(groups: SectionTaskGroup[], taskId: string): Task | un
   return undefined;
 }
 
+function applyResolvedTaskInGroups(groups: SectionTaskGroup[], resolvedTask: Task) {
+  const withoutTask = groups.map((group) => ({
+    ...group,
+    tasks: group.tasks.filter((task) => task.id !== resolvedTask.id),
+  }));
+
+  return withoutTask.map((group) =>
+    group.section.id === resolvedTask.sectionId
+      ? { ...group, tasks: [...group.tasks, resolvedTask] }
+      : group,
+  );
+}
+
+function applyResolvedTasksInGroups(groups: SectionTaskGroup[], resolvedTasks: Task[]) {
+  return resolvedTasks.reduce(
+    (current, resolvedTask) => applyResolvedTaskInGroups(current, resolvedTask),
+    groups,
+  );
+}
+
 function applyTaskTimelineMoveInGroups(
   groups: SectionTaskGroup[],
   taskId: string,
@@ -1989,6 +2009,10 @@ export function ProjectScheduleCanvas({
       return { previous, previousTaskDetail, previousTaskSnapshot };
     },
     onSuccess: (result, variables, context) => {
+      queryClient.setQueryData<SectionTaskGroup[] | undefined>(
+        queryKeys.projectTasksGrouped(projectId),
+        (current) => (current ? applyResolvedTaskInGroups(current, result) : current),
+      );
       queryClient.setQueryData<Task>(queryKeys.taskDetail(variables.taskId), result);
       handleParentMovePolicy(result, context?.previousTaskSnapshot);
     },
@@ -2098,6 +2122,16 @@ export function ProjectScheduleCanvas({
         setRescheduleNotice({ type: 'error', message: t('timelineRescheduleFailed') });
       }
     },
+    onSuccess: (result, variables) => {
+      queryClient.setQueryData<SectionTaskGroup[] | undefined>(
+        queryKeys.projectTasksGrouped(projectId),
+        (current) => (current ? applyResolvedTasksInGroups(current, result) : current),
+      );
+      result.forEach((task, index) => {
+        const taskId = variables.tasks[index]?.taskId ?? task.id;
+        queryClient.setQueryData<Task>(queryKeys.taskDetail(taskId), task);
+      });
+    },
     onSettled: async (_result, _error, variables) => {
       for (const task of variables.tasks) {
         rescheduleInFlightTaskIdsRef.current.delete(task.taskId);
@@ -2189,6 +2223,10 @@ export function ProjectScheduleCanvas({
       return { previous, previousTaskDetail, previousTaskSnapshot };
     },
     onSuccess: (result, variables, context) => {
+      queryClient.setQueryData<SectionTaskGroup[] | undefined>(
+        queryKeys.projectTasksGrouped(projectId),
+        (current) => (current ? applyResolvedTaskInGroups(current, result) : current),
+      );
       queryClient.setQueryData<Task>(queryKeys.taskDetail(variables.taskId), result);
       handleParentMovePolicy(result, context?.previousTaskSnapshot, variables.skipSubtaskNotice);
     },
