@@ -190,8 +190,11 @@ function PersonalSettingsMenu() {
           <DropdownMenuItem disabled>{t('helpSupport')}</DropdownMenuItem>
           <DropdownMenuItem
             onClick={async () => {
-              await api('/auth/logout', { method: 'POST' });
-              router.push('/login');
+              try {
+                await api('/auth/logout', { method: 'POST' });
+              } finally {
+                router.push('/login');
+              }
             }}
           >
             {t('signOut')}

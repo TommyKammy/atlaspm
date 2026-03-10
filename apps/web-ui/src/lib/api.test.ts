@@ -6,6 +6,7 @@ describe('api auth transport', () => {
   const originalDocument = globalThis.document;
   const originalLocalStorage = globalThis.localStorage;
   const originalFetch = globalThis.fetch;
+  let getItemSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     const fetchMock = vi.fn(async () =>
@@ -14,11 +15,12 @@ describe('api auth transport', () => {
         headers: { 'content-type': 'application/json' },
       }),
     );
+    getItemSpy = vi.fn(() => 'legacy-token');
     vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('window', globalThis);
     vi.stubGlobal('document', { cookie: 'atlaspm_csrf=test-csrf' });
     vi.stubGlobal('localStorage', {
-      getItem: vi.fn(() => 'legacy-token'),
+      getItem: getItemSpy,
       setItem: vi.fn(),
       removeItem: vi.fn(),
     });
@@ -39,6 +41,7 @@ describe('api auth transport', () => {
     const request = vi.mocked(globalThis.fetch).mock.calls[0]?.[1];
     expect(request?.credentials).toBe('include');
     expect(request?.headers).not.toHaveProperty('authorization');
+    expect(getItemSpy).not.toHaveBeenCalled();
   });
 
   test('sends the CSRF token for unsafe methods', async () => {

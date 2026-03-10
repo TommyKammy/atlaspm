@@ -195,11 +195,13 @@ describe('Dev auth environment guardrails', () => {
       expect(sessionCookie).toMatch(/;\s*Expires=/i);
       expect(sessionCookie).toMatch(/;\s*HttpOnly\b/i);
       expect(sessionCookie).toMatch(/;\s*SameSite=Lax\b/i);
+      expect(sessionCookie).toMatch(/;\s*Path=\//i);
 
       expect(csrfCookie).toBeDefined();
       expect(csrfCookie).toMatch(/;\s*Expires=/i);
       expect(csrfCookie).not.toMatch(/;\s*HttpOnly\b/i);
       expect(csrfCookie).toMatch(/;\s*SameSite=Lax\b/i);
+      expect(csrfCookie).toMatch(/;\s*Path=\//i);
     } finally {
       await app.close();
     }
