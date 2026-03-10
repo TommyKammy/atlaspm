@@ -107,6 +107,7 @@ type TimelineDependencyDraft = {
 };
 
 type TimelineSelectionDraft = {
+  pointerId: number;
   originX: number;
   originY: number;
   currentX: number;
@@ -1125,6 +1126,7 @@ export function ProjectScheduleCanvas({
   const selectedTimelineTaskIdsRef = useRef<string[]>([]);
   const [selectionDraft, setSelectionDraft] = useState<TimelineSelectionDraft | null>(null);
   const selectionDraftRef = useRef<TimelineSelectionDraft | null>(null);
+  const selectionPointerTargetRef = useRef<HTMLElement | null>(null);
   const suppressClickTaskIdRef = useRef<string | null>(null);
   const [rescheduleNotice, setRescheduleNotice] = useState<{
     type: 'conflict' | 'error' | 'warning';
@@ -2760,6 +2762,19 @@ export function ProjectScheduleCanvas({
     setSelectionDraft(nextSelectionDraft);
   };
 
+  const updateSelectionDraft = (pointerId: number, clientX: number, clientY: number) => {
+    const current = selectionDraftRef.current;
+    if (!current || current.pointerId !== pointerId) return;
+    const next = { ...current, currentX: clientX, currentY: clientY };
+    selectTimelineTasksInRect({
+      left: Math.min(next.originX, next.currentX),
+      top: Math.min(next.originY, next.currentY),
+      right: Math.max(next.originX, next.currentX),
+      bottom: Math.max(next.originY, next.currentY),
+    });
+    replaceSelectionDraft(next);
+  };
+
   const taskIdsInSelectionRect = (nextRect: {
     left: number;
     top: number;
@@ -2791,6 +2806,25 @@ export function ProjectScheduleCanvas({
       }),
     );
     replaceSelectionDraft(null);
+  };
+
+  const finishSelectionDraft = (pointerId: number, clientX?: number, clientY?: number) => {
+    const current = selectionDraftRef.current;
+    if (!current || current.pointerId !== pointerId) return;
+    const selectionPointerTarget = selectionPointerTargetRef.current;
+    selectionPointerTargetRef.current = null;
+    try {
+      if (selectionPointerTarget?.hasPointerCapture(pointerId)) {
+        selectionPointerTarget.releasePointerCapture(pointerId);
+      }
+    } catch {
+      // Ignore release failures if the selection surface unmounted mid-selection.
+    }
+    const next =
+      clientX !== undefined && clientY !== undefined
+        ? { ...current, currentX: clientX, currentY: clientY }
+        : current;
+    finalizeSelectionDraft(next);
   };
 
   const toggleTimelineTaskSelection = (taskId: string) => {
@@ -3374,26 +3408,33 @@ export function ProjectScheduleCanvas({
   const finishBarDragRef = useRef(finishBarDrag);
   const updateBarResizeRef = useRef(updateBarResize);
   const finishBarResizeRef = useRef(finishBarResize);
+  const updateSelectionDraftRef = useRef(updateSelectionDraft);
+  const finishSelectionDraftRef = useRef(finishSelectionDraft);
 
   useEffect(() => {
     updateBarDragRef.current = updateBarDrag;
     finishBarDragRef.current = finishBarDrag;
     updateBarResizeRef.current = updateBarResize;
     finishBarResizeRef.current = finishBarResize;
+    updateSelectionDraftRef.current = updateSelectionDraft;
+    finishSelectionDraftRef.current = finishSelectionDraft;
   });
 
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
+      updateSelectionDraftRef.current(event.pointerId, event.clientX, event.clientY);
       updateBarDragRef.current(event.pointerId, event.clientX, event.clientY, event.altKey);
       updateBarResizeRef.current(event.pointerId, event.clientX, event.altKey);
     };
 
     const handlePointerUp = (event: PointerEvent) => {
+      finishSelectionDraftRef.current(event.pointerId, event.clientX, event.clientY);
       finishBarDragRef.current(event.pointerId, event.clientX, event.clientY, event.altKey);
       finishBarResizeRef.current(event.pointerId, event.altKey);
     };
 
     const handlePointerCancel = (event: PointerEvent) => {
+      finishSelectionDraftRef.current(event.pointerId, event.clientX, event.clientY);
       finishBarDragRef.current(event.pointerId, event.clientX, event.clientY, event.altKey);
       finishBarResizeRef.current(event.pointerId, event.altKey);
     };
@@ -4044,58 +4085,27 @@ export function ProjectScheduleCanvas({
               }
               setSelectedTaskId(null);
               replaceSelectionDraft({
+                pointerId: event.pointerId,
                 originX: event.clientX,
                 originY: event.clientY,
                 currentX: event.clientX,
                 currentY: event.clientY,
               });
-              event.currentTarget.setPointerCapture(event.pointerId);
+              try {
+                event.currentTarget.setPointerCapture(event.pointerId);
+                selectionPointerTargetRef.current = event.currentTarget;
+              } catch {
+                selectionPointerTargetRef.current = null;
+              }
             }}
             onPointerMove={(event) => {
-              const current = selectionDraftRef.current;
-              if (!current) return;
-              const next = { ...current, currentX: event.clientX, currentY: event.clientY };
-              selectTimelineTasksInRect({
-                left: Math.min(next.originX, next.currentX),
-                top: Math.min(next.originY, next.currentY),
-                right: Math.max(next.originX, next.currentX),
-                bottom: Math.max(next.originY, next.currentY),
-              });
-              replaceSelectionDraft(next);
+              updateSelectionDraft(event.pointerId, event.clientX, event.clientY);
             }}
             onPointerUp={(event) => {
-              if (selectionDraftRef.current) {
-                const next = {
-                  ...selectionDraftRef.current,
-                  currentX: event.clientX,
-                  currentY: event.clientY,
-                };
-                selectTimelineTasksInRect({
-                  left: Math.min(next.originX, next.currentX),
-                  top: Math.min(next.originY, next.currentY),
-                  right: Math.max(next.originX, next.currentX),
-                  bottom: Math.max(next.originY, next.currentY),
-                });
-                replaceSelectionDraft(next);
-              }
-              finalizeSelectionDraft(selectionDraftRef.current);
-              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                event.currentTarget.releasePointerCapture(event.pointerId);
-              }
+              finishSelectionDraft(event.pointerId, event.clientX, event.clientY);
             }}
             onPointerCancel={(event) => {
-              if (selectionDraftRef.current) {
-                const next = {
-                  ...selectionDraftRef.current,
-                  currentX: event.clientX,
-                  currentY: event.clientY,
-                };
-                replaceSelectionDraft(next);
-              }
-              finalizeSelectionDraft(selectionDraftRef.current);
-              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                event.currentTarget.releasePointerCapture(event.pointerId);
-              }
+              finishSelectionDraft(event.pointerId, event.clientX, event.clientY);
             }}
             onDragOver={(event) => {
               if (!Array.from(event.dataTransfer.types).includes(UNSCHEDULED_TASK_DND_TYPE)) return;

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { ComponentType } from 'react';
-import { BarChart3, CheckCircle2, FolderKanban, FolderOpen, Home, Inbox, Menu, Users } from 'lucide-react';
+import { BarChart3, CheckCircle2, FolderKanban, FolderOpen, Home, Inbox, Menu, Target, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
@@ -105,6 +105,12 @@ export function Sidebar({ onNavigate, compact = false, onToggleMode }: SidebarPr
       active: pathname.includes('/workload'),
     },
     { href: '/dashboards', label: t('dashboards'), icon: BarChart3, active: pathname === '/dashboards' },
+    {
+      href: activeWorkspaceId ? `/workspaces/${activeWorkspaceId}/goals` : '/',
+      label: t('goals'),
+      icon: Target,
+      active: pathname.includes('/goals'),
+    },
     {
       href: activeWorkspaceId ? `/workspaces/${activeWorkspaceId}/portfolios` : '/',
       label: t('portfolios'),

@@ -76,11 +76,13 @@ function MentionText({ value }: { value: string }) {
 
 export function ProjectStatusUpdates({
   projectId,
+  workspaceId,
   canEdit,
   members,
   highlightedStatusUpdateId,
 }: {
   projectId: string;
+  workspaceId: string | undefined;
   canEdit: boolean;
   members: ProjectMember[];
   highlightedStatusUpdateId?: string | null;
@@ -126,6 +128,13 @@ export function ProjectStatusUpdates({
         nextCursor: current?.nextCursor ?? null,
         hasNextPage: current?.hasNextPage ?? false,
       }));
+      queryClient.invalidateQueries({ queryKey: ['goal'] });
+      if (workspaceId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.workspaceGoals(workspaceId) });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.workspaceGoals(workspaceId, { includeArchived: true }),
+        });
+      }
       setHealth('ON_TRACK');
       setSummary('');
       setBlockers('');

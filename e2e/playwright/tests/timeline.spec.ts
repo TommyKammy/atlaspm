@@ -473,6 +473,8 @@ test('timeline marquee selection can shift multiple tasks together immediately',
 
   const firstBar = page.locator(`[data-testid="timeline-bar-${taskA.id}"]`);
   const secondBar = page.locator(`[data-testid="timeline-bar-${taskB.id}"]`);
+  await firstBar.scrollIntoViewIfNeeded();
+  await secondBar.scrollIntoViewIfNeeded();
   const firstBox = await firstBar.boundingBox();
   const secondBox = await secondBar.boundingBox();
   const selectionSurface = page.locator('[data-testid="timeline-selection-surface"]');
@@ -535,6 +537,7 @@ test('timeline marquee selection can shift multiple tasks together immediately',
   await expect(page.locator('[data-testid="timeline-selection-count"]')).toContainText('2');
   await expect(firstBar).toHaveAttribute('data-selected', 'true');
   await expect(secondBar).toHaveAttribute('data-selected', 'true');
+  await firstBar.scrollIntoViewIfNeeded();
   const dragBox = await firstBar.boundingBox();
   if (!dragBox) {
     throw new Error('Expected selected first bar bounds after marquee');

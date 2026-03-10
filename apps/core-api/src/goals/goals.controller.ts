@@ -142,6 +142,11 @@ export class GoalsController {
     return this.goalsService.listGoalProjects(goalId, req.user.sub);
   }
 
+  @Get('projects/:id/goals')
+  listProjectGoals(@Param('id') projectId: string, @CurrentRequest() req: AppRequest) {
+    return this.goalsService.listProjectGoals(projectId, req.user.sub);
+  }
+
   @Post('goals/:id/projects')
   addProject(
     @Param('id') goalId: string,

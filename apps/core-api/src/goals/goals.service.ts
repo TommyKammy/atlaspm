@@ -263,6 +263,26 @@ export class GoalsService {
     }));
   }
 
+  async listProjectGoals(projectId: string, actorUserId: string) {
+    await this.requireProject(projectId, actorUserId, ProjectRole.MEMBER);
+
+    const links = await this.prisma.goalProjectLink.findMany({
+      where: {
+        projectId,
+        deletedAt: null,
+        goal: {
+          archivedAt: null,
+        },
+      },
+      include: {
+        goal: true,
+      },
+      orderBy: [{ createdAt: 'asc' }],
+    });
+
+    return links.map((link) => this.serializeGoal(link.goal));
+  }
+
   async addProjectLink(goalId: string, projectId: string, actorUserId: string, correlationId: string) {
     const goal = await this.requireGoal(goalId, actorUserId, { requireActive: true, minRole: WorkspaceRole.WS_MEMBER });
     const project = await this.requireProject(projectId, actorUserId, ProjectRole.MEMBER);

@@ -5,6 +5,8 @@ export const queryKeys = {
   workspaceUsers: (workspaceId: string, params: { query?: string; status?: string }) =>
     ['workspace', workspaceId, 'users', params] as const,
   workspaceInvitations: (workspaceId: string) => ['workspace', workspaceId, 'invitations'] as const,
+  workspaceGoals: (workspaceId: string, options?: { includeArchived?: boolean }) =>
+    ['workspace', workspaceId, 'goals', options?.includeArchived ? 'all' : 'active'] as const,
   projects: ['projects'] as const,
   myTasks: (userId: string, projectIds: string[]) => ['my-tasks', userId, projectIds] as const,
   projectSections: (projectId: string) => ['project', projectId, 'sections'] as const,
@@ -18,6 +20,7 @@ export const queryKeys = {
     ['project', projectId, 'recurring-rules', options?.includeInactive ? 'all' : 'active'] as const,
   projectMembers: (projectId: string) => ['project', projectId, 'members'] as const,
   projectStatusUpdates: (projectId: string) => ['project', projectId, 'status-updates'] as const,
+  projectGoals: (projectId: string) => ['project', projectId, 'goals'] as const,
   projectSavedViews: (projectId: string) => ['project', projectId, 'saved-views'] as const,
   projectTimelinePreferences: (projectId: string) => ['project', projectId, 'timeline', 'preferences'] as const,
   projectCustomFields: (projectId: string) => ['project', projectId, 'custom-fields'] as const,
@@ -31,6 +34,9 @@ export const queryKeys = {
   taskAttachments: (taskId: string, options?: { includeDeleted?: boolean }) =>
     ['task', taskId, 'attachments', options?.includeDeleted ? 'all' : 'active'] as const,
   taskReminder: (taskId: string) => ['task', taskId, 'reminder'] as const,
+  goal: (goalId: string) => ['goal', goalId] as const,
+  goalHistory: (goalId: string, take?: number) => ['goal', goalId, 'history', take ?? 'default'] as const,
+  goalProjects: (goalId: string) => ['goal', goalId, 'projects'] as const,
 
   // Subtask keys
   taskSubtasks: (taskId: string) => ['task', taskId, 'subtasks'] as const,
