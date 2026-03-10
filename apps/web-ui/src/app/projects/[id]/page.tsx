@@ -292,25 +292,27 @@ export default function ProjectPage() {
           <h1 className="text-lg font-semibold">{project?.name ?? t('project')}</h1>
           <p className="text-sm text-muted-foreground">{t('projectFollowerHint')}</p>
         </div>
-        <FollowerToggle
-          count={project?.followerCount ?? 0}
-          isFollowed={project?.isFollowedByCurrentUser ?? false}
-          isPending={followProject.isPending || unfollowProject.isPending}
-          onToggle={() => {
-            if (followProject.isPending || unfollowProject.isPending) return;
-            if (project?.isFollowedByCurrentUser) {
-              unfollowProject.mutate();
-              return;
-            }
-            followProject.mutate();
-          }}
-          buttonTestId="project-follow-toggle"
-          countTestId="project-follower-count"
-          followLabel={t('follow')}
-          followingLabel={t('following')}
-          followerLabel={t('follower')}
-          followersLabel={t('followers')}
-        />
+        {project ? (
+          <FollowerToggle
+            count={project.followerCount ?? 0}
+            isFollowed={project.isFollowedByCurrentUser ?? false}
+            isPending={followProject.isPending || unfollowProject.isPending}
+            onToggle={() => {
+              if (followProject.isPending || unfollowProject.isPending) return;
+              if (project.isFollowedByCurrentUser) {
+                unfollowProject.mutate();
+                return;
+              }
+              followProject.mutate();
+            }}
+            buttonTestId="project-follow-toggle"
+            countTestId="project-follower-count"
+            followLabel={t('follow')}
+            followingLabel={t('following')}
+            followerLabel={t('follower')}
+            followersLabel={t('followers')}
+          />
+        ) : null}
       </section>
 
       <Dialog open={trashOpen} onOpenChange={(open) => setProjectQueryParam('trash', open ? '1' : null)}>

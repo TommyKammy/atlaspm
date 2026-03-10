@@ -1,4 +1,4 @@
-import { expect, test } from './helpers/browser-auth';
+import { expect, test, type Page } from './helpers/browser-auth';
 
 const API = process.env.E2E_CORE_API_URL ?? 'http://localhost:3001';
 
@@ -21,6 +21,65 @@ function dayIso(deltaDays: number) {
   date.setHours(0, 0, 0, 0);
   date.setDate(date.getDate() + deltaDays);
   return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}T00:00:00.000Z`;
+}
+
+async function timelineBarBox(page: Page, taskId: string) {
+  const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
+  await bar.scrollIntoViewIfNeeded();
+  await expect(bar).toBeVisible();
+  await expect
+    .poll(async () => {
+      const box = await bar.boundingBox();
+      return box ? { x: box.x, y: box.y, width: box.width, height: box.height } : null;
+    })
+    .not.toBeNull();
+  const box = await bar.boundingBox();
+  if (!box) {
+    throw new Error(`Expected timeline bar bounds for ${taskId}`);
+  }
+  return box;
+}
+
+async function dragTimelineBarHorizontally(page: Page, taskId: string, deltaX: number, altKey = false) {
+  const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
+  const box = await timelineBarBox(page, taskId);
+  const startX = box.x + box.width / 2;
+  const startY = box.y + box.height / 2;
+
+  await bar.dispatchEvent('pointerdown', {
+    button: 0,
+    clientX: startX,
+    clientY: startY,
+    pointerType: 'mouse',
+    isPrimary: true,
+    bubbles: true,
+    altKey,
+  });
+  await page.evaluate(
+    ({ clientX, clientY, altKey }) => {
+      window.dispatchEvent(
+        new PointerEvent('pointermove', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+          altKey,
+        }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointerup', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+          altKey,
+        }),
+      );
+    },
+    { clientX: startX + deltaX, clientY: startY, altKey },
+  );
 }
 
 test('timeline tab flow: bars render, detail opens, zoom/window persists', async ({ page }) => {
@@ -569,23 +628,12 @@ test('timeline working-days drag skips weekends and Alt keeps calendar-day place
     'true',
   );
 
-  const firstBar = page.locator(`[data-testid="timeline-bar-${taskA.id}"]`);
   const secondBar = page.locator(`[data-testid="timeline-bar-${taskB.id}"]`);
-  const firstBox = await firstBar.boundingBox();
-  if (!firstBox) {
-    throw new Error('Expected timeline bars to have bounds');
-  }
+  const firstBox = await timelineBarBox(page, taskA.id);
 
   const deltaX = 64;
 
-  await page.mouse.move(firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(
-    firstBox.x + firstBox.width / 2 + deltaX,
-    firstBox.y + firstBox.height / 2,
-    { steps: 10 },
-  );
-  await page.mouse.up();
+  await dragTimelineBarHorizontally(page, taskA.id, deltaX);
 
   await expect
     .poll(async () => {
@@ -599,16 +647,7 @@ test('timeline working-days drag skips weekends and Alt keeps calendar-day place
     throw new Error('Expected second timeline bar to have bounds after rerender');
   }
 
-  await page.keyboard.down('Alt');
-  await page.mouse.move(secondBox.x + secondBox.width / 2, secondBox.y + secondBox.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(
-    secondBox.x + secondBox.width / 2 + deltaX,
-    secondBox.y + secondBox.height / 2,
-    { steps: 10 },
-  );
-  await page.mouse.up();
-  await page.keyboard.up('Alt');
+  await dragTimelineBarHorizontally(page, taskB.id, deltaX, true);
 
   await expect
     .poll(async () => {

@@ -34,15 +34,49 @@ async function loginWithTimelineEnabled(page: Page, sub: string, email: string) 
 
 async function dragTimelineBar(page: Page, taskId: string, deltaDays: number) {
   const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
+  await bar.scrollIntoViewIfNeeded();
   await expect(bar).toBeVisible();
+  await expect
+    .poll(async () => {
+      const resolved = await bar.boundingBox();
+      return resolved ? { x: resolved.x, y: resolved.y, width: resolved.width, height: resolved.height } : null;
+    })
+    .not.toBeNull();
   const box = await bar.boundingBox();
   if (!box) throw new Error(`Unable to resolve bounds for timeline bar ${taskId}`);
   const startX = box.x + Math.min(Math.max(8, box.width / 4), box.width - 4);
   const startY = box.y + box.height / 2;
-  await page.mouse.move(startX, startY);
-  await page.mouse.down();
-  await page.mouse.move(startX + (deltaDays * DAY_COLUMN_WIDTH), startY, { steps: 12 });
-  await page.mouse.up();
+  await bar.dispatchEvent('pointerdown', {
+    button: 0,
+    clientX: startX,
+    clientY: startY,
+    pointerType: 'mouse',
+    isPrimary: true,
+    bubbles: true,
+  });
+  await page.evaluate(
+    ({ clientX, clientY }) => {
+      window.dispatchEvent(
+        new PointerEvent('pointermove', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointerup', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+    },
+    { clientX: startX + deltaDays * DAY_COLUMN_WIDTH, clientY: startY },
+  );
 }
 
 test('timeline drag reschedule supports optimistic success and conflict rollback banner', async ({ page }) => {

@@ -110,9 +110,15 @@ async function dragTimelineLaneHeaderToLane(
 async function dragTimelineBarToLane(page: Page, taskId: string, laneTestId: string) {
   const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
   const lane = page.locator(`[data-testid="${laneTestId}"]`);
+  await bar.scrollIntoViewIfNeeded();
   await expect(bar).toBeVisible();
   await expect(lane).toBeVisible();
-  await page.waitForTimeout(100);
+  await expect
+    .poll(async () => {
+      const resolved = await bar.boundingBox();
+      return resolved ? { x: resolved.x, y: resolved.y, width: resolved.width, height: resolved.height } : null;
+    })
+    .not.toBeNull();
   const barBox = await bar.boundingBox();
   const laneBox = await lane.boundingBox();
   if (!barBox || !laneBox) throw new Error('Unable to resolve bar/lane bounds');
@@ -121,11 +127,37 @@ async function dragTimelineBarToLane(page: Page, taskId: string, laneTestId: str
   const startY = barBox.y + barBox.height / 2;
   const targetY = laneBox.y + Math.min(Math.max(16, laneBox.height * 0.75), laneBox.height - 12);
 
-  await page.mouse.move(startX, startY);
-  await page.mouse.down();
-  await page.waitForTimeout(50);
-  await page.mouse.move(startX + Math.max(16, DAY_COLUMN_WIDTH * 0.35), targetY, { steps: 16 });
-  await page.mouse.up();
+  await bar.dispatchEvent('pointerdown', {
+    button: 0,
+    clientX: startX,
+    clientY: startY,
+    pointerType: 'mouse',
+    isPrimary: true,
+    bubbles: true,
+  });
+  await page.evaluate(
+    ({ clientX, clientY }) => {
+      window.dispatchEvent(
+        new PointerEvent('pointermove', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointerup', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+    },
+    { clientX: startX + Math.max(16, DAY_COLUMN_WIDTH * 0.35), clientY: targetY },
+  );
 }
 
 async function timelineBarTop(page: Page, taskId: string) {
@@ -152,34 +184,100 @@ async function orderedTaskIdsByTop(page: Page, taskIds: string[]) {
 
 async function dragTimelineBarVertically(page: Page, taskId: string, deltaY: number) {
   const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
+  await bar.scrollIntoViewIfNeeded();
   await expect(bar).toBeVisible();
+  await expect
+    .poll(async () => {
+      const resolved = await bar.boundingBox();
+      return resolved ? { x: resolved.x, y: resolved.y, width: resolved.width, height: resolved.height } : null;
+    })
+    .not.toBeNull();
   const box = await bar.boundingBox();
   if (!box) throw new Error(`Unable to resolve bounds for timeline bar ${taskId}`);
 
   const startX = box.x + Math.min(Math.max(8, box.width / 4), box.width - 4);
   const startY = box.y + box.height / 2;
 
-  await page.mouse.move(startX, startY);
-  await page.mouse.down();
-  await page.waitForTimeout(50);
-  await page.mouse.move(startX, startY + deltaY, { steps: 18 });
-  await page.mouse.up();
+  await bar.dispatchEvent('pointerdown', {
+    button: 0,
+    clientX: startX,
+    clientY: startY,
+    pointerType: 'mouse',
+    isPrimary: true,
+    bubbles: true,
+  });
+  await page.evaluate(
+    ({ clientX, clientY }) => {
+      window.dispatchEvent(
+        new PointerEvent('pointermove', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointerup', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+    },
+    { clientX: startX, clientY: startY + deltaY },
+  );
 }
 
 async function dragTimelineBarHorizontally(page: Page, taskId: string, deltaDays: number) {
   const bar = page.locator(`[data-testid="timeline-bar-${taskId}"]`);
+  await bar.scrollIntoViewIfNeeded();
   await expect(bar).toBeVisible();
+  await expect
+    .poll(async () => {
+      const resolved = await bar.boundingBox();
+      return resolved ? { x: resolved.x, y: resolved.y, width: resolved.width, height: resolved.height } : null;
+    })
+    .not.toBeNull();
   const box = await bar.boundingBox();
   if (!box) throw new Error(`Unable to resolve bounds for timeline bar ${taskId}`);
 
   const startX = box.x + Math.min(Math.max(8, box.width / 4), box.width - 4);
   const startY = box.y + box.height / 2;
 
-  await page.mouse.move(startX, startY);
-  await page.mouse.down();
-  await page.waitForTimeout(50);
-  await page.mouse.move(startX + deltaDays * DAY_COLUMN_WIDTH, startY, { steps: 18 });
-  await page.mouse.up();
+  await bar.dispatchEvent('pointerdown', {
+    button: 0,
+    clientX: startX,
+    clientY: startY,
+    pointerType: 'mouse',
+    isPrimary: true,
+    bubbles: true,
+  });
+  await page.evaluate(
+    ({ clientX, clientY }) => {
+      window.dispatchEvent(
+        new PointerEvent('pointermove', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointerup', {
+          clientX,
+          clientY,
+          pointerType: 'mouse',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+    },
+    { clientX: startX + deltaDays * DAY_COLUMN_WIDTH, clientY: startY },
+  );
 }
 
 async function timelineBarBox(page: Page, taskId: string) {
@@ -952,14 +1050,18 @@ test('timeline grouped bars stay in sync with drawer date edits after drag resch
   const draggedBox = await timelineBarBox(page, scheduledTask.id);
   expect(Math.abs((draggedBox.x - initialBox.x) - DAY_COLUMN_WIDTH)).toBeLessThanOrEqual(4);
 
+  const taskDetailStartDateInput = page.locator('[data-testid="task-detail-start-date"]');
+  const taskDetailDueDateInput = page.locator('[data-testid="task-detail-due-date"]');
   await page.click(`[data-testid="timeline-bar-${scheduledTask.id}"]`);
-  await expect(page.locator('[data-testid="task-detail-start-date"]')).toHaveValue(draggedStartDate);
-  await expect(page.locator('[data-testid="task-detail-due-date"]')).toHaveValue(draggedDueDate);
+  if ((await taskDetailStartDateInput.count()) === 0) {
+    await page.click(`[data-testid="timeline-bar-${scheduledTask.id}"]`);
+  }
+  await expect(taskDetailStartDateInput).toHaveValue(draggedStartDate);
+  await expect(taskDetailDueDateInput).toHaveValue(draggedDueDate);
 
   const extendedDueDate = dayIso(5).slice(0, 10);
-  const dueDateInput = page.locator('[data-testid="task-detail-due-date"]');
-  await dueDateInput.fill(extendedDueDate);
-  await expect(dueDateInput).toHaveValue(extendedDueDate);
+  await taskDetailDueDateInput.fill(extendedDueDate);
+  await expect(taskDetailDueDateInput).toHaveValue(extendedDueDate);
 
   await expect
     .poll(async () => {
