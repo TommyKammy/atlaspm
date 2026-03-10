@@ -3,12 +3,12 @@ import { SignJWT, jwtVerify, createRemoteJWKSet } from 'jose';
 import { createSecretKey } from 'crypto';
 import type { AuthUser } from '../common/types';
 import { getValidatedDevAuthSecret } from './dev-auth-environment';
+import { readAtlaspmSessionCookie } from './session-cookie';
 
 @Injectable()
 export class AuthService {
-  async verify(authHeader?: string): Promise<AuthUser> {
-    if (!authHeader?.startsWith('Bearer ')) throw new UnauthorizedException('Missing bearer token');
-    const token = authHeader.slice('Bearer '.length);
+  async verify(authHeader?: string, cookieHeader?: string): Promise<AuthUser> {
+    const token = this.extractToken(authHeader, cookieHeader);
     const devEnabled = process.env.DEV_AUTH_ENABLED === 'true';
     if (devEnabled) {
       const secret = createSecretKey(Buffer.from(getValidatedDevAuthSecret()));
@@ -34,6 +34,17 @@ export class AuthService {
     }
     if (!payload.sub) throw new UnauthorizedException('Missing sub');
     return { sub: payload.sub, email: payload.email as string | undefined, name: payload.name as string | undefined };
+  }
+
+  private extractToken(authHeader?: string, cookieHeader?: string): string {
+    if (authHeader?.startsWith('Bearer ')) {
+      return authHeader.slice('Bearer '.length);
+    }
+
+    const sessionToken = readAtlaspmSessionCookie(cookieHeader);
+    if (sessionToken) return sessionToken;
+
+    throw new UnauthorizedException('Missing bearer token');
   }
 
   async mintDevToken(sub: string, email?: string, name?: string) {

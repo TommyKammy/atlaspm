@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import { AuthService } from '../src/auth/auth.service';
 import { DevAuthModule } from '../src/auth/dev-auth.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -116,6 +117,61 @@ describe('Dev auth environment guardrails', () => {
 
       expect(typeof response.body.token).toBe('string');
       expect(response.body.token.length).toBeGreaterThan(20);
+    } finally {
+      await app.close();
+    }
+  }, 15_000);
+
+  test('establishes a browser session cookie for dev auth login', async () => {
+    process.env.NODE_ENV = 'test';
+    process.env.DEV_AUTH_ENABLED = 'true';
+    process.env.DEV_AUTH_SECRET = 'atlaspm-test-secret-123';
+
+    const app = await createAuthApp();
+    await app.init();
+
+    try {
+      const response = await request(app.getHttpServer())
+        .post('/dev-auth/token')
+        .send({ sub: 'user-123', email: 'user@example.com', name: 'User Example' })
+        .expect(201);
+
+      const setCookie = response.headers['set-cookie'] ?? [];
+      const sessionCookie = setCookie.find((cookie) => /(?:__Host-)?atlaspm_session=/.test(cookie));
+      const csrfCookie = setCookie.find((cookie) => /(?:__Host-)?atlaspm_csrf=/.test(cookie));
+
+      expect(sessionCookie).toBeDefined();
+      expect(sessionCookie).toMatch(/;\s*HttpOnly\b/i);
+      expect(sessionCookie).toMatch(/;\s*SameSite=Lax\b/i);
+      expect(sessionCookie).toMatch(/;\s*Path=\//i);
+
+      expect(csrfCookie).toBeDefined();
+      expect(csrfCookie).not.toMatch(/;\s*HttpOnly\b/i);
+      expect(csrfCookie).toMatch(/;\s*SameSite=Lax\b/i);
+      expect(csrfCookie).toMatch(/;\s*Path=\//i);
+    } finally {
+      await app.close();
+    }
+  }, 15_000);
+
+  test('accepts the dev session cookie as an auth credential', async () => {
+    process.env.NODE_ENV = 'test';
+    process.env.DEV_AUTH_ENABLED = 'true';
+    process.env.DEV_AUTH_SECRET = 'atlaspm-test-secret-123';
+
+    const app = await createAuthApp();
+    await app.init();
+
+    try {
+      const auth = app.get(AuthService);
+      const token = await auth.mintDevToken('user-123', 'user@example.com', 'User Example');
+      const user = await auth.verify(undefined, `atlaspm_session=${token}`);
+
+      expect(user).toEqual({
+        sub: 'user-123',
+        email: 'user@example.com',
+        name: 'User Example',
+      });
     } finally {
       await app.close();
     }
