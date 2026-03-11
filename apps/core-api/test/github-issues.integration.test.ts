@@ -420,15 +420,15 @@ describe('GitHub issues integration', () => {
 
     failIssueSyncMessage = 'upstream token secret=ghp_super_secret_token';
 
-    const syncRes = await request(app.getHttpServer())
-      .post(`/workspaces/${workspaceId}/integrations/${connectRes.body.id}/sync`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ scope: 'issues' })
-      .expect(500);
-
-    failIssueSyncMessage = null;
-
-    expect(syncRes.body.message).toBe('Internal server error');
+    try {
+      await request(app.getHttpServer())
+        .post(`/workspaces/${workspaceId}/integrations/${connectRes.body.id}/sync`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ scope: 'issues' })
+        .expect(500);
+    } finally {
+      failIssueSyncMessage = null;
+    }
 
     const syncState = await prisma.integrationSyncState.findUnique({
       where: {

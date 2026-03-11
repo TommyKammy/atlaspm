@@ -8,7 +8,7 @@ import {
 import { IntegrationCredentialKind, IntegrationProviderKind, WorkspaceRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
-import { IntegrationRuntimeService } from './integration-runtime.service';
+import { IntegrationRuntimeService, type RunIntegrationSyncJobResult } from './integration-runtime.service';
 import { IntegrationCredentialsService } from './integration-credentials.service';
 import { Prisma } from '@prisma/client';
 import { GithubProviderSettings } from './github.types';
@@ -127,7 +127,7 @@ export class IntegrationsService {
     await this.domain.requireWorkspaceRole(input.workspaceId, input.actorUserId, WorkspaceRole.WS_ADMIN);
     const config = await this.getConfigOrThrow(input.providerConfigId, input.workspaceId);
     const providerKey = this.mapProviderKey(config.provider);
-    let result;
+    let result: RunIntegrationSyncJobResult;
 
     try {
       result = await this.runtime.runSyncJob({
