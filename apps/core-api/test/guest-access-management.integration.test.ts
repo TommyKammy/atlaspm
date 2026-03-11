@@ -150,4 +150,68 @@ describe('Guest access management integration', () => {
       }),
     ]);
   });
+
+  test('expired guest invitations remain expired and never auto-accept on matching login', async () => {
+    const ownerId = `guest-expiry-admin-${Date.now()}`;
+    const ownerEmail = `${ownerId}@example.com`;
+    const ownerToken = await auth.mintDevToken(ownerId, ownerEmail, 'Guest Expiry Admin');
+
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${ownerToken}`).expect(200);
+
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ workspaceId, name: `Guest Access Expiry ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const inviteEmail = `expired-${Date.now()}@vendor.example`;
+    const invitationRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/guest-invitations`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ email: inviteEmail, role: ProjectRole.VIEWER, expiresInDays: 1 })
+      .expect(201);
+
+    await prisma.guestInvitation.update({
+      where: { id: invitationRes.body.invitationId as string },
+      data: { expiresAt: new Date(Date.now() - 60_000) },
+    });
+
+    const guestId = `expired-guest-${Date.now()}`;
+    const guestToken = await auth.mintDevToken(guestId, inviteEmail, 'Expired Guest');
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${guestToken}`).expect(200);
+
+    const guestAccessRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/guest-access`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .expect(200);
+
+    expect(guestAccessRes.body).toEqual([
+      expect.objectContaining({
+        invitationId: invitationRes.body.invitationId,
+        email: inviteEmail,
+        state: 'expired',
+        grantStatus: null,
+        userId: null,
+        acceptedAt: null,
+      }),
+    ]);
+
+    const guestProjectsRes = await request(app.getHttpServer())
+      .get('/projects')
+      .set('Authorization', `Bearer ${guestToken}`)
+      .expect(200);
+    expect(guestProjectsRes.body.map((project: { id: string }) => project.id)).not.toContain(projectId);
+
+    await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${guestToken}`)
+      .expect(404);
+  });
 });
