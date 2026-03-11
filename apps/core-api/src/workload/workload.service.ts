@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { WorkspaceRole } from '@prisma/client';
+import { CapacityService } from '../capacity/capacity.service';
 
 export interface WorkloadFilters {
   startDate?: Date;
@@ -56,6 +57,7 @@ export class WorkloadService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(CapacityService) private readonly capacityService: CapacityService,
   ) {}
 
   async getUserWorkload(
@@ -106,7 +108,12 @@ export class WorkloadService {
     });
 
     const weeklyBreakdown = this.groupByWeek(tasks, startDate, endDate);
-    const overloadAlerts = this.detectOverload(weeklyBreakdown, filters.viewMode || 'effort');
+    const overloadAlerts = await this.detectOverload(
+      workspaceId,
+      targetUserId,
+      weeklyBreakdown,
+      filters.viewMode || 'effort',
+    );
 
     const totalEstimateMinutes = tasks.reduce((sum, t) => sum + (t.estimateMinutes || 0), 0);
     const totalSpentMinutes = tasks.reduce((sum, t) => sum + t.spentMinutes, 0);
@@ -196,16 +203,16 @@ export class WorkloadService {
     const now = new Date();
     const weeks = filters.periodWeeks || 4;
     const defaultStart = new Date(now);
-    defaultStart.setDate(now.getDate() - now.getDay());
-    defaultStart.setHours(0, 0, 0, 0);
+    defaultStart.setUTCDate(now.getUTCDate() - now.getUTCDay());
+    defaultStart.setUTCHours(0, 0, 0, 0);
 
     const defaultEnd = new Date(defaultStart);
-    defaultEnd.setDate(defaultStart.getDate() + (weeks * 7) - 1);
-    defaultEnd.setHours(23, 59, 59, 999);
+    defaultEnd.setUTCDate(defaultStart.getUTCDate() + (weeks * 7) - 1);
+    defaultEnd.setUTCHours(23, 59, 59, 999);
 
     return {
-      startDate: filters.startDate || defaultStart,
-      endDate: filters.endDate || defaultEnd,
+      startDate: filters.startDate ? this.startOfUtcDay(filters.startDate) : defaultStart,
+      endDate: filters.endDate ? this.endOfUtcDay(filters.endDate) : defaultEnd,
       projectId: filters.projectId,
     };
   }
@@ -228,8 +235,8 @@ export class WorkloadService {
 
     while (currentWeek <= endDate) {
       const weekEnd = new Date(currentWeek);
-      weekEnd.setDate(currentWeek.getDate() + 6);
-      weekEnd.setHours(23, 59, 59, 999);
+      weekEnd.setUTCDate(currentWeek.getUTCDate() + 6);
+      weekEnd.setUTCHours(23, 59, 59, 999);
 
       const weekTasks = tasks.filter((task) => {
         if (!task.dueAt) return false;
@@ -258,39 +265,80 @@ export class WorkloadService {
         })),
       });
 
-      currentWeek.setDate(currentWeek.getDate() + 7);
+      currentWeek.setUTCDate(currentWeek.getUTCDate() + 7);
     }
 
     return weeks;
   }
 
-  private detectOverload(weeklyLoad: WeeklyLoad[], viewMode: 'tasks' | 'effort'): OverloadAlert[] {
+  private async detectOverload(
+    workspaceId: string,
+    userId: string,
+    weeklyLoad: WeeklyLoad[],
+    viewMode: 'tasks' | 'effort',
+  ): Promise<OverloadAlert[]> {
+    const capacityByWeek = await this.capacityService.resolveWeeklyCapacityMinutesBatch(
+      workspaceId,
+      userId,
+      weeklyLoad.map((week) => ({
+        startDate: week.startDate,
+        endDate: week.endDate,
+      })),
+    );
+
     if (viewMode === 'effort') {
-      const capacityMinutes = this.DEFAULT_CAPACITY_HOURS * 60;
-      return weeklyLoad
-        .filter((week) => week.estimateMinutes > capacityMinutes)
-        .map((week) => ({
+      const weeksWithCapacity = weeklyLoad.map((week, index) => ({
+        week,
+        capacityMinutes: capacityByWeek[index] ?? this.DEFAULT_CAPACITY_HOURS * 60,
+      }));
+
+      return weeksWithCapacity
+        .filter(({ week, capacityMinutes }) => week.estimateMinutes > capacityMinutes)
+        .map(({ week, capacityMinutes }) => ({
           week: week.week,
           estimateMinutes: week.estimateMinutes,
           capacity: capacityMinutes,
           excess: week.estimateMinutes - capacityMinutes,
         }));
     } else {
-      return weeklyLoad
-        .filter((week) => week.taskCount > this.DEFAULT_CAPACITY_TASKS)
-        .map((week) => ({
+      const weeksWithCapacity = weeklyLoad.map((week, index) => ({
+        week,
+        capacityTasks: Math.max(
+          0,
+          Math.round(
+            (capacityByWeek[index] ?? this.DEFAULT_CAPACITY_HOURS * 60) /
+              ((this.DEFAULT_CAPACITY_HOURS * 60) / this.DEFAULT_CAPACITY_TASKS),
+          ),
+        ),
+      }));
+
+      return weeksWithCapacity
+        .filter(({ week, capacityTasks }) => week.taskCount > capacityTasks)
+        .map(({ week, capacityTasks }) => ({
           week: week.week,
           taskCount: week.taskCount,
           estimateMinutes: week.estimateMinutes,
-          capacity: this.DEFAULT_CAPACITY_TASKS,
-          excess: week.taskCount - this.DEFAULT_CAPACITY_TASKS,
+          capacity: capacityTasks,
+          excess: week.taskCount - capacityTasks,
         }));
     }
   }
 
   private formatWeekLabel(date: Date): string {
-    const month = date.toLocaleString('en-US', { month: 'short' });
-    const day = date.getDate();
+    const month = date.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+    const day = date.getUTCDate();
     return `${month} ${day}`;
+  }
+
+  private startOfUtcDay(date: Date) {
+    const normalized = new Date(date);
+    normalized.setUTCHours(0, 0, 0, 0);
+    return normalized;
+  }
+
+  private endOfUtcDay(date: Date) {
+    const normalized = new Date(date);
+    normalized.setUTCHours(23, 59, 59, 999);
+    return normalized;
   }
 }
