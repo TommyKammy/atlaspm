@@ -135,6 +135,9 @@ jobs:
 
       - name: Build core-api image (cached)
         uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_SUMMARY: false
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
           file: apps/core-api/Dockerfile
@@ -145,6 +148,9 @@ jobs:
 
       - name: Build collab-server image (cached)
         uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_SUMMARY: false
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
           file: apps/collab-server/Dockerfile
@@ -155,6 +161,9 @@ jobs:
 
       - name: Build web-ui image (cached)
         uses: docker/bake-action@v5
+        env:
+          DOCKER_BUILD_SUMMARY: false
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           workdir: infra/docker
           files: docker-compose.yml
