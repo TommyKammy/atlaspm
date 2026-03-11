@@ -1,54 +1,78 @@
-# Issue #363: P3: Add capacity schedule and time-off domain models
+# Issue #365: P3: Build workload UI indicators and filters for over-capacity states
 
 ## Supervisor Snapshot
-- Issue URL: https://github.com/TommyKammy/atlaspm/issues/363
-- Branch: codex/reopen-issue-363
-- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-363
-- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-363/.codex-supervisor/issue-journal.md
+- Issue URL: https://github.com/TommyKammy/atlaspm/issues/365
+- Branch: codex/reopen-issue-365
+- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-365
+- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-365/.codex-supervisor/issue-journal.md
 - Current phase: addressing_review
-- Attempt count: 3
-- Last head SHA: 06eef0c5910bc0e38409f661105673aade8ca53d
+- Attempt count: 2
+- Last head SHA: bddd95cc2eff71df6e6fc26002f2ef09a2a45b90
 - Blocked reason: none
-- Last failure signature: PRRT_kwDORWcwRc5zdPDb|PRRT_kwDORWcwRc5zdPDo|PRRT_kwDORWcwRc5zdPDy|PRRT_kwDORWcwRc5zdPD3|PRRT_kwDORWcwRc5zdPD6|PRRT_kwDORWcwRc5zdPD9
+- Last failure signature: none
 - Repeated failure signature count: 1
-- Updated at: 2026-03-11T00:38:04.837Z
+- Updated at: 2026-03-11T10:20:28+09:00
 
 ## Latest Codex Summary
-Inspected PR `#373`’s failing `e2e` job and the failure was not a Playwright regression. The job died in the cached Docker image build step, specifically `docker/build-push-action@v6`, with a build-summary/build-record parse error: `invalid character '<' looking for beginning of value`. I mitigated that by disabling Docker build summaries/build-record uploads for the cached image build steps in [`ci.yml`](/home/tommy/Dev/atlaspm-worktrees/issue-363/.github/workflows/ci.yml), updated the issue journal, committed it as `06eef0c` (`fix: disable docker build summaries in e2e ci`), and pushed `codex/reopen-issue-363`.
+Resolved the four automated review comments in commit `bddd95c` (`Address workload review feedback`) and pushed the branch to PR #374.
 
-The branch is clean and PR `#373` now points at `06eef0c5910bc0e38409f661105673aade8ca53d`. No new local product failure was reproduced; this was a workflow-level CI repair.
+The fix set keeps behavior unchanged while tightening the implementation: the capacity integration test now asserts `workloadWeek` exists before reading its fields; workload helpers now build an alerts-by-week map once and reuse it; the workload page computes per-user status and status counts in one pass; and each workload card reuses a per-card alerts map instead of scanning `overloadAlerts` for every rendered week.
 
-Summary: Fixed PR `#373`’s failing `e2e` job by disabling Docker build summary/build-record post-processing in the cached image build steps, then pushed commit `06eef0c`.
-State hint: waiting_ci
-Blocked reason: none
-Tests: `gh pr checks 373`; `gh run view 22930597973 --job 66551161894 --log`; `gh run view 22930597973 --job 66551161894 --log | rg -n "invalid character|##\\[error\\]|buildx failed|Build core-api"`; `git diff --check`
-Failure signature: none
-Next action: Watch PR `#373`’s rerun CI and confirm the `e2e` job now gets past Docker image build setup into actual Playwright execution.
+Focused verification passed:
+`pnpm --filter @atlaspm/web-ui test -- src/app/workspaces/[workspaceId]/workload/workload-helpers.test.ts`
+`pnpm --filter @atlaspm/web-ui type-check`
+`pnpm --filter @atlaspm/core-api test -- test/capacity.integration.test.ts`
+
+PR follow-up:
+`git push origin codex/reopen-issue-365`
+Resolved review threads `PRRT_kwDORWcwRc5zdilP`, `PRRT_kwDORWcwRc5zdild`, `PRRT_kwDORWcwRc5zdilj`, and `PRRT_kwDORWcwRc5zdilm` via `gh api graphql`.
 
 ## Active Failure Context
-- Category: review
-- Summary: 6 unresolved automated review thread(s) remain.
-- Reference: https://github.com/TommyKammy/atlaspm/pull/373#discussion_r2915224243
-- Details:
-  - apps/core-api/src/workload/workload.service.ts:285 `detectOverload()` resolves capacity by calling `capacityService.resolveWeeklyCapacityMinutes()` for every week. Since that method performs multiple DB queries, longer ranges (or team workload across many users) can turn into an N+1 query pattern. Consider a batch method that fetches schedules once + all overlapping time-off once, then computes capacities per-week in memory.
-  - apps/core-api/src/workload/workload.service.ts:288 `groupByWeek()` produces week boundaries using local-time `setDate()/setHours()`, but capacity resolution iterates days using UTC day math. On non-UTC servers this can shift which days are counted in a week. Consider normalizing week boundaries to UTC (use `getUTCDay()/setUTCDate()/setUTCHours`) or making capacity resolution use the same time basis as `groupByWeek()`.
-  - apps/core-api/prisma/schema.prisma:133 Capacity schedule uniqueness is only enforced in application logic. Because `subjectUserId` is nullable, Postgres UNIQUE on (workspaceId, subjectType, subjectUserId) would still allow multiple WORKSPACE schedules (multiple NULLs). Add DB-level constraints (e.g., partial unique indexes per subjectType and a CHECK tying subjectType to subjectUserId nullability) to guarantee the invariant and avoid races.
-  - apps/core-api/prisma/migrations/20260311093000_add_capacity_schedules_and_time_off/migration.sql:40 This migration creates non-unique indexes for capacity_schedules but doesn't enforce the intended 'one schedule per subject' invariant. Consider adding partial UNIQUE indexes (e.g., unique (workspace_id) where subject_type='WORKSPACE' and subject_user_id IS NULL; unique (workspace_id, subject_user_id) where subject_type='USER') so concurrent creates can't produce duplicates. ```suggestion -- Enforce one schedule per workspace-level subject CREATE UNIQUE INDEX "capacity_schedules_workspace_subject_unique" ON "capacity_schedules"("workspace_id") WHERE "subject_type" = 'WORKSPACE' AND "subject_user_id" IS NULL; -- Enforce one schedule per user-level subject within a workspace CREATE UNIQUE INDEX "capacity_schedules_user_subject_unique" ON "capacity_schedules"("workspace_id", "subject_user_id") WHERE "subject_type" = 'USER' AND "subject_user_id" IS NOT NULL; ```
-  - apps/core-api/src/capacity/capacity.service.ts:45 The pre-insert `findFirst` duplicate check is race-prone: two concurrent requests can both pass the check and insert duplicates. With DB-level uniqueness in place, rely on the constraint and map unique-violation errors to a 409 Conflict instead of doing a separate read-before-write check.
+- None recorded locally. PR #374 is waiting on fresh CI after review-thread resolution.
 
 ## Codex Working Notes
 ### Current Handoff
-- Hypothesis: The automated review comments were valid; the current branch now addresses them with DB-backed schedule invariants, race-free schedule creation, batched weekly capacity lookup, and UTC-normalized workload week math.
-- Primary failure or risk: No current local failure. Remaining risk is only CI confirmation plus whether reviewers accept the explicit `UTC` restriction for `timeZone` until timezone-aware capacity math is implemented.
-- Last focused command: `pnpm --filter @atlaspm/core-api type-check && pnpm --filter @atlaspm/core-api test -- test/capacity.integration.test.ts`
-- Files changed: `apps/core-api/prisma/schema.prisma`, `apps/core-api/prisma/migrations/20260311094500_capacity_schedule_constraints/migration.sql`, `apps/core-api/src/capacity/capacity.service.ts`, `apps/core-api/src/workload/workload.service.ts`, `apps/core-api/test/capacity.integration.test.ts`, and this journal.
+- Hypothesis: All four automated review comments are valid and can be fixed without changing behavior: tighten one test assertion, cache overload alerts by week in workload helpers/cards, and precompute per-user workload status once per render.
+- Primary failure or risk: No current local failure. The only remaining risk is remote CI because PR #374 is now running a fresh check set after commit `bddd95c`.
+- Last focused command: `pnpm --filter @atlaspm/core-api test -- test/capacity.integration.test.ts`
+- Files changed: `apps/core-api/test/capacity.integration.test.ts`, `apps/web-ui/src/app/workspaces/[workspaceId]/workload/workload-helpers.ts`, `apps/web-ui/src/app/workspaces/[workspaceId]/workload/page.tsx`, and this journal.
 - Next 1-3 actions:
-  1. Commit and push the review-fix patch set.
-  2. Resolve the addressed Copilot review threads on PR #373.
-  3. Watch CI, especially the rerun `e2e` check, for any remaining non-review failures.
+  1. Watch PR #374 checks, especially `e2e`, until the merge state is stable.
+  2. If a fresh CI failure appears, reproduce it locally from this worktree and fix it here.
+  3. If checks pass, proceed with final PR review/merge handling.
 
 ### Scratchpad
-- Keep this section short. The supervisor may compact older notes automatically.
+- Review follow-up:
+  - Added `expect(workloadWeek).toBeTruthy()` before asserting weekly capacity fields in `apps/core-api/test/capacity.integration.test.ts`.
+  - Added `createAlertsByWeekMap()` in `apps/web-ui/src/app/workspaces/[workspaceId]/workload/workload-helpers.ts` so helper lookups are O(1) per week instead of repeated `.find(...)`.
+  - `getWorkloadStatus()` now walks weeks once and returns early on over-capacity instead of building an intermediate array.
+  - `filterWeeks()` accepts a precomputed alerts map.
+  - `apps/web-ui/src/app/workspaces/[workspaceId]/workload/page.tsx` now computes per-user workload status and counts in one pass per render, then reuses the results for filtering and counts.
+  - `UserWorkloadCard` now builds `alertsByWeek` once and reuses it for both header status and week rows.
+- Review verification:
+  - `pnpm --filter @atlaspm/web-ui test -- src/app/workspaces/[workspaceId]/workload/workload-helpers.test.ts`
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm --filter @atlaspm/core-api test -- test/capacity.integration.test.ts`
+
+    - effort weeks still used `2400` instead of API capacity `420`
+    - reduced-capacity task weeks were reported as `available`
+  - That exposed a contract gap: `overloadAlerts` carried `capacity`, but non-overloaded reduced-capacity weeks had no capacity data at all.
+- Implementation:
+  - `apps/core-api/src/workload/workload.service.ts` now annotates every `weeklyBreakdown` entry with `capacityMinutes` and `capacityTasks` before computing overload alerts.
+  - `apps/web-ui/src/lib/api/workload.ts` accepts the new weekly capacity fields.
+  - `apps/web-ui/src/app/workspaces/[workspaceId]/workload/workload-helpers.ts` centralizes week/person status derivation and filtering.
+  - `apps/web-ui/src/app/workspaces/[workspaceId]/workload/page.tsx` now:
+    - uses actual weekly capacity instead of fixed thresholds
+    - shows reduced-capacity indicators
+    - adds client-side filters for `over-capacity`, `reduced-capacity`, and `available`
+    - narrows visible week rows inside each card when a capacity filter is active
+- Verification:
+  - `pnpm install`
+  - `pnpm --filter @atlaspm/web-ui test -- src/app/workspaces/[workspaceId]/workload/workload-helpers.test.ts` (failed first, then passed)
+  - `pnpm --filter @atlaspm/web-ui type-check`
+  - `pnpm --filter @atlaspm/domain build`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/core-api test -- test/capacity.integration.test.ts`
 - Reproduction:
   - Added `apps/core-api/test/capacity.integration.test.ts` to prove the missing contract first.
   - Initial feature failure: `POST /workspaces/:workspaceId/capacity-schedules` returned `404` because no capacity/time-off API existed.
@@ -67,7 +91,7 @@ Next action: Watch PR `#373`’s rerun CI and confirm the `e2e` job now gets pas
     - Batched workload weekly capacity resolution so one user/workload request fetches schedules once and overlapping time-off once.
     - Normalized workload week boundaries to UTC and restricted `timeZone` input to `UTC` until timezone-aware schedule math exists.
 - Failure signature:
-  - `review-capacity-invariants-and-workload-batching`
+  - `workload-ui-ignored-api-capacity`
 - Current focused verification:
   - `pnpm install`
   - `pnpm --filter @atlaspm/domain build`

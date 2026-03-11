@@ -239,9 +239,13 @@ describe('Capacity Integration', () => {
       .expect(200);
 
     const overloadedWeek = assigneeWorkload.body.overloadAlerts.find((week: any) => week.week === 'Mar 8');
+    const workloadWeek = assigneeWorkload.body.weeklyBreakdown.find((week: any) => week.week === 'Mar 8');
     expect(overloadedWeek).toBeTruthy();
     expect(overloadedWeek.capacity).toBe(420);
     expect(overloadedWeek.excess).toBe(780);
+    expect(workloadWeek).toBeTruthy();
+    expect(workloadWeek.capacityMinutes).toBe(420);
+    expect(workloadWeek.capacityTasks).toBe(2);
 
     const viewerSchedules = await request(app.getHttpServer())
       .get(`/workspaces/${workspaceId}/capacity-schedules`)

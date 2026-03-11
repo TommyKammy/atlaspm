@@ -7,6 +7,8 @@ export interface WeeklyLoad {
   week: string;
   startDate: string;
   endDate: string;
+  capacityMinutes: number;
+  capacityTasks: number;
   taskCount: number;
   estimateMinutes: number;
   spentMinutes: number;

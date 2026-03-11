@@ -16,6 +16,8 @@ export interface WeeklyLoad {
   week: string;
   startDate: Date;
   endDate: Date;
+  capacityMinutes: number;
+  capacityTasks: number;
   taskCount: number;
   estimateMinutes: number;
   spentMinutes: number;
@@ -107,13 +109,14 @@ export class WorkloadService {
       orderBy: { dueAt: 'asc' },
     });
 
-    const weeklyBreakdown = this.groupByWeek(tasks, startDate, endDate);
-    const overloadAlerts = await this.detectOverload(
+    const weeklyBreakdown = await this.buildWeeklyBreakdown(
       workspaceId,
       targetUserId,
-      weeklyBreakdown,
-      filters.viewMode || 'effort',
+      tasks,
+      startDate,
+      endDate,
     );
+    const overloadAlerts = this.detectOverload(weeklyBreakdown, filters.viewMode || 'effort');
 
     const totalEstimateMinutes = tasks.reduce((sum, t) => sum + (t.estimateMinutes || 0), 0);
     const totalSpentMinutes = tasks.reduce((sum, t) => sum + t.spentMinutes, 0);
@@ -251,6 +254,8 @@ export class WorkloadService {
         week: this.formatWeekLabel(currentWeek),
         startDate: new Date(currentWeek),
         endDate: new Date(weekEnd),
+        capacityMinutes: this.DEFAULT_CAPACITY_HOURS * 60,
+        capacityTasks: this.DEFAULT_CAPACITY_TASKS,
         taskCount: weekTasks.length,
         estimateMinutes,
         spentMinutes,
@@ -271,12 +276,22 @@ export class WorkloadService {
     return weeks;
   }
 
-  private async detectOverload(
+  private async buildWeeklyBreakdown(
     workspaceId: string,
     userId: string,
-    weeklyLoad: WeeklyLoad[],
-    viewMode: 'tasks' | 'effort',
-  ): Promise<OverloadAlert[]> {
+    tasks: Array<{
+      id: string;
+      title: string;
+      dueAt: Date | null;
+      priority: string | null;
+      status: string;
+      estimateMinutes: number | null;
+      spentMinutes: number;
+    }>,
+    startDate: Date,
+    endDate: Date,
+  ): Promise<WeeklyLoad[]> {
+    const weeklyLoad = this.groupByWeek(tasks, startDate, endDate);
     const capacityByWeek = await this.capacityService.resolveWeeklyCapacityMinutesBatch(
       workspaceId,
       userId,
@@ -286,40 +301,43 @@ export class WorkloadService {
       })),
     );
 
-    if (viewMode === 'effort') {
-      const weeksWithCapacity = weeklyLoad.map((week, index) => ({
-        week,
-        capacityMinutes: capacityByWeek[index] ?? this.DEFAULT_CAPACITY_HOURS * 60,
-      }));
+    return weeklyLoad.map((week, index) => {
+      const capacityMinutes = capacityByWeek[index] ?? this.DEFAULT_CAPACITY_HOURS * 60;
+      const capacityTasks = Math.max(
+        0,
+        Math.round(capacityMinutes / ((this.DEFAULT_CAPACITY_HOURS * 60) / this.DEFAULT_CAPACITY_TASKS)),
+      );
 
-      return weeksWithCapacity
-        .filter(({ week, capacityMinutes }) => week.estimateMinutes > capacityMinutes)
-        .map(({ week, capacityMinutes }) => ({
+      return {
+        ...week,
+        capacityMinutes,
+        capacityTasks,
+      };
+    });
+  }
+
+  private detectOverload(
+    weeklyLoad: WeeklyLoad[],
+    viewMode: 'tasks' | 'effort',
+  ): OverloadAlert[] {
+    if (viewMode === 'effort') {
+      return weeklyLoad
+        .filter((week) => week.estimateMinutes > week.capacityMinutes)
+        .map((week) => ({
           week: week.week,
           estimateMinutes: week.estimateMinutes,
-          capacity: capacityMinutes,
-          excess: week.estimateMinutes - capacityMinutes,
+          capacity: week.capacityMinutes,
+          excess: week.estimateMinutes - week.capacityMinutes,
         }));
     } else {
-      const weeksWithCapacity = weeklyLoad.map((week, index) => ({
-        week,
-        capacityTasks: Math.max(
-          0,
-          Math.round(
-            (capacityByWeek[index] ?? this.DEFAULT_CAPACITY_HOURS * 60) /
-              ((this.DEFAULT_CAPACITY_HOURS * 60) / this.DEFAULT_CAPACITY_TASKS),
-          ),
-        ),
-      }));
-
-      return weeksWithCapacity
-        .filter(({ week, capacityTasks }) => week.taskCount > capacityTasks)
-        .map(({ week, capacityTasks }) => ({
+      return weeklyLoad
+        .filter((week) => week.taskCount > week.capacityTasks)
+        .map((week) => ({
           week: week.week,
           taskCount: week.taskCount,
           estimateMinutes: week.estimateMinutes,
-          capacity: capacityTasks,
-          excess: week.taskCount - capacityTasks,
+          capacity: week.capacityTasks,
+          excess: week.taskCount - week.capacityTasks,
         }));
     }
   }
