@@ -8,6 +8,7 @@ import {
 import {
   CapacitySchedule,
   CapacityScheduleSubjectType,
+  Prisma,
   TimeOffEvent,
   WorkspaceRole,
 } from '@prisma/client';
@@ -20,6 +21,8 @@ export class CapacityService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(DomainService) private readonly domain: DomainService,
   ) {}
+
+  private readonly DEFAULT_WEEKLY_CAPACITY_MINUTES = 40 * 60;
 
   async createCapacitySchedule(
     workspaceId: string,
@@ -37,39 +40,33 @@ export class CapacityService {
     await this.domain.requireWorkspaceRole(workspaceId, actorUserId, WorkspaceRole.WS_ADMIN);
     const normalized = await this.normalizeScheduleInput(workspaceId, input);
 
-    const duplicate = await this.prisma.capacitySchedule.findFirst({
-      where: {
-        workspaceId,
-        subjectType: normalized.subjectType,
-        subjectUserId: normalized.subjectUserId,
-      },
-    });
-    if (duplicate) {
-      throw new ConflictException('capacity schedule already exists for this subject');
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const created = await tx.capacitySchedule.create({
+          data: {
+            workspaceId,
+            ...normalized,
+          },
+        });
+
+        await this.domain.appendAuditOutbox({
+          tx,
+          actor: actorUserId,
+          entityType: 'CapacitySchedule',
+          entityId: created.id,
+          action: 'capacity_schedule.created',
+          afterJson: created,
+          correlationId,
+          outboxType: 'capacity_schedule.created',
+          payload: created,
+        });
+
+        return this.serializeSchedule(created);
+      });
+    } catch (error) {
+      this.rethrowDuplicateSchedule(error);
+      throw error;
     }
-
-    return this.prisma.$transaction(async (tx) => {
-      const created = await tx.capacitySchedule.create({
-        data: {
-          workspaceId,
-          ...normalized,
-        },
-      });
-
-      await this.domain.appendAuditOutbox({
-        tx,
-        actor: actorUserId,
-        entityType: 'CapacitySchedule',
-        entityId: created.id,
-        action: 'capacity_schedule.created',
-        afterJson: created,
-        correlationId,
-        outboxType: 'capacity_schedule.created',
-        payload: created,
-      });
-
-      return this.serializeSchedule(created);
-    });
   }
 
   async listCapacitySchedules(workspaceId: string, actorUserId: string) {
@@ -261,13 +258,25 @@ export class CapacityService {
     return { ok: true };
   }
 
-  async resolveWeeklyCapacityMinutes(
+  async resolveWeeklyCapacityMinutesBatch(
     workspaceId: string,
     userId: string,
-    weekStart: Date,
-    weekEnd: Date,
-  ): Promise<number> {
+    weeks: Array<{ startDate: Date; endDate: Date }>,
+  ): Promise<number[]> {
+    if (weeks.length === 0) {
+      return [];
+    }
+
     await this.requireWorkspaceUser(workspaceId, userId);
+    const firstWeek = weeks[0]!;
+    const minWeekStart = weeks.reduce(
+      (earliest, week) => (week.startDate < earliest ? week.startDate : earliest),
+      firstWeek.startDate,
+    );
+    const maxWeekEnd = weeks.reduce(
+      (latest, week) => (week.endDate > latest ? week.endDate : latest),
+      firstWeek.endDate,
+    );
 
     const [userSchedule, workspaceSchedule, timeOffEvents] = await Promise.all([
       this.prisma.capacitySchedule.findFirst({
@@ -290,17 +299,38 @@ export class CapacityService {
         where: {
           workspaceId,
           userId,
-          startDate: { lte: weekEnd },
-          endDate: { gte: weekStart },
+          startDate: { lte: maxWeekEnd },
+          endDate: { gte: minWeekStart },
         },
       }),
     ]);
 
     const schedule = userSchedule ?? workspaceSchedule;
     if (!schedule) {
-      return 40 * 60;
+      return weeks.map(() => this.DEFAULT_WEEKLY_CAPACITY_MINUTES);
     }
 
+    return weeks.map((week) => this.calculateCapacityForWeek(schedule, timeOffEvents, week.startDate, week.endDate));
+  }
+
+  async resolveWeeklyCapacityMinutes(
+    workspaceId: string,
+    userId: string,
+    weekStart: Date,
+    weekEnd: Date,
+  ): Promise<number> {
+    const [capacityMinutes] = await this.resolveWeeklyCapacityMinutesBatch(workspaceId, userId, [
+      { startDate: weekStart, endDate: weekEnd },
+    ]);
+    return capacityMinutes ?? this.DEFAULT_WEEKLY_CAPACITY_MINUTES;
+  }
+
+  private calculateCapacityForWeek(
+    schedule: CapacitySchedule,
+    timeOffEvents: TimeOffEvent[],
+    weekStart: Date,
+    weekEnd: Date,
+  ) {
     let totalMinutes = 0;
     for (let cursor = new Date(weekStart); cursor <= weekEnd; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
       const day = cursor.getUTCDay();
@@ -348,7 +378,7 @@ export class CapacityService {
       subjectType,
       subjectUserId,
       name: this.normalizeRequiredString(input.name, 'name'),
-      timeZone: this.normalizeRequiredString(input.timeZone, 'timeZone'),
+      timeZone: this.normalizeTimeZone(input.timeZone),
       hoursPerDay: this.normalizeHoursPerDay(input.hoursPerDay),
       daysOfWeek: this.normalizeDaysOfWeek(input.daysOfWeek),
     };
@@ -368,7 +398,7 @@ export class CapacityService {
       ...(input.name === undefined ? {} : { name: this.normalizeRequiredString(input.name, 'name') }),
       ...(input.timeZone === undefined
         ? {}
-        : { timeZone: this.normalizeRequiredString(input.timeZone, 'timeZone') }),
+        : { timeZone: this.normalizeTimeZone(input.timeZone) }),
       ...(input.hoursPerDay === undefined ? {} : { hoursPerDay: this.normalizeHoursPerDay(input.hoursPerDay) }),
       ...(input.daysOfWeek === undefined ? {} : { daysOfWeek: this.normalizeDaysOfWeek(input.daysOfWeek) }),
     };
@@ -435,6 +465,14 @@ export class CapacityService {
     return normalized;
   }
 
+  private normalizeTimeZone(value: string) {
+    const normalized = this.normalizeRequiredString(value, 'timeZone');
+    if (normalized !== 'UTC') {
+      throw new BadRequestException('timeZone must be UTC until timezone-aware capacity math is implemented');
+    }
+    return normalized;
+  }
+
   private normalizeOptionalString(value?: string) {
     if (value === undefined) {
       return undefined;
@@ -483,6 +521,15 @@ export class CapacityService {
     const utcStart = Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate());
     const utcEnd = Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), endDate.getUTCDate());
     return Math.floor((utcEnd - utcStart) / 86400000) + 1;
+  }
+
+  private rethrowDuplicateSchedule(error: unknown): never | void {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw new ConflictException('capacity schedule already exists for this subject');
+    }
   }
 
   private serializeSchedule(schedule: CapacitySchedule) {

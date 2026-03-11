@@ -126,6 +126,8 @@ model User {
   timeOffEvents        TimeOffEvent[]
 }
 
+/// Partial UNIQUE indexes and subject nullability checks are enforced in SQL migration files
+/// because Prisma schema cannot express those PostgreSQL-specific invariants directly.
 model CapacitySchedule {
   id            String                      @id @default(uuid())
   workspaceId    String                     @map("workspace_id")

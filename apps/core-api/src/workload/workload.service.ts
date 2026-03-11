@@ -203,16 +203,16 @@ export class WorkloadService {
     const now = new Date();
     const weeks = filters.periodWeeks || 4;
     const defaultStart = new Date(now);
-    defaultStart.setDate(now.getDate() - now.getDay());
-    defaultStart.setHours(0, 0, 0, 0);
+    defaultStart.setUTCDate(now.getUTCDate() - now.getUTCDay());
+    defaultStart.setUTCHours(0, 0, 0, 0);
 
     const defaultEnd = new Date(defaultStart);
-    defaultEnd.setDate(defaultStart.getDate() + (weeks * 7) - 1);
-    defaultEnd.setHours(23, 59, 59, 999);
+    defaultEnd.setUTCDate(defaultStart.getUTCDate() + (weeks * 7) - 1);
+    defaultEnd.setUTCHours(23, 59, 59, 999);
 
     return {
-      startDate: filters.startDate || defaultStart,
-      endDate: filters.endDate || defaultEnd,
+      startDate: filters.startDate ? this.startOfUtcDay(filters.startDate) : defaultStart,
+      endDate: filters.endDate ? this.endOfUtcDay(filters.endDate) : defaultEnd,
       projectId: filters.projectId,
     };
   }
@@ -235,8 +235,8 @@ export class WorkloadService {
 
     while (currentWeek <= endDate) {
       const weekEnd = new Date(currentWeek);
-      weekEnd.setDate(currentWeek.getDate() + 6);
-      weekEnd.setHours(23, 59, 59, 999);
+      weekEnd.setUTCDate(currentWeek.getUTCDate() + 6);
+      weekEnd.setUTCHours(23, 59, 59, 999);
 
       const weekTasks = tasks.filter((task) => {
         if (!task.dueAt) return false;
@@ -265,7 +265,7 @@ export class WorkloadService {
         })),
       });
 
-      currentWeek.setDate(currentWeek.getDate() + 7);
+      currentWeek.setUTCDate(currentWeek.getUTCDate() + 7);
     }
 
     return weeks;
@@ -277,18 +277,20 @@ export class WorkloadService {
     weeklyLoad: WeeklyLoad[],
     viewMode: 'tasks' | 'effort',
   ): Promise<OverloadAlert[]> {
+    const capacityByWeek = await this.capacityService.resolveWeeklyCapacityMinutesBatch(
+      workspaceId,
+      userId,
+      weeklyLoad.map((week) => ({
+        startDate: week.startDate,
+        endDate: week.endDate,
+      })),
+    );
+
     if (viewMode === 'effort') {
-      const weeksWithCapacity = await Promise.all(
-        weeklyLoad.map(async (week) => ({
-          week,
-          capacityMinutes: await this.capacityService.resolveWeeklyCapacityMinutes(
-            workspaceId,
-            userId,
-            week.startDate,
-            week.endDate,
-          ),
-        })),
-      );
+      const weeksWithCapacity = weeklyLoad.map((week, index) => ({
+        week,
+        capacityMinutes: capacityByWeek[index] ?? this.DEFAULT_CAPACITY_HOURS * 60,
+      }));
 
       return weeksWithCapacity
         .filter(({ week, capacityMinutes }) => week.estimateMinutes > capacityMinutes)
@@ -299,23 +301,16 @@ export class WorkloadService {
           excess: week.estimateMinutes - capacityMinutes,
         }));
     } else {
-      const weeksWithCapacity = await Promise.all(
-        weeklyLoad.map(async (week) => ({
-          week,
-          capacityTasks: Math.max(
-            0,
-            Math.round(
-              (await this.capacityService.resolveWeeklyCapacityMinutes(
-                workspaceId,
-                userId,
-                week.startDate,
-                week.endDate,
-              )) /
-                ((this.DEFAULT_CAPACITY_HOURS * 60) / this.DEFAULT_CAPACITY_TASKS),
-            ),
+      const weeksWithCapacity = weeklyLoad.map((week, index) => ({
+        week,
+        capacityTasks: Math.max(
+          0,
+          Math.round(
+            (capacityByWeek[index] ?? this.DEFAULT_CAPACITY_HOURS * 60) /
+              ((this.DEFAULT_CAPACITY_HOURS * 60) / this.DEFAULT_CAPACITY_TASKS),
           ),
-        })),
-      );
+        ),
+      }));
 
       return weeksWithCapacity
         .filter(({ week, capacityTasks }) => week.taskCount > capacityTasks)
@@ -330,8 +325,20 @@ export class WorkloadService {
   }
 
   private formatWeekLabel(date: Date): string {
-    const month = date.toLocaleString('en-US', { month: 'short' });
-    const day = date.getDate();
+    const month = date.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+    const day = date.getUTCDate();
     return `${month} ${day}`;
+  }
+
+  private startOfUtcDay(date: Date) {
+    const normalized = new Date(date);
+    normalized.setUTCHours(0, 0, 0, 0);
+    return normalized;
+  }
+
+  private endOfUtcDay(date: Date) {
+    const normalized = new Date(date);
+    normalized.setUTCHours(23, 59, 59, 999);
+    return normalized;
   }
 }

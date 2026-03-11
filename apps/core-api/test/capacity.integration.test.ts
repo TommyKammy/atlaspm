@@ -128,6 +128,18 @@ describe('Capacity Integration', () => {
     expect(workspaceSchedule.body.hoursPerDay).toBe(8);
     const workspaceScheduleId = workspaceSchedule.body.id as string;
 
+    await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/capacity-schedules`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        subjectType: 'WORKSPACE',
+        name: 'Duplicate workspace default',
+        timeZone: 'UTC',
+        hoursPerDay: 8,
+        daysOfWeek: [1, 2, 3, 4, 5],
+      })
+      .expect(409);
+
     const userSchedule = await request(app.getHttpServer())
       .post(`/workspaces/${workspaceId}/capacity-schedules`)
       .set('Authorization', `Bearer ${token}`)
@@ -155,6 +167,14 @@ describe('Capacity Integration', () => {
       workspaceScheduleId,
       userScheduleId,
     ]);
+
+    await request(app.getHttpServer())
+      .patch(`/capacity-schedules/${userScheduleId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        timeZone: 'Asia/Tokyo',
+      })
+      .expect(400);
 
     await request(app.getHttpServer())
       .patch(`/capacity-schedules/${userScheduleId}`)
