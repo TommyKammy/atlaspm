@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import { INTEGRATION_PROVIDERS, IntegrationProviderRegistry } from './integration-provider.registry';
+import { IntegrationRuntimeService } from './integration-runtime.service';
 import { SlackService } from './slack.service';
 import { SlackWebhookController } from './slack.controller';
 import { SlackIntegrationProvider } from './slack.provider';
@@ -7,6 +9,7 @@ import { SlackIntegrationProvider } from './slack.provider';
 @Module({
   controllers: [SlackWebhookController],
   providers: [
+    PrismaService,
     SlackService,
     SlackIntegrationProvider,
     {
@@ -15,7 +18,8 @@ import { SlackIntegrationProvider } from './slack.provider';
       inject: [SlackIntegrationProvider],
     },
     IntegrationProviderRegistry,
+    IntegrationRuntimeService,
   ],
-  exports: [SlackService, IntegrationProviderRegistry],
+  exports: [SlackService, IntegrationProviderRegistry, IntegrationRuntimeService],
 })
 export class IntegrationsModule {}

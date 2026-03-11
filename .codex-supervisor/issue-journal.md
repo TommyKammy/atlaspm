@@ -1,61 +1,29 @@
-# Issue #368: P4: Define integration provider abstraction and storage contracts
+# Issue #369: P4: Implement provider auth, sync-state, and job orchestration infrastructure
 
 ## Supervisor Snapshot
-- Issue URL: https://github.com/TommyKammy/atlaspm/issues/368
-- Branch: codex/reopen-issue-368
-- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-368
-- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-368/.codex-supervisor/issue-journal.md
-- Current phase: addressing_review
-- Attempt count: 3
-- Last head SHA: 540b420c5f96b7c6f06516aa9a5e1bf054d9f595
+- Issue URL: https://github.com/TommyKammy/atlaspm/issues/369
+- Branch: codex/reopen-issue-369
+- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-369
+- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-369/.codex-supervisor/issue-journal.md
+- Current phase: reproducing
+- Attempt count: 1
+- Last head SHA: 53a46be9752e1691a4a65dfb6955a011affb0bac
 - Blocked reason: none
-- Last failure signature: PRRT_kwDORWcwRc5zd2ud|PRRT_kwDORWcwRc5zd2us
-- Repeated failure signature count: 1
-- Updated at: 2026-03-11T02:07:43.715Z
+- Last failure signature: none
+- Repeated failure signature count: 0
+- Updated at: 2026-03-11T02:22:14.620Z
 
 ## Latest Codex Summary
-Reproduced the failing CI lint job locally from the Actions log, and it was exactly two `@typescript-eslint/no-unused-vars` errors in [slack.provider.ts](/home/tommy/Dev/atlaspm-worktrees/issue-368/apps/core-api/src/integrations/slack.provider.ts): the unused `authorize` and `sync` context parameters. I fixed that without changing behavior by keeping the interface-conformant parameters and marking them intentionally unused with `void context;`.
-
-Verified with `gh run view 22933011586 --job 66558412518 --log`, `pnpm --filter @atlaspm/core-api lint`, `pnpm lint`, `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`, and `git diff --check`. I updated the issue journal, committed the repair as `540b420` (`Fix integration provider lint failure`), and pushed `codex/reopen-issue-368`. `gh pr checks 375` currently reports no checks yet on the updated branch, so the rerun is still pending registration.
-
-Summary: Reproduced and fixed the PR #375 lint failure, verified locally, updated the journal, committed, and pushed the branch
-State hint: waiting_ci
-Blocked reason: none
-Tests: `gh run view 22933011586 --job 66558412518 --log`; `pnpm --filter @atlaspm/core-api lint`; `pnpm lint`; `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`; `git diff --check`
-Failure signature: none
-Next action: Watch PR #375 for the rerun of lint and confirm the updated branch clears CI
+- Added `IntegrationRuntimeService` to handle provider auth status updates and persisted sync-state orchestration.
+- Added focused runtime tests and re-verified existing provider contract, registry, and Slack webhook coverage.
 
 ## Active Failure Context
-- Category: review
-- Summary: 2 unresolved automated review thread(s) remain.
-- Reference: https://github.com/TommyKammy/atlaspm/pull/375#discussion_r2915439409
-- Details:
-  - apps/core-api/src/integrations/integration-provider.registry.ts:14 IntegrationProviderRegistry currently overwrites providers silently when two providers share the same `provider.key` (later `Map.set` wins). That makes misconfiguration hard to detect and can route requests to the wrong provider. Consider detecting duplicate keys during construction and throwing an error (or logging + throwing) when a duplicate is registered. ```suggestion for (const provider of providers) { if (this.providersByKey.has(provider.key)) { throw new Error( `Duplicate integration provider key detected: ${provider.key}`, ); } ```
-  - apps/core-api/src/integrations/slack.provider.ts:169 Slack `message` event payloads typically represent mentions as `<@USERID>` (not `@USERID`). Checking `event.text?.includes(`@${SLACK_BOT_USER_ID}`)` can fail to detect actual mentions, so `message` events that mention the bot may be ignored. Consider checking for `<@${SLACK_BOT_USER_ID}>` (and optionally a fallback for display-name mentions) instead. ```suggestion case 'message': { const botUserId = process.env.SLACK_BOT_USER_ID; const mentionById = botUserId ? `<@${botUserId}>` : null; const mentionByName = '@AtlasPM'; const text = event.text || ''; if ((mentionById && text.includes(mentionById)) || text.includes(mentionByName)) { await this.handleMention(event); } break; } ```
+- None recorded.
 
 ## Codex Working Notes
 ### Current Handoff
 - Older scratchpad entries were compacted by codex-supervisor to keep resume context small.
 
-    - workspace admins can create, update, and delete them
-  - Inheritance model:
-    - workload uses the latest user-specific schedule if one exists
-    - otherwise it falls back to the latest workspace-default schedule
-    - otherwise it falls back to the legacy 40h default
-  - Workload overload capacity now subtracts overlapping time-off minutes from schedule-derived weekly capacity.
-  - CI mitigation:
-    - Added `DOCKER_BUILD_SUMMARY: false` and `DOCKER_BUILD_RECORD_UPLOAD: false` to the cached Docker build steps in `.github/workflows/ci.yml` so the `e2e` job no longer depends on Docker action summary/build-record post-processing.
-  - Review fixes:
-    - Added migration `20260311094500_capacity_schedule_constraints` to enforce subject nullability and one-schedule-per-subject at the DB layer.
-    - `CapacityService.createCapacitySchedule` now relies on the DB constraint and maps unique violations to `409 Conflict`.
-    - `CapacityService.resolveWeeklyCapacityMinutesBatch` fetches schedules/time-off once per user/range and computes per-week capacities in memory.
-    - `WorkloadService` now uses UTC-normalized week boundaries (`setUTCDate`/`setUTCHours`) and consumes batched capacity results.
-    - `CapacityService` currently accepts only `timeZone === 'UTC'`, making the stored value honest until timezone-aware day-of-week calculations are implemented.
-    - `apps/core-api/test/capacity.integration.test.ts` now covers duplicate schedule rejection and non-UTC schedule rejection.
-
-### 2026-03-11 Codex Update (issue #368)
-- Hypothesis:
-  - The branch had only Slack-specific integration code and no explicit provider contract or persistence model for provider config, credentials, sync state, and entity mappings.
 - Focused reproduction:
   - Added `apps/core-api/test/integration-contracts.test.ts`.
   - First focused run: `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts`
@@ -139,3 +107,37 @@ Next action: Watch PR #375 for the rerun of lint and confirm the updated branch 
   - `PRRT_kwDORWcwRc5zd2ud|PRRT_kwDORWcwRc5zd2us`
 - Next actions:
   - Commit and push the review fixes, then resolve or respond to the two review threads on PR #375.
+
+### 2026-03-11 Codex Runtime Infrastructure
+- Hypothesis:
+  - The shared provider contract existed, but `core-api` still lacked a concrete runtime service for auth status persistence and retry-safe sync-state orchestration.
+- Focused reproduction:
+  - Added `apps/core-api/test/integration-runtime.service.test.ts`.
+  - First focused run: `pnpm --filter @atlaspm/core-api exec vitest run test/integration-runtime.service.test.ts`
+  - Initial setup failure: `Command "vitest" not found` before `pnpm install`.
+  - Repro after install: the focused test failed because `apps/core-api/src/integrations/integration-runtime.service.ts` did not exist.
+  - Follow-up environment failure: the focused run required `pnpm --filter @atlaspm/core-api prisma:generate` because the local Prisma client was not yet generated.
+  - Intermediate behavior failure: the duplicate-run guard test used a stale `startedAt`, which the new service correctly treated as reclaimable rather than in-flight.
+- Implementation:
+  - Added `apps/core-api/src/integrations/integration-runtime.service.ts`.
+  - Implemented `authorizeProvider` to delegate provider auth and persist `IntegrationProviderConfig.status`.
+  - Implemented `runSyncJob` to persist RUNNING/SUCCEEDED/FAILED sync lifecycle state, skip duplicate in-flight scopes, and record last successful sync timestamps.
+  - Added structured runtime logging with basic secret/token redaction for persisted/logged error messages.
+  - Registered and exported `IntegrationRuntimeService` from `apps/core-api/src/integrations/integrations.module.ts`.
+- Verification:
+  - `pnpm install`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-runtime.service.test.ts` (failed: missing service file)
+  - `pnpm --filter @atlaspm/core-api prisma:generate`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-runtime.service.test.ts`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-runtime.service.test.ts test/integration-provider.registry.test.ts test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `git diff --check`
+- Current outcome:
+  - `core-api` now has a shared runtime service backing provider auth and sync lifecycle instead of only schema/contracts.
+  - Duplicate in-flight sync execution for the same provider scope is skipped from persisted state.
+  - Successful syncs now persist `lastSyncedAt`, and failures persist sanitized error details.
+- Failure signature:
+  - `missing-integration-runtime-service`
+- Next actions:
+  - Extend the runtime with first-class credential storage/rotation helpers if the next slice needs managed token persistence instead of external secret references only.
