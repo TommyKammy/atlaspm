@@ -16,9 +16,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useI18n } from '@/lib/i18n';
 
-function formatTimestamp(value?: string | null) {
+function formatTimestamp(value: string | null | undefined, fallback: string) {
   if (!value) {
-    return 'Never';
+    return fallback;
   }
   return new Date(value).toLocaleString();
 }
@@ -64,7 +64,9 @@ export default function WorkspaceIntegrationsPage() {
     const result = await triggerSync.mutateAsync({ providerConfigId, scope: 'issues' });
     setLastSyncMessage(
       result.message ??
-        `Imported ${result.importedCount ?? 0} issues and updated ${result.updatedCount ?? 0}.`,
+        t('integrationsGithubSyncSummary')
+          .replace('{imported}', String(result.importedCount ?? 0))
+          .replace('{updated}', String(result.updatedCount ?? 0)),
     );
   };
 
@@ -74,7 +76,7 @@ export default function WorkspaceIntegrationsPage() {
         <div>
           <h1 className="text-3xl font-bold">{t('integrations')}</h1>
           <p className="mt-1 text-muted-foreground">
-            Connect GitHub issues to an AtlasPM project through the shared integration runtime.
+            {t('integrationsGithubPageDescription')}
           </p>
         </div>
         {lastSyncMessage ? (
@@ -88,15 +90,15 @@ export default function WorkspaceIntegrationsPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <GitBranch className="h-5 w-5" />
-            GitHub Issues
+            {t('integrationsGithubCardTitle')}
           </CardTitle>
           <CardDescription>
-            Validate one repository token, bind it to a project, then import issues on demand.
+            {t('integrationsGithubCardDescription')}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="integration-key">Connection key</Label>
+            <Label htmlFor="integration-key">{t('integrationsConnectionKey')}</Label>
             <Input
               id="integration-key"
               value={draft.key}
@@ -104,7 +106,7 @@ export default function WorkspaceIntegrationsPage() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="integration-display-name">Display name</Label>
+            <Label htmlFor="integration-display-name">{t('integrationsDisplayName')}</Label>
             <Input
               id="integration-display-name"
               value={draft.displayName}
@@ -114,32 +116,32 @@ export default function WorkspaceIntegrationsPage() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="integration-owner">GitHub owner</Label>
+            <Label htmlFor="integration-owner">{t('integrationsGithubOwner')}</Label>
             <Input
               id="integration-owner"
-              placeholder="atlaspm"
+              placeholder={t('integrationsGithubOwnerPlaceholder')}
               value={draft.owner}
               onChange={(event) => setDraft((current) => ({ ...current, owner: event.target.value }))}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="integration-repo">Repository</Label>
+            <Label htmlFor="integration-repo">{t('integrationsGithubRepository')}</Label>
             <Input
               id="integration-repo"
-              placeholder="repo"
+              placeholder={t('integrationsGithubRepositoryPlaceholder')}
               value={draft.repo}
               onChange={(event) => setDraft((current) => ({ ...current, repo: event.target.value }))}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="integration-project">AtlasPM project</Label>
+            <Label htmlFor="integration-project">{t('integrationsAtlaspmProject')}</Label>
             <select
               id="integration-project"
-              className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none"
+              className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               value={draft.projectId}
               onChange={(event) => setDraft((current) => ({ ...current, projectId: event.target.value }))}
             >
-              <option value="">Select a project</option>
+              <option value="">{t('integrationsSelectProject')}</option>
               {projectOptions.map((project) => (
                 <option key={project.id} value={project.id}>
                   {project.name}
@@ -148,7 +150,7 @@ export default function WorkspaceIntegrationsPage() {
             </select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="integration-access-token">Personal access token</Label>
+            <Label htmlFor="integration-access-token">{t('integrationsPersonalAccessToken')}</Label>
             <Input
               id="integration-access-token"
               type="password"
@@ -172,7 +174,7 @@ export default function WorkspaceIntegrationsPage() {
               }
             >
               <CheckCircle2 className="mr-2 h-4 w-4" />
-              {connectGithub.isPending ? 'Connecting...' : 'Connect GitHub'}
+              {connectGithub.isPending ? t('connecting') : t('integrationsConnectGithub')}
             </Button>
           </div>
         </CardContent>
@@ -192,9 +194,12 @@ export default function WorkspaceIntegrationsPage() {
                 <div>
                   <CardTitle>{integration.displayName}</CardTitle>
                   <CardDescription>
-                    {String(settings.owner ?? 'unknown')}/{String(settings.repo ?? 'unknown')}
+                    {String(settings.owner ?? t('integrationsUnknownValue'))}
+                    /
+                    {String(settings.repo ?? t('integrationsUnknownValue'))}
                     {' -> '}
-                    {projectOptions.find((project) => project.id === settings.projectId)?.name ?? 'Unknown project'}
+                    {projectOptions.find((project) => project.id === settings.projectId)?.name
+                      ?? t('integrationsUnknownProject')}
                   </CardDescription>
                 </div>
                 <Badge variant={integration.status === 'ACTIVE' ? 'default' : 'secondary'}>
@@ -203,9 +208,12 @@ export default function WorkspaceIntegrationsPage() {
               </CardHeader>
               <CardContent className="flex flex-wrap items-center justify-between gap-4 text-sm">
                 <div className="space-y-1 text-muted-foreground">
-                  <p>Token: {accessTokenPreview ?? 'Not stored'}</p>
-                  <p>Last sync: {formatTimestamp(latestSync?.lastSyncedAt)}</p>
-                  <p>Sync status: {latestSync?.status ?? 'Never run'}</p>
+                  <p>{t('integrationsTokenLabel')}: {accessTokenPreview ?? t('integrationsNotStored')}</p>
+                  <p>
+                    {t('integrationsLastSyncLabel')}
+                    : {formatTimestamp(latestSync?.lastSyncedAt, t('never'))}
+                  </p>
+                  <p>{t('integrationsSyncStatusLabel')}: {latestSync?.status ?? t('integrationsNeverRun')}</p>
                 </div>
                 <Button
                   variant="outline"
@@ -213,7 +221,7 @@ export default function WorkspaceIntegrationsPage() {
                   disabled={triggerSync.isPending}
                 >
                   <RefreshCcw className="mr-2 h-4 w-4" />
-                  {triggerSync.isPending ? 'Syncing...' : 'Import issues'}
+                  {triggerSync.isPending ? t('integrationsSyncing') : t('integrationsImportIssues')}
                 </Button>
               </CardContent>
             </Card>
@@ -223,7 +231,7 @@ export default function WorkspaceIntegrationsPage() {
         {!integrationsQuery.isLoading && (integrationsQuery.data?.length ?? 0) === 0 ? (
           <Card className="py-10">
             <CardContent className="text-center text-sm text-muted-foreground">
-              No integrations connected yet.
+              {t('integrationsEmptyState')}
             </CardContent>
           </Card>
         ) : null}

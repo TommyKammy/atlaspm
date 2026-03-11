@@ -263,4 +263,122 @@ describe('GitHub issues integration', () => {
       'integration.sync.completed',
     ]);
   });
+
+  test('connecting with a duplicate key in the same workspace returns 409', async () => {
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
+
+    const workspacesRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspacesRes.body[0].id as string;
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `GitHub Duplicate ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+    const key = `github-duplicate-${Date.now()}`;
+
+    await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/integrations/github`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        key,
+        displayName: 'AtlasPM GitHub',
+        owner: 'atlaspm',
+        repo: 'repo',
+        projectId,
+        credentials: {
+          accessToken: 'github-test-token',
+        },
+      })
+      .expect(201);
+
+    const duplicateRes = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/integrations/github`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        key,
+        displayName: 'AtlasPM GitHub Duplicate',
+        owner: 'atlaspm',
+        repo: 'repo',
+        projectId,
+        credentials: {
+          accessToken: 'github-test-token',
+        },
+      })
+      .expect(409);
+
+    expect(duplicateRes.body.message).toBe('Integration key is already in use for this workspace');
+  });
+
+  test('failed GitHub authorization cleans up the new config and credential so the key can be retried', async () => {
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
+
+    const workspacesRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspacesRes.body[0].id as string;
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `GitHub Cleanup ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+    const key = `github-bad-token-${Date.now()}`;
+
+    const failedRes = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/integrations/github`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        key,
+        displayName: 'AtlasPM GitHub Invalid',
+        owner: 'atlaspm',
+        repo: 'repo',
+        projectId,
+        credentials: {
+          accessToken: 'github-wrong-token',
+        },
+      })
+      .expect(401);
+
+    expect(failedRes.body.message).toBe('GitHub credentials were rejected');
+
+    const lingeringConfig = await prisma.integrationProviderConfig.findFirst({
+      where: {
+        workspaceId,
+        key,
+      },
+    });
+    expect(lingeringConfig).toBeNull();
+
+    const retryRes = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/integrations/github`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        key,
+        displayName: 'AtlasPM GitHub Retry',
+        owner: 'atlaspm',
+        repo: 'repo',
+        projectId,
+        credentials: {
+          accessToken: 'github-test-token',
+        },
+      })
+      .expect(201);
+
+    expect(retryRes.body.status).toBe('ACTIVE');
+
+    const credential = await prisma.integrationCredential.findUnique({
+      where: {
+        providerConfigId_kind: {
+          providerConfigId: retryRes.body.id as string,
+          kind: 'ACCESS_TOKEN',
+        },
+      },
+    });
+    expect(credential?.redactedValue).toBe('gith...oken');
+  });
 });

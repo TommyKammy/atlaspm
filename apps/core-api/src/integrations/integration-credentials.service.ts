@@ -53,8 +53,15 @@ export class IntegrationCredentialsService {
 
   redact(value: string): string {
     const trimmed = value.trim();
-    if (trimmed.length <= 8) {
-      return `${trimmed.slice(0, 2)}...${trimmed.slice(-2)}`;
+    const len = trimmed.length;
+    if (len === 0) {
+      return '';
+    }
+    if (len <= 4) {
+      return '*'.repeat(len);
+    }
+    if (len <= 8) {
+      return `${trimmed.slice(0, 1)}...${trimmed.slice(-1)}`;
     }
     return `${trimmed.slice(0, 4)}...${trimmed.slice(-4)}`;
   }
@@ -87,9 +94,15 @@ export class IntegrationCredentialsService {
   }
 
   private getKey(): Buffer {
-    const secret = process.env.INTEGRATION_CREDENTIAL_SECRET;
-    if (!secret) {
+    const rawSecret = process.env.INTEGRATION_CREDENTIAL_SECRET;
+    if (!rawSecret) {
       throw new InternalServerErrorException('INTEGRATION_CREDENTIAL_SECRET is not configured');
+    }
+    const secret = rawSecret.trim();
+    if (secret.length < 32) {
+      throw new InternalServerErrorException(
+        'INTEGRATION_CREDENTIAL_SECRET must be at least 32 characters long',
+      );
     }
     return createHash('sha256').update(secret, 'utf8').digest();
   }

@@ -17,7 +17,7 @@
 - Each imported GitHub issue maps to one AtlasPM task through `IntegrationEntityMapping`.
 - The mapping uses the GitHub issue id as the stable external id.
 - New issues create new AtlasPM tasks in the selected project's default section.
-- Existing mapped issues update the linked AtlasPM task title, description, status, completion state, and GitHub tags.
+- Existing mapped issues update the linked AtlasPM task title, description, status, completion state, and apply static GitHub-related tags (for example, `github` and `github:owner/repo`; GitHub labels are not currently synced as AtlasPM tags).
 - Open issues map to `TODO`.
 - Closed issues map to `DONE`.
 - Task descriptions include the GitHub issue number and source URL for traceability.

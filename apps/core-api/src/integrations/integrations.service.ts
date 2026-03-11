@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   NotFoundException,
@@ -73,17 +74,7 @@ export class IntegrationsService {
       projectId: input.projectId,
     };
 
-    const providerConfig = await this.prisma.integrationProviderConfig.create({
-      data: {
-        workspaceId: input.workspaceId,
-        provider: IntegrationProviderKind.GITHUB,
-        key: input.key,
-        displayName: input.displayName,
-        settings: settings as unknown as Prisma.InputJsonValue,
-        createdByUserId: input.actorUserId,
-        updatedByUserId: input.actorUserId,
-      },
-    });
+    const providerConfig = await this.createGithubProviderConfig(input, settings);
 
     await this.credentials.upsertCredential(
       providerConfig.id,
@@ -99,13 +90,7 @@ export class IntegrationsService {
         actorUserId: input.actorUserId,
       });
     } catch (error) {
-      await this.prisma.integrationProviderConfig.update({
-        where: { id: providerConfig.id },
-        data: {
-          status: 'ERROR',
-          updatedByUserId: input.actorUserId,
-        },
-      });
+      await this.cleanupFailedConnection(providerConfig.id, input.actorUserId);
       throw error;
     }
 
@@ -141,7 +126,7 @@ export class IntegrationsService {
   }) {
     await this.domain.requireWorkspaceRole(input.workspaceId, input.actorUserId, WorkspaceRole.WS_ADMIN);
     const config = await this.getConfigOrThrow(input.providerConfigId, input.workspaceId);
-    const providerKey = config.provider === IntegrationProviderKind.GITHUB ? 'github' : 'slack';
+    const providerKey = this.mapProviderKey(config.provider);
     const result = await this.runtime.runSyncJob({
       providerKey,
       providerConfigId: config.id,
@@ -183,6 +168,63 @@ export class IntegrationsService {
       providerKey,
       scope: input.scope,
     };
+  }
+
+  private async createGithubProviderConfig(
+    input: GithubConnectInput,
+    settings: GithubProviderSettings,
+  ) {
+    try {
+      return await this.prisma.integrationProviderConfig.create({
+        data: {
+          workspaceId: input.workspaceId,
+          provider: IntegrationProviderKind.GITHUB,
+          key: input.key,
+          displayName: input.displayName,
+          settings: settings as unknown as Prisma.InputJsonValue,
+          createdByUserId: input.actorUserId,
+          updatedByUserId: input.actorUserId,
+        },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError
+        && error.code === 'P2002'
+        && Array.isArray(error.meta?.target)
+        && error.meta.target.includes('workspace_id')
+        && error.meta.target.includes('key')
+      ) {
+        throw new ConflictException('Integration key is already in use for this workspace');
+      }
+      throw error;
+    }
+  }
+
+  private async cleanupFailedConnection(providerConfigId: string, actorUserId: string) {
+    try {
+      await this.prisma.integrationProviderConfig.delete({
+        where: { id: providerConfigId },
+      });
+    } catch {
+      await this.prisma.integrationProviderConfig.updateMany({
+        where: { id: providerConfigId },
+        data: {
+          status: 'ERROR',
+          updatedByUserId: actorUserId,
+        },
+      });
+    }
+  }
+
+  private mapProviderKey(provider: IntegrationProviderKind): 'github' | 'slack' {
+    switch (provider) {
+      case IntegrationProviderKind.GITHUB:
+        return 'github';
+      case IntegrationProviderKind.SLACK:
+        return 'slack';
+      default:
+        throw new BadRequestException(`Unsupported integration provider: ${provider}`);
+    }
   }
 
   private async getConfigOrThrow(providerConfigId: string, workspaceId: string) {
