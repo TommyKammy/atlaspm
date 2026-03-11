@@ -129,6 +129,7 @@ export function ProjectStatusUpdates({
         hasNextPage: current?.hasNextPage ?? false,
       }));
       queryClient.invalidateQueries({ queryKey: ['goal'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectGoals(projectId) });
       if (workspaceId) {
         queryClient.invalidateQueries({ queryKey: queryKeys.workspaceGoals(workspaceId) });
         queryClient.invalidateQueries({

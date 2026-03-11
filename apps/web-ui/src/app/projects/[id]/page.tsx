@@ -136,6 +136,7 @@ export default function ProjectPage() {
     return projectMembersQuery.data.find((member) => member.userId === meId)?.role ?? null;
   }, [meQuery.data?.id, projectMembersQuery.data]);
   const canEditProject = currentProjectRole ? currentProjectRole !== 'VIEWER' : true;
+  const canEditProjectGoals = meQuery.isSuccess && projectMembersQuery.isSuccess && canEditProject;
 
   const createSection = useMutation({
     mutationFn: (name: string) =>
@@ -381,7 +382,7 @@ export default function ProjectPage() {
       />
 
       {project?.workspaceId ? (
-        <ProjectGoalsCard projectId={projectId} workspaceId={project.workspaceId} />
+        <ProjectGoalsCard projectId={projectId} workspaceId={project.workspaceId} canEdit={canEditProjectGoals} />
       ) : null}
 
       {view === 'list' ? (
