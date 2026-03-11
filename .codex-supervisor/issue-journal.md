@@ -1,64 +1,89 @@
-# Issue #371: P4: Add regression coverage for integration auth and sync behavior
+# Issue #381: P4: Define guest identity, membership, and invitation contracts
 
 ## Supervisor Snapshot
-- Issue URL: https://github.com/TommyKammy/atlaspm/issues/371
-- Branch: codex/reopen-issue-371
-- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-371
-- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-371/.codex-supervisor/issue-journal.md
+- Issue URL: https://github.com/TommyKammy/atlaspm/issues/381
+- Branch: codex/reopen-issue-381
+- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-381
+- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-381/.codex-supervisor/issue-journal.md
 - Current phase: addressing_review
 - Attempt count: 2
-- Last head SHA: 94252b34eea187b0c08fb064fd42af25fb08050d
+- Last head SHA: 9bac93f218397e579959b69c7de7d2c4dd985662
 - Blocked reason: none
-- Last failure signature: PRRT_kwDORWcwRc5zehc_|PRRT_kwDORWcwRc5zehdM|PRRT_kwDORWcwRc5zehdY
+- Last failure signature: PRRT_kwDORWcwRc5zlqFl|PRRT_kwDORWcwRc5zlqGU|PRRT_kwDORWcwRc5zlqGu|PRRT_kwDORWcwRc5zlqHD|PRRT_kwDORWcwRc5zlqHQ
 - Repeated failure signature count: 1
-- Updated at: 2026-03-11T03:41:22.467Z
+- Updated at: 2026-03-11T12:58:46.409Z
 
 ## Latest Codex Summary
-Added a focused regression slice for sync failure observability. The new GitHub integration test in [github-issues.integration.test.ts](/home/tommy/Dev/atlaspm-worktrees/issue-371/apps/core-api/test/github-issues.integration.test.ts) now forces an upstream `500` and proves the API persists a sanitized `FAILED` sync state plus matching `integration.sync.failed` audit/outbox records. To make that pass, [integrations.service.ts](/home/tommy/Dev/atlaspm-worktrees/issue-371/apps/core-api/src/integrations/integrations.service.ts) now catches runtime sync failures, records failure observability, and rethrows.
+Added a focused reproducer and then defined the guest-access contract layer in `core-api`. The new checkpoint commit is `9bac93f` (`Define guest access contracts`).
 
-Focused verification passed after bringing the worktree to a runnable baseline with `pnpm install`, Prisma generate, and a build of `@atlaspm/domain`. I also updated the supervisor notes in [issue-journal.md](/home/tommy/Dev/atlaspm-worktrees/issue-371/.codex-supervisor/issue-journal.md) and checkpointed the work as commit `94252b3` (`Add sync failure observability regression coverage`).
+The contract now exists in three places: Prisma schema/migration for `GuestInvitation` and `GuestAccessGrant`, a pure TypeScript contract module at [guest-access.contract.ts](/home/tommy/Dev/atlaspm-worktrees/issue-381/apps/core-api/src/guest-access/guest-access.contract.ts), and documentation at [guest-access-contract.md](/home/tommy/Dev/atlaspm-worktrees/issue-381/docs/guest-access-contract.md). The key rule is explicit: guest identities still map to the existing `User` row, and guest acceptance grants scoped access via `GuestAccessGrant`, not `WorkspaceMembership`.
 
-Summary: Added focused GitHub sync-failure regression coverage and implemented missing `integration.sync.failed` audit/outbox emission.
-State hint: stabilizing
+Verification passed after installing deps and generating Prisma client for this fresh worktree. I also updated the issue journal with the reproduction, environment setup failures, commands, and next actions.
+
+Summary: Added guest identity/access/invitation contract definitions with focused tests and a checkpoint commit (`9bac93f`).
+State hint: implementing
 Blocked reason: none
-Tests: `pnpm install`; `pnpm --filter @atlaspm/core-api prisma:generate`; `pnpm --filter @atlaspm/domain build`; `pnpm --filter @atlaspm/core-api exec vitest run test/github-issues.integration.test.ts`; `pnpm --filter @atlaspm/core-api exec vitest run test/github-issues.integration.test.ts test/integration-runtime.service.test.ts test/integration-credentials.service.test.ts test/integration-provider.registry.test.ts test/integration-contracts.test.ts`; `pnpm --filter @atlaspm/core-api lint`; `pnpm --filter @atlaspm/core-api type-check`; `git diff --check`
+Tests: `pnpm install`; `pnpm --filter @atlaspm/core-api exec vitest run test/guest-access-contracts.test.ts`; `DATABASE_URL=postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public pnpm --filter @atlaspm/core-api prisma:generate`; `DATABASE_URL=postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public pnpm --filter @atlaspm/core-api exec prisma validate`; `pnpm --filter @atlaspm/core-api exec vitest run test/guest-access-contracts.test.ts test/integration-contracts.test.ts`; `pnpm --filter @atlaspm/core-api type-check`; `pnpm --filter @atlaspm/core-api lint`; `git diff --check`
 Failure signature: none
-Next action: Extend the reference-provider coverage with retry and partial-sync regression tests on top of this new failure-path baseline
+Next action: Decide whether to keep #381 scoped to contract definition or wire runtime guest invitation/grant endpoints onto these new contracts.
 
 ## Active Failure Context
 - Category: review
-- Summary: 3 unresolved automated review thread(s) remain.
-- Reference: https://github.com/TommyKammy/atlaspm/pull/378#discussion_r2915670853
+- Summary: 5 unresolved automated review thread(s) remain.
+- Reference: https://github.com/TommyKammy/atlaspm/pull/385#discussion_r2918205758
 - Details:
-  - apps/core-api/src/integrations/integrations.service.ts:140 `result` is declared without a type/initializer, so it becomes `any` and weakens type-safety for the rest of `triggerSync` (e.g., `result.status`, `importedCount`). Consider typing it as `RunIntegrationSyncJobResult` (or the runtime return type) and/or initializing it inside the `try` to keep inference.
-  - apps/core-api/test/github-issues.integration.test.ts:476 `failIssueSyncMessage` is mutable shared state across the whole test file (captured by the mock GitHub server). If an assertion throws before the reset, later tests can unexpectedly keep returning 500s. Consider resetting it in a `finally` block around the sync call (or in `afterEach`) to avoid cross-test contamination. ```suggestion let syncRes; try { syncRes = await request(app.getHttpServer()) .post(`/workspaces/${workspaceId}/integrations/${connectRes.body.id}/sync`) .set('Authorization', `Bearer ${token}`) .send({ scope: 'issues' }) .expect(500); expect(syncRes.body.message).toBe('Internal server error'); const syncState = await prisma.integrationSyncState.findUnique({ where: { providerConfigId_scope: { providerConfigId: connectRes.body.id as string, scope: 'issues', }, }, }); expect(syncState?.status).toBe('FAILED'); expect(syncState?.lastErrorCode).toBe('INTEGRATION_SYNC_FAILED'); expect(syncState?.lastErrorMessage).toBe('GitHub API request failed with status 500'); expect(syncState?.finishedAt).not.toBeNull(); const auditEvents = await prisma.auditEvent.findMany({ where: { entityId: connectRes.body.id as string, action: 'integration.sync.failed', }, }); expect(auditEvents).toHaveLength(1); expect(auditEvents[0]?.afterJson).toMatchObject({ scope: 'issues', status: 'failed', errorCode: 'INTEGRATION_SYNC_FAILED', errorMessage: 'GitHub API request failed with status 500', }); const outboxEvents = await prisma.outboxEvent.findMany({ where: { type: 'integration.sync.failed', payload: { path: ['providerConfigId'], equals: connectRes.body.id as string, }, }, }); expect(outboxEvents).toHaveLength(1); expect(outboxEvents[0]?.payload).toMatchObject({ providerConfigId: connectRes.body.id, workspaceId, scope: 'issues', errorCode: 'INTEGRATION_SYNC_FAILED', errorMessage: 'GitHub API request failed with status 500', }); } finally { failIssueSyncMessage = null; } ```
-  - apps/core-api/test/github-issues.integration.test.ts:432 This assertion relies on Nest's default 500 response shape (`{ message: 'Internal server error' }`), but the production app installs `GlobalErrorFilter`, which returns `{ error: { message: ... } }`. To keep the regression test aligned with production (and more future-proof), consider applying `GlobalErrorFilter` in this suite and asserting against the filtered shape (or only asserting on status code here). ```suggestion ```
+  - apps/core-api/prisma/schema.prisma:391 `@@unique([userId, projectId, scopeType])` won't enforce uniqueness for WORKSPACE-scoped grants because PostgreSQL UNIQUE indexes allow multiple rows where `projectId` is NULL. This would allow duplicate WORKSPACE grants per user (and potentially break grant refresh/upsert semantics). Consider replacing this with partial unique indexes: one for PROJECT scope (e.g., userId+projectId where scopeType='PROJECT' and projectId IS NOT NULL) and one for WORKSPACE scope (e.g., userId+workspaceId where scopeType='WORKSPACE' and projectId IS NULL), added via SQL migration since Prisma can't express partial indexes. ```suggestion ```
+  - apps/core-api/prisma/migrations/20260311125000_guest_access_contract/migration.sql:43 The migration creates a UNIQUE index on (user_id, project_id, scope_type), but this does not prevent duplicates when `project_id` is NULL (PostgreSQL treats NULLs as distinct). That means multiple WORKSPACE-scope grants per user could be inserted. Consider replacing this with partial unique indexes keyed by the actual scope (WORKSPACE: user_id+workspace_id WHERE scope_type='WORKSPACE' AND project_id IS NULL; PROJECT: user_id+project_id WHERE scope_type='PROJECT' AND project_id IS NOT NULL). ```suggestion CREATE UNIQUE INDEX "guest_access_grants_workspace_scope_key" ON "guest_access_grants"("user_id", "workspace_id") WHERE "scope_type" = 'WORKSPACE' AND "project_id" IS NULL; CREATE UNIQUE INDEX "guest_access_grants_project_scope_key" ON "guest_access_grants"("user_id", "project_id") WHERE "scope_type" = 'PROJECT' AND "project_id" IS NOT NULL; ```
+  - apps/core-api/prisma/migrations/20260311125000_guest_access_contract/migration.sql:36 The contract/docs require scope-dependent invariants (e.g., scopeType=PROJECT requires projectId and projectRole; scopeType=WORKSPACE should not have projectId/projectRole), but the schema/migration currently allow any combination. Given this repo already adds CHECK constraints in follow-up migrations (e.g., capacity_schedules_subject_type_user_id_check), consider adding similar CHECK constraints for `guest_invitations` and `guest_access_grants` so invalid rows can’t be persisted.
+  - apps/core-api/src/guest-access/guest-access.contract.ts:13 `GuestAccessScope.role` is typed as `ProjectRole`, which includes `ADMIN`, but the contract doc states guest project roles are limited to non-admin collaboration roles. To keep the contract self-consistent and prevent accidental admin grants, consider narrowing this type (e.g., a GuestProjectRole union that excludes ADMIN) and/or exporting a validation helper that enforces the restriction.
+  - apps/core-api/src/guest-access/guest-access.contract.ts:32 `GuestInvitationContract` includes `acceptedByUserId` but omits `createdByUserId` even though the documented contract and Prisma model include an inviter/creator user id. If this type is intended to be the canonical invitation contract for auditability and downstream logic, consider adding `createdByUserId` (and possibly `createdAt`) so consumers don’t silently drop that linkage. ```suggestion acceptedByUserId: string | null; createdByUserId?: string; createdAt?: Date; ```
 
 ## Codex Working Notes
-### 2026-03-11 Codex Review Fixes for PR #378
-- Hypothesis:
-  - All three configured-bot review comments on the new sync-failure regression slice were valid and could be fixed without changing behavior.
-- Review items addressed:
-  - `apps/core-api/src/integrations/integrations.service.ts`
-    - Typed `result` in `triggerSync()` as `RunIntegrationSyncJobResult` instead of leaving it implicitly `any`.
-  - `apps/core-api/test/github-issues.integration.test.ts`
-    - Wrapped the forced failing sync request in a `try`/`finally` so `failIssueSyncMessage` is always reset, even if an assertion fails.
-    - Dropped the brittle assertion on Nest's default `500` body shape and kept the regression focused on status code plus persisted/audited failure state.
-- Verification:
-  - `pnpm --filter @atlaspm/core-api exec vitest run test/github-issues.integration.test.ts`
-  - `pnpm --filter @atlaspm/core-api lint`
-  - `pnpm --filter @atlaspm/core-api type-check`
-  - `git diff --check`
-- Current outcome:
-  - The review threads are addressed without widening the runtime behavior surface.
-  - The GitHub failure-path regression no longer depends on test-order-sensitive mutable state or framework-specific default error serialization.
-- Failure signature:
-  - `PRRT_kwDORWcwRc5zehc_|PRRT_kwDORWcwRc5zehdM|PRRT_kwDORWcwRc5zehdY`
-- Next actions:
-  - Commit, push, and resolve the three review threads on PR #378.
-
 ### Current Handoff
 - Older scratchpad entries were compacted by codex-supervisor to keep resume context small.
+
+### 2026-03-11 Codex Review Fixes for PR #385
+- Hypothesis:
+  - All five configured-bot review comments on the guest access contract were valid contract hardening issues rather than false positives.
+- Focused reproduction:
+  - Tightened `apps/core-api/test/guest-access-contracts.test.ts` to assert:
+    - the Prisma schema no longer advertises a null-sensitive guest grant uniqueness guarantee
+    - the migration defines scope-aware partial unique indexes
+    - the migration defines scope-dependent CHECK constraints
+    - the TypeScript contract narrows guest project roles away from `ADMIN`
+    - the invitation contract includes inviter metadata
+  - Focused repro run: `pnpm --filter @atlaspm/core-api exec vitest run test/guest-access-contracts.test.ts`
+  - Failure after tightening:
+    - `schema.prisma` still contained `@@unique([userId, projectId, scopeType], ...)`
+    - the migration still used the null-sensitive guest grant unique index and lacked scope CHECK constraints
+    - `GuestAccessScope.role` still accepted `ProjectRole.ADMIN`
+    - `GuestInvitationContract` still omitted `createdByUserId` and `createdAt`
+- Implementation:
+  - Added `GuestProjectRole = 'MEMBER' | 'VIEWER'` and exported `isGuestProjectRole(...)`.
+  - Added `createdByUserId` and `createdAt` to `GuestInvitationContract`.
+  - Removed the misleading Prisma `@@unique([userId, projectId, scopeType])` declaration and documented that SQL migration files own the guest grant uniqueness/invariant enforcement.
+  - Updated the guest access migration to:
+    - add `guest_invitations_scope_check`
+    - add `guest_access_grants_scope_check`
+    - replace the old guest grant unique index with partial unique indexes for workspace scope and project scope separately
+- Verification:
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/guest-access-contracts.test.ts` (failed before fixes)
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/guest-access-contracts.test.ts`
+  - `DATABASE_URL=postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public pnpm --filter @atlaspm/core-api exec prisma validate`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/guest-access-contracts.test.ts test/integration-contracts.test.ts`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `git diff --check`
+- Current outcome:
+  - Guest contract storage now encodes the scope-dependent invariants the docs describe.
+  - Workspace-scope guest grants are protected against duplicate rows despite `project_id` being `NULL`.
+  - The TypeScript contract no longer permits accidental guest `ADMIN` roles and now preserves inviter metadata.
+- Failure signature:
+  - `PRRT_kwDORWcwRc5zlqFl|PRRT_kwDORWcwRc5zlqGU|PRRT_kwDORWcwRc5zlqGu|PRRT_kwDORWcwRc5zlqHD|PRRT_kwDORWcwRc5zlqHQ`
+- Next actions:
+  - Commit, push, and resolve/respond to the five configured-bot review threads on PR #385.
+
+
 
 
 ### Current Handoff
