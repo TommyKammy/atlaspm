@@ -7,52 +7,39 @@
 - Journal: /home/tommy/Dev/atlaspm-worktrees/issue-365/.codex-supervisor/issue-journal.md
 - Current phase: addressing_review
 - Attempt count: 2
-- Last head SHA: 872da0f20a2fe69d027b730c4f2b15b86e58ffa3
+- Last head SHA: bddd95cc2eff71df6e6fc26002f2ef09a2a45b90
 - Blocked reason: none
-- Last failure signature: PRRT_kwDORWcwRc5zdilP|PRRT_kwDORWcwRc5zdild|PRRT_kwDORWcwRc5zdilj|PRRT_kwDORWcwRc5zdilm
+- Last failure signature: none
 - Repeated failure signature count: 1
 - Updated at: 2026-03-11T10:20:28+09:00
 
 ## Latest Codex Summary
-Implemented the workload capacity UI slice and committed it as `872da0f` (`Add workload capacity indicators and filters`).
+Resolved the four automated review comments in commit `bddd95c` (`Address workload review feedback`) and pushed the branch to PR #374.
 
-The main fix is that workload weeks now carry real capacity data from the API, so the page no longer relies on fixed `40h` / `10 task` thresholds. The UI in [page.tsx](/home/tommy/Dev/atlaspm-worktrees/issue-365/apps/web-ui/src/app/workspaces/[workspaceId]/workload/page.tsx) now shows over-capacity and reduced-capacity indicators, plus client-side filters for `over-capacity`, `reduced-capacity`, and `available`. I also added a focused repro/guard test in [workload-helpers.test.ts](/home/tommy/Dev/atlaspm-worktrees/issue-365/apps/web-ui/src/app/workspaces/[workspaceId]/workload/workload-helpers.test.ts) and extended the workload contract in [workload.service.ts](/home/tommy/Dev/atlaspm-worktrees/issue-365/apps/core-api/src/workload/workload.service.ts) to expose `capacityMinutes` and `capacityTasks` per week.
+The fix set keeps behavior unchanged while tightening the implementation: the capacity integration test now asserts `workloadWeek` exists before reading its fields; workload helpers now build an alerts-by-week map once and reuse it; the workload page computes per-user status and status counts in one pass; and each workload card reuses a per-card alerts map instead of scanning `overloadAlerts` for every rendered week.
 
 Focused verification passed:
-`pnpm install`
 `pnpm --filter @atlaspm/web-ui test -- src/app/workspaces/[workspaceId]/workload/workload-helpers.test.ts`
 `pnpm --filter @atlaspm/web-ui type-check`
-`pnpm --filter @atlaspm/domain build`
-`pnpm --filter @atlaspm/core-api type-check`
 `pnpm --filter @atlaspm/core-api test -- test/capacity.integration.test.ts`
 
-Summary: Added real capacity-backed workload indicators and filters in `web-ui`, extended the workload API contract for weekly capacity, added focused tests, and checkpoint-committed the slice.
-State hint: local_review
-Blocked reason: none
-Tests: `pnpm install`; `pnpm --filter @atlaspm/web-ui test -- src/app/workspaces/[workspaceId]/workload/workload-helpers.test.ts`; `pnpm --filter @atlaspm/web-ui type-check`; `pnpm --filter @atlaspm/domain build`; `pnpm --filter @atlaspm/core-api type-check`; `pnpm --filter @atlaspm/core-api test -- test/capacity.integration.test.ts`
-Failure signature: none
-Next action: Open or update the draft PR for this branch and, if needed, run a broader `web-ui` smoke pass around the workload page filter UX.
+PR follow-up:
+`git push origin codex/reopen-issue-365`
+Resolved review threads `PRRT_kwDORWcwRc5zdilP`, `PRRT_kwDORWcwRc5zdild`, `PRRT_kwDORWcwRc5zdilj`, and `PRRT_kwDORWcwRc5zdilm` via `gh api graphql`.
 
 ## Active Failure Context
-- Category: review
-- Summary: 4 unresolved automated review thread(s) remain.
-- Reference: https://github.com/TommyKammy/atlaspm/pull/374#discussion_r2915329668
-- Details:
-  - apps/core-api/test/capacity.integration.test.ts:245 `workloadWeek` can be `undefined` if the weekly label changes or the API returns a different set of weeks; the subsequent `workloadWeek.capacityMinutes` / `capacityTasks` assertions would then throw a less-informative runtime error. Add an explicit `expect(workloadWeek).toBeTruthy()` (or use optional chaining in the expects) before asserting on its fields so failures point to the real mismatch. ```suggestion expect(overloadedWeek.excess).toBe(780); expect(workloadWeek).toBeTruthy(); ```
-  - apps/web-ui/src/app/workspaces/[workspaceId]/workload/workload-helpers.ts:49 `getWorkloadStatus()` builds `weeklyStates` by calling `workload.overloadAlerts.find(...)` inside the `map()`, making it O(weeks * alerts) each time this helper runs. Since this status helper is called repeatedly (for filtering, counts, and rendering), consider building a `Map` of overload alerts keyed by `week` once and doing O(1) lookups while iterating weeks.
-  - apps/web-ui/src/app/workspaces/[workspaceId]/workload/page.tsx:65 `getWorkloadStatus()` is recomputed multiple times per render here (for `filteredWorkload` and each of the three counts), and each computation iterates over every week in a workload. For larger teams/periods this can become noticeable; consider precomputing a per-user status map (e.g. via `useMemo`) and deriving both the counts and `filteredWorkload` from that single pass.
-  - apps/web-ui/src/app/workspaces/[workspaceId]/workload/page.tsx:244 Inside the `visibleWeeks.map(...)` render, `workload.overloadAlerts.find(...)` runs once per week row. If there are many weeks (or if this component renders often), this creates repeated linear scans. Consider precomputing an `alertsByWeek` map/object once per card (before the JSX) and doing constant-time lookups while rendering.
+- None recorded locally. PR #374 is waiting on fresh CI after review-thread resolution.
 
 ## Codex Working Notes
 ### Current Handoff
 - Hypothesis: All four automated review comments are valid and can be fixed without changing behavior: tighten one test assertion, cache overload alerts by week in workload helpers/cards, and precompute per-user workload status once per render.
-- Primary failure or risk: No current local failure after the review-fix patch. Remaining risk is only remote CI / PR thread resolution.
+- Primary failure or risk: No current local failure. The only remaining risk is remote CI because PR #374 is now running a fresh check set after commit `bddd95c`.
 - Last focused command: `pnpm --filter @atlaspm/core-api test -- test/capacity.integration.test.ts`
 - Files changed: `apps/core-api/test/capacity.integration.test.ts`, `apps/web-ui/src/app/workspaces/[workspaceId]/workload/workload-helpers.ts`, `apps/web-ui/src/app/workspaces/[workspaceId]/workload/page.tsx`, and this journal.
 - Next 1-3 actions:
-  1. Commit and push the review-fix patch.
-  2. Resolve the four Copilot review threads on PR #374.
-  3. Watch PR checks, especially `e2e`, until the merge state is stable.
+  1. Watch PR #374 checks, especially `e2e`, until the merge state is stable.
+  2. If a fresh CI failure appears, reproduce it locally from this worktree and fix it here.
+  3. If checks pass, proceed with final PR review/merge handling.
 
 ### Scratchpad
 - Review follow-up:
