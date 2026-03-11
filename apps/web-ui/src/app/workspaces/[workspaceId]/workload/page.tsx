@@ -221,7 +221,7 @@ function UserWorkloadCard({
     );
 
     return (
-      <Card>
+      <Card data-testid={`workload-card-${workload.userId}`}>
         <CardHeader>
           <div className="flex items-start justify-between">
             <div>
@@ -328,7 +328,7 @@ function UserWorkloadCard({
     const maxTasks = Math.max(...visibleWeeks.map((w) => Math.max(w.taskCount, w.capacityTasks)), CAPACITY_TASKS);
 
     return (
-      <Card>
+      <Card data-testid={`workload-card-${workload.userId}`}>
         <CardHeader>
           <div className="flex items-start justify-between">
             <div>
