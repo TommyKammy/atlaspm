@@ -33,6 +33,7 @@ describe('GitHub issues integration', () => {
   let githubServer: ReturnType<typeof createServer>;
   let githubBaseUrl: string;
   let issues: MockIssue[];
+  let failIssueSyncMessage: string | null;
 
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
@@ -75,6 +76,7 @@ describe('GitHub issues integration', () => {
         updated_at: '2026-03-11T00:05:00.000Z',
       },
     ];
+    failIssueSyncMessage = null;
 
     githubServer = createServer((req: IncomingMessage, res: ServerResponse) => {
       if (req.headers.authorization !== 'Bearer github-test-token') {
@@ -98,6 +100,10 @@ describe('GitHub issues integration', () => {
       }
 
       if (req.method === 'GET' && req.url?.startsWith('/repos/atlaspm/repo/issues')) {
+        if (failIssueSyncMessage) {
+          sendJson(res, 500, { message: failIssueSyncMessage });
+          return;
+        }
         sendJson(res, 200, issues);
         return;
       }
@@ -380,5 +386,93 @@ describe('GitHub issues integration', () => {
       },
     });
     expect(credential?.redactedValue).toBe('gith...oken');
+  });
+
+  test('failed sync persists sanitized FAILED state and emits failure audit/outbox observability', async () => {
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
+
+    const workspacesRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspacesRes.body[0].id as string;
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `GitHub Sync Failure ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const connectRes = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/integrations/github`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        key: `github-sync-failure-${Date.now()}`,
+        displayName: 'AtlasPM GitHub Failure',
+        owner: 'atlaspm',
+        repo: 'repo',
+        projectId,
+        credentials: {
+          accessToken: 'github-test-token',
+        },
+      })
+      .expect(201);
+
+    failIssueSyncMessage = 'upstream token secret=ghp_super_secret_token';
+
+    try {
+      await request(app.getHttpServer())
+        .post(`/workspaces/${workspaceId}/integrations/${connectRes.body.id}/sync`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ scope: 'issues' })
+        .expect(500);
+    } finally {
+      failIssueSyncMessage = null;
+    }
+
+    const syncState = await prisma.integrationSyncState.findUnique({
+      where: {
+        providerConfigId_scope: {
+          providerConfigId: connectRes.body.id as string,
+          scope: 'issues',
+        },
+      },
+    });
+    expect(syncState?.status).toBe('FAILED');
+    expect(syncState?.lastErrorCode).toBe('INTEGRATION_SYNC_FAILED');
+    expect(syncState?.lastErrorMessage).toBe('GitHub API request failed with status 500');
+    expect(syncState?.finishedAt).not.toBeNull();
+
+    const auditEvents = await prisma.auditEvent.findMany({
+      where: {
+        entityId: connectRes.body.id as string,
+        action: 'integration.sync.failed',
+      },
+    });
+    expect(auditEvents).toHaveLength(1);
+    expect(auditEvents[0]?.afterJson).toMatchObject({
+      scope: 'issues',
+      status: 'failed',
+      errorCode: 'INTEGRATION_SYNC_FAILED',
+      errorMessage: 'GitHub API request failed with status 500',
+    });
+
+    const outboxEvents = await prisma.outboxEvent.findMany({
+      where: {
+        type: 'integration.sync.failed',
+        payload: {
+          path: ['providerConfigId'],
+          equals: connectRes.body.id as string,
+        },
+      },
+    });
+    expect(outboxEvents).toHaveLength(1);
+    expect(outboxEvents[0]?.payload).toMatchObject({
+      providerConfigId: connectRes.body.id,
+      workspaceId,
+      scope: 'issues',
+      errorCode: 'INTEGRATION_SYNC_FAILED',
+      errorMessage: 'GitHub API request failed with status 500',
+    });
   });
 });

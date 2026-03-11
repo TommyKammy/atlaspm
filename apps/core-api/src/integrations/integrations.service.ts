@@ -8,7 +8,7 @@ import {
 import { IntegrationCredentialKind, IntegrationProviderKind, WorkspaceRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
-import { IntegrationRuntimeService } from './integration-runtime.service';
+import { IntegrationRuntimeService, type RunIntegrationSyncJobResult } from './integration-runtime.service';
 import { IntegrationCredentialsService } from './integration-credentials.service';
 import { Prisma } from '@prisma/client';
 import { GithubProviderSettings } from './github.types';
@@ -127,14 +127,47 @@ export class IntegrationsService {
     await this.domain.requireWorkspaceRole(input.workspaceId, input.actorUserId, WorkspaceRole.WS_ADMIN);
     const config = await this.getConfigOrThrow(input.providerConfigId, input.workspaceId);
     const providerKey = this.mapProviderKey(config.provider);
-    const result = await this.runtime.runSyncJob({
-      providerKey,
-      providerConfigId: config.id,
-      workspaceId: input.workspaceId,
-      actorUserId: input.actorUserId,
-      scope: input.scope,
-      reason: 'manual',
-    });
+    let result: RunIntegrationSyncJobResult;
+
+    try {
+      result = await this.runtime.runSyncJob({
+        providerKey,
+        providerConfigId: config.id,
+        workspaceId: input.workspaceId,
+        actorUserId: input.actorUserId,
+        scope: input.scope,
+        reason: 'manual',
+      });
+    } catch (error) {
+      const syncError = this.serializeSyncError(error);
+
+      await this.prisma.$transaction(async (tx) => {
+        await this.domain.appendAuditOutbox({
+          tx,
+          actor: input.actorUserId,
+          entityType: 'IntegrationProviderConfig',
+          entityId: config.id,
+          action: 'integration.sync.failed',
+          afterJson: {
+            scope: input.scope,
+            status: 'failed',
+            errorCode: syncError.code,
+            errorMessage: syncError.message,
+          },
+          correlationId: input.correlationId,
+          outboxType: 'integration.sync.failed',
+          payload: {
+            providerConfigId: config.id,
+            workspaceId: input.workspaceId,
+            scope: input.scope,
+            errorCode: syncError.code,
+            errorMessage: syncError.message,
+          },
+        });
+      });
+
+      throw error;
+    }
 
     if (result.status === 'completed') {
       await this.prisma.$transaction(async (tx) => {
@@ -167,6 +200,21 @@ export class IntegrationsService {
       ...result,
       providerKey,
       scope: input.scope,
+    };
+  }
+
+  private serializeSyncError(error: unknown): { code: string; message: string } {
+    if (error instanceof Error) {
+      const errorWithCode = error as Error & { code?: string };
+      return {
+        code: errorWithCode.code ?? 'INTEGRATION_SYNC_FAILED',
+        message: error.message,
+      };
+    }
+
+    return {
+      code: 'INTEGRATION_SYNC_FAILED',
+      message: 'Integration sync failed',
     };
   }
 
