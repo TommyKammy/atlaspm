@@ -1,5 +1,5 @@
 import { Body, ConflictException, Controller, Delete, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { Prisma, ProjectRole, WorkspaceRole } from '@prisma/client';
+import { GuestAccessScopeType, GuestAccessStatus, Prisma, ProjectRole, WorkspaceRole } from '@prisma/client';
 import { IsEnum, IsString, IsUUID } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
@@ -40,7 +40,22 @@ export class ProjectsController {
   @Get()
   async list(@CurrentRequest() req: AppRequest) {
     const projects = await this.prisma.project.findMany({
-      where: { memberships: { some: { userId: req.user.sub } } },
+      where: {
+        OR: [
+          { memberships: { some: { userId: req.user.sub } } },
+          {
+            guestAccessGrants: {
+              some: {
+                userId: req.user.sub,
+                scopeType: GuestAccessScopeType.PROJECT,
+                status: GuestAccessStatus.ACTIVE,
+                revokedAt: null,
+                OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+              },
+            },
+          },
+        ],
+      },
       orderBy: { createdAt: 'asc' },
     });
     return this.hydrateProjectsWithFollowerState(projects, req.user.sub);
