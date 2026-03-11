@@ -29,6 +29,10 @@ async function api(path: string, token: string, method = 'GET', body?: unknown) 
   return res.json();
 }
 
+function workloadCard(page: Page, userId: string) {
+  return page.getByTestId(`workload-card-${userId}`);
+}
+
 async function inviteAndAcceptWorkspaceMember(
   ownerToken: string,
   workspaceId: string,
@@ -134,7 +138,7 @@ async function createCapacityScenario(browser: Browser) {
   }
 
   const reducedTask = (await api(`/projects/${project.id}/tasks`, ownerToken, 'POST', {
-    title: `Reduced capacity ${stamp}`,
+    title: `Lower capacity ${stamp}`,
     assigneeUserId: reducedSub,
     dueAt,
   })) as { id: string };
@@ -145,9 +149,12 @@ async function createCapacityScenario(browser: Browser) {
     ownerPage,
     workspaceId,
     ownerEmail,
+    ownerSub,
+    overloadedSub,
     overloadedContext,
     overloadedPage,
     overloadedEmail,
+    reducedSub,
     reducedContext,
     reducedPage,
     reducedEmail,
@@ -197,39 +204,44 @@ test('workload page shows capacity-aware indicators, filters, and reload state',
     workspaceId,
     overloadedEmail,
     reducedEmail,
+    overloadedSub,
+    reducedSub,
     overloadedContext,
     reducedContext,
   } = await createCapacityScenario(browser);
 
   try {
+    const overloadedCard = workloadCard(ownerPage, overloadedSub);
+    const reducedCard = workloadCard(ownerPage, reducedSub);
+
     await ownerPage.goto(`/workspaces/${workspaceId}/workload`);
 
     await expect(ownerPage.locator(`text=${overloadedEmail}`)).toBeVisible();
     await expect(ownerPage.locator(`text=${reducedEmail}`)).toBeVisible();
-    await expect(ownerPage.locator('text=+1 over capacity')).toBeVisible();
-    await expect(ownerPage.locator('text=Reduced capacity')).toBeVisible();
-    await expect(ownerPage.locator('text=2 task capacity')).toBeVisible();
+    await expect(overloadedCard.getByText('+1 over capacity', { exact: true })).toBeVisible();
+    await expect(reducedCard.getByText('Reduced capacity', { exact: true })).toBeVisible();
+    await expect(reducedCard.getByText('2 task capacity', { exact: true })).toBeVisible();
 
     await ownerPage.reload();
     await expect(ownerPage.locator(`text=${overloadedEmail}`)).toBeVisible();
     await expect(ownerPage.locator(`text=${reducedEmail}`)).toBeVisible();
-    await expect(ownerPage.locator('text=+1 over capacity')).toBeVisible();
-    await expect(ownerPage.locator('text=Reduced capacity')).toBeVisible();
+    await expect(overloadedCard.getByText('+1 over capacity', { exact: true })).toBeVisible();
+    await expect(reducedCard.getByText('Reduced capacity', { exact: true })).toBeVisible();
 
     await ownerPage.getByRole('button', { name: 'Effort View' }).click();
-    await expect(ownerPage.locator('text=+1h over capacity')).toBeVisible();
-    await expect(ownerPage.locator('text=5h / 6h')).toBeVisible();
+    await expect(overloadedCard.getByText('+1h over capacity', { exact: true })).toBeVisible();
+    await expect(reducedCard.getByText('5h / 6h', { exact: true })).toBeVisible();
 
     await ownerPage.getByRole('button', { name: /All people \(/ }).click();
-    await ownerPage.getByRole('option', { name: /Over capacity \(/ }).click();
+    await ownerPage.getByRole('button', { name: /Over capacity \(/ }).click();
     await expect(ownerPage.locator(`text=${overloadedEmail}`)).toBeVisible();
     await expect(ownerPage.locator(`text=${reducedEmail}`)).toHaveCount(0);
 
     await ownerPage.getByRole('button', { name: /Over capacity \(/ }).click();
-    await ownerPage.getByRole('option', { name: /Reduced capacity \(/ }).click();
+    await ownerPage.getByRole('button', { name: /Reduced capacity \(/ }).click();
     await expect(ownerPage.locator(`text=${reducedEmail}`)).toBeVisible();
     await expect(ownerPage.locator(`text=${overloadedEmail}`)).toHaveCount(0);
-    await expect(ownerPage.locator('text=5h / 6h')).toBeVisible();
+    await expect(reducedCard.getByText('5h / 6h', { exact: true })).toBeVisible();
   } finally {
     await reducedContext.close();
     await overloadedContext.close();
@@ -245,17 +257,24 @@ test('non-admin team members only see their own workload cards', async ({ browse
     reducedPage,
     workspaceId,
     ownerEmail,
+    ownerSub,
     overloadedEmail,
+    overloadedSub,
     reducedEmail,
+    reducedSub,
   } = await createCapacityScenario(browser);
 
   try {
+    const reducedCard = workloadCard(reducedPage, reducedSub);
+
     await reducedPage.goto(`/workspaces/${workspaceId}/workload`);
 
     await expect(reducedPage.locator(`text=${reducedEmail}`)).toBeVisible();
     await expect(reducedPage.locator(`text=${overloadedEmail}`)).toHaveCount(0);
     await expect(reducedPage.locator(`text=${ownerEmail}`)).toHaveCount(0);
-    await expect(reducedPage.locator('text=Reduced capacity')).toBeVisible();
+    await expect(reducedPage.locator(`text=${ownerSub}@example.com`)).toHaveCount(0);
+    await expect(reducedPage.locator(`text=${overloadedSub}@example.com`)).toHaveCount(0);
+    await expect(reducedCard.getByText('Reduced capacity', { exact: true })).toBeVisible();
 
     await reducedPage.reload();
     await expect(reducedPage.locator(`text=${reducedEmail}`)).toBeVisible();
