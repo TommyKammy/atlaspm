@@ -26,23 +26,26 @@ Failure signature: none
 Next action: Open or update the issue PR from `codex/reopen-issue-358` so CI runs the new goals integration and E2E coverage.
 
 ## Active Failure Context
-- Category: review
-- Summary: 2 unresolved automated review thread(s) remain.
-- Reference: https://github.com/TommyKammy/atlaspm/pull/372#discussion_r2915107881
+- Category: waiting_ci
+- Summary: Review threads are resolved and PR #372 has been updated; the remaining live signal is the `e2e` CI job still in progress after push.
+- Reference: https://github.com/TommyKammy/atlaspm/pull/372
 - Details:
-  - e2e/playwright/tests/goals.spec.ts:184 The viewer test is checking for a button named "Add goal alignment", but the UI label for `t('addGoalAlignment')` is currently "Add goal" (see i18n dictionary). As written, this assertion will always pass even if the alignment button is mistakenly visible, so it won't actually guard the regression. Update the locator to match the real accessible name (or switch to a stable data-testid/translation key driven selector) so the test fails if the control appears for viewers. ```suggestion await expect(viewerPage.getByRole('button', { name: 'Add goal' })).toHaveCount(0); ```
-  - apps/web-ui/src/app/projects/[id]/page.tsx:384 `canEditProject` is computed as `true` when the current project role hasn't loaded yet (it defaults to `true` when `currentProjectRole` is null). Passing that value into `ProjectGoalsCard` means read-only users can briefly see alignment controls (and potentially trigger 403s) during initial load. Consider defaulting `canEditProject` to `false` until `meQuery` + `projectMembersQuery` resolve (or pass an explicit `canEdit={currentProjectRole !== 'VIEWER'}` only when the role is known) so viewer UI never renders edit affordances. ```suggestion <ProjectGoalsCard projectId={projectId} workspaceId={project.workspaceId} canEdit={meQuery.isSuccess && projectMembersQuery.isSuccess && canEditProject} /> ```
+  - Head advanced to `f60d202`.
+  - Resolved review threads:
+    - `PRRT_kwDORWcwRc5zc6Yb`
+    - `PRRT_kwDORWcwRc5zc6Y0`
+  - `gh pr view 372 --json statusCheckRollup` shows `e2e` as `IN_PROGRESS`; all other reported checks are `SUCCESS`.
 
 ## Codex Working Notes
 ### Current Handoff
-- Hypothesis: Both automated review comments are valid and should be fixed narrowly without reopening the broader goals behavior. One was a false-negative Playwright locator; the other was a read-only affordance flash on the project page while role data loads.
-- Primary failure or risk: The only remaining work after the code fix is updating PR #372 so CI reruns and resolving the two review threads. Local host commands still warn on unsupported Node 24, but the touched web-ui and Playwright checks passed.
-- Last focused command: `E2E_KEEP_UP=1 ./scripts/run-e2e.sh e2e/playwright/tests/goals.spec.ts`
+- Hypothesis: The review follow-up is complete. The remaining risk is ordinary CI variance in the rerunning `e2e` job, not an unresolved local regression.
+- Primary failure or risk: None locally. PR #372 is now waiting on CI after push `f60d202`, with `e2e` still running at the time of handoff.
+- Last focused command: `gh pr view 372 --json mergeStateStatus,headRefName,headRefOid,statusCheckRollup,reviewDecision,url`
 - Files changed: `apps/web-ui/src/app/projects/[id]/page.tsx`, `e2e/playwright/tests/goals.spec.ts`, and this journal.
 - Next 1-3 actions:
-  1. Commit and push the review-follow-up patch to PR #372.
-  2. Resolve the two Copilot review threads after push.
-  3. Watch the refreshed PR checks, especially `e2e`.
+  1. Watch PR #372 until the rerun `e2e` job completes.
+  2. If `e2e` fails, inspect the uploaded Playwright artifacts for `e2e/playwright/tests/goals.spec.ts` first.
+  3. Merge once the CI run is green and mergeable.
 
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
@@ -55,7 +58,7 @@ Next action: Open or update the issue PR from `codex/reopen-issue-358` so CI run
     - `e2e/playwright/tests/goals.spec.ts` was asserting the nonexistent button label `"Add goal alignment"` instead of the real accessible label `"Add goal"`.
     - `ProjectGoalsCard` received `canEditProject === true` before membership queries resolved, so read-only users could briefly see alignment controls during initial load.
 - Failure signature:
-  - `PRRT_kwDORWcwRc5zc6Yb|PRRT_kwDORWcwRc5zc6Y0`
+  - `none`
 - Current focused verification:
   - `pnpm install`
   - `pnpm --filter @atlaspm/domain build`
@@ -66,6 +69,10 @@ Next action: Open or update the issue PR from `codex/reopen-issue-358` so CI run
   - `E2E_KEEP_UP=1 ./scripts/run-e2e.sh e2e/playwright/tests/goals.spec.ts`
   - `pnpm --filter @atlaspm/web-ui type-check` (review follow-up)
   - `E2E_KEEP_UP=1 ./scripts/run-e2e.sh e2e/playwright/tests/goals.spec.ts` (review follow-up)
+  - `git push origin codex/reopen-issue-358`
+  - `gh api graphql -f query='mutation($thread:ID!){ resolveReviewThread(input:{threadId:$thread}) { thread { id isResolved } } }' -f thread='PRRT_kwDORWcwRc5zc6Yb'`
+  - `gh api graphql -f query='mutation($thread:ID!){ resolveReviewThread(input:{threadId:$thread}) { thread { id isResolved } } }' -f thread='PRRT_kwDORWcwRc5zc6Y0'`
+  - `gh pr view 372 --json mergeStateStatus,headRefName,headRefOid,statusCheckRollup,reviewDecision,url`
 - Implementation notes:
   - `GoalsService.listProjectGoals` now accepts `ProjectRole.VIEWER` so read-only project members can see aligned goals.
   - `ProjectGoalsCard` now accepts `canEdit` and hides add/remove alignment controls for read-only users.
@@ -76,3 +83,4 @@ Next action: Open or update the issue PR from `codex/reopen-issue-358` so CI run
   - Review follow-up:
     - The viewer Playwright test now asserts the real accessible button name, `"Add goal"`.
     - The project page now computes `canEditProjectGoals` as `meQuery.isSuccess && projectMembersQuery.isSuccess && canEditProject` before passing edit access to `ProjectGoalsCard`.
+    - Pushed as `f60d202` (`fix: address goals review feedback`) and resolved both Copilot review threads on PR #372.
