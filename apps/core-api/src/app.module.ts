@@ -44,6 +44,7 @@ import { TaskCommentsService } from './tasks/task-comments.service';
 import { TaskMentionsService } from './tasks/task-mentions.service';
 import { GoalsModule } from './goals/goals.module';
 import { CapacityModule } from './capacity/capacity.module';
+import { GuestAccessController } from './guest-access/guest-access.controller';
 
 @Module({
   imports: [
@@ -80,6 +81,7 @@ import { CapacityModule } from './capacity/capacity.module';
     FormsController,
     TaskApprovalController,
     TaskTimeTrackingController,
+    GuestAccessController,
   ],
   providers: [
     PrismaService,

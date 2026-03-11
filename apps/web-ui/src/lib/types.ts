@@ -142,6 +142,35 @@ export type Invitation = {
   createdAt: string;
 };
 
+export type GuestAccessState = 'pending' | 'accepted' | 'revoked' | 'expired';
+
+export type GuestAccessEntry = {
+  invitationId: string;
+  grantId?: string | null;
+  workspaceId: string;
+  projectId: string | null;
+  email: string;
+  userId?: string | null;
+  userDisplayName?: string | null;
+  projectRole: 'MEMBER' | 'VIEWER' | null;
+  grantStatus: 'ACTIVE' | 'REVOKED' | 'EXPIRED' | null;
+  state: GuestAccessState;
+  expiresAt: string;
+  acceptedAt?: string | null;
+  revokedAt?: string | null;
+  createdAt: string;
+  scope: {
+    type: 'project';
+    workspaceId: string;
+    projectId: string | null;
+    role: 'MEMBER' | 'VIEWER' | null;
+  };
+};
+
+export type GuestInvitationResponse = GuestAccessEntry & {
+  inviteLink: string;
+};
+
 export type Section = {
   id: string;
   projectId: string;

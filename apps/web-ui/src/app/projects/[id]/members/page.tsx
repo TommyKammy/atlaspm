@@ -9,11 +9,29 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { AuditActivityList } from '@/components/audit-activity-list';
 import { queryKeys } from '@/lib/query-keys';
-import type { AuditEvent, Project, ProjectMember, Workspace, WorkspaceUserRow } from '@/lib/types';
+import type { AuditEvent, GuestAccessEntry, GuestInvitationResponse, Project, ProjectMember, Workspace, WorkspaceUserRow } from '@/lib/types';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { useI18n } from '@/lib/i18n';
+
+function formatGuestState(
+  state: GuestAccessEntry['state'],
+  t: (key: string) => string,
+) {
+  switch (state) {
+    case 'accepted':
+      return t('guestAccepted');
+    case 'revoked':
+      return t('guestRevoked');
+    case 'expired':
+      return t('guestExpired');
+    case 'pending':
+    default:
+      return t('guestPending');
+  }
+}
 
 export default function ProjectMembersPage() {
   const { t } = useI18n();
@@ -23,6 +41,10 @@ export default function ProjectMembersPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState('');
   const [selectedRole, setSelectedRole] = useState<'ADMIN' | 'MEMBER' | 'VIEWER'>('MEMBER');
+  const [guestDialogOpen, setGuestDialogOpen] = useState(false);
+  const [guestEmail, setGuestEmail] = useState('');
+  const [guestRole, setGuestRole] = useState<'MEMBER' | 'VIEWER'>('VIEWER');
+  const [guestInviteLink, setGuestInviteLink] = useState('');
 
   const projectsQuery = useQuery<Project[]>({
     queryKey: queryKeys.projects,
@@ -40,6 +62,11 @@ export default function ProjectMembersPage() {
   const auditQuery = useQuery<AuditEvent[]>({
     queryKey: queryKeys.projectAudit(projectId),
     queryFn: () => api(`/projects/${projectId}/audit`),
+    enabled: Boolean(projectId),
+  });
+  const guestAccessQuery = useQuery<GuestAccessEntry[]>({
+    queryKey: queryKeys.projectGuestAccess(projectId),
+    queryFn: () => api(`/projects/${projectId}/guest-access`),
     enabled: Boolean(projectId),
   });
 
@@ -79,6 +106,28 @@ export default function ProjectMembersPage() {
     mutationFn: (userId: string) => api(`/projects/${projectId}/members/${userId}`, { method: 'DELETE' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projectMembers(projectId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectAudit(projectId) });
+    },
+  });
+
+  const inviteGuest = useMutation({
+    mutationFn: () =>
+      api(`/projects/${projectId}/guest-invitations`, {
+        method: 'POST',
+        body: { email: guestEmail, role: guestRole },
+      }) as Promise<GuestInvitationResponse>,
+    onSuccess: (data) => {
+      setGuestInviteLink(data.inviteLink);
+      setGuestEmail('');
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectGuestAccess(projectId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectAudit(projectId) });
+    },
+  });
+
+  const revokeGuestInvite = useMutation({
+    mutationFn: (invitationId: string) => api(`/guest-invitations/${invitationId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectGuestAccess(projectId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.projectAudit(projectId) });
     },
   });
@@ -208,6 +257,139 @@ export default function ProjectMembersPage() {
                 </TableRow>
               );
             })}
+          </TableBody>
+        </Table>
+      </section>
+
+      <section className="rounded-lg border bg-card p-4">
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold">{t('guestAccess')}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{t('guestAccessDescription')}</p>
+          </div>
+          <Dialog.Root
+            open={guestDialogOpen}
+            onOpenChange={(nextOpen) => {
+              setGuestDialogOpen(nextOpen);
+              if (!nextOpen) {
+                setGuestInviteLink('');
+              }
+            }}
+          >
+            <Dialog.Trigger asChild>
+              <Button
+                data-testid="project-guest-invite-open"
+                onClick={() => {
+                  setGuestDialogOpen(true);
+                  setGuestInviteLink('');
+                }}
+              >
+                {t('inviteGuest')}
+              </Button>
+            </Dialog.Trigger>
+            <Dialog.Portal>
+              <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/50" />
+              <Dialog.Content className="fixed left-1/2 top-1/2 z-[80] w-[480px] max-w-[95vw] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-background p-4">
+                <Dialog.Title className="text-sm font-semibold">{t('inviteGuest')}</Dialog.Title>
+                <div className="mt-3 space-y-3">
+                  <Input
+                    value={guestEmail}
+                    onChange={(e) => setGuestEmail(e.target.value)}
+                    placeholder="name@example.com"
+                    data-testid="project-guest-email-input"
+                  />
+                  <select
+                    value={guestRole}
+                    onChange={(e) => setGuestRole(e.target.value as 'MEMBER' | 'VIEWER')}
+                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    data-testid="project-guest-role-select"
+                  >
+                    <option value="VIEWER">VIEWER</option>
+                    <option value="MEMBER">MEMBER</option>
+                  </select>
+                  <Button
+                    onClick={() => inviteGuest.mutate()}
+                    disabled={!guestEmail.trim() || inviteGuest.isPending}
+                    data-testid="project-guest-invite-submit"
+                  >
+                    {inviteGuest.isPending ? t('creating') : t('inviteGuest')}
+                  </Button>
+
+                  {guestInviteLink ? (
+                    <div className="rounded-md border bg-muted/30 p-2">
+                      <p className="text-xs text-muted-foreground">{t('guestInviteLink')}</p>
+                      <p className="break-all text-xs" data-testid="project-guest-invite-link">{guestInviteLink}</p>
+                      <Button
+                        className="mt-2"
+                        size="sm"
+                        variant="outline"
+                        data-testid="project-guest-invite-copy"
+                        onClick={async () => {
+                          await navigator.clipboard.writeText(guestInviteLink);
+                        }}
+                      >
+                        {t('copy')}
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              </Dialog.Content>
+            </Dialog.Portal>
+          </Dialog.Root>
+        </div>
+
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t('users')}</TableHead>
+              <TableHead>{t('email')}</TableHead>
+              <TableHead>{t('role')}</TableHead>
+              <TableHead>{t('guestState')}</TableHead>
+              <TableHead>{t('guestExpires')}</TableHead>
+              <TableHead>{t('actions')}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {(guestAccessQuery.data ?? []).length ? (
+              (guestAccessQuery.data ?? []).map((entry) => {
+                const label = entry.userDisplayName ?? entry.email;
+                const canRevoke = entry.state === 'pending' || entry.state === 'accepted';
+                return (
+                  <TableRow key={entry.invitationId} data-testid={`project-guest-row-${entry.invitationId}`}>
+                    <TableCell>{label}</TableCell>
+                    <TableCell>{entry.email}</TableCell>
+                    <TableCell>{entry.projectRole ?? '—'}</TableCell>
+                    <TableCell>
+                      <span className="inline-flex rounded-full border px-2 py-0.5 text-xs font-medium">
+                        {formatGuestState(entry.state, t)}
+                      </span>
+                    </TableCell>
+                    <TableCell>{new Date(entry.expiresAt).toLocaleString()}</TableCell>
+                    <TableCell>
+                      {canRevoke ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          data-testid={`project-guest-revoke-${entry.invitationId}`}
+                          onClick={() => revokeGuestInvite.mutate(entry.invitationId)}
+                          disabled={revokeGuestInvite.isPending}
+                        >
+                          {t('revoke')}
+                        </Button>
+                      ) : (
+                        '—'
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })
+            ) : (
+              <TableRow>
+                <TableCell colSpan={6} className="text-sm text-muted-foreground">
+                  {t('guestEmpty')}
+                </TableCell>
+              </TableRow>
+            )}
           </TableBody>
         </Table>
       </section>
