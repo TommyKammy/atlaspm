@@ -5,60 +5,40 @@
 - Branch: codex/reopen-issue-368
 - Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-368
 - Journal: /home/tommy/Dev/atlaspm-worktrees/issue-368/.codex-supervisor/issue-journal.md
-- Current phase: reproducing
-- Attempt count: 1
-- Last head SHA: 8cd4a31dd7a5a041a2f11da336051ea248d12f64
+- Current phase: repairing_ci
+- Attempt count: 2
+- Last head SHA: 6728a704018a2f9be249cec13051a5a96f8964af
 - Blocked reason: none
-- Last failure signature: none
-- Repeated failure signature count: 0
-- Updated at: 2026-03-11T01:53:11.164Z
+- Last failure signature: lint:fail
+- Repeated failure signature count: 1
+- Updated at: 2026-03-11T02:01:13.565Z
 
 ## Latest Codex Summary
-- None yet.
+Implemented the integration provider groundwork in `core-api` and docs, with a focused repro-first path. The new contract test in [apps/core-api/test/integration-contracts.test.ts](/home/tommy/Dev/atlaspm-worktrees/issue-368/apps/core-api/test/integration-contracts.test.ts) initially failed on missing provider/storage contracts; the branch now has Prisma models and migration for provider config, credentials, sync state, and entity mappings in [schema.prisma](/home/tommy/Dev/atlaspm-worktrees/issue-368/apps/core-api/prisma/schema.prisma) and [migration.sql](/home/tommy/Dev/atlaspm-worktrees/issue-368/apps/core-api/prisma/migrations/20260311110000_add_integration_provider_contracts/migration.sql).
+
+The explicit provider abstraction lives in [integration-provider.contract.ts](/home/tommy/Dev/atlaspm-worktrees/issue-368/apps/core-api/src/integrations/integration-provider.contract.ts) and [integration-provider.registry.ts](/home/tommy/Dev/atlaspm-worktrees/issue-368/apps/core-api/src/integrations/integration-provider.registry.ts). Slack now implements that abstraction in [slack.provider.ts](/home/tommy/Dev/atlaspm-worktrees/issue-368/apps/core-api/src/integrations/slack.provider.ts), and [slack.controller.ts](/home/tommy/Dev/atlaspm-worktrees/issue-368/apps/core-api/src/integrations/slack.controller.ts) delegates through the registry instead of carrying provider logic inline. The contract and operational expectations are documented in [docs/integrations-provider-contract.md](/home/tommy/Dev/atlaspm-worktrees/issue-368/docs/integrations-provider-contract.md) and linked from [docs/architecture.md](/home/tommy/Dev/atlaspm-worktrees/issue-368/docs/architecture.md). I also updated the issue journal and committed the checkpoint as `6728a70` (`Define integration provider contracts`).
+
+Verified with `pnpm --filter @atlaspm/core-api prisma:generate`, `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`, `pnpm --filter @atlaspm/core-api type-check`, and `git diff --check`.
+
+Summary: Added explicit integration provider abstraction, Prisma storage contracts, Slack provider implementation, docs, focused tests, and committed the result.
+State hint: implementing
+Blocked reason: none
+Tests: `pnpm --filter @atlaspm/core-api prisma:generate`; `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`; `pnpm --filter @atlaspm/core-api type-check`; `git diff --check`
+Failure signature: none
+Next action: Open or update a draft PR for this contract slice, or start the next dependent integration issue against the new provider/storage contracts
 
 ## Active Failure Context
-- None recorded.
+- Category: checks
+- Summary: PR #375 has failing checks.
+- Command or source: gh pr checks
+- Reference: https://github.com/TommyKammy/atlaspm/pull/375
+- Details:
+  - lint (fail/FAILURE) https://github.com/TommyKammy/atlaspm/actions/runs/22933011586/job/66558412518
 
 ## Codex Working Notes
 ### Current Handoff
 - Older scratchpad entries were compacted by codex-supervisor to keep resume context small.
 
-
-    - effort weeks still used `2400` instead of API capacity `420`
-    - reduced-capacity task weeks were reported as `available`
-  - That exposed a contract gap: `overloadAlerts` carried `capacity`, but non-overloaded reduced-capacity weeks had no capacity data at all.
-- Implementation:
-  - `apps/core-api/src/workload/workload.service.ts` now annotates every `weeklyBreakdown` entry with `capacityMinutes` and `capacityTasks` before computing overload alerts.
-  - `apps/web-ui/src/lib/api/workload.ts` accepts the new weekly capacity fields.
-  - `apps/web-ui/src/app/workspaces/[workspaceId]/workload/workload-helpers.ts` centralizes week/person status derivation and filtering.
-  - `apps/web-ui/src/app/workspaces/[workspaceId]/workload/page.tsx` now:
-    - uses actual weekly capacity instead of fixed thresholds
-    - shows reduced-capacity indicators
-    - adds client-side filters for `over-capacity`, `reduced-capacity`, and `available`
-    - narrows visible week rows inside each card when a capacity filter is active
-- Verification:
-  - `pnpm install`
-  - `pnpm --filter @atlaspm/web-ui test -- src/app/workspaces/[workspaceId]/workload/workload-helpers.test.ts` (failed first, then passed)
-  - `pnpm --filter @atlaspm/web-ui type-check`
-  - `pnpm --filter @atlaspm/domain build`
-  - `pnpm --filter @atlaspm/core-api type-check`
-  - `pnpm --filter @atlaspm/core-api test -- test/capacity.integration.test.ts`
-- Reproduction:
-  - Added `apps/core-api/test/capacity.integration.test.ts` to prove the missing contract first.
-  - Initial feature failure: `POST /workspaces/:workspaceId/capacity-schedules` returned `404` because no capacity/time-off API existed.
-  - Secondary setup failures while reproducing:
-    - `prisma: not found` before `pnpm install`
-    - Vite failed to resolve `@atlaspm/domain` before `pnpm --filter @atlaspm/domain build`
-  - Behavioral follow-up during implementation:
-    - Workload overload stayed empty because task estimates are updated through `PATCH /tasks/:id/estimate`, not task creation.
-  - CI repair follow-up:
-    - `gh pr checks 373` showed only `e2e` failing.
-    - `gh run view 22930597973 --job 66551161894 --log` showed the job failed in `Build core-api image (cached)`, not in Playwright.
-    - The actionable error was `buildx failed with ... invalid character '<' looking for beginning of value`, emitted while Docker’s action was generating/uploading build summaries/records.
-  - Review follow-up:
-    - Replaced the race-prone pre-insert duplicate read with DB-level uniqueness and `P2002` -> `409 Conflict` handling.
-    - Added a follow-up migration for `capacity_schedules` partial unique indexes plus a `CHECK` tying `subject_type` and `subject_user_id`.
-    - Batched workload weekly capacity resolution so one user/workload request fetches schedules once and overlapping time-off once.
     - Normalized workload week boundaries to UTC and restricted `timeZone` input to `UTC` until timezone-aware schedule math exists.
 - Failure signature:
   - `workload-ui-ignored-api-capacity`
@@ -133,3 +113,31 @@
   - `missing-integration-provider-contracts`
 - Next actions:
   - Consider adding CRUD/service APIs for managing integration provider configs and credentials if a follow-on issue expects runtime management rather than contract-only groundwork.
+
+### 2026-03-11 Codex CI Repair
+- Hypothesis:
+  - PR #375 lint failed on a narrow ESLint rule violation introduced in `SlackIntegrationProvider`, not on a broader contract or schema regression.
+- CI failure reproduced from GitHub Actions:
+  - `gh run view 22933011586 --job 66558412518 --log`
+  - Failure was:
+    - `apps/core-api/src/integrations/slack.provider.ts`
+    - `84:19  error  '_context' is defined but never used`
+    - `91:14  error  '_context' is defined but never used`
+- Local reproduction:
+  - `pnpm --filter @atlaspm/core-api lint`
+  - Reproduced the same two `@typescript-eslint/no-unused-vars` errors in `apps/core-api/src/integrations/slack.provider.ts`.
+- Fix:
+  - Kept the interface-conformant `context` parameters in `SlackIntegrationProvider.authorize` and `SlackIntegrationProvider.sync`.
+  - Marked them intentionally unused with `void context;` so ESLint passes without weakening the signature.
+- Verification:
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm lint`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`
+  - `git diff --check`
+- Current outcome:
+  - The local lint failure matching PR #375 is fixed.
+  - Focused integration contract and Slack webhook tests still pass after the lint-only repair.
+- Failure signature:
+  - `lint-unused-context-params`
+- Next actions:
+  - Commit the lint repair and push/update PR #375 so GitHub Actions reruns the previously failing lint job.

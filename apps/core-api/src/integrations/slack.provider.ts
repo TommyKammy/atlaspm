@@ -81,14 +81,16 @@ export class SlackIntegrationProvider implements IntegrationProvider {
 
   constructor(private readonly slackService: SlackService) {}
 
-  async authorize(_context: IntegrationAuthorizationContext): Promise<IntegrationAuthorizationResult> {
+  async authorize(context: IntegrationAuthorizationContext): Promise<IntegrationAuthorizationResult> {
+    void context;
     return {
       status: 'not_supported',
       message: 'Slack auth is managed through bot credentials and signing secrets outside the API.',
     };
   }
 
-  async sync(_context: IntegrationSyncContext): Promise<IntegrationSyncResult> {
+  async sync(context: IntegrationSyncContext): Promise<IntegrationSyncResult> {
+    void context;
     return {
       status: 'not_supported',
       message: 'Slack sync is not implemented yet; webhook ingestion is the active integration path.',
