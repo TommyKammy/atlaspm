@@ -47,3 +47,8 @@
 - `SlackIntegrationProvider` is the first implementation against the contract.
 - Current Slack capability is webhook/event handling plus outbound notifications.
 - Auth and sync return `not_supported` today, but the provider still plugs into the same contract and registry used by future providers.
+
+## GitHub Issues Reference Provider
+- `GithubIntegrationProvider` is the first end-to-end auth + sync implementation on top of the shared runtime.
+- It validates a repository token, imports GitHub issues into a selected AtlasPM project, and persists stable issue-to-task mappings.
+- Provider-specific setup and constraints: see `docs/integrations-github-issues.md`.

@@ -7,6 +7,7 @@ export const queryKeys = {
   workspaceInvitations: (workspaceId: string) => ['workspace', workspaceId, 'invitations'] as const,
   workspaceGoals: (workspaceId: string, options?: { includeArchived?: boolean }) =>
     ['workspace', workspaceId, 'goals', options?.includeArchived ? 'all' : 'active'] as const,
+  workspaceIntegrations: (workspaceId: string) => ['workspace', workspaceId, 'integrations'] as const,
   projects: ['projects'] as const,
   myTasks: (userId: string, projectIds: string[]) => ['my-tasks', userId, projectIds] as const,
   projectSections: (projectId: string) => ['project', projectId, 'sections'] as const,

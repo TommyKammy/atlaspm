@@ -1,0 +1,1 @@
+ALTER TYPE "IntegrationProviderKind" ADD VALUE IF NOT EXISTS 'GITHUB';

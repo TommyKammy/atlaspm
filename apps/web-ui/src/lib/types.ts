@@ -36,6 +36,49 @@ export type Workspace = {
   role: 'WS_ADMIN' | 'WS_MEMBER';
 };
 
+export type IntegrationCredentialPreview = {
+  kind: 'ACCESS_TOKEN' | 'REFRESH_TOKEN' | 'API_TOKEN' | 'SIGNING_SECRET';
+  redactedValue?: string | null;
+  updatedAt: string;
+};
+
+export type IntegrationSyncState = {
+  id: string;
+  scope: string;
+  status: 'IDLE' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+  cursor?: string | null;
+  lastSyncedAt?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
+export type IntegrationConfig = {
+  id: string;
+  workspaceId: string;
+  provider: 'SLACK' | 'GITHUB';
+  key: string;
+  displayName: string;
+  status: 'PENDING' | 'ACTIVE' | 'ERROR' | 'DISCONNECTED';
+  settings?: Record<string, unknown> | null;
+  credentials: IntegrationCredentialPreview[];
+  syncStates: IntegrationSyncState[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type IntegrationSyncJobResult = {
+  status: 'completed' | 'queued' | 'not_supported' | 'skipped';
+  nextCursor?: string | null;
+  message?: string;
+  importedCount?: number;
+  updatedCount?: number;
+  providerKey: 'github' | 'slack';
+  scope: string;
+};
+
 export type GoalStatus = 'NOT_STARTED' | 'ON_TRACK' | 'AT_RISK' | 'OFF_TRACK' | 'COMPLETED';
 
 export type Goal = {
