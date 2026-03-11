@@ -1,6 +1,15 @@
 import { Injectable, ForbiddenException, NotFoundException, ConflictException, Inject, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma, ProjectRole, TaskStatus, TaskType, UserStatus, WorkspaceRole } from '@prisma/client';
+import {
+  GuestAccessStatus,
+  GuestAccessScopeType,
+  Prisma,
+  ProjectRole,
+  TaskStatus,
+  TaskType,
+  UserStatus,
+  WorkspaceRole,
+} from '@prisma/client';
 import {
   applyTaskProgressAutomation,
   assertTimelineScheduleRange as assertTimelineScheduleRangeInDomain,
@@ -19,6 +28,8 @@ import type { AuthUser } from './types';
 export class DomainService {
   private static readonly defaultRuleTemplateKeys = ['progress_to_done', 'progress_to_in_progress'] as const;
   private static readonly defaultWorkspaceRetryDelaysMs = [10, 25, 50, 100, 200, 400];
+  private static readonly workspaceRoleRank: Record<WorkspaceRole, number> = { WS_MEMBER: 1, WS_ADMIN: 2 };
+  private static readonly projectRoleRank: Record<ProjectRole, number> = { VIEWER: 1, MEMBER: 2, ADMIN: 3 };
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
@@ -132,8 +143,9 @@ export class DomainService {
       where: { workspaceId_userId: { workspaceId, userId } },
     });
     if (!membership) throw new NotFoundException('Workspace membership not found');
-    const rank: Record<WorkspaceRole, number> = { WS_MEMBER: 1, WS_ADMIN: 2 };
-    if (rank[membership.role] < rank[min]) throw new ForbiddenException('Insufficient workspace role');
+    if (DomainService.workspaceRoleRank[membership.role] < DomainService.workspaceRoleRank[min]) {
+      throw new ForbiddenException('Insufficient workspace role');
+    }
     return membership;
   }
 
@@ -149,10 +161,46 @@ export class DomainService {
     const membership = await this.prisma.projectMembership.findUnique({
       where: { projectId_userId: { projectId, userId } },
     });
-    if (!membership) throw new NotFoundException('Project membership not found');
-    const rank: Record<ProjectRole, number> = { VIEWER: 1, MEMBER: 2, ADMIN: 3 };
-    if (rank[membership.role] < rank[min]) throw new ForbiddenException('Insufficient role');
-    return membership;
+    if (membership) {
+      if (DomainService.projectRoleRank[membership.role] < DomainService.projectRoleRank[min]) {
+        throw new ForbiddenException('Insufficient role');
+      }
+      return membership;
+    }
+
+    const guestGrant = await this.prisma.guestAccessGrant.findFirst({
+      where: {
+        userId,
+        projectId,
+        scopeType: GuestAccessScopeType.PROJECT,
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+    if (!guestGrant) {
+      throw new NotFoundException('Project membership not found');
+    }
+    if (guestGrant.status === GuestAccessStatus.REVOKED || guestGrant.revokedAt) {
+      throw new ForbiddenException('Guest access has been revoked');
+    }
+    if (
+      guestGrant.status === GuestAccessStatus.EXPIRED ||
+      (guestGrant.expiresAt && guestGrant.expiresAt.getTime() <= Date.now())
+    ) {
+      throw new ForbiddenException('Guest access has expired');
+    }
+    if (!guestGrant.projectRole) {
+      throw new ForbiddenException('Guest project access is not configured');
+    }
+    if (DomainService.projectRoleRank[guestGrant.projectRole] < DomainService.projectRoleRank[min]) {
+      throw new ForbiddenException('Insufficient role');
+    }
+    return {
+      id: guestGrant.id,
+      projectId,
+      userId,
+      role: guestGrant.projectRole,
+      createdAt: guestGrant.createdAt,
+    };
   }
 
   async appendAuditOutbox(args: {
