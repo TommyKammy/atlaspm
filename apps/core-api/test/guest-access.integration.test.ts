@@ -129,4 +129,72 @@ describe('Guest access integration', () => {
       .set('Authorization', `Bearer ${guestToken}`)
       .expect(403);
   });
+
+  test('guest viewers cannot write and expired grants are removed from visibility', async () => {
+    const ownerId = `guest-owner-write-${Date.now()}`;
+    const ownerToken = await auth.mintDevToken(ownerId, `${ownerId}@example.com`, 'Guest Owner Write');
+
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${ownerToken}`).expect(200);
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ workspaceId, name: `Guest Write Denial ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .expect(200);
+    const defaultSectionId = sectionsRes.body[0].id as string;
+
+    const guestId = `guest-viewer-${Date.now()}`;
+    const guestToken = await auth.mintDevToken(guestId, `${guestId}@example.com`, 'Guest Viewer');
+
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${guestToken}`).expect(200);
+
+    await prisma.guestAccessGrant.create({
+      data: {
+        workspaceId,
+        userId: guestId,
+        projectId,
+        scopeType: GuestAccessScopeType.PROJECT,
+        projectRole: ProjectRole.VIEWER,
+        status: GuestAccessStatus.ACTIVE,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        createdByUserId: ownerId,
+      },
+    });
+
+    await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${guestToken}`)
+      .send({ sectionId: defaultSectionId, title: 'Guest should not create this task' })
+      .expect(403);
+
+    await prisma.guestAccessGrant.updateMany({
+      where: { userId: guestId, projectId },
+      data: {
+        status: GuestAccessStatus.EXPIRED,
+        expiresAt: new Date(Date.now() - 60_000),
+      },
+    });
+
+    const projectsAfterExpiryRes = await request(app.getHttpServer())
+      .get('/projects')
+      .set('Authorization', `Bearer ${guestToken}`)
+      .expect(200);
+    expect(projectsAfterExpiryRes.body.map((project: { id: string }) => project.id)).not.toContain(projectId);
+
+    await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${guestToken}`)
+      .expect(403);
+  });
 });
