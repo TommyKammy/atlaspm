@@ -43,6 +43,7 @@ import { TaskCommentsController } from './tasks/task-comments.controller';
 import { TaskCommentsService } from './tasks/task-comments.service';
 import { TaskMentionsService } from './tasks/task-mentions.service';
 import { GoalsModule } from './goals/goals.module';
+import { CapacityModule } from './capacity/capacity.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { GoalsModule } from './goals/goals.module';
     IntegrationsModule,
     TaskProjectLinksModule,
     GoalsModule,
+    CapacityModule,
   ],
   controllers: [
     WorkspacesController,

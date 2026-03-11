@@ -27,6 +27,11 @@ enum GoalStatus {
   COMPLETED
 }
 
+enum CapacityScheduleSubjectType {
+  WORKSPACE
+  USER
+}
+
 enum WorkspaceRole {
   WS_ADMIN
   WS_MEMBER
@@ -87,6 +92,8 @@ model Workspace {
   memberships WorkspaceMembership[]
   invitations Invitation[]
   portfolios  Portfolio[]
+  capacitySchedules CapacitySchedule[]
+  timeOffEvents TimeOffEvent[]
 }
 
 model User {
@@ -115,6 +122,46 @@ model User {
   taskFollows          TaskFollower[]
   projectFollows       ProjectFollower[]
   ownedGoals           Goal[]
+  capacitySchedules    CapacitySchedule[]
+  timeOffEvents        TimeOffEvent[]
+}
+
+model CapacitySchedule {
+  id            String                      @id @default(uuid())
+  workspaceId    String                     @map("workspace_id")
+  subjectType    CapacityScheduleSubjectType @map("subject_type")
+  subjectUserId  String?                    @map("subject_user_id")
+  name          String
+  timeZone      String                      @map("time_zone")
+  hoursPerDay   Int                         @map("hours_per_day")
+  daysOfWeek    Int[]                       @default([]) @map("days_of_week")
+  createdAt     DateTime                    @default(now()) @map("created_at")
+  updatedAt     DateTime                    @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  subjectUser User?     @relation(fields: [subjectUserId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, subjectType, createdAt])
+  @@index([subjectUserId, createdAt])
+  @@map("capacity_schedules")
+}
+
+model TimeOffEvent {
+  id             String   @id @default(uuid())
+  workspaceId     String   @map("workspace_id")
+  userId         String   @map("user_id")
+  startDate      DateTime @db.Date @map("start_date")
+  endDate        DateTime @db.Date @map("end_date")
+  minutesPerDay  Int      @map("minutes_per_day")
+  reason         String?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, userId, startDate, endDate])
+  @@map("time_off_events")
 }
 
 model WorkspaceMembership {

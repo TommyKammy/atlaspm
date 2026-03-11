@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { WorkspaceRole } from '@prisma/client';
+import { CapacityService } from '../capacity/capacity.service';
 
 export interface WorkloadFilters {
   startDate?: Date;
@@ -56,6 +57,7 @@ export class WorkloadService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(CapacityService) private readonly capacityService: CapacityService,
   ) {}
 
   async getUserWorkload(
@@ -106,7 +108,12 @@ export class WorkloadService {
     });
 
     const weeklyBreakdown = this.groupByWeek(tasks, startDate, endDate);
-    const overloadAlerts = this.detectOverload(weeklyBreakdown, filters.viewMode || 'effort');
+    const overloadAlerts = await this.detectOverload(
+      workspaceId,
+      targetUserId,
+      weeklyBreakdown,
+      filters.viewMode || 'effort',
+    );
 
     const totalEstimateMinutes = tasks.reduce((sum, t) => sum + (t.estimateMinutes || 0), 0);
     const totalSpentMinutes = tasks.reduce((sum, t) => sum + t.spentMinutes, 0);
@@ -264,26 +271,60 @@ export class WorkloadService {
     return weeks;
   }
 
-  private detectOverload(weeklyLoad: WeeklyLoad[], viewMode: 'tasks' | 'effort'): OverloadAlert[] {
+  private async detectOverload(
+    workspaceId: string,
+    userId: string,
+    weeklyLoad: WeeklyLoad[],
+    viewMode: 'tasks' | 'effort',
+  ): Promise<OverloadAlert[]> {
     if (viewMode === 'effort') {
-      const capacityMinutes = this.DEFAULT_CAPACITY_HOURS * 60;
-      return weeklyLoad
-        .filter((week) => week.estimateMinutes > capacityMinutes)
-        .map((week) => ({
+      const weeksWithCapacity = await Promise.all(
+        weeklyLoad.map(async (week) => ({
+          week,
+          capacityMinutes: await this.capacityService.resolveWeeklyCapacityMinutes(
+            workspaceId,
+            userId,
+            week.startDate,
+            week.endDate,
+          ),
+        })),
+      );
+
+      return weeksWithCapacity
+        .filter(({ week, capacityMinutes }) => week.estimateMinutes > capacityMinutes)
+        .map(({ week, capacityMinutes }) => ({
           week: week.week,
           estimateMinutes: week.estimateMinutes,
           capacity: capacityMinutes,
           excess: week.estimateMinutes - capacityMinutes,
         }));
     } else {
-      return weeklyLoad
-        .filter((week) => week.taskCount > this.DEFAULT_CAPACITY_TASKS)
-        .map((week) => ({
+      const weeksWithCapacity = await Promise.all(
+        weeklyLoad.map(async (week) => ({
+          week,
+          capacityTasks: Math.max(
+            0,
+            Math.round(
+              (await this.capacityService.resolveWeeklyCapacityMinutes(
+                workspaceId,
+                userId,
+                week.startDate,
+                week.endDate,
+              )) /
+                ((this.DEFAULT_CAPACITY_HOURS * 60) / this.DEFAULT_CAPACITY_TASKS),
+            ),
+          ),
+        })),
+      );
+
+      return weeksWithCapacity
+        .filter(({ week, capacityTasks }) => week.taskCount > capacityTasks)
+        .map(({ week, capacityTasks }) => ({
           week: week.week,
           taskCount: week.taskCount,
           estimateMinutes: week.estimateMinutes,
-          capacity: this.DEFAULT_CAPACITY_TASKS,
-          excess: week.taskCount - this.DEFAULT_CAPACITY_TASKS,
+          capacity: capacityTasks,
+          excess: week.taskCount - capacityTasks,
         }));
     }
   }
