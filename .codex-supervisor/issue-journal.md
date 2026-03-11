@@ -1,17 +1,17 @@
-# Issue #383: P4: Build guest invitation and external-collaborator UI flows
+# Issue #384: P4: Add regression coverage for guest access and invitation lifecycle
 
 ## Supervisor Snapshot
-- Issue URL: https://github.com/TommyKammy/atlaspm/issues/383
-- Branch: codex/reopen-issue-383
-- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-383
-- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-383/.codex-supervisor/issue-journal.md
+- Issue URL: https://github.com/TommyKammy/atlaspm/issues/384
+- Branch: codex/reopen-issue-384
+- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-384
+- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-384/.codex-supervisor/issue-journal.md
 - Current phase: reproducing
 - Attempt count: 1
-- Last head SHA: 465cf615f90f90333ca9756fc656cc25fdc68c3a
+- Last head SHA: 3f0dd1fad770877fea51ee37ed8788bd2899d42b
 - Blocked reason: none
 - Last failure signature: none
 - Repeated failure signature count: 0
-- Updated at: 2026-03-11T13:40:13.046Z
+- Updated at: 2026-03-11T14:01:41.701Z
 
 ## Latest Codex Summary
 - None yet.
@@ -20,52 +20,42 @@
 - None recorded.
 
 ## Codex Working Notes
-### Current Handoff
-- Older scratchpad entries were compacted by codex-supervisor to keep resume context small.
-
-
-
-
-
-### Current Handoff
-- Older scratchpad entries were compacted by codex-supervisor to keep resume context small.
-
-- Verification:
-  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-provider.registry.test.ts test/slack-webhook-signature.test.ts test/integration-contracts.test.ts`
-  - `pnpm --filter @atlaspm/core-api lint`
-  - `pnpm --filter @atlaspm/core-api type-check`
-  - `pnpm lint`
-  - `git diff --check`
-- Current outcome:
-  - The registry fails fast on duplicate provider registration.
-  - Slack message events now recognize the standard `<@USERID>` mention format.
-- Failure signature:
-  - `PRRT_kwDORWcwRc5zd2ud|PRRT_kwDORWcwRc5zd2us`
-- Next actions:
-  - Commit and push the review fixes, then resolve or respond to the two review threads on PR #375.
-
-### 2026-03-11 Codex Runtime Infrastructure
+### 2026-03-11 Codex Guest Access Regression Coverage
 - Hypothesis:
-  - The shared provider contract existed, but `core-api` still lacked a concrete runtime service for auth status persistence and retry-safe sync-state orchestration.
+  - The remaining gap for issue #384 was missing regression coverage rather than missing backend behavior; the narrowest missing cases were expired guest invitations and browser-level guest invite/restrict/revoke flows.
 - Focused reproduction:
-  - Added `apps/core-api/test/integration-runtime.service.test.ts`.
-  - First focused run: `pnpm --filter @atlaspm/core-api exec vitest run test/integration-runtime.service.test.ts`
-  - Initial setup failure: `Command "vitest" not found` before `pnpm install`.
-  - Repro after install: the focused test failed because `apps/core-api/src/integrations/integration-runtime.service.ts` did not exist.
-  - Follow-up environment failure: the focused run required `pnpm --filter @atlaspm/core-api prisma:generate` because the local Prisma client was not yet generated.
-  - Intermediate behavior failure: the duplicate-run guard test used a stale `startedAt`, which the new service correctly treated as reclaimable rather than in-flight.
+  - Added a focused Playwright spec first and ran `CI= pnpm e2e tests/guest-access.spec.ts`.
+  - Initial browser failure after route load:
+    - `getByTestId('project-guest-invite-open')` never appeared on `/projects/:id/members`
+  - Failure analysis:
+    - Playwright snapshot showed the running Docker `web-ui` image was serving an older members page without the guest access section.
 - Implementation:
-  - Added `apps/core-api/src/integrations/integration-runtime.service.ts`.
-  - Implemented `authorizeProvider` to delegate provider auth and persist `IntegrationProviderConfig.status`.
-  - Implemented `runSyncJob` to persist RUNNING/SUCCEEDED/FAILED sync lifecycle state, skip duplicate in-flight scopes, and record last successful sync timestamps.
-  - Added structured runtime logging with basic secret/token redaction for persisted/logged error messages.
-  - Registered and exported `IntegrationRuntimeService` from `apps/core-api/src/integrations/integrations.module.ts`.
+  - Extended `apps/core-api/test/guest-access-management.integration.test.ts` with an expiration regression proving expired guest invitations remain `expired` and do not auto-accept on matching login.
+  - Added `e2e/playwright/tests/guest-access.spec.ts` covering:
+    - guest invitation from the project members page
+    - accepted guest state after matching-email login
+    - project scope restriction across reloads
+    - revocation removing guest visibility/access after reload
 - Verification:
   - `pnpm install`
-  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-runtime.service.test.ts` (failed: missing service file)
   - `pnpm --filter @atlaspm/core-api prisma:generate`
-  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-runtime.service.test.ts`
-  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-runtime.service.test.ts test/integration-provider.registry.test.ts test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`
+  - `pnpm --filter @atlaspm/domain build`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/guest-access-management.integration.test.ts test/guest-access.integration.test.ts`
+  - `CI= pnpm e2e tests/guest-access.spec.ts` -> failed because Docker served a stale `web-ui` image missing the guest section
+  - `CI= E2E_REBUILD=1 pnpm e2e tests/guest-access.spec.ts`
+  - `git diff --check`
+- Current outcome:
+  - Guest invitation expiration is now covered at the integration level.
+  - Guest invite, scoped visibility, reload persistence, and revocation are now covered by a focused Playwright scenario.
+  - The browser harness for this area currently requires `E2E_REBUILD=1` after UI changes so Docker does not reuse an older app image.
+- Failure signature:
+  - `stale-e2e-web-ui-image-missing-guest-section`
+- Next actions:
+  - Commit the coverage additions.
+
+### Current Handoff
+- Older scratchpad entries were compacted by codex-supervisor to keep resume context small.
+
   - `pnpm --filter @atlaspm/core-api lint`
   - `pnpm --filter @atlaspm/core-api type-check`
   - `git diff --check`
