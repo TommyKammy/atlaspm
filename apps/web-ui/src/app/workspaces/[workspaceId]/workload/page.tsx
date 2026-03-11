@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import {
+  createAlertsByWeekMap,
   filterWeeks,
   filterWorkloads,
   getWeeklyCapacityState,
@@ -58,11 +59,26 @@ export default function WorkloadPage() {
 
   const isLoading = view === 'team' ? isTeamLoading : isProjectLoading;
   const workload = view === 'team' ? teamWorkload : projectWorkload;
-  const filteredWorkload = workload ? filterWorkloads(workload, statusFilter, viewMode) : workload;
-  const overCapacityCount = workload?.filter((user) => getWorkloadStatus(user, viewMode) === 'over-capacity').length ?? 0;
-  const reducedCapacityCount =
-    workload?.filter((user) => getWorkloadStatus(user, viewMode) === 'reduced-capacity').length ?? 0;
-  const availableCount = workload?.filter((user) => getWorkloadStatus(user, viewMode) === 'available').length ?? 0;
+  const workloadStatusByUserId = new Map<string, Exclude<WorkloadStatusFilter, 'all'>>();
+  let overCapacityCount = 0;
+  let reducedCapacityCount = 0;
+  let availableCount = 0;
+
+  for (const user of workload ?? []) {
+    const status = getWorkloadStatus(user, viewMode);
+    workloadStatusByUserId.set(user.userId, status);
+    if (status === 'over-capacity') {
+      overCapacityCount += 1;
+    } else if (status === 'reduced-capacity') {
+      reducedCapacityCount += 1;
+    } else {
+      availableCount += 1;
+    }
+  }
+
+  const filteredWorkload = workload
+    ? filterWorkloads(workload, statusFilter, viewMode, workloadStatusByUserId)
+    : workload;
 
   return (
     <div className="container mx-auto py-8">
@@ -193,9 +209,10 @@ function UserWorkloadCard({
   viewMode: 'tasks' | 'effort';
   statusFilter: WorkloadStatusFilter;
 }) {
+  const alertsByWeek = createAlertsByWeekMap(workload.overloadAlerts);
   const hasOverloads = workload.overloadAlerts.length > 0;
-  const workloadStatus = getWorkloadStatus(workload, viewMode);
-  const visibleWeeks = filterWeeks(workload, statusFilter, viewMode);
+  const workloadStatus = getWorkloadStatus(workload, viewMode, alertsByWeek);
+  const visibleWeeks = filterWeeks(workload, statusFilter, viewMode, alertsByWeek);
 
   if (viewMode === 'effort') {
     const maxMinutes = Math.max(
@@ -237,11 +254,7 @@ function UserWorkloadCard({
         <CardContent>
           <div className="space-y-4">
             {visibleWeeks.map((week) => {
-              const state = getWeeklyCapacityState(
-                week,
-                viewMode,
-                workload.overloadAlerts.find((alert) => alert.week === week.week),
-              );
+              const state = getWeeklyCapacityState(week, viewMode, alertsByWeek.get(week.week));
               const percentage = Math.min((week.estimateMinutes / maxMinutes) * 100, 100);
 
               return (
@@ -344,11 +357,7 @@ function UserWorkloadCard({
         <CardContent>
           <div className="space-y-4">
             {visibleWeeks.map((week) => {
-              const state = getWeeklyCapacityState(
-                week,
-                viewMode,
-                workload.overloadAlerts.find((alert) => alert.week === week.week),
-              );
+              const state = getWeeklyCapacityState(week, viewMode, alertsByWeek.get(week.week));
               const percentage = Math.min((week.taskCount / maxTasks) * 100, 100);
 
               return (

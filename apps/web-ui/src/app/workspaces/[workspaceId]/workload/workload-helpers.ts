@@ -13,6 +13,10 @@ export interface WeeklyCapacityState {
   status: Exclude<WorkloadStatusFilter, 'all'>;
 }
 
+export function createAlertsByWeekMap(overloadAlerts: OverloadAlert[]): ReadonlyMap<string, OverloadAlert> {
+  return new Map(overloadAlerts.map((alert) => [alert.week, alert]));
+}
+
 export function getWeeklyCapacityState(
   week: WeeklyLoad,
   viewMode: 'tasks' | 'effort',
@@ -39,53 +43,48 @@ export function getWeeklyCapacityState(
 export function getWorkloadStatus(
   workload: UserWorkload,
   viewMode: 'tasks' | 'effort',
+  alertsByWeek: ReadonlyMap<string, OverloadAlert> = createAlertsByWeekMap(workload.overloadAlerts),
 ): Exclude<WorkloadStatusFilter, 'all'> {
-  const weeklyStates = workload.weeklyBreakdown.map((week) =>
-    getWeeklyCapacityState(
-      week,
-      viewMode,
-      workload.overloadAlerts.find((alert) => alert.week === week.week),
-    ),
-  );
+  let hasReducedCapacity = false;
 
-  if (weeklyStates.some((week) => week.isOverCapacity)) {
-    return 'over-capacity';
+  for (const week of workload.weeklyBreakdown) {
+    const state = getWeeklyCapacityState(week, viewMode, alertsByWeek.get(week.week));
+    if (state.isOverCapacity) {
+      return 'over-capacity';
+    }
+    hasReducedCapacity = hasReducedCapacity || state.isReducedCapacity;
   }
 
-  if (weeklyStates.some((week) => week.isReducedCapacity)) {
-    return 'reduced-capacity';
-  }
-
-  return 'available';
+  return hasReducedCapacity ? 'reduced-capacity' : 'available';
 }
 
 export function filterWorkloads(
   workloads: UserWorkload[],
   filter: WorkloadStatusFilter,
   viewMode: 'tasks' | 'effort',
+  workloadStatusByUserId?: ReadonlyMap<string, Exclude<WorkloadStatusFilter, 'all'>>,
 ): UserWorkload[] {
   if (filter === 'all') {
     return workloads;
   }
 
-  return workloads.filter((workload) => getWorkloadStatus(workload, viewMode) === filter);
+  return workloads.filter(
+    (workload) => (workloadStatusByUserId?.get(workload.userId) ?? getWorkloadStatus(workload, viewMode)) === filter,
+  );
 }
 
 export function filterWeeks(
   workload: UserWorkload,
   filter: WorkloadStatusFilter,
   viewMode: 'tasks' | 'effort',
+  alertsByWeek: ReadonlyMap<string, OverloadAlert> = createAlertsByWeekMap(workload.overloadAlerts),
 ): WeeklyLoad[] {
   if (filter === 'all') {
     return workload.weeklyBreakdown;
   }
 
   return workload.weeklyBreakdown.filter((week) => {
-    const state = getWeeklyCapacityState(
-      week,
-      viewMode,
-      workload.overloadAlerts.find((alert) => alert.week === week.week),
-    );
+    const state = getWeeklyCapacityState(week, viewMode, alertsByWeek.get(week.week));
     return state.status === filter;
   });
 }
