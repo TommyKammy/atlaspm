@@ -5,66 +5,38 @@
 - Branch: codex/reopen-issue-368
 - Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-368
 - Journal: /home/tommy/Dev/atlaspm-worktrees/issue-368/.codex-supervisor/issue-journal.md
-- Current phase: repairing_ci
-- Attempt count: 2
-- Last head SHA: 6728a704018a2f9be249cec13051a5a96f8964af
+- Current phase: addressing_review
+- Attempt count: 3
+- Last head SHA: 540b420c5f96b7c6f06516aa9a5e1bf054d9f595
 - Blocked reason: none
-- Last failure signature: lint:fail
+- Last failure signature: PRRT_kwDORWcwRc5zd2ud|PRRT_kwDORWcwRc5zd2us
 - Repeated failure signature count: 1
-- Updated at: 2026-03-11T02:01:13.565Z
+- Updated at: 2026-03-11T02:07:43.715Z
 
 ## Latest Codex Summary
-Implemented the integration provider groundwork in `core-api` and docs, with a focused repro-first path. The new contract test in [apps/core-api/test/integration-contracts.test.ts](/home/tommy/Dev/atlaspm-worktrees/issue-368/apps/core-api/test/integration-contracts.test.ts) initially failed on missing provider/storage contracts; the branch now has Prisma models and migration for provider config, credentials, sync state, and entity mappings in [schema.prisma](/home/tommy/Dev/atlaspm-worktrees/issue-368/apps/core-api/prisma/schema.prisma) and [migration.sql](/home/tommy/Dev/atlaspm-worktrees/issue-368/apps/core-api/prisma/migrations/20260311110000_add_integration_provider_contracts/migration.sql).
+Reproduced the failing CI lint job locally from the Actions log, and it was exactly two `@typescript-eslint/no-unused-vars` errors in [slack.provider.ts](/home/tommy/Dev/atlaspm-worktrees/issue-368/apps/core-api/src/integrations/slack.provider.ts): the unused `authorize` and `sync` context parameters. I fixed that without changing behavior by keeping the interface-conformant parameters and marking them intentionally unused with `void context;`.
 
-The explicit provider abstraction lives in [integration-provider.contract.ts](/home/tommy/Dev/atlaspm-worktrees/issue-368/apps/core-api/src/integrations/integration-provider.contract.ts) and [integration-provider.registry.ts](/home/tommy/Dev/atlaspm-worktrees/issue-368/apps/core-api/src/integrations/integration-provider.registry.ts). Slack now implements that abstraction in [slack.provider.ts](/home/tommy/Dev/atlaspm-worktrees/issue-368/apps/core-api/src/integrations/slack.provider.ts), and [slack.controller.ts](/home/tommy/Dev/atlaspm-worktrees/issue-368/apps/core-api/src/integrations/slack.controller.ts) delegates through the registry instead of carrying provider logic inline. The contract and operational expectations are documented in [docs/integrations-provider-contract.md](/home/tommy/Dev/atlaspm-worktrees/issue-368/docs/integrations-provider-contract.md) and linked from [docs/architecture.md](/home/tommy/Dev/atlaspm-worktrees/issue-368/docs/architecture.md). I also updated the issue journal and committed the checkpoint as `6728a70` (`Define integration provider contracts`).
+Verified with `gh run view 22933011586 --job 66558412518 --log`, `pnpm --filter @atlaspm/core-api lint`, `pnpm lint`, `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`, and `git diff --check`. I updated the issue journal, committed the repair as `540b420` (`Fix integration provider lint failure`), and pushed `codex/reopen-issue-368`. `gh pr checks 375` currently reports no checks yet on the updated branch, so the rerun is still pending registration.
 
-Verified with `pnpm --filter @atlaspm/core-api prisma:generate`, `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`, `pnpm --filter @atlaspm/core-api type-check`, and `git diff --check`.
-
-Summary: Added explicit integration provider abstraction, Prisma storage contracts, Slack provider implementation, docs, focused tests, and committed the result.
-State hint: implementing
+Summary: Reproduced and fixed the PR #375 lint failure, verified locally, updated the journal, committed, and pushed the branch
+State hint: waiting_ci
 Blocked reason: none
-Tests: `pnpm --filter @atlaspm/core-api prisma:generate`; `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`; `pnpm --filter @atlaspm/core-api type-check`; `git diff --check`
+Tests: `gh run view 22933011586 --job 66558412518 --log`; `pnpm --filter @atlaspm/core-api lint`; `pnpm lint`; `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`; `git diff --check`
 Failure signature: none
-Next action: Open or update a draft PR for this contract slice, or start the next dependent integration issue against the new provider/storage contracts
+Next action: Watch PR #375 for the rerun of lint and confirm the updated branch clears CI
 
 ## Active Failure Context
-- Category: checks
-- Summary: PR #375 has failing checks.
-- Command or source: gh pr checks
-- Reference: https://github.com/TommyKammy/atlaspm/pull/375
+- Category: review
+- Summary: 2 unresolved automated review thread(s) remain.
+- Reference: https://github.com/TommyKammy/atlaspm/pull/375#discussion_r2915439409
 - Details:
-  - lint (fail/FAILURE) https://github.com/TommyKammy/atlaspm/actions/runs/22933011586/job/66558412518
+  - apps/core-api/src/integrations/integration-provider.registry.ts:14 IntegrationProviderRegistry currently overwrites providers silently when two providers share the same `provider.key` (later `Map.set` wins). That makes misconfiguration hard to detect and can route requests to the wrong provider. Consider detecting duplicate keys during construction and throwing an error (or logging + throwing) when a duplicate is registered. ```suggestion for (const provider of providers) { if (this.providersByKey.has(provider.key)) { throw new Error( `Duplicate integration provider key detected: ${provider.key}`, ); } ```
+  - apps/core-api/src/integrations/slack.provider.ts:169 Slack `message` event payloads typically represent mentions as `<@USERID>` (not `@USERID`). Checking `event.text?.includes(`@${SLACK_BOT_USER_ID}`)` can fail to detect actual mentions, so `message` events that mention the bot may be ignored. Consider checking for `<@${SLACK_BOT_USER_ID}>` (and optionally a fallback for display-name mentions) instead. ```suggestion case 'message': { const botUserId = process.env.SLACK_BOT_USER_ID; const mentionById = botUserId ? `<@${botUserId}>` : null; const mentionByName = '@AtlasPM'; const text = event.text || ''; if ((mentionById && text.includes(mentionById)) || text.includes(mentionByName)) { await this.handleMention(event); } break; } ```
 
 ## Codex Working Notes
 ### Current Handoff
 - Older scratchpad entries were compacted by codex-supervisor to keep resume context small.
 
-    - Normalized workload week boundaries to UTC and restricted `timeZone` input to `UTC` until timezone-aware schedule math exists.
-- Failure signature:
-  - `workload-ui-ignored-api-capacity`
-- Current focused verification:
-  - `pnpm install`
-  - `pnpm --filter @atlaspm/domain build`
-  - `pnpm --filter @atlaspm/core-api test -- test/capacity.integration.test.ts` (failed: missing route)
-  - `pnpm --filter @atlaspm/core-api prisma:generate && pnpm --filter @atlaspm/core-api type-check`
-  - `pnpm --filter @atlaspm/core-api test -- test/capacity.integration.test.ts` (passed)
-  - `pnpm --filter @atlaspm/core-api type-check`
-  - `gh pr checks 373`
-  - `gh run view 22930597973 --job 66551161894 --log`
-  - `gh run view 22930597973 --job 66551161894 --log | rg -n "invalid character|##\\[error\\]|buildx failed|Build core-api"`
-  - `git diff --check`
-  - `pnpm --filter @atlaspm/core-api prisma:generate`
-  - `pnpm --filter @atlaspm/core-api type-check`
-  - `pnpm --filter @atlaspm/core-api test -- test/capacity.integration.test.ts`
-- Implementation notes:
-  - Added Prisma models `CapacitySchedule` and `TimeOffEvent` plus migration `20260311093000_add_capacity_schedules_and_time_off`.
-  - Added `CapacityModule` with CRUD endpoints:
-    - `POST/GET /workspaces/:workspaceId/capacity-schedules`
-    - `PATCH /capacity-schedules/:id`
-    - `POST/GET /workspaces/:workspaceId/time-off`
-    - `PATCH/DELETE /time-off/:id`
-  - Authorization model:
-    - workspace members can read schedules/time-off
     - workspace admins can create, update, and delete them
   - Inheritance model:
     - workload uses the latest user-specific schedule if one exists
@@ -141,3 +113,29 @@ Next action: Open or update a draft PR for this contract slice, or start the nex
   - `lint-unused-context-params`
 - Next actions:
   - Commit the lint repair and push/update PR #375 so GitHub Actions reruns the previously failing lint job.
+
+### 2026-03-11 Codex Review Follow-up
+- Hypothesis:
+  - Both automated review comments were valid behavior gaps rather than stylistic preferences.
+- Review items addressed:
+  - `apps/core-api/src/integrations/integration-provider.registry.ts`
+    - Added duplicate provider-key detection in the registry constructor.
+    - The registry now throws `Duplicate integration provider key detected: <key>` instead of silently overwriting an earlier provider.
+  - `apps/core-api/src/integrations/slack.provider.ts`
+    - Updated Slack `message` mention detection to look for `<@SLACK_BOT_USER_ID>` first, with `@AtlasPM` retained as a fallback for display-name mentions.
+- Tests added/updated:
+  - Added `apps/core-api/test/integration-provider.registry.test.ts` to prove duplicate provider keys fail fast.
+  - Expanded `apps/core-api/test/slack-webhook-signature.test.ts` with a `message` event using `<@UATLASPM>` to prove Slack mention-by-id handling.
+- Verification:
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-provider.registry.test.ts test/slack-webhook-signature.test.ts test/integration-contracts.test.ts`
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `pnpm lint`
+  - `git diff --check`
+- Current outcome:
+  - The registry fails fast on duplicate provider registration.
+  - Slack message events now recognize the standard `<@USERID>` mention format.
+- Failure signature:
+  - `PRRT_kwDORWcwRc5zd2ud|PRRT_kwDORWcwRc5zd2us`
+- Next actions:
+  - Commit and push the review fixes, then resolve or respond to the two review threads on PR #375.

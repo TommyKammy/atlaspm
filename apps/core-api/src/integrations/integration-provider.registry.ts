@@ -12,6 +12,9 @@ export class IntegrationProviderRegistry {
     providers: IntegrationProvider[] = [],
   ) {
     for (const provider of providers) {
+      if (this.providersByKey.has(provider.key)) {
+        throw new Error(`Duplicate integration provider key detected: ${provider.key}`);
+      }
       this.providersByKey.set(provider.key, provider);
     }
   }

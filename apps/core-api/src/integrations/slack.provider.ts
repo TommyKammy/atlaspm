@@ -162,11 +162,17 @@ export class SlackIntegrationProvider implements IntegrationProvider {
         case 'app_mention':
           await this.handleMention(event);
           break;
-        case 'message':
-          if (event.text?.includes(`@${process.env.SLACK_BOT_USER_ID || 'AtlasPM'}`)) {
+        case 'message': {
+          const botUserId = process.env.SLACK_BOT_USER_ID;
+          const mentionById = botUserId ? `<@${botUserId}>` : null;
+          const mentionByName = '@AtlasPM';
+          const text = event.text || '';
+
+          if ((mentionById && text.includes(mentionById)) || text.includes(mentionByName)) {
             await this.handleMention(event);
           }
           break;
+        }
         default:
           this.logger.debug(`Unhandled event type: ${event.type}`);
       }
