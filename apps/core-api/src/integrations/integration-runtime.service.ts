@@ -33,6 +33,8 @@ export interface RunIntegrationSyncJobResult {
   status: IntegrationSyncResult['status'] | 'skipped';
   nextCursor?: string | null;
   message?: string;
+  importedCount?: number;
+  updatedCount?: number;
 }
 
 @Injectable()

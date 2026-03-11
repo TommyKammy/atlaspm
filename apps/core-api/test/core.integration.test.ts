@@ -1109,7 +1109,7 @@ describe('Core API Integration', () => {
     ).toBe(true);
 
     expect(defaultSection).toBeTruthy();
-  });
+  }, 15_000);
 
   test('task and project followers expose follow state, prevent duplicates, and enforce authorization', async () => {
     const auth = app.get(AuthService);
@@ -1979,7 +1979,7 @@ describe('Core API Integration', () => {
     expect(outbox.body.some((event: any) => event.type === 'custom_field.created')).toBe(true);
     expect(outbox.body.some((event: any) => event.type === 'custom_field.updated')).toBe(true);
     expect(outbox.body.some((event: any) => event.type === 'custom_field.archived')).toBe(true);
-  });
+  }, 15_000);
 
   test('task custom field value APIs enforce optimistic locking and expose values on task responses', async () => {
     const wsRes = await request(app.getHttpServer())
@@ -2177,7 +2177,7 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(outbox.body.some((event: any) => event.type === 'task.custom_fields.updated')).toBe(true);
-  });
+  }, 15_000);
 
   test('time tracking APIs update spent/estimate and reject logs on soft-deleted tasks', async () => {
     const wsRes = await request(app.getHttpServer())

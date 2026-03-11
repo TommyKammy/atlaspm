@@ -1,4 +1,4 @@
-export type IntegrationProviderKey = 'slack';
+export type IntegrationProviderKey = 'slack' | 'github';
 
 export interface IntegrationJobDefinition {
   jobKey: string;
@@ -32,6 +32,8 @@ export interface IntegrationSyncResult {
   status: 'queued' | 'completed' | 'not_supported';
   nextCursor?: string | null;
   message?: string;
+  importedCount?: number;
+  updatedCount?: number;
 }
 
 export interface IntegrationWebhookContext<TPayload = unknown> {
