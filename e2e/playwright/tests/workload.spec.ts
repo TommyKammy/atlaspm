@@ -1,4 +1,4 @@
-import { expect, test, type Page } from './helpers/browser-auth';
+import { expect, test, type Browser, type Page } from './helpers/browser-auth';
 
 const API = process.env.E2E_CORE_API_URL ?? 'http://localhost:3001';
 
@@ -27,6 +27,131 @@ async function api(path: string, token: string, method = 'GET', body?: unknown) 
   });
   if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
   return res.json();
+}
+
+async function inviteAndAcceptWorkspaceMember(
+  ownerToken: string,
+  workspaceId: string,
+  inviteEmail: string,
+  invitedUserToken: string,
+) {
+  const invitation = await api(`/workspaces/${workspaceId}/invitations`, ownerToken, 'POST', {
+    email: inviteEmail,
+    role: 'WS_MEMBER',
+  });
+  const inviteToken = String(invitation.inviteLink).split('inviteToken=')[1];
+  if (!inviteToken) throw new Error('Missing workspace invite token');
+  await api('/invitations/accept', invitedUserToken, 'POST', { token: inviteToken });
+}
+
+function nextUtcWeekday(dayOfWeek: number) {
+  const date = new Date();
+  date.setUTCHours(12, 0, 0, 0);
+  const delta = (dayOfWeek - date.getUTCDay() + 7) % 7 || 7;
+  date.setUTCDate(date.getUTCDate() + delta);
+  return date;
+}
+
+async function createCapacityScenario(browser: Browser) {
+  const stamp = Date.now();
+  const ownerContext = await browser.newContext();
+  const ownerPage = await ownerContext.newPage();
+  const ownerSub = `e2e-workload-owner-${stamp}`;
+  const ownerEmail = `${ownerSub}@example.com`;
+  await devLogin(ownerPage, ownerSub, ownerEmail);
+  const ownerToken = await getToken(ownerPage);
+
+  const workspaces = (await api('/workspaces', ownerToken)) as Array<{ id: string }>;
+  const workspaceId = workspaces[0]?.id;
+  if (!workspaceId) throw new Error('Workspace not found');
+
+  const project = (await api('/projects', ownerToken, 'POST', {
+    workspaceId,
+    name: `Workload Capacity ${stamp}`,
+  })) as { id: string };
+
+  const overloadedSub = `e2e-workload-over-${stamp}`;
+  const overloadedEmail = `${overloadedSub}@example.com`;
+  const overloadedContext = await browser.newContext();
+  const overloadedPage = await overloadedContext.newPage();
+  await devLogin(overloadedPage, overloadedSub, overloadedEmail);
+  const overloadedToken = await getToken(overloadedPage);
+  await inviteAndAcceptWorkspaceMember(ownerToken, workspaceId, overloadedEmail, overloadedToken);
+
+  const reducedSub = `e2e-workload-reduced-${stamp}`;
+  const reducedEmail = `${reducedSub}@example.com`;
+  const reducedContext = await browser.newContext();
+  const reducedPage = await reducedContext.newPage();
+  await devLogin(reducedPage, reducedSub, reducedEmail);
+  const reducedToken = await getToken(reducedPage);
+  await inviteAndAcceptWorkspaceMember(ownerToken, workspaceId, reducedEmail, reducedToken);
+
+  await api(`/projects/${project.id}/members`, ownerToken, 'POST', {
+    userId: overloadedSub,
+    role: 'MEMBER',
+  });
+  await api(`/projects/${project.id}/members`, ownerToken, 'POST', {
+    userId: reducedSub,
+    role: 'MEMBER',
+  });
+
+  const nextTuesday = nextUtcWeekday(2);
+  const dateOnly = nextTuesday.toISOString().slice(0, 10);
+  const dueAt = nextTuesday.toISOString();
+
+  await api(`/workspaces/${workspaceId}/capacity-schedules`, ownerToken, 'POST', {
+    subjectType: 'WORKSPACE',
+    name: `Workspace Tuesday ${stamp}`,
+    timeZone: 'UTC',
+    hoursPerDay: 8,
+    daysOfWeek: [2],
+  });
+
+  await api(`/workspaces/${workspaceId}/capacity-schedules`, ownerToken, 'POST', {
+    subjectType: 'USER',
+    subjectUserId: overloadedSub,
+    name: `Overloaded Tuesday ${stamp}`,
+    timeZone: 'UTC',
+    hoursPerDay: 6,
+    daysOfWeek: [2],
+  });
+
+  await api(`/workspaces/${workspaceId}/time-off`, ownerToken, 'POST', {
+    userId: reducedSub,
+    startDate: dateOnly,
+    endDate: dateOnly,
+    minutesPerDay: 120,
+    reason: 'Training',
+  });
+
+  for (let index = 0; index < 3; index += 1) {
+    const task = (await api(`/projects/${project.id}/tasks`, ownerToken, 'POST', {
+      title: `Over capacity ${stamp}-${index + 1}`,
+      assigneeUserId: overloadedSub,
+      dueAt,
+    })) as { id: string };
+    await api(`/tasks/${task.id}/estimate`, ownerToken, 'PATCH', { estimateMinutes: 140 });
+  }
+
+  const reducedTask = (await api(`/projects/${project.id}/tasks`, ownerToken, 'POST', {
+    title: `Reduced capacity ${stamp}`,
+    assigneeUserId: reducedSub,
+    dueAt,
+  })) as { id: string };
+  await api(`/tasks/${reducedTask.id}/estimate`, ownerToken, 'PATCH', { estimateMinutes: 300 });
+
+  return {
+    ownerContext,
+    ownerPage,
+    workspaceId,
+    ownerEmail,
+    overloadedContext,
+    overloadedPage,
+    overloadedEmail,
+    reducedContext,
+    reducedPage,
+    reducedEmail,
+  };
 }
 
 test('workload page renders and supports view switching', async ({ page }) => {
@@ -63,4 +188,81 @@ test('workload page renders and supports view switching', async ({ page }) => {
 
   await expect(page.locator(`text=Workload Task ${stamp}`)).toBeVisible();
   await expect(page.locator('text=total tasks')).toBeVisible();
+});
+
+test('workload page shows capacity-aware indicators, filters, and reload state', async ({ browser }) => {
+  const {
+    ownerContext,
+    ownerPage,
+    workspaceId,
+    overloadedEmail,
+    reducedEmail,
+    overloadedContext,
+    reducedContext,
+  } = await createCapacityScenario(browser);
+
+  try {
+    await ownerPage.goto(`/workspaces/${workspaceId}/workload`);
+
+    await expect(ownerPage.locator(`text=${overloadedEmail}`)).toBeVisible();
+    await expect(ownerPage.locator(`text=${reducedEmail}`)).toBeVisible();
+    await expect(ownerPage.locator('text=+1 over capacity')).toBeVisible();
+    await expect(ownerPage.locator('text=Reduced capacity')).toBeVisible();
+    await expect(ownerPage.locator('text=2 task capacity')).toBeVisible();
+
+    await ownerPage.reload();
+    await expect(ownerPage.locator(`text=${overloadedEmail}`)).toBeVisible();
+    await expect(ownerPage.locator(`text=${reducedEmail}`)).toBeVisible();
+    await expect(ownerPage.locator('text=+1 over capacity')).toBeVisible();
+    await expect(ownerPage.locator('text=Reduced capacity')).toBeVisible();
+
+    await ownerPage.getByRole('button', { name: 'Effort View' }).click();
+    await expect(ownerPage.locator('text=+1h over capacity')).toBeVisible();
+    await expect(ownerPage.locator('text=5h / 6h')).toBeVisible();
+
+    await ownerPage.getByRole('button', { name: /All people \(/ }).click();
+    await ownerPage.getByRole('option', { name: /Over capacity \(/ }).click();
+    await expect(ownerPage.locator(`text=${overloadedEmail}`)).toBeVisible();
+    await expect(ownerPage.locator(`text=${reducedEmail}`)).toHaveCount(0);
+
+    await ownerPage.getByRole('button', { name: /Over capacity \(/ }).click();
+    await ownerPage.getByRole('option', { name: /Reduced capacity \(/ }).click();
+    await expect(ownerPage.locator(`text=${reducedEmail}`)).toBeVisible();
+    await expect(ownerPage.locator(`text=${overloadedEmail}`)).toHaveCount(0);
+    await expect(ownerPage.locator('text=5h / 6h')).toBeVisible();
+  } finally {
+    await reducedContext.close();
+    await overloadedContext.close();
+    await ownerContext.close();
+  }
+});
+
+test('non-admin team members only see their own workload cards', async ({ browser }) => {
+  const {
+    ownerContext,
+    overloadedContext,
+    reducedContext,
+    reducedPage,
+    workspaceId,
+    ownerEmail,
+    overloadedEmail,
+    reducedEmail,
+  } = await createCapacityScenario(browser);
+
+  try {
+    await reducedPage.goto(`/workspaces/${workspaceId}/workload`);
+
+    await expect(reducedPage.locator(`text=${reducedEmail}`)).toBeVisible();
+    await expect(reducedPage.locator(`text=${overloadedEmail}`)).toHaveCount(0);
+    await expect(reducedPage.locator(`text=${ownerEmail}`)).toHaveCount(0);
+    await expect(reducedPage.locator('text=Reduced capacity')).toBeVisible();
+
+    await reducedPage.reload();
+    await expect(reducedPage.locator(`text=${reducedEmail}`)).toBeVisible();
+    await expect(reducedPage.locator(`text=${overloadedEmail}`)).toHaveCount(0);
+  } finally {
+    await reducedContext.close();
+    await overloadedContext.close();
+    await ownerContext.close();
+  }
 });
