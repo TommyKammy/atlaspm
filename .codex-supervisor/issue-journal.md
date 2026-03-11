@@ -1,93 +1,45 @@
-# Issue #368: P4: Define integration provider abstraction and storage contracts
+# Issue #369: P4: Implement provider auth, sync-state, and job orchestration infrastructure
 
 ## Supervisor Snapshot
-- Issue URL: https://github.com/TommyKammy/atlaspm/issues/368
-- Branch: codex/reopen-issue-368
-- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-368
-- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-368/.codex-supervisor/issue-journal.md
+- Issue URL: https://github.com/TommyKammy/atlaspm/issues/369
+- Branch: codex/reopen-issue-369
+- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-369
+- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-369/.codex-supervisor/issue-journal.md
 - Current phase: addressing_review
-- Attempt count: 3
-- Last head SHA: 540b420c5f96b7c6f06516aa9a5e1bf054d9f595
+- Attempt count: 2
+- Last head SHA: 592ab503f4fd8bdd19be3182c1d8938aaa72c12e
 - Blocked reason: none
-- Last failure signature: PRRT_kwDORWcwRc5zd2ud|PRRT_kwDORWcwRc5zd2us
+- Last failure signature: PRRT_kwDORWcwRc5zeC_6|PRRT_kwDORWcwRc5zeDAF|PRRT_kwDORWcwRc5zeDAK
 - Repeated failure signature count: 1
-- Updated at: 2026-03-11T02:07:43.715Z
+- Updated at: 2026-03-11T02:33:56.541Z
 
 ## Latest Codex Summary
-Reproduced the failing CI lint job locally from the Actions log, and it was exactly two `@typescript-eslint/no-unused-vars` errors in [slack.provider.ts](/home/tommy/Dev/atlaspm-worktrees/issue-368/apps/core-api/src/integrations/slack.provider.ts): the unused `authorize` and `sync` context parameters. I fixed that without changing behavior by keeping the interface-conformant parameters and marking them intentionally unused with `void context;`.
+Implemented a focused runtime slice for issue #369 and committed it as `592ab50` (`Add integration runtime orchestration service`).
 
-Verified with `gh run view 22933011586 --job 66558412518 --log`, `pnpm --filter @atlaspm/core-api lint`, `pnpm lint`, `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`, and `git diff --check`. I updated the issue journal, committed the repair as `540b420` (`Fix integration provider lint failure`), and pushed `codex/reopen-issue-368`. `gh pr checks 375` currently reports no checks yet on the updated branch, so the rerun is still pending registration.
+The new service is [`apps/core-api/src/integrations/integration-runtime.service.ts`](/home/tommy/Dev/atlaspm-worktrees/issue-369/apps/core-api/src/integrations/integration-runtime.service.ts). It adds shared provider auth status persistence plus persisted sync lifecycle orchestration with duplicate in-flight scope skipping, success/failure state updates, `lastSyncedAt` tracking, and sanitized error logging/persistence. It is wired through [`apps/core-api/src/integrations/integrations.module.ts`](/home/tommy/Dev/atlaspm-worktrees/issue-369/apps/core-api/src/integrations/integrations.module.ts), and the focused repro/coverage lives in [`apps/core-api/test/integration-runtime.service.test.ts`](/home/tommy/Dev/atlaspm-worktrees/issue-369/apps/core-api/test/integration-runtime.service.test.ts).
 
-Summary: Reproduced and fixed the PR #375 lint failure, verified locally, updated the journal, committed, and pushed the branch
-State hint: waiting_ci
+I first reproduced the gap with the new focused test failing on a missing runtime service, then implemented the smallest runtime needed and re-verified the existing contract/registry/Slack coverage. The issue journal was updated in [`.codex-supervisor/issue-journal.md`](/home/tommy/Dev/atlaspm-worktrees/issue-369/.codex-supervisor/issue-journal.md).
+
+Summary: Added shared integration runtime orchestration for auth status and sync-state persistence, with focused tests and a checkpoint commit `592ab50`.
+State hint: stabilizing
 Blocked reason: none
-Tests: `gh run view 22933011586 --job 66558412518 --log`; `pnpm --filter @atlaspm/core-api lint`; `pnpm lint`; `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`; `git diff --check`
+Tests: `pnpm install`; `pnpm --filter @atlaspm/core-api prisma:generate`; `pnpm --filter @atlaspm/core-api exec vitest run test/integration-runtime.service.test.ts`; `pnpm --filter @atlaspm/core-api exec vitest run test/integration-runtime.service.test.ts test/integration-provider.registry.test.ts test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`; `pnpm --filter @atlaspm/core-api lint`; `pnpm --filter @atlaspm/core-api type-check`; `git diff --check`
 Failure signature: none
-Next action: Watch PR #375 for the rerun of lint and confirm the updated branch clears CI
+Next action: extend the runtime with first-class credential storage/rotation primitives and hook it into provider management flows if issue #369 is meant to cover token persistence beyond lifecycle orchestration
 
 ## Active Failure Context
 - Category: review
-- Summary: 2 unresolved automated review thread(s) remain.
-- Reference: https://github.com/TommyKammy/atlaspm/pull/375#discussion_r2915439409
+- Summary: 3 unresolved automated review thread(s) remain.
+- Reference: https://github.com/TommyKammy/atlaspm/pull/376#discussion_r2915506267
 - Details:
-  - apps/core-api/src/integrations/integration-provider.registry.ts:14 IntegrationProviderRegistry currently overwrites providers silently when two providers share the same `provider.key` (later `Map.set` wins). That makes misconfiguration hard to detect and can route requests to the wrong provider. Consider detecting duplicate keys during construction and throwing an error (or logging + throwing) when a duplicate is registered. ```suggestion for (const provider of providers) { if (this.providersByKey.has(provider.key)) { throw new Error( `Duplicate integration provider key detected: ${provider.key}`, ); } ```
-  - apps/core-api/src/integrations/slack.provider.ts:169 Slack `message` event payloads typically represent mentions as `<@USERID>` (not `@USERID`). Checking `event.text?.includes(`@${SLACK_BOT_USER_ID}`)` can fail to detect actual mentions, so `message` events that mention the bot may be ignored. Consider checking for `<@${SLACK_BOT_USER_ID}>` (and optionally a fallback for display-name mentions) instead. ```suggestion case 'message': { const botUserId = process.env.SLACK_BOT_USER_ID; const mentionById = botUserId ? `<@${botUserId}>` : null; const mentionByName = '@AtlasPM'; const text = event.text || ''; if ((mentionById && text.includes(mentionById)) || text.includes(mentionByName)) { await this.handleMention(event); } break; } ```
+  - apps/core-api/src/integrations/integration-runtime.service.ts:216 In the error path you log/persist a sanitized message, but then rethrow the original `error`. The GlobalErrorFilter logs `exception.message` and `exception.stack` without redaction, so a provider error containing tokens/secrets in its message/stack can still leak to logs. Consider throwing a new error with the sanitized message (and optionally keep the original as a non-logged `cause`), or otherwise ensure the thrown error is also sanitized before it reaches the global logger. ```suggestion const sanitizedException: Error & { code?: string; cause?: unknown } = new Error( sanitizedError.message, ); sanitizedException.code = sanitizedError.code; sanitizedException.cause = error; throw sanitizedException; ```
+  - apps/core-api/src/integrations/integration-runtime.service.ts:164 The success-state update clears `lastSyncedAt` when the provider returns anything other than `'completed'` (including `'queued'` and `'not_supported'`). That will erase the last known successful sync time, which is usually needed for observability. Also, mapping `'queued'` to DB status `IDLE` makes the “already running” guard ineffective for queued/asynchronous syncs. Suggestion: only set `lastSyncedAt` when completed (leave it unchanged otherwise), and treat `'queued'` as an in-flight state (e.g., keep status RUNNING and avoid setting `finishedAt` yet).
+  - apps/core-api/src/integrations/integration-runtime.service.ts:109 The duplicate in-flight guard is not concurrency-safe: two workers can both read a non-RUNNING state via `findUnique()` and then both proceed to `upsert()` + execute `provider.sync()`. To make the “only one RUNNING per (providerConfigId, scope)” guarantee real, claim the job atomically (e.g., a transaction that does an `updateMany` with a WHERE that only matches when status != RUNNING or startedAt is stale, and only continue when `count===1`, or use a DB advisory lock keyed by providerConfigId/scope).
 
 ## Codex Working Notes
 ### Current Handoff
 - Older scratchpad entries were compacted by codex-supervisor to keep resume context small.
 
-    - workspace admins can create, update, and delete them
-  - Inheritance model:
-    - workload uses the latest user-specific schedule if one exists
-    - otherwise it falls back to the latest workspace-default schedule
-    - otherwise it falls back to the legacy 40h default
-  - Workload overload capacity now subtracts overlapping time-off minutes from schedule-derived weekly capacity.
-  - CI mitigation:
-    - Added `DOCKER_BUILD_SUMMARY: false` and `DOCKER_BUILD_RECORD_UPLOAD: false` to the cached Docker build steps in `.github/workflows/ci.yml` so the `e2e` job no longer depends on Docker action summary/build-record post-processing.
-  - Review fixes:
-    - Added migration `20260311094500_capacity_schedule_constraints` to enforce subject nullability and one-schedule-per-subject at the DB layer.
-    - `CapacityService.createCapacitySchedule` now relies on the DB constraint and maps unique violations to `409 Conflict`.
-    - `CapacityService.resolveWeeklyCapacityMinutesBatch` fetches schedules/time-off once per user/range and computes per-week capacities in memory.
-    - `WorkloadService` now uses UTC-normalized week boundaries (`setUTCDate`/`setUTCHours`) and consumes batched capacity results.
-    - `CapacityService` currently accepts only `timeZone === 'UTC'`, making the stored value honest until timezone-aware day-of-week calculations are implemented.
-    - `apps/core-api/test/capacity.integration.test.ts` now covers duplicate schedule rejection and non-UTC schedule rejection.
-
-### 2026-03-11 Codex Update (issue #368)
-- Hypothesis:
-  - The branch had only Slack-specific integration code and no explicit provider contract or persistence model for provider config, credentials, sync state, and entity mappings.
-- Focused reproduction:
-  - Added `apps/core-api/test/integration-contracts.test.ts`.
-  - First focused run: `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts`
-  - Initial setup failure: `Command "vitest" not found` before `pnpm install`.
-  - Repro after install: the test failed because `schema.prisma` lacked `IntegrationProviderConfig`, `IntegrationCredential`, `IntegrationSyncState`, and `IntegrationEntityMapping`, and `apps/core-api/src/integrations/integration-provider.contract.ts` did not exist.
-- Implementation:
-  - Added Prisma enums/models for integration provider configs, credentials, sync state, and entity mappings in `apps/core-api/prisma/schema.prisma`.
-  - Added migration `apps/core-api/prisma/migrations/20260311110000_add_integration_provider_contracts/migration.sql`.
-  - Added `IntegrationProvider` contract and `IntegrationProviderRegistry`.
-  - Added `SlackIntegrationProvider` implementing the shared contract.
-  - Refactored `SlackWebhookController` to route webhook handling through the provider registry.
-  - Updated Slack webhook tests to cover the refactor.
-  - Documented the contract in `docs/integrations-provider-contract.md` and linked it from `docs/architecture.md`.
-- Verification:
-  - `pnpm install`
-  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts` (failed: missing models/contract)
-  - `pnpm --filter @atlaspm/core-api prisma:generate` (failed first on duplicate Prisma-generated unique names for integration mapping constraints)
-  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts test/slack-webhook-signature.test.ts` (failed first because Nest injected `undefined` for the registry until the controller used explicit `@Inject(IntegrationProviderRegistry)`)
-  - `pnpm --filter @atlaspm/core-api prisma:generate`
-  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`
-  - `pnpm --filter @atlaspm/core-api type-check`
-- Current outcome:
-  - The provider abstraction is explicit in code and docs.
-  - Storage contracts are implemented in Prisma + SQL migration.
-  - Slack now plugs into the abstraction as the first provider without embedding provider-specific logic directly in core controller flow.
-- Failure signature:
-  - `missing-integration-provider-contracts`
-- Next actions:
-  - Consider adding CRUD/service APIs for managing integration provider configs and credentials if a follow-on issue expects runtime management rather than contract-only groundwork.
-
-### 2026-03-11 Codex CI Repair
-- Hypothesis:
   - PR #375 lint failed on a narrow ESLint rule violation introduced in `SlackIntegrationProvider`, not on a broader contract or schema regression.
 - CI failure reproduced from GitHub Actions:
   - `gh run view 22933011586 --job 66558412518 --log`
@@ -139,3 +91,66 @@ Next action: Watch PR #375 for the rerun of lint and confirm the updated branch 
   - `PRRT_kwDORWcwRc5zd2ud|PRRT_kwDORWcwRc5zd2us`
 - Next actions:
   - Commit and push the review fixes, then resolve or respond to the two review threads on PR #375.
+
+### 2026-03-11 Codex Runtime Infrastructure
+- Hypothesis:
+  - The shared provider contract existed, but `core-api` still lacked a concrete runtime service for auth status persistence and retry-safe sync-state orchestration.
+- Focused reproduction:
+  - Added `apps/core-api/test/integration-runtime.service.test.ts`.
+  - First focused run: `pnpm --filter @atlaspm/core-api exec vitest run test/integration-runtime.service.test.ts`
+  - Initial setup failure: `Command "vitest" not found` before `pnpm install`.
+  - Repro after install: the focused test failed because `apps/core-api/src/integrations/integration-runtime.service.ts` did not exist.
+  - Follow-up environment failure: the focused run required `pnpm --filter @atlaspm/core-api prisma:generate` because the local Prisma client was not yet generated.
+  - Intermediate behavior failure: the duplicate-run guard test used a stale `startedAt`, which the new service correctly treated as reclaimable rather than in-flight.
+- Implementation:
+  - Added `apps/core-api/src/integrations/integration-runtime.service.ts`.
+  - Implemented `authorizeProvider` to delegate provider auth and persist `IntegrationProviderConfig.status`.
+  - Implemented `runSyncJob` to persist RUNNING/SUCCEEDED/FAILED sync lifecycle state, skip duplicate in-flight scopes, and record last successful sync timestamps.
+  - Added structured runtime logging with basic secret/token redaction for persisted/logged error messages.
+  - Registered and exported `IntegrationRuntimeService` from `apps/core-api/src/integrations/integrations.module.ts`.
+- Verification:
+  - `pnpm install`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-runtime.service.test.ts` (failed: missing service file)
+  - `pnpm --filter @atlaspm/core-api prisma:generate`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-runtime.service.test.ts`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-runtime.service.test.ts test/integration-provider.registry.test.ts test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `git diff --check`
+- Current outcome:
+  - `core-api` now has a shared runtime service backing provider auth and sync lifecycle instead of only schema/contracts.
+  - Duplicate in-flight sync execution for the same provider scope is skipped from persisted state.
+  - Successful syncs now persist `lastSyncedAt`, and failures persist sanitized error details.
+- Failure signature:
+  - `missing-integration-runtime-service`
+- Next actions:
+  - Extend the runtime with first-class credential storage/rotation helpers if the next slice needs managed token persistence instead of external secret references only.
+
+### 2026-03-11 Codex Review Fixes for PR #376
+- Hypothesis:
+  - All three configured-bot review threads on `IntegrationRuntimeService` were valid behavioral issues, not false positives.
+- Review items addressed:
+  - `apps/core-api/src/integrations/integration-runtime.service.ts`
+    - Replaced the non-atomic `findUnique()` duplicate-run check with an atomic claim flow: ensure the sync-state row exists, then `updateMany()` it to `RUNNING` only when the existing row is not actively running or is stale.
+    - Changed queued sync handling so provider results with `status: 'queued'` remain persisted as `RUNNING`, preserving in-flight protection for async jobs.
+    - Stopped clearing `lastSyncedAt` for non-completed sync results; only completed syncs now update the last-success timestamp.
+    - Stopped rethrowing raw provider exceptions after sanitizing persistence/log output; the runtime now throws a sanitized error carrying the original error only as `cause`.
+- Tests added/updated:
+  - Expanded `apps/core-api/test/integration-runtime.service.test.ts` to cover:
+    - atomic duplicate-run skipping via claim failure
+    - queued syncs remaining `RUNNING` without clearing prior success data
+    - sanitized rethrow behavior for provider errors containing secret/token material
+- Verification:
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-runtime.service.test.ts`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-runtime.service.test.ts test/integration-provider.registry.test.ts test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`
+  - `pnpm --filter @atlaspm/core-api lint`
+  - `pnpm --filter @atlaspm/core-api type-check`
+  - `git diff --check`
+- Current outcome:
+  - The runtime no longer leaks raw provider exception text into the global error logger path.
+  - Async queued syncs keep their in-flight lock semantics and do not erase the last successful sync timestamp.
+  - Sync claim logic is now concurrency-safe at the row-update level instead of depending on a racy read-before-write check.
+- Failure signature:
+  - `PRRT_kwDORWcwRc5zeC_6|PRRT_kwDORWcwRc5zeDAF|PRRT_kwDORWcwRc5zeDAK`
+- Next actions:
+  - Commit, push, and resolve the three configured-bot review threads on PR #376.
