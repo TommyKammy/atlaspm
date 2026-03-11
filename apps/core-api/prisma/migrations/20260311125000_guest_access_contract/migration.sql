@@ -16,6 +16,18 @@ CREATE TABLE "guest_invitations" (
   "revoked_at" TIMESTAMP(3),
   "created_by_user_id" TEXT NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "guest_invitations_scope_check" CHECK (
+    (
+      "scope_type" = 'PROJECT'
+      AND "project_id" IS NOT NULL
+      AND "project_role" IN ('MEMBER', 'VIEWER')
+    )
+    OR (
+      "scope_type" = 'WORKSPACE'
+      AND "project_id" IS NULL
+      AND "project_role" IS NULL
+    )
+  ),
   CONSTRAINT "guest_invitations_pkey" PRIMARY KEY ("id")
 );
 
@@ -33,6 +45,18 @@ CREATE TABLE "guest_access_grants" (
   "created_by_user_id" TEXT NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "guest_access_grants_scope_check" CHECK (
+    (
+      "scope_type" = 'PROJECT'
+      AND "project_id" IS NOT NULL
+      AND "project_role" IN ('MEMBER', 'VIEWER')
+    )
+    OR (
+      "scope_type" = 'WORKSPACE'
+      AND "project_id" IS NULL
+      AND "project_role" IS NULL
+    )
+  ),
   CONSTRAINT "guest_access_grants_pkey" PRIMARY KEY ("id")
 );
 
@@ -40,7 +64,12 @@ CREATE UNIQUE INDEX "guest_invitations_token_hash_key" ON "guest_invitations"("t
 CREATE INDEX "guest_invitations_workspace_id_email_revoked_at_accepted_at_idx" ON "guest_invitations"("workspace_id", "email", "revoked_at", "accepted_at");
 CREATE INDEX "guest_invitations_project_id_revoked_at_accepted_at_idx" ON "guest_invitations"("project_id", "revoked_at", "accepted_at");
 
-CREATE UNIQUE INDEX "guest_access_grants_scope_key" ON "guest_access_grants"("user_id", "project_id", "scope_type");
+CREATE UNIQUE INDEX "guest_access_grants_workspace_scope_key"
+  ON "guest_access_grants"("user_id", "workspace_id")
+  WHERE "scope_type" = 'WORKSPACE' AND "project_id" IS NULL;
+CREATE UNIQUE INDEX "guest_access_grants_project_scope_key"
+  ON "guest_access_grants"("user_id", "project_id")
+  WHERE "scope_type" = 'PROJECT' AND "project_id" IS NOT NULL;
 CREATE INDEX "guest_access_grants_workspace_id_user_id_status_idx" ON "guest_access_grants"("workspace_id", "user_id", "status");
 CREATE INDEX "guest_access_grants_project_id_status_idx" ON "guest_access_grants"("project_id", "status");
 CREATE INDEX "guest_access_grants_invitation_id_idx" ON "guest_access_grants"("invitation_id");

@@ -5,56 +5,84 @@
 - Branch: codex/reopen-issue-381
 - Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-381
 - Journal: /home/tommy/Dev/atlaspm-worktrees/issue-381/.codex-supervisor/issue-journal.md
-- Current phase: reproducing
-- Attempt count: 1
-- Last head SHA: 913aacbdba4fc39f49e1126e42e1810756eebd49
+- Current phase: addressing_review
+- Attempt count: 2
+- Last head SHA: 9bac93f218397e579959b69c7de7d2c4dd985662
 - Blocked reason: none
-- Last failure signature: none
-- Repeated failure signature count: 0
-- Updated at: 2026-03-11T12:46:36.683Z
+- Last failure signature: PRRT_kwDORWcwRc5zlqFl|PRRT_kwDORWcwRc5zlqGU|PRRT_kwDORWcwRc5zlqGu|PRRT_kwDORWcwRc5zlqHD|PRRT_kwDORWcwRc5zlqHQ
+- Repeated failure signature count: 1
+- Updated at: 2026-03-11T12:58:46.409Z
 
 ## Latest Codex Summary
-- None yet.
+Added a focused reproducer and then defined the guest-access contract layer in `core-api`. The new checkpoint commit is `9bac93f` (`Define guest access contracts`).
+
+The contract now exists in three places: Prisma schema/migration for `GuestInvitation` and `GuestAccessGrant`, a pure TypeScript contract module at [guest-access.contract.ts](/home/tommy/Dev/atlaspm-worktrees/issue-381/apps/core-api/src/guest-access/guest-access.contract.ts), and documentation at [guest-access-contract.md](/home/tommy/Dev/atlaspm-worktrees/issue-381/docs/guest-access-contract.md). The key rule is explicit: guest identities still map to the existing `User` row, and guest acceptance grants scoped access via `GuestAccessGrant`, not `WorkspaceMembership`.
+
+Verification passed after installing deps and generating Prisma client for this fresh worktree. I also updated the issue journal with the reproduction, environment setup failures, commands, and next actions.
+
+Summary: Added guest identity/access/invitation contract definitions with focused tests and a checkpoint commit (`9bac93f`).
+State hint: implementing
+Blocked reason: none
+Tests: `pnpm install`; `pnpm --filter @atlaspm/core-api exec vitest run test/guest-access-contracts.test.ts`; `DATABASE_URL=postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public pnpm --filter @atlaspm/core-api prisma:generate`; `DATABASE_URL=postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public pnpm --filter @atlaspm/core-api exec prisma validate`; `pnpm --filter @atlaspm/core-api exec vitest run test/guest-access-contracts.test.ts test/integration-contracts.test.ts`; `pnpm --filter @atlaspm/core-api type-check`; `pnpm --filter @atlaspm/core-api lint`; `git diff --check`
+Failure signature: none
+Next action: Decide whether to keep #381 scoped to contract definition or wire runtime guest invitation/grant endpoints onto these new contracts.
 
 ## Active Failure Context
-- None recorded.
+- Category: review
+- Summary: 5 unresolved automated review thread(s) remain.
+- Reference: https://github.com/TommyKammy/atlaspm/pull/385#discussion_r2918205758
+- Details:
+  - apps/core-api/prisma/schema.prisma:391 `@@unique([userId, projectId, scopeType])` won't enforce uniqueness for WORKSPACE-scoped grants because PostgreSQL UNIQUE indexes allow multiple rows where `projectId` is NULL. This would allow duplicate WORKSPACE grants per user (and potentially break grant refresh/upsert semantics). Consider replacing this with partial unique indexes: one for PROJECT scope (e.g., userId+projectId where scopeType='PROJECT' and projectId IS NOT NULL) and one for WORKSPACE scope (e.g., userId+workspaceId where scopeType='WORKSPACE' and projectId IS NULL), added via SQL migration since Prisma can't express partial indexes. ```suggestion ```
+  - apps/core-api/prisma/migrations/20260311125000_guest_access_contract/migration.sql:43 The migration creates a UNIQUE index on (user_id, project_id, scope_type), but this does not prevent duplicates when `project_id` is NULL (PostgreSQL treats NULLs as distinct). That means multiple WORKSPACE-scope grants per user could be inserted. Consider replacing this with partial unique indexes keyed by the actual scope (WORKSPACE: user_id+workspace_id WHERE scope_type='WORKSPACE' AND project_id IS NULL; PROJECT: user_id+project_id WHERE scope_type='PROJECT' AND project_id IS NOT NULL). ```suggestion CREATE UNIQUE INDEX "guest_access_grants_workspace_scope_key" ON "guest_access_grants"("user_id", "workspace_id") WHERE "scope_type" = 'WORKSPACE' AND "project_id" IS NULL; CREATE UNIQUE INDEX "guest_access_grants_project_scope_key" ON "guest_access_grants"("user_id", "project_id") WHERE "scope_type" = 'PROJECT' AND "project_id" IS NOT NULL; ```
+  - apps/core-api/prisma/migrations/20260311125000_guest_access_contract/migration.sql:36 The contract/docs require scope-dependent invariants (e.g., scopeType=PROJECT requires projectId and projectRole; scopeType=WORKSPACE should not have projectId/projectRole), but the schema/migration currently allow any combination. Given this repo already adds CHECK constraints in follow-up migrations (e.g., capacity_schedules_subject_type_user_id_check), consider adding similar CHECK constraints for `guest_invitations` and `guest_access_grants` so invalid rows can’t be persisted.
+  - apps/core-api/src/guest-access/guest-access.contract.ts:13 `GuestAccessScope.role` is typed as `ProjectRole`, which includes `ADMIN`, but the contract doc states guest project roles are limited to non-admin collaboration roles. To keep the contract self-consistent and prevent accidental admin grants, consider narrowing this type (e.g., a GuestProjectRole union that excludes ADMIN) and/or exporting a validation helper that enforces the restriction.
+  - apps/core-api/src/guest-access/guest-access.contract.ts:32 `GuestInvitationContract` includes `acceptedByUserId` but omits `createdByUserId` even though the documented contract and Prisma model include an inviter/creator user id. If this type is intended to be the canonical invitation contract for auditability and downstream logic, consider adding `createdByUserId` (and possibly `createdAt`) so consumers don’t silently drop that linkage. ```suggestion acceptedByUserId: string | null; createdByUserId?: string; createdAt?: Date; ```
 
 ## Codex Working Notes
 ### Current Handoff
 - Older scratchpad entries were compacted by codex-supervisor to keep resume context small.
 
-### 2026-03-11 Codex Guest Access Contract Definition
+### 2026-03-11 Codex Review Fixes for PR #385
 - Hypothesis:
-  - Issue #381 is a contract-definition slice. The repo already had internal workspace invitations, but no explicit guest identity, guest-scoped access entity, or guest invitation contract.
+  - All five configured-bot review comments on the guest access contract were valid contract hardening issues rather than false positives.
 - Focused reproduction:
-  - Added `apps/core-api/test/guest-access-contracts.test.ts`.
-  - First focused run: `pnpm --filter @atlaspm/core-api exec vitest run test/guest-access-contracts.test.ts`
-  - Initial environment failure: `Command "vitest" not found` before local dependency install.
-  - Repro after install: the focused test failed because `schema.prisma` lacked guest access models, `apps/core-api/src/guest-access/guest-access.contract.ts` did not exist, and `docs/guest-access-contract.md` did not exist.
-  - Follow-up environment failures: `prisma validate` needed `DATABASE_URL`, and `type-check` needed `pnpm --filter @atlaspm/core-api prisma:generate` in this fresh worktree.
+  - Tightened `apps/core-api/test/guest-access-contracts.test.ts` to assert:
+    - the Prisma schema no longer advertises a null-sensitive guest grant uniqueness guarantee
+    - the migration defines scope-aware partial unique indexes
+    - the migration defines scope-dependent CHECK constraints
+    - the TypeScript contract narrows guest project roles away from `ADMIN`
+    - the invitation contract includes inviter metadata
+  - Focused repro run: `pnpm --filter @atlaspm/core-api exec vitest run test/guest-access-contracts.test.ts`
+  - Failure after tightening:
+    - `schema.prisma` still contained `@@unique([userId, projectId, scopeType], ...)`
+    - the migration still used the null-sensitive guest grant unique index and lacked scope CHECK constraints
+    - `GuestAccessScope.role` still accepted `ProjectRole.ADMIN`
+    - `GuestInvitationContract` still omitted `createdByUserId` and `createdAt`
 - Implementation:
-  - Added guest contract coverage in `apps/core-api/test/guest-access-contracts.test.ts`.
-  - Added Prisma contract definitions for `GuestInvitation`, `GuestAccessGrant`, `GuestAccessScopeType`, and `GuestAccessStatus` in `apps/core-api/prisma/schema.prisma`.
-  - Added matching migration scaffold at `apps/core-api/prisma/migrations/20260311125000_guest_access_contract/migration.sql`.
-  - Added `apps/core-api/src/guest-access/guest-access.contract.ts` with explicit identity/scope types plus invitation state derivation helpers.
-  - Added `docs/guest-access-contract.md` and linked it from `docs/architecture.md`.
+  - Added `GuestProjectRole = 'MEMBER' | 'VIEWER'` and exported `isGuestProjectRole(...)`.
+  - Added `createdByUserId` and `createdAt` to `GuestInvitationContract`.
+  - Removed the misleading Prisma `@@unique([userId, projectId, scopeType])` declaration and documented that SQL migration files own the guest grant uniqueness/invariant enforcement.
+  - Updated the guest access migration to:
+    - add `guest_invitations_scope_check`
+    - add `guest_access_grants_scope_check`
+    - replace the old guest grant unique index with partial unique indexes for workspace scope and project scope separately
 - Verification:
-  - `pnpm install`
-  - `pnpm --filter @atlaspm/core-api exec vitest run test/guest-access-contracts.test.ts` (failed: missing guest contract definitions)
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/guest-access-contracts.test.ts` (failed before fixes)
   - `pnpm --filter @atlaspm/core-api exec vitest run test/guest-access-contracts.test.ts`
-  - `DATABASE_URL=postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public pnpm --filter @atlaspm/core-api prisma:generate`
   - `DATABASE_URL=postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public pnpm --filter @atlaspm/core-api exec prisma validate`
   - `pnpm --filter @atlaspm/core-api exec vitest run test/guest-access-contracts.test.ts test/integration-contracts.test.ts`
   - `pnpm --filter @atlaspm/core-api type-check`
   - `pnpm --filter @atlaspm/core-api lint`
   - `git diff --check`
 - Current outcome:
-  - Guest identity mapping, scoped guest access entities, and invitation lifecycle semantics are now explicit in `core-api` contracts and docs.
-  - The contract states that guest acceptance maps into the existing `User` row and grants scoped access via `GuestAccessGrant`, not `WorkspaceMembership`.
+  - Guest contract storage now encodes the scope-dependent invariants the docs describe.
+  - Workspace-scope guest grants are protected against duplicate rows despite `project_id` being `NULL`.
+  - The TypeScript contract no longer permits accidental guest `ADMIN` roles and now preserves inviter metadata.
 - Failure signature:
-  - `missing-guest-access-contract`
+  - `PRRT_kwDORWcwRc5zlqFl|PRRT_kwDORWcwRc5zlqGU|PRRT_kwDORWcwRc5zlqGu|PRRT_kwDORWcwRc5zlqHD|PRRT_kwDORWcwRc5zlqHQ`
 - Next actions:
-  - Decide whether the next slice should wire guest invitation/grant runtime endpoints onto these contracts or keep this issue scoped to contract definition only.
+  - Commit, push, and resolve/respond to the five configured-bot review threads on PR #385.
+
 
 
 

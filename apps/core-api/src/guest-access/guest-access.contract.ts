@@ -1,4 +1,4 @@
-import { ProjectRole } from '@prisma/client';
+export type GuestProjectRole = 'MEMBER' | 'VIEWER';
 
 export type GuestAccessScope =
   | {
@@ -9,7 +9,7 @@ export type GuestAccessScope =
       type: 'project';
       workspaceId: string;
       projectId: string;
-      role: ProjectRole;
+      role: GuestProjectRole;
     };
 
 export type AtlasUserIdentity = {
@@ -30,6 +30,8 @@ export interface GuestInvitationContract {
   acceptedAt: Date | null;
   revokedAt: Date | null;
   acceptedByUserId: string | null;
+  createdByUserId: string;
+  createdAt: Date;
 }
 
 export type GuestInvitationState = 'pending' | 'accepted' | 'revoked' | 'expired';
@@ -44,6 +46,10 @@ type EvaluateGuestInvitationStateInput = Pick<
   GuestInvitationContract,
   'expiresAt' | 'acceptedAt' | 'revokedAt'
 >;
+
+export function isGuestProjectRole(role: string): role is GuestProjectRole {
+  return role === 'MEMBER' || role === 'VIEWER';
+}
 
 export function deriveGuestIdentity(input: DeriveGuestIdentityInput): AtlasUserIdentity {
   return {

@@ -362,6 +362,7 @@ model GuestInvitation {
   createdBy  User      @relation("GuestInvitationCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
   grants     GuestAccessGrant[]
 
+  /// Scope-dependent invariants are enforced in the SQL migration with CHECK constraints.
   @@index([workspaceId, email, revokedAt, acceptedAt])
   @@index([projectId, revokedAt, acceptedAt])
   @@map("guest_invitations")
@@ -388,7 +389,7 @@ model GuestAccessGrant {
   project     Project?         @relation(fields: [projectId], references: [id], onDelete: Cascade)
   createdBy   User             @relation("GuestAccessGrantCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
 
-  @@unique([userId, projectId, scopeType], map: "guest_access_grants_scope_key")
+  /// Partial unique indexes and scope-dependent invariants are enforced in the SQL migration.
   @@index([workspaceId, userId, status])
   @@index([projectId, status])
   @@index([invitationId])
