@@ -32,6 +32,37 @@ enum CapacityScheduleSubjectType {
   USER
 }
 
+enum IntegrationProviderKind {
+  SLACK
+}
+
+enum IntegrationConnectionStatus {
+  PENDING
+  ACTIVE
+  ERROR
+  DISCONNECTED
+}
+
+enum IntegrationCredentialKind {
+  ACCESS_TOKEN
+  REFRESH_TOKEN
+  API_TOKEN
+  SIGNING_SECRET
+}
+
+enum IntegrationSyncStatus {
+  IDLE
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum IntegrationMappingDirection {
+  IMPORT
+  EXPORT
+  BIDIRECTIONAL
+}
+
 enum WorkspaceRole {
   WS_ADMIN
   WS_MEMBER
@@ -94,6 +125,7 @@ model Workspace {
   portfolios  Portfolio[]
   capacitySchedules CapacitySchedule[]
   timeOffEvents TimeOffEvent[]
+  integrationProviderConfigs IntegrationProviderConfig[]
 }
 
 model User {
@@ -124,6 +156,99 @@ model User {
   ownedGoals           Goal[]
   capacitySchedules    CapacitySchedule[]
   timeOffEvents        TimeOffEvent[]
+  integrationProviderConfigsCreated IntegrationProviderConfig[] @relation("IntegrationProviderConfigCreatedBy")
+  integrationProviderConfigsUpdated IntegrationProviderConfig[] @relation("IntegrationProviderConfigUpdatedBy")
+}
+
+model IntegrationProviderConfig {
+  id               String                    @id @default(uuid())
+  workspaceId      String                    @map("workspace_id")
+  provider         IntegrationProviderKind
+  key              String
+  displayName      String                    @map("display_name")
+  status           IntegrationConnectionStatus @default(PENDING)
+  settings         Json?                     @map("settings")
+  createdByUserId  String                    @map("created_by_user_id")
+  updatedByUserId  String?                   @map("updated_by_user_id")
+  createdAt        DateTime                  @default(now()) @map("created_at")
+  updatedAt        DateTime                  @updatedAt @map("updated_at")
+
+  workspace        Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy        User                      @relation("IntegrationProviderConfigCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedBy        User?                     @relation("IntegrationProviderConfigUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  credentials      IntegrationCredential[]
+  syncStates       IntegrationSyncState[]
+  entityMappings   IntegrationEntityMapping[]
+
+  @@unique([workspaceId, key])
+  @@index([workspaceId, provider, status])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
+  @@map("integration_provider_configs")
+}
+
+/// Plaintext secrets must never be persisted. Store an encrypted ciphertext or
+/// an external secret reference plus a redacted preview for audit-safe reads.
+model IntegrationCredential {
+  id                String                    @id @default(uuid())
+  providerConfigId  String                    @map("provider_config_id")
+  kind              IntegrationCredentialKind
+  secretRef         String?                   @map("secret_ref")
+  encryptedValue    String?                   @map("encrypted_value")
+  redactedValue     String?                   @map("redacted_value")
+  expiresAt         DateTime?                 @map("expires_at")
+  lastRotatedAt     DateTime?                 @map("last_rotated_at")
+  createdAt         DateTime                  @default(now()) @map("created_at")
+  updatedAt         DateTime                  @updatedAt @map("updated_at")
+
+  providerConfig    IntegrationProviderConfig @relation(fields: [providerConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([providerConfigId, kind])
+  @@index([expiresAt])
+  @@map("integration_credentials")
+}
+
+model IntegrationSyncState {
+  id                String                    @id @default(uuid())
+  providerConfigId  String                    @map("provider_config_id")
+  scope             String
+  status            IntegrationSyncStatus     @default(IDLE)
+  cursor            String?
+  nextSyncAt        DateTime?                 @map("next_sync_at")
+  lastSyncedAt      DateTime?                 @map("last_synced_at")
+  startedAt         DateTime?                 @map("started_at")
+  finishedAt        DateTime?                 @map("finished_at")
+  lastErrorCode     String?                   @map("last_error_code")
+  lastErrorMessage  String?                   @map("last_error_message")
+  metadata          Json?
+  createdAt         DateTime                  @default(now()) @map("created_at")
+  updatedAt         DateTime                  @updatedAt @map("updated_at")
+
+  providerConfig    IntegrationProviderConfig @relation(fields: [providerConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([providerConfigId, scope])
+  @@index([status, nextSyncAt])
+  @@map("integration_sync_states")
+}
+
+model IntegrationEntityMapping {
+  id                String                    @id @default(uuid())
+  providerConfigId  String                    @map("provider_config_id")
+  entityType        String                    @map("entity_type")
+  direction         IntegrationMappingDirection @default(BIDIRECTIONAL)
+  internalId        String                    @map("internal_id")
+  externalId        String                    @map("external_id")
+  externalUpdatedAt DateTime?                 @map("external_updated_at")
+  metadata          Json?
+  createdAt         DateTime                  @default(now()) @map("created_at")
+  updatedAt         DateTime                  @updatedAt @map("updated_at")
+
+  providerConfig    IntegrationProviderConfig @relation(fields: [providerConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([providerConfigId, entityType, internalId], map: "integration_entity_mappings_internal_unique")
+  @@unique([providerConfigId, entityType, externalId], map: "integration_entity_mappings_external_unique")
+  @@index([providerConfigId, entityType, direction])
+  @@map("integration_entity_mappings")
 }
 
 /// Partial UNIQUE indexes and subject nullability checks are enforced in SQL migration files

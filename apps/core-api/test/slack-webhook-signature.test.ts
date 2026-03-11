@@ -5,6 +5,8 @@ import request from 'supertest';
 import crypto from 'crypto';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { SlackWebhookController } from '../src/integrations/slack.controller';
+import { INTEGRATION_PROVIDERS, IntegrationProviderRegistry } from '../src/integrations/integration-provider.registry';
+import { SlackIntegrationProvider } from '../src/integrations/slack.provider';
 import { SlackService } from '../src/integrations/slack.service';
 
 const ENV_KEYS = ['SLACK_SIGNING_SECRET', 'SLACK_BOT_TOKEN', 'SLACK_BOT_USER_ID'] as const;
@@ -34,7 +36,16 @@ async function createSlackApp(
   const moduleRef = await Test.createTestingModule({
     imports: [ThrottlerModule.forRoot([{ ttl: 60000, limit: 10 }])],
     controllers: [SlackWebhookController],
-    providers: [{ provide: SlackService, useValue: slackService }],
+    providers: [
+      { provide: SlackService, useValue: slackService },
+      SlackIntegrationProvider,
+      {
+        provide: INTEGRATION_PROVIDERS,
+        useFactory: (slackProvider: SlackIntegrationProvider) => [slackProvider],
+        inject: [SlackIntegrationProvider],
+      },
+      IntegrationProviderRegistry,
+    ],
   }).compile();
 
   const app = moduleRef.createNestApplication({ rawBody: true });
@@ -174,10 +185,11 @@ describe('Slack webhook signature verification', () => {
     process.env.SLACK_SIGNING_SECRET = 'atlaspm-slack-signing-secret';
 
     const sendMentionResponse = vi.fn();
-    const controller = new SlackWebhookController({
+    const provider = new SlackIntegrationProvider({
       isConfigured: () => true,
       sendMentionResponse,
     } as SlackService);
+    const controller = new SlackWebhookController(new IntegrationProviderRegistry([provider]));
     const body = JSON.stringify({
       type: 'event_callback',
       event: { type: 'app_mention', text: 'help', channel: 'C123', ts: '1710000000.000100' },
@@ -197,6 +209,52 @@ describe('Slack webhook signature verification', () => {
     expect(sendMentionResponse).toHaveBeenCalledWith(
       'C123',
       '1710000000.000100',
+      expect.stringContaining('Here are the commands I understand'),
+    );
+  });
+
+  test('processes a valid signed message event when the bot is mentioned by Slack user id token', async () => {
+    process.env.SLACK_SIGNING_SECRET = 'atlaspm-slack-signing-secret';
+    process.env.SLACK_BOT_USER_ID = 'UATLASPM';
+
+    const sendMentionResponse = vi.fn();
+    const provider = new SlackIntegrationProvider({
+      isConfigured: () => true,
+      sendMentionResponse,
+    } as SlackService);
+    const controller = new SlackWebhookController(new IntegrationProviderRegistry([provider]));
+    const body = JSON.stringify({
+      type: 'event_callback',
+      event: {
+        type: 'message',
+        text: '<@UATLASPM> help',
+        channel: 'C123',
+        ts: '1710000000.000101',
+      },
+    });
+    const timestamp = `${Math.floor(Date.now() / 1000)}`;
+    const signature = signSlackBody(body, process.env.SLACK_SIGNING_SECRET, timestamp);
+
+    const response = await controller.handleEvent(
+      { rawBody: Buffer.from(body, 'utf8') } as never,
+      {
+        type: 'event_callback',
+        event: {
+          type: 'message',
+          text: '<@UATLASPM> help',
+          channel: 'C123',
+          ts: '1710000000.000101',
+        },
+      },
+      signature,
+      timestamp,
+    );
+
+    expect(response).toEqual({ ok: true });
+    expect(sendMentionResponse).toHaveBeenCalledOnce();
+    expect(sendMentionResponse).toHaveBeenCalledWith(
+      'C123',
+      '1710000000.000101',
       expect.stringContaining('Here are the commands I understand'),
     );
   });

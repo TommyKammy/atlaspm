@@ -238,6 +238,12 @@
 - Delivery worker:
   - `core-api` webhook worker consumes pending outbox events and sends event envelopes to active project webhooks.
   - Worker is env-gated (`WEBHOOK_DELIVERY_WORKER_ENABLED=true`).
+
+## Integrations
+- Provider contract: see `docs/integrations-provider-contract.md`.
+- `core-api` owns integration provider configs, credentials, sync state, and entity mappings.
+- Secrets are stored only as encrypted values or external secret references with redacted previews.
+- Provider implementations plug into shared audit/outbox and background job infrastructure through the `IntegrationProvider` contract and registry.
   - Retries use exponential backoff with capped delay.
 - Dead letter queue (DLQ):
   - Events that exceed retry limit are marked `deadLetteredAt` with `lastError`.
