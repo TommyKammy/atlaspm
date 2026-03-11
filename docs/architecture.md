@@ -221,6 +221,10 @@
   - Invitation token is generated raw once and persisted as `tokenHash` only.
   - Acceptance requires logged-in OIDC user and strict email match with invitation email.
   - Invitation lifecycle states: pending, accepted, revoked, expired.
+- Guest access model: see `docs/guest-access-contract.md`.
+  - Guest identities still map to the existing `User` table by OIDC `sub`.
+  - External collaboration is granted through `GuestInvitation` -> `GuestAccessGrant`, not `WorkspaceMembership`.
+  - Guest authorization stays scope-bound and must not widen into workspace-admin capabilities.
 - User account state:
   - AtlasPM tracks internal user status (`ACTIVE` / `SUSPENDED`).
   - Suspended users are blocked at auth guard.
