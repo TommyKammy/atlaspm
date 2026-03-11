@@ -145,8 +145,6 @@ describe('GitHub issues integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     const workspaceId = workspacesRes.body[0].id as string;
-    const testStartedAt = new Date();
-
     const projectRes = await request(app.getHttpServer())
       .post('/projects')
       .set('Authorization', `Bearer ${token}`)
@@ -236,18 +234,26 @@ describe('GitHub issues integration', () => {
 
     const auditEvents = await prisma.auditEvent.findMany({
       where: {
-        createdAt: { gte: testStartedAt },
         entityId: connectRes.body.id as string,
+        action: {
+          in: ['integration.provider.connected', 'integration.sync.completed'],
+        },
       },
       orderBy: { createdAt: 'asc' },
     });
-    expect(auditEvents.map((event) => event.action)).toContain('integration.provider.connected');
+    expect(auditEvents.map((event) => event.action)).toEqual([
+      'integration.provider.connected',
+      'integration.sync.completed',
+    ]);
 
     const outboxEvents = await prisma.outboxEvent.findMany({
       where: {
-        createdAt: { gte: testStartedAt },
         type: {
           in: ['integration.provider.connected', 'integration.sync.completed'],
+        },
+        payload: {
+          path: ['providerConfigId'],
+          equals: connectRes.body.id as string,
         },
       },
       orderBy: { createdAt: 'asc' },
