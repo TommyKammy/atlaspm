@@ -5,6 +5,8 @@ import request from 'supertest';
 import crypto from 'crypto';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { SlackWebhookController } from '../src/integrations/slack.controller';
+import { INTEGRATION_PROVIDERS, IntegrationProviderRegistry } from '../src/integrations/integration-provider.registry';
+import { SlackIntegrationProvider } from '../src/integrations/slack.provider';
 import { SlackService } from '../src/integrations/slack.service';
 
 const ENV_KEYS = ['SLACK_SIGNING_SECRET', 'SLACK_BOT_TOKEN', 'SLACK_BOT_USER_ID'] as const;
@@ -34,7 +36,16 @@ async function createSlackApp(
   const moduleRef = await Test.createTestingModule({
     imports: [ThrottlerModule.forRoot([{ ttl: 60000, limit: 10 }])],
     controllers: [SlackWebhookController],
-    providers: [{ provide: SlackService, useValue: slackService }],
+    providers: [
+      { provide: SlackService, useValue: slackService },
+      SlackIntegrationProvider,
+      {
+        provide: INTEGRATION_PROVIDERS,
+        useFactory: (slackProvider: SlackIntegrationProvider) => [slackProvider],
+        inject: [SlackIntegrationProvider],
+      },
+      IntegrationProviderRegistry,
+    ],
   }).compile();
 
   const app = moduleRef.createNestApplication({ rawBody: true });
@@ -174,10 +185,11 @@ describe('Slack webhook signature verification', () => {
     process.env.SLACK_SIGNING_SECRET = 'atlaspm-slack-signing-secret';
 
     const sendMentionResponse = vi.fn();
-    const controller = new SlackWebhookController({
+    const provider = new SlackIntegrationProvider({
       isConfigured: () => true,
       sendMentionResponse,
     } as SlackService);
+    const controller = new SlackWebhookController(new IntegrationProviderRegistry([provider]));
     const body = JSON.stringify({
       type: 'event_callback',
       event: { type: 'app_mention', text: 'help', channel: 'C123', ts: '1710000000.000100' },

@@ -1,58 +1,28 @@
-# Issue #365: P3: Build workload UI indicators and filters for over-capacity states
+# Issue #368: P4: Define integration provider abstraction and storage contracts
 
 ## Supervisor Snapshot
-- Issue URL: https://github.com/TommyKammy/atlaspm/issues/365
-- Branch: codex/reopen-issue-365
-- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-365
-- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-365/.codex-supervisor/issue-journal.md
-- Current phase: addressing_review
-- Attempt count: 2
-- Last head SHA: bddd95cc2eff71df6e6fc26002f2ef09a2a45b90
+- Issue URL: https://github.com/TommyKammy/atlaspm/issues/368
+- Branch: codex/reopen-issue-368
+- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-368
+- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-368/.codex-supervisor/issue-journal.md
+- Current phase: reproducing
+- Attempt count: 1
+- Last head SHA: 8cd4a31dd7a5a041a2f11da336051ea248d12f64
 - Blocked reason: none
 - Last failure signature: none
-- Repeated failure signature count: 1
-- Updated at: 2026-03-11T10:20:28+09:00
+- Repeated failure signature count: 0
+- Updated at: 2026-03-11T01:53:11.164Z
 
 ## Latest Codex Summary
-Resolved the four automated review comments in commit `bddd95c` (`Address workload review feedback`) and pushed the branch to PR #374.
-
-The fix set keeps behavior unchanged while tightening the implementation: the capacity integration test now asserts `workloadWeek` exists before reading its fields; workload helpers now build an alerts-by-week map once and reuse it; the workload page computes per-user status and status counts in one pass; and each workload card reuses a per-card alerts map instead of scanning `overloadAlerts` for every rendered week.
-
-Focused verification passed:
-`pnpm --filter @atlaspm/web-ui test -- src/app/workspaces/[workspaceId]/workload/workload-helpers.test.ts`
-`pnpm --filter @atlaspm/web-ui type-check`
-`pnpm --filter @atlaspm/core-api test -- test/capacity.integration.test.ts`
-
-PR follow-up:
-`git push origin codex/reopen-issue-365`
-Resolved review threads `PRRT_kwDORWcwRc5zdilP`, `PRRT_kwDORWcwRc5zdild`, `PRRT_kwDORWcwRc5zdilj`, and `PRRT_kwDORWcwRc5zdilm` via `gh api graphql`.
+- None yet.
 
 ## Active Failure Context
-- None recorded locally. PR #374 is waiting on fresh CI after review-thread resolution.
+- None recorded.
 
 ## Codex Working Notes
 ### Current Handoff
-- Hypothesis: All four automated review comments are valid and can be fixed without changing behavior: tighten one test assertion, cache overload alerts by week in workload helpers/cards, and precompute per-user workload status once per render.
-- Primary failure or risk: No current local failure. The only remaining risk is remote CI because PR #374 is now running a fresh check set after commit `bddd95c`.
-- Last focused command: `pnpm --filter @atlaspm/core-api test -- test/capacity.integration.test.ts`
-- Files changed: `apps/core-api/test/capacity.integration.test.ts`, `apps/web-ui/src/app/workspaces/[workspaceId]/workload/workload-helpers.ts`, `apps/web-ui/src/app/workspaces/[workspaceId]/workload/page.tsx`, and this journal.
-- Next 1-3 actions:
-  1. Watch PR #374 checks, especially `e2e`, until the merge state is stable.
-  2. If a fresh CI failure appears, reproduce it locally from this worktree and fix it here.
-  3. If checks pass, proceed with final PR review/merge handling.
+- Older scratchpad entries were compacted by codex-supervisor to keep resume context small.
 
-### Scratchpad
-- Review follow-up:
-  - Added `expect(workloadWeek).toBeTruthy()` before asserting weekly capacity fields in `apps/core-api/test/capacity.integration.test.ts`.
-  - Added `createAlertsByWeekMap()` in `apps/web-ui/src/app/workspaces/[workspaceId]/workload/workload-helpers.ts` so helper lookups are O(1) per week instead of repeated `.find(...)`.
-  - `getWorkloadStatus()` now walks weeks once and returns early on over-capacity instead of building an intermediate array.
-  - `filterWeeks()` accepts a precomputed alerts map.
-  - `apps/web-ui/src/app/workspaces/[workspaceId]/workload/page.tsx` now computes per-user workload status and counts in one pass per render, then reuses the results for filtering and counts.
-  - `UserWorkloadCard` now builds `alertsByWeek` once and reuses it for both header status and week rows.
-- Review verification:
-  - `pnpm --filter @atlaspm/web-ui test -- src/app/workspaces/[workspaceId]/workload/workload-helpers.test.ts`
-  - `pnpm --filter @atlaspm/web-ui type-check`
-  - `pnpm --filter @atlaspm/core-api test -- test/capacity.integration.test.ts`
 
     - effort weeks still used `2400` instead of API capacity `420`
     - reduced-capacity task weeks were reported as `available`
@@ -130,3 +100,36 @@ Resolved review threads `PRRT_kwDORWcwRc5zdilP`, `PRRT_kwDORWcwRc5zdild`, `PRRT_
     - `WorkloadService` now uses UTC-normalized week boundaries (`setUTCDate`/`setUTCHours`) and consumes batched capacity results.
     - `CapacityService` currently accepts only `timeZone === 'UTC'`, making the stored value honest until timezone-aware day-of-week calculations are implemented.
     - `apps/core-api/test/capacity.integration.test.ts` now covers duplicate schedule rejection and non-UTC schedule rejection.
+
+### 2026-03-11 Codex Update (issue #368)
+- Hypothesis:
+  - The branch had only Slack-specific integration code and no explicit provider contract or persistence model for provider config, credentials, sync state, and entity mappings.
+- Focused reproduction:
+  - Added `apps/core-api/test/integration-contracts.test.ts`.
+  - First focused run: `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts`
+  - Initial setup failure: `Command "vitest" not found` before `pnpm install`.
+  - Repro after install: the test failed because `schema.prisma` lacked `IntegrationProviderConfig`, `IntegrationCredential`, `IntegrationSyncState`, and `IntegrationEntityMapping`, and `apps/core-api/src/integrations/integration-provider.contract.ts` did not exist.
+- Implementation:
+  - Added Prisma enums/models for integration provider configs, credentials, sync state, and entity mappings in `apps/core-api/prisma/schema.prisma`.
+  - Added migration `apps/core-api/prisma/migrations/20260311110000_add_integration_provider_contracts/migration.sql`.
+  - Added `IntegrationProvider` contract and `IntegrationProviderRegistry`.
+  - Added `SlackIntegrationProvider` implementing the shared contract.
+  - Refactored `SlackWebhookController` to route webhook handling through the provider registry.
+  - Updated Slack webhook tests to cover the refactor.
+  - Documented the contract in `docs/integrations-provider-contract.md` and linked it from `docs/architecture.md`.
+- Verification:
+  - `pnpm install`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts` (failed: missing models/contract)
+  - `pnpm --filter @atlaspm/core-api prisma:generate` (failed first on duplicate Prisma-generated unique names for integration mapping constraints)
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts test/slack-webhook-signature.test.ts` (failed first because Nest injected `undefined` for the registry until the controller used explicit `@Inject(IntegrationProviderRegistry)`)
+  - `pnpm --filter @atlaspm/core-api prisma:generate`
+  - `pnpm --filter @atlaspm/core-api exec vitest run test/integration-contracts.test.ts test/slack-webhook-signature.test.ts`
+  - `pnpm --filter @atlaspm/core-api type-check`
+- Current outcome:
+  - The provider abstraction is explicit in code and docs.
+  - Storage contracts are implemented in Prisma + SQL migration.
+  - Slack now plugs into the abstraction as the first provider without embedding provider-specific logic directly in core controller flow.
+- Failure signature:
+  - `missing-integration-provider-contracts`
+- Next actions:
+  - Consider adding CRUD/service APIs for managing integration provider configs and credentials if a follow-on issue expects runtime management rather than contract-only groundwork.
