@@ -2304,6 +2304,8 @@ describe('Core API Integration', () => {
 
     expect(Array.isArray(effortRes.body.weeklyBreakdown)).toBe(true);
     expect(effortRes.body.weeklyBreakdown.length).toBe(8);
+    expect(typeof effortRes.body.weeklyBreakdown[0]?.capacityMinutes).toBe('number');
+    expect(typeof effortRes.body.weeklyBreakdown[0]?.capacityTasks).toBe('number');
     expect(typeof effortRes.body.totalEstimateMinutes).toBe('number');
     expect(typeof effortRes.body.totalSpentMinutes).toBe('number');
 
