@@ -74,19 +74,10 @@ export class IntegrationRuntimeService {
 
   async runSyncJob(input: RunIntegrationSyncJobInput): Promise<RunIntegrationSyncJobResult> {
     const provider = this.registry.get(input.providerKey);
-    const existingState = await this.prisma.integrationSyncState.findUnique({
-      where: {
-        providerConfigId_scope: {
-          providerConfigId: input.providerConfigId,
-          scope: input.scope,
-        },
-      },
-    });
+    const startedAt = new Date();
+    const claimed = await this.claimSyncExecution(input, startedAt);
 
-    if (
-      existingState?.status === 'RUNNING' &&
-      !this.isStaleRunningSync(existingState.startedAt ?? null)
-    ) {
+    if (!claimed) {
       this.logStructuredEvent('integration.sync.skipped', {
         providerKey: input.providerKey,
         providerConfigId: input.providerConfigId,
@@ -98,38 +89,6 @@ export class IntegrationRuntimeService {
         message: 'A sync is already running for this provider scope.',
       };
     }
-
-    const startedAt = new Date();
-    await this.prisma.integrationSyncState.upsert({
-      where: {
-        providerConfigId_scope: {
-          providerConfigId: input.providerConfigId,
-          scope: input.scope,
-        },
-      },
-      create: {
-        providerConfigId: input.providerConfigId,
-        scope: input.scope,
-        status: 'RUNNING',
-        cursor: input.cursor ?? null,
-        startedAt,
-        metadata: {
-          providerKey: input.providerKey,
-          lastReason: input.reason,
-        } as Prisma.InputJsonValue,
-      },
-      update: {
-        status: 'RUNNING',
-        startedAt,
-        finishedAt: null,
-        lastErrorCode: null,
-        lastErrorMessage: null,
-        metadata: {
-          providerKey: input.providerKey,
-          lastReason: input.reason,
-        } as Prisma.InputJsonValue,
-      },
-    });
 
     this.logStructuredEvent('integration.sync.started', {
       providerKey: input.providerKey,
@@ -149,6 +108,28 @@ export class IntegrationRuntimeService {
       });
 
       const finishedAt = new Date();
+      const stateUpdate: Prisma.IntegrationSyncStateUpdateInput = {
+        status: this.mapSyncResultStatus(result.status),
+        cursor: result.nextCursor ?? input.cursor ?? undefined,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        metadata: {
+          providerKey: input.providerKey,
+          lastReason: input.reason,
+          lastResultStatus: result.status,
+          lastMessage: this.sanitizeMessage(result.message),
+        } as Prisma.InputJsonValue,
+      };
+
+      if (result.status === 'completed') {
+        stateUpdate.lastSyncedAt = finishedAt;
+        stateUpdate.nextSyncAt = null;
+        stateUpdate.finishedAt = finishedAt;
+      } else if (result.status === 'not_supported') {
+        stateUpdate.nextSyncAt = null;
+        stateUpdate.finishedAt = finishedAt;
+      }
+
       await this.prisma.integrationSyncState.update({
         where: {
           providerConfigId_scope: {
@@ -156,21 +137,7 @@ export class IntegrationRuntimeService {
             scope: input.scope,
           },
         },
-        data: {
-          status: result.status === 'completed' ? 'SUCCEEDED' : 'IDLE',
-          cursor: result.nextCursor ?? input.cursor ?? null,
-          lastSyncedAt: result.status === 'completed' ? finishedAt : null,
-          nextSyncAt: null,
-          finishedAt,
-          lastErrorCode: null,
-          lastErrorMessage: null,
-          metadata: {
-            providerKey: input.providerKey,
-            lastReason: input.reason,
-            lastResultStatus: result.status,
-            lastMessage: this.sanitizeMessage(result.message),
-          } as Prisma.InputJsonValue,
-        },
+        data: stateUpdate,
       });
 
       this.logStructuredEvent('integration.sync.completed', {
@@ -213,7 +180,7 @@ export class IntegrationRuntimeService {
         errorMessage: sanitizedError.message,
       });
 
-      throw error;
+      throw this.createSanitizedException(sanitizedError, error);
     }
   }
 
@@ -230,11 +197,65 @@ export class IntegrationRuntimeService {
     }
   }
 
-  private isStaleRunningSync(startedAt: Date | null): boolean {
-    if (!startedAt) {
-      return true;
+  private async claimSyncExecution(
+    input: RunIntegrationSyncJobInput,
+    startedAt: Date,
+  ): Promise<boolean> {
+    await this.prisma.integrationSyncState.upsert({
+      where: {
+        providerConfigId_scope: {
+          providerConfigId: input.providerConfigId,
+          scope: input.scope,
+        },
+      },
+      create: {
+        providerConfigId: input.providerConfigId,
+        scope: input.scope,
+        status: 'IDLE',
+        cursor: input.cursor ?? null,
+        metadata: {
+          providerKey: input.providerKey,
+        } as Prisma.InputJsonValue,
+      },
+      update: {},
+    });
+
+    const claimedState = await this.prisma.integrationSyncState.updateMany({
+      where: {
+        providerConfigId: input.providerConfigId,
+        scope: input.scope,
+        OR: [
+          { status: { not: 'RUNNING' } },
+          { startedAt: null },
+          { startedAt: { lt: new Date(startedAt.getTime() - RUNNING_SYNC_STALE_MS) } },
+        ],
+      },
+      data: {
+        status: 'RUNNING',
+        cursor: input.cursor ?? undefined,
+        startedAt,
+        finishedAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        metadata: {
+          providerKey: input.providerKey,
+          lastReason: input.reason,
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    return claimedState.count === 1;
+  }
+
+  private mapSyncResultStatus(status: IntegrationSyncResult['status']): 'SUCCEEDED' | 'RUNNING' | 'IDLE' {
+    switch (status) {
+      case 'completed':
+        return 'SUCCEEDED';
+      case 'queued':
+        return 'RUNNING';
+      case 'not_supported':
+        return 'IDLE';
     }
-    return Date.now() - startedAt.getTime() > RUNNING_SYNC_STALE_MS;
   }
 
   private sanitizeError(error: unknown): { code: string; message: string } {
@@ -267,8 +288,20 @@ export class IntegrationRuntimeService {
     return message
       .replace(/\bBearer\s+[A-Za-z0-9._-]+\b/gi, 'Bearer [redacted]')
       .replace(/\bxox[a-z]-[A-Za-z0-9-]+\b/gi, '[redacted-token]')
-      .replace(/\b(api key|access token|refresh token|signing secret|token|secret|password)\s*[:=]?\s*\S+/gi, '$1 [redacted]')
+      .replace(/(^|\s)(api key|access token|refresh token|signing secret|token|secret|password)\s*[:=]?\s*\S+/gi, '$1$2 [redacted]')
       .slice(0, 500);
+  }
+
+  private createSanitizedException(
+    sanitizedError: { code: string; message: string },
+    cause: unknown,
+  ): Error & { code?: string; cause?: unknown } {
+    const sanitizedException: Error & { code?: string; cause?: unknown } = new Error(
+      sanitizedError.message,
+    );
+    sanitizedException.code = sanitizedError.code;
+    sanitizedException.cause = cause;
+    return sanitizedException;
   }
 
   private logStructuredEvent(event: string, details: Record<string, unknown>): void {
