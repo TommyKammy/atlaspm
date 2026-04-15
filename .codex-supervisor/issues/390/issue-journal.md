@@ -18,12 +18,12 @@ Extracted the dependency/subtask endpoints out of `TasksController` into [task-d
 
 Focused verification passed for the new slice and touched source files. Package type-check for `@atlaspm/core-api` also passed in this worktree. The remaining verification gap from earlier turns is still environmental and limited to the DB-backed reminder integration path, where `prisma migrate deploy` previously failed with `P1001` against `localhost:55432`.
 
-Summary: Extracted dependency/subtask routes into a dedicated controller, added a dependency slice characterization test, and verified the slice with tests, lint, and package type-check.
-State hint: stabilizing
+Summary: Extracted dependency/subtask routes into a dedicated controller, added a dependency slice characterization test, committed the checkpoint as `2ffc507`, and opened draft PR #396.
+State hint: draft_pr
 Blocked reason: none
 Tests: `corepack pnpm --filter @atlaspm/core-api exec vitest run test/task-comments-slice.test.ts test/task-attachments-slice.test.ts test/task-reminders-slice.test.ts test/task-dependencies-slice.test.ts` passed; `corepack pnpm --filter @atlaspm/core-api exec eslint src/tasks/task-dependencies.controller.ts src/tasks/tasks.controller.ts src/app.module.ts` passed; `corepack pnpm --filter @atlaspm/core-api type-check` passed
-Next action: Commit the dependency/subtask slice checkpoint, push `codex/issue-390`, and open a draft PR so the branch stops sitting in stabilizing without review context.
-Failure signature: stale-stabilizing-no-pr-recovery-loop
+Next action: Continue the remaining controller split from draft PR #396, with timeline as the next higher-coupling surface once any needed DB-backed verification is available.
+Failure signature: none
 
 ## Active Failure Context
 - None recorded.
@@ -33,10 +33,10 @@ Failure signature: stale-stabilizing-no-pr-recovery-loop
 - Hypothesis: `dependencies-subtasks` is the next bounded `TasksController` seam after reminders because the business logic already lives in `SubtaskService`; extracting just the route ownership should be low-risk and reviewable.
 - What changed: Added `apps/core-api/test/task-dependencies-slice.test.ts`, created `apps/core-api/src/tasks/task-dependencies.controller.ts`, wired `TaskDependenciesController` through `apps/core-api/src/app.module.ts`, and removed the dependency/subtask DTOs plus endpoints from `apps/core-api/src/tasks/tasks.controller.ts`.
 - Current blocker: None for the dependency/subtask slice itself. Earlier DB-backed reminder integration remains unrerun because the local Postgres test instance on `localhost:55432` was unavailable when `prisma migrate deploy` was attempted.
-- Next exact step: Stage only the task-slice files and this issue journal, commit the checkpoint, push `codex/issue-390`, and open a draft PR. After that, either resume broader verification once the test DB is available or begin the higher-coupling timeline split.
+- Next exact step: Continue from draft PR #396 (`https://github.com/TommyKammy/atlaspm/pull/396`). After that, either resume broader verification once the test DB is available or begin the higher-coupling timeline split.
 - Verification gap: Characterization coverage, touched-source lint, and `@atlaspm/core-api` package type-check all passed for this slice. No DB-backed integration path was needed for the controller move itself.
 - Files touched: `apps/core-api/test/task-dependencies-slice.test.ts`, `apps/core-api/src/tasks/task-dependencies.controller.ts`, `apps/core-api/src/tasks/tasks.controller.ts`, `apps/core-api/src/app.module.ts`.
 - Rollback concern: Low; this extraction only rehomes thin transport/auth glue around `SubtaskService` and preserves the existing route paths and payload handling.
-- Last focused command: `corepack pnpm --filter @atlaspm/core-api type-check`
+- Last focused command: `gh pr create --draft --base main --head codex/issue-390 --title "[codex] Split task controller slices for attachments, reminders, and dependencies" --body-file /tmp/issue-390-pr-body.md`
 ### Scratchpad
 - Keep this section short. The supervisor may compact older notes automatically.
