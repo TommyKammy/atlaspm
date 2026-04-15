@@ -1,53 +1,20 @@
 'use client';
 
 import * as Dialog from '@radix-ui/react-dialog';
-import { dateOnlyInputToLocalDate, dateOnlyInputValue, normalizeDateOnlyUtcIso } from '@atlaspm/domain';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import {
-  Activity,
-  CalendarDays,
-  CheckCircle2,
-  Circle,
-  Diamond,
-  Clock3,
-  Flag,
-  Folder,
-  Gauge,
-  List,
-  MessageSquare,
-  Paperclip,
-  Stamp,
-  Tag,
-  UserCircle2,
-  X,
-} from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { api, apiBaseUrl, useProjects } from '@/lib/api';
+import { Activity, List, MessageSquare, Paperclip, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import type {
-  AuditEvent,
-  ProjectMember,
-  RecurringFrequency,
-  ReminderPreferences,
-  RecurringRule,
-  Section,
-  SectionTaskGroup,
-  Task,
-  TaskAttachment,
-  TaskComment,
-  TaskDependency,
-  TaskReminder,
-  TaskTree,
-} from '@/lib/types';
-import { ApprovalSection } from '@/components/task-approval-section';
+import type { AuditEvent, ProjectMember, Section, SectionTaskGroup, Task, TaskTree } from '@/lib/types';
 import { AuditActivityList } from '@/components/audit-activity-list';
-import { DependencyManager } from '@/components/dependency-manager';
-import TaskDescriptionEditor from '@/components/editor/TaskDescriptionEditor';
-import { FollowerToggle } from '@/components/follower-toggle';
-import { ProjectSelector } from '@/components/project-selector';
-import { SubtaskList } from '@/components/subtask-list';
-import { Badge } from '@/components/ui/badge';
+import { TaskDetailCommentsTab } from '@/components/task-detail/task-detail-comments-tab';
+import { TaskDetailDetailsTab } from '@/components/task-detail/task-detail-details-tab';
+import {
+  compactSnapshotActivity,
+  countOpenSubtasks,
+  renderTaskTypeCompletionIcon,
+} from '@/components/task-detail/task-detail-utils';
 import { Button } from '@/components/ui/button';
 import {
   Dialog as UiDialog,
@@ -57,258 +24,8 @@ import {
   DialogTitle as UiDialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/lib/i18n';
-import { DEFAULT_REMINDER_PREFERENCES } from '@/lib/reminder-preferences';
 import { cn } from '@/lib/utils';
-
-function getAuditDescriptionText(event: AuditEvent) {
-  const beforeRaw = event.beforeJson?.descriptionText;
-  const afterRaw = event.afterJson?.descriptionText;
-  return {
-    before: typeof beforeRaw === 'string' ? beforeRaw : '',
-    after: typeof afterRaw === 'string' ? afterRaw : '',
-  };
-}
-
-function compactSnapshotActivity(events: AuditEvent[]) {
-  const compacted: AuditEvent[] = [];
-  for (const event of events) {
-    const prev = compacted[compacted.length - 1];
-    if (!prev) {
-      compacted.push(event);
-      continue;
-    }
-
-    const bothSnapshotSaves =
-      prev.action === 'task.description.snapshot_saved' &&
-      event.action === 'task.description.snapshot_saved' &&
-      prev.actor === 'collab-server' &&
-      event.actor === 'collab-server';
-    if (!bothSnapshotSaves) {
-      compacted.push(event);
-      continue;
-    }
-
-    const prevText = getAuditDescriptionText(prev);
-    const currentText = getAuditDescriptionText(event);
-    const elapsedMs = Math.abs(new Date(event.createdAt).getTime() - new Date(prev.createdAt).getTime());
-    const looksDuplicate =
-      prevText.after === currentText.after &&
-      prevText.before !== prevText.after &&
-      currentText.before === currentText.after &&
-      elapsedMs <= 2_500;
-
-    if (looksDuplicate) continue;
-    compacted.push(event);
-  }
-  return compacted;
-}
-
-function renderTaskTypeCompletionIcon(task: Task | null | undefined, isDone: boolean) {
-  if (task?.type === 'MILESTONE') {
-    return <Diamond className={cn('mr-1 h-4 w-4 shrink-0', isDone ? 'fill-current text-emerald-600' : 'text-muted-foreground')} />;
-  }
-  if (task?.type === 'APPROVAL') {
-    return <Stamp className={cn('mr-1 h-4 w-4 shrink-0', isDone ? 'text-emerald-600' : 'text-muted-foreground')} />;
-  }
-  return isDone ? <CheckCircle2 className="mr-1 h-4 w-4 shrink-0" /> : <Circle className="mr-1 h-4 w-4 shrink-0" />;
-}
-
-function parseCommentBody(body: string) {
-  const regex = /@\[(?<id>[a-zA-Z0-9:_-]+)\|(?<label>[^\]]+)\]/g;
-  const output: Array<{ type: 'text' | 'mention'; value: string; userId?: string }> = [];
-  let cursor = 0;
-  let match = regex.exec(body);
-  while (match) {
-    if (match.index > cursor) {
-      output.push({ type: 'text', value: body.slice(cursor, match.index) });
-    }
-    output.push({
-      type: 'mention',
-      userId: match.groups?.id ?? '',
-      value: `@${match.groups?.label ?? match.groups?.id ?? ''}`,
-    });
-    cursor = match.index + match[0].length;
-    match = regex.exec(body);
-  }
-  if (cursor < body.length) output.push({ type: 'text', value: body.slice(cursor) });
-  return output;
-}
-
-function serializeCommentMentions(body: string, members: ProjectMember[]) {
-  if (!body.trim()) return body;
-  const idToLabel = new Map<string, string>();
-  for (const member of members) {
-    const label = member.user.displayName ?? member.user.email ?? member.user.id;
-    idToLabel.set(member.userId.toLowerCase(), label);
-  }
-  return body.replace(/(^|\s)@([a-zA-Z0-9._:|-]+)/g, (whole, prefix: string, mentionId: string) => {
-    const label = idToLabel.get(mentionId.toLowerCase());
-    if (!label) return whole;
-    return `${prefix}@[${mentionId}|${label}]`;
-  });
-}
-
-function normalizeComposerMentions(body: string) {
-  return body.replace(/@\[(?<id>[a-zA-Z0-9:_-]+)\|[^\]]+\]/g, (_whole, mentionId: string) => `@${mentionId}`);
-}
-
-function statusLabel(status: Task['status'], t: (key: string) => string) {
-  if (status === 'TODO') return t('statusTodo');
-  if (status === 'IN_PROGRESS') return t('statusInProgress');
-  if (status === 'DONE') return t('statusDone');
-  if (status === 'BLOCKED') return t('statusBlocked');
-  return status;
-}
-
-function assigneeLabel(task: Task | undefined, members: ProjectMember[], t: (key: string) => string) {
-  if (!task?.assigneeUserId) return t('unassigned');
-  const member = members.find((item) => item.userId === task.assigneeUserId);
-  if (!member) return task.assigneeUserId;
-  return member.user.displayName || member.user.email || member.user.id;
-}
-
-function initials(value: string) {
-  const pieces = value.trim().split(/\s+/).slice(0, 2);
-  return pieces.map((piece) => piece.charAt(0).toUpperCase()).join('') || 'U';
-}
-
-function toDateInputValue(value?: string | null) {
-  return dateOnlyInputValue(value);
-}
-
-function toDatetimeLocalInputValue(date: Date) {
-  const offsetMs = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
-}
-
-function buildDefaultReminderInputValue(dueAt: string | null | undefined, leadTimeMinutes: number) {
-  const dueDate = dateOnlyInputToLocalDate(dueAt);
-  if (!dueDate) return '';
-  const dueMorning = new Date(dueDate);
-  dueMorning.setHours(9, 0, 0, 0);
-  return toDatetimeLocalInputValue(new Date(dueMorning.getTime() - leadTimeMinutes * 60_000));
-}
-
-function countOpenSubtasks(nodes: TaskTree[]) {
-  let count = 0;
-  const queue = [...nodes];
-  while (queue.length > 0) {
-    const node = queue.shift();
-    if (!node) continue;
-    if (node.status !== 'DONE') count += 1;
-    if (node.children?.length) queue.push(...node.children);
-  }
-  return count;
-}
-
-function MetadataRow({
-  icon,
-  label,
-  children,
-}: {
-  icon: ReactNode;
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="grid grid-cols-[140px_1fr] items-center gap-2 py-1">
-      <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-        {icon}
-        <span>{label}</span>
-      </div>
-      <div>{children}</div>
-    </div>
-  );
-}
-
-type FollowerState = Pick<Task, 'followerCount' | 'isFollowedByCurrentUser'>;
-
-function toFollowerState(response: {
-  followerCount: number;
-  isFollowedByCurrentUser: boolean;
-}) {
-  return {
-    followerCount: response.followerCount,
-    isFollowedByCurrentUser: response.isFollowedByCurrentUser,
-  } satisfies FollowerState;
-}
-
-type RecurrenceDraft = {
-  frequency: RecurringFrequency;
-  interval: string;
-  daysOfWeek: number[];
-  dayOfMonth: string;
-  startDate: string;
-  endDate: string;
-};
-
-const RECURRENCE_WEEKDAY_KEYS = [
-  'weekdaySunShort',
-  'weekdayMonShort',
-  'weekdayTueShort',
-  'weekdayWedShort',
-  'weekdayThuShort',
-  'weekdayFriShort',
-  'weekdaySatShort',
-] as const;
-
-function recurrenceIntervalLabel(interval: number, frequency: RecurringFrequency, t: (key: string) => string) {
-  if (frequency === 'DAILY') {
-    return interval === 1
-      ? t('recurrenceEveryDay')
-      : t('recurrenceEveryDays').replace('{count}', String(interval));
-  }
-  if (frequency === 'WEEKLY') {
-    return interval === 1
-      ? t('recurrenceEveryWeek')
-      : t('recurrenceEveryWeeks').replace('{count}', String(interval));
-  }
-  return interval === 1
-    ? t('recurrenceEveryMonth')
-    : t('recurrenceEveryMonths').replace('{count}', String(interval));
-}
-
-function recurrenceSummary(rule: RecurringRule, locale: 'en' | 'ja', t: (key: string) => string) {
-  const parts = [recurrenceIntervalLabel(rule.interval, rule.frequency, t)];
-  if (rule.frequency === 'WEEKLY' && rule.daysOfWeek.length) {
-    parts.push(rule.daysOfWeek
-      .slice()
-      .sort((left, right) => left - right)
-      .map((day) => t(RECURRENCE_WEEKDAY_KEYS[day] ?? RECURRENCE_WEEKDAY_KEYS[0]))
-      .join(', '));
-  }
-  if (rule.frequency === 'MONTHLY' && rule.dayOfMonth) {
-    parts.push(t('recurrenceDayNumber').replace('{day}', String(rule.dayOfMonth)));
-  }
-  const startDate = dateOnlyInputToLocalDate(rule.startDate);
-  if (startDate) {
-    parts.push(startDate.toLocaleDateString(locale === 'ja' ? 'ja-JP' : 'en-US'));
-  }
-  if (!rule.isActive) {
-    parts.unshift(t('recurrenceDisabled'));
-  }
-  return parts.join(' • ');
-}
-
-function localDateInputToday() {
-  const now = new Date();
-  const localDateAsUtc = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
-  return localDateAsUtc.toISOString().slice(0, 10);
-}
-
-function createRecurrenceDraft(task: Task | undefined, rule: RecurringRule | null): RecurrenceDraft {
-  const fallbackStartDate = dateOnlyInputValue(task?.startAt) || dateOnlyInputValue(task?.dueAt) || localDateInputToday();
-  return {
-    frequency: rule?.frequency ?? 'DAILY',
-    interval: String(rule?.interval ?? 1),
-    daysOfWeek: rule?.daysOfWeek ?? [],
-    dayOfMonth: rule?.dayOfMonth ? String(rule.dayOfMonth) : '',
-    startDate: dateOnlyInputValue(rule?.startDate) || fallbackStartDate,
-    endDate: dateOnlyInputValue(rule?.endDate) || '',
-  };
-}
 
 export default function TaskDetailDrawer({
   taskId,
@@ -321,26 +38,10 @@ export default function TaskDetailDrawer({
   onOpenChange: (open: boolean) => void;
   projectId: string;
 }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<'details' | 'comments' | 'activity'>('details');
-  const [newComment, setNewComment] = useState('');
-  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
-  const [editingBody, setEditingBody] = useState('');
-  const [commentMentionQuery, setCommentMentionQuery] = useState('');
-  const [reminderAtInput, setReminderAtInput] = useState('');
   const [titleInput, setTitleInput] = useState('');
-  const [progressInput, setProgressInput] = useState('0');
-  const [startDateInput, setStartDateInput] = useState('');
-  const [dueDateInput, setDueDateInput] = useState('');
-  const [assigneeInput, setAssigneeInput] = useState<string>('unassigned');
-  const [statusInput, setStatusInput] = useState<Task['status']>('TODO');
-  const [recurrenceDraft, setRecurrenceDraft] = useState<RecurrenceDraft>(createRecurrenceDraft(undefined, null));
-  const [isRecurrenceEditing, setIsRecurrenceEditing] = useState(false);
-  const [recurrenceError, setRecurrenceError] = useState<string | null>(null);
   const [undoComplete, setUndoComplete] = useState<{
     taskId: string;
     title: string;
@@ -350,37 +51,12 @@ export default function TaskDetailDrawer({
   const [pendingCompleteWarningCount, setPendingCompleteWarningCount] = useState<number | null>(null);
   const attachmentsSectionRef = useRef<HTMLElement | null>(null);
   const undoCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingScheduleDraftRef = useRef<{ startDate: string; dueDate: string } | null>(null);
 
   const enabled = Boolean(taskId && open);
 
   const taskQuery = useQuery<Task>({
     queryKey: taskId ? queryKeys.taskDetail(taskId) : ['task', 'none'],
     queryFn: () => api(`/tasks/${taskId}`),
-    enabled,
-  });
-
-  const commentsQuery = useQuery<TaskComment[]>({
-    queryKey: taskId ? queryKeys.taskComments(taskId) : ['task', 'none', 'comments'],
-    queryFn: () => api(`/tasks/${taskId}/comments`),
-    enabled,
-  });
-
-  const attachmentsQuery = useQuery<TaskAttachment[]>({
-    queryKey: taskId ? queryKeys.taskAttachments(taskId) : ['task', 'none', 'attachments'],
-    queryFn: () => api(`/tasks/${taskId}/attachments`),
-    enabled,
-  });
-
-  const reminderQuery = useQuery<TaskReminder | null>({
-    queryKey: taskId ? queryKeys.taskReminder(taskId) : ['task', 'none', 'reminder'],
-    queryFn: () => api(`/tasks/${taskId}/reminder`),
-    enabled,
-  });
-
-  const reminderPreferencesQuery = useQuery<ReminderPreferences>({
-    queryKey: queryKeys.reminderPreferences,
-    queryFn: () => api('/me/reminder-preferences'),
     enabled,
   });
 
@@ -395,15 +71,10 @@ export default function TaskDetailDrawer({
     queryFn: () => api(`/projects/${projectId}/members`),
     enabled,
   });
+
   const sectionsQuery = useQuery<Section[]>({
     queryKey: queryKeys.projectSections(projectId),
     queryFn: () => api(`/projects/${projectId}/sections`),
-    enabled,
-  });
-
-  const dependenciesQuery = useQuery<TaskDependency[]>({
-    queryKey: taskId ? queryKeys.taskDependencies(taskId) : ['task', 'none', 'dependencies'],
-    queryFn: () => api(`/tasks/${taskId}/dependencies`),
     enabled,
   });
 
@@ -412,25 +83,6 @@ export default function TaskDetailDrawer({
     queryFn: () => api(`/tasks/${taskId}/subtasks/tree`),
     enabled,
   });
-
-  const meQuery = useQuery<{ id: string }>({
-    queryKey: queryKeys.me,
-    queryFn: () => api('/me'),
-  });
-
-  const projectQuery = useQuery<{ id: string; workspaceId: string; name: string }>({
-    queryKey: ['project', projectId],
-    queryFn: () => api(`/projects/${projectId}`),
-    enabled: enabled && !!projectId,
-  });
-
-  const recurringRulesQuery = useQuery<RecurringRule[]>({
-    queryKey: queryKeys.projectRecurringRules(projectId, { includeInactive: true }),
-    queryFn: () => api(`/projects/${projectId}/recurring-rules?includeInactive=true`),
-    enabled,
-  });
-
-  const projectsQuery = useProjects(projectQuery.data?.workspaceId ?? '');
 
   const syncTaskCaches = (updated: Task) => {
     queryClient.setQueryData(queryKeys.taskDetail(updated.id), updated);
@@ -446,42 +98,6 @@ export default function TaskDetailDrawer({
     mutationFn: (body: Record<string, unknown>) => api(`/tasks/${taskId}`, { method: 'PATCH', body }) as Promise<Task>,
     onSuccess: async (updated) => {
       syncTaskCaches(updated);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(updated.id) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
-    },
-  });
-
-  const patchSchedule = useMutation({
-    mutationFn: ({
-      version,
-      startDate,
-      dueDate,
-    }: {
-      version: number;
-      startDate: string;
-      dueDate: string;
-    }) =>
-      api(`/tasks/${taskId}`, {
-        method: 'PATCH',
-        body: {
-          version,
-          startAt: normalizeDateOnlyUtcIso(startDate),
-          dueAt: normalizeDateOnlyUtcIso(dueDate),
-        },
-      }) as Promise<Task>,
-    onSuccess: async (updated) => {
-      syncTaskCaches(updated);
-      const pending = pendingScheduleDraftRef.current;
-      const persistedStartDate = dateOnlyInputValue(updated.startAt);
-      const persistedDueDate = dateOnlyInputValue(updated.dueAt);
-      if (pending && (pending.startDate !== persistedStartDate || pending.dueDate !== persistedDueDate)) {
-        pendingScheduleDraftRef.current = null;
-        patchSchedule.mutate({
-          version: updated.version,
-          startDate: pending.startDate,
-          dueDate: pending.dueDate,
-        });
-      }
       await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(updated.id) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
     },
@@ -522,245 +138,35 @@ export default function TaskDetailDrawer({
     },
   });
 
-  const createComment = useMutation({
-    mutationFn: (body: string) =>
-      api(`/tasks/${taskId}/comments`, {
-        method: 'POST',
-        body: { body: serializeCommentMentions(body, membersQuery.data ?? []) },
-      }) as Promise<TaskComment>,
-    onSuccess: async () => {
-      setNewComment('');
-      await queryClient.invalidateQueries({ queryKey: queryKeys.taskComments(taskId!) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
-    },
-  });
-
-  const syncFollowerState = (taskIdToUpdate: string, followerState: FollowerState) => {
-    queryClient.setQueryData<Task | undefined>(queryKeys.taskDetail(taskIdToUpdate), (current) =>
-      current ? { ...current, ...followerState } : current,
-    );
-    queryClient.setQueryData<SectionTaskGroup[]>(queryKeys.projectTasksGrouped(projectId), (current = []) =>
-      current.map((group) => ({
-        ...group,
-        tasks: group.tasks.map((task) => (task.id === taskIdToUpdate ? { ...task, ...followerState } : task)),
-      })),
-    );
-  };
-
-  const followTask = useMutation({
-    mutationFn: () =>
-      api(`/tasks/${taskId}/followers`, { method: 'POST' }) as Promise<{
-        followerCount: number;
-        isFollowedByCurrentUser: boolean;
-      }>,
-    onSuccess: (updated) => {
-      if (!taskId) return;
-      syncFollowerState(taskId, toFollowerState(updated));
-    },
-  });
-
-  const unfollowTask = useMutation({
-    mutationFn: () =>
-      api(`/tasks/${taskId}/followers/me`, { method: 'DELETE' }) as Promise<{
-        followerCount: number;
-        isFollowedByCurrentUser: boolean;
-      }>,
-    onSuccess: (updated) => {
-      if (!taskId) return;
-      syncFollowerState(taskId, toFollowerState(updated));
-    },
-  });
-
-  const updateComment = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: string }) => api(`/comments/${id}`, { method: 'PATCH', body: { body } }) as Promise<TaskComment>,
-    onSuccess: async () => {
-      setEditingCommentId(null);
-      setEditingBody('');
-      await queryClient.invalidateQueries({ queryKey: queryKeys.taskComments(taskId!) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
-    },
-  });
-
-  const deleteComment = useMutation({
-    mutationFn: (id: string) => api(`/comments/${id}`, { method: 'DELETE' }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.taskComments(taskId!) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
-    },
-  });
-
-  const deleteAttachment = useMutation({
-    mutationFn: (id: string) => api(`/attachments/${id}`, { method: 'DELETE' }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAttachments(taskId!) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
-    },
-  });
-
-  const setReminder = useMutation({
-    mutationFn: (remindAt: string) => api(`/tasks/${taskId}/reminder`, { method: 'PUT', body: { remindAt } }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.taskReminder(taskId!) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
-    },
-  });
-
-  const clearReminder = useMutation({
-    mutationFn: () => api(`/tasks/${taskId}/reminder`, { method: 'DELETE' }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.taskReminder(taskId!) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
-    },
-  });
-
-  const createRecurrence = useMutation({
-    mutationFn: (body: Record<string, unknown>) =>
-      api(`/projects/${projectId}/recurring-rules`, {
-        method: 'POST',
-        body,
-      }) as Promise<RecurringRule>,
-    onSuccess: async (created) => {
-      setRecurrenceError(null);
-      setIsRecurrenceEditing(false);
-      queryClient.setQueryData<RecurringRule[]>(
-        queryKeys.projectRecurringRules(projectId, { includeInactive: true }),
-        (current = []) => [created, ...current.filter((rule) => rule.id !== created.id)],
-      );
-      await queryClient.invalidateQueries({ queryKey: queryKeys.projectRecurringRules(projectId, { includeInactive: true }) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
-    },
-    onError: (error) => {
-      setRecurrenceError(error instanceof Error ? error.message : t('recurrenceSaveFailed'));
-    },
-  });
-
-  const updateRecurrence = useMutation({
-    mutationFn: ({ ruleId, body }: { ruleId: string; body: Record<string, unknown> }) =>
-      api(`/recurring-rules/${ruleId}`, {
-        method: 'PUT',
-        body,
-      }) as Promise<RecurringRule>,
-    onSuccess: async (updated) => {
-      setRecurrenceError(null);
-      setIsRecurrenceEditing(false);
-      queryClient.setQueryData<RecurringRule[]>(
-        queryKeys.projectRecurringRules(projectId, { includeInactive: true }),
-        (current = []) => {
-          if (!current.some((rule) => rule.id === updated.id)) {
-            return [updated, ...current];
-          }
-          return current.map((rule) => (rule.id === updated.id ? { ...rule, ...updated } : rule));
-        },
-      );
-      await queryClient.invalidateQueries({ queryKey: queryKeys.projectRecurringRules(projectId, { includeInactive: true }) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId!) });
-    },
-    onError: (error) => {
-      setRecurrenceError(error instanceof Error ? error.message : t('recurrenceSaveFailed'));
-    },
-  });
-
+  const currentTask = taskQuery.data;
   const members = membersQuery.data ?? [];
-  const mentionCandidates = members.filter((member) => {
-    const name = (member.user.displayName ?? member.user.email ?? member.user.id).toLowerCase();
-    return !commentMentionQuery || name.includes(commentMentionQuery.toLowerCase());
-  });
-
-  const comments = commentsQuery.data ?? [];
-  const attachments = attachmentsQuery.data ?? [];
   const activity = useMemo(
     () => compactSnapshotActivity((activityQuery.data ?? []).slice().reverse()),
     [activityQuery.data],
   );
-  const dependencies = dependenciesQuery.data ?? [];
-  const currentTask = taskQuery.data;
-  const blockingCount = dependencies.filter((dep) => dep.dependsOnTask && dep.dependsOnTask.status !== 'DONE').length;
-  const reminderPreferences = reminderPreferencesQuery.data ?? DEFAULT_REMINDER_PREFERENCES;
-  const reminderLocal = reminderQuery.data?.remindAt
-    ? toDatetimeLocalInputValue(new Date(reminderQuery.data.remindAt))
-    : '';
-  const defaultReminderInput =
-    !reminderQuery.data?.id && reminderPreferences.enabled
-      ? buildDefaultReminderInputValue(currentTask?.dueAt, reminderPreferences.defaultLeadTimeMinutes)
-      : '';
-  const reminderInput = reminderAtInput || reminderLocal || defaultReminderInput;
-
-  const subtaskProgress = useMemo(() => {
-    const walk = (nodes: TaskTree[]): { total: number; done: number } =>
-      nodes.reduce(
-        (acc, node) => {
-          const child = walk(node.children ?? []);
-          return {
-            total: acc.total + 1 + child.total,
-            done: acc.done + (node.status === 'DONE' ? 1 : 0) + child.done,
-          };
-        },
-        { total: 0, done: 0 },
-      );
-    const counted = walk(subtasksTreeQuery.data ?? []);
-    const percent = counted.total ? Math.round((counted.done / counted.total) * 100) : 0;
-    return { ...counted, percent };
-  }, [subtasksTreeQuery.data]);
-
-  const currentRecurringRule = useMemo(() => {
-    if (!currentTask) return null;
-    const rules = recurringRulesQuery.data ?? [];
-    if (currentTask.recurringRuleId) {
-      const generatedRule = rules.find((rule) => rule.id === currentTask.recurringRuleId);
-      if (generatedRule) return generatedRule;
-    }
-    return rules.find((rule) => rule.sourceTaskId === currentTask.id) ?? null;
-  }, [currentTask, recurringRulesQuery.data]);
+  const isDone = currentTask?.status === 'DONE';
+  const openSubtaskCount = useMemo(
+    () => countOpenSubtasks(subtasksTreeQuery.data ?? []),
+    [subtasksTreeQuery.data],
+  );
 
   useEffect(() => {
     return () => {
-      if (undoCompleteTimerRef.current) {
-        clearTimeout(undoCompleteTimerRef.current);
-      }
+      if (undoCompleteTimerRef.current) clearTimeout(undoCompleteTimerRef.current);
     };
   }, []);
 
   useEffect(() => {
     if (!taskQuery.data) return;
     setTitleInput(taskQuery.data.title);
-    setProgressInput(String(taskQuery.data.progressPercent ?? 0));
-    setStartDateInput(toDateInputValue(taskQuery.data.startAt));
-    setDueDateInput(toDateInputValue(taskQuery.data.dueAt));
-    setAssigneeInput(taskQuery.data.assigneeUserId ?? 'unassigned');
-    setStatusInput(taskQuery.data.status);
   }, [taskQuery.data]);
-
-  useEffect(() => {
-    setRecurrenceDraft(createRecurrenceDraft(taskQuery.data, currentRecurringRule));
-    setRecurrenceError(null);
-    setIsRecurrenceEditing(false);
-  }, [currentRecurringRule?.id, currentRecurringRule?.updatedAt, taskQuery.data?.id]);
 
   useEffect(() => {
     if (open) return;
     setPendingCompleteWarningCount(null);
-    if (undoCompleteTimerRef.current) {
-      clearTimeout(undoCompleteTimerRef.current);
-    }
+    if (undoCompleteTimerRef.current) clearTimeout(undoCompleteTimerRef.current);
     setUndoComplete(null);
-    setIsRecurrenceEditing(false);
-    setRecurrenceError(null);
   }, [open]);
-
-  const tryCommentMentionLookup = (text: string) => {
-    const match = text.match(/(?:^|\s)@([a-zA-Z0-9._-]*)$/);
-    if (!match) {
-      setCommentMentionQuery('');
-      return;
-    }
-    setCommentMentionQuery(match[1] ?? '');
-  };
-  const currentAssignee = assigneeLabel(currentTask, members, t);
-  const isDone = currentTask?.status === 'DONE';
-  const openSubtaskCount = useMemo(
-    () => countOpenSubtasks(subtasksTreeQuery.data ?? []),
-    [subtasksTreeQuery.data],
-  );
 
   const runToggleComplete = (done: boolean, force: boolean = false) => {
     if (!currentTask || toggleComplete.isPending) return;
@@ -769,9 +175,7 @@ export default function TaskDetailDrawer({
       {
         onSuccess: () => {
           if (!done) return;
-          if (undoCompleteTimerRef.current) {
-            clearTimeout(undoCompleteTimerRef.current);
-          }
+          if (undoCompleteTimerRef.current) clearTimeout(undoCompleteTimerRef.current);
           setUndoComplete({
             taskId: currentTask.id,
             title: currentTask.title || t('untitledTask'),
@@ -809,115 +213,6 @@ export default function TaskDetailDrawer({
     }
     if (nextTitle === currentTask.title) return;
     patchTask.mutate({ title: nextTitle, version: currentTask.version });
-  };
-
-  const commitProgress = () => {
-    if (!currentTask) return;
-    const parsed = Number(progressInput);
-    if (Number.isNaN(parsed)) {
-      setProgressInput(String(currentTask.progressPercent));
-      return;
-    }
-    const normalized = Math.max(0, Math.min(100, Math.round(parsed)));
-    if (normalized === currentTask.progressPercent) return;
-    patchTask.mutate({ progressPercent: normalized, version: currentTask.version });
-  };
-
-  const commitSchedule = (nextStartDate: string, nextDueDate: string) => {
-    if (!currentTask) return;
-    const currentStartAt = dateOnlyInputValue(currentTask.startAt);
-    const currentDueAt = dateOnlyInputValue(currentTask.dueAt);
-    if (currentStartAt === nextStartDate && currentDueAt === nextDueDate) return;
-    pendingScheduleDraftRef.current = { startDate: nextStartDate, dueDate: nextDueDate };
-    if (patchSchedule.isPending) return;
-    pendingScheduleDraftRef.current = null;
-    patchSchedule.mutate({
-      version: currentTask.version,
-      startDate: nextStartDate,
-      dueDate: nextDueDate,
-    });
-  };
-
-  const commitStartDate = (nextValue: string = startDateInput) => commitSchedule(nextValue, dueDateInput);
-
-  const commitDueDate = (nextValue: string = dueDateInput) => commitSchedule(startDateInput, nextValue);
-
-  const commitStatus = (nextStatus: Task['status']) => {
-    if (!currentTask || currentTask.status === nextStatus) return;
-    patchTask.mutate({ status: nextStatus, version: currentTask.version });
-  };
-
-  const commitAssignee = (nextAssignee: string) => {
-    if (!currentTask) return;
-    const assigneeUserId = nextAssignee === 'unassigned' ? null : nextAssignee;
-    if ((currentTask.assigneeUserId ?? null) === assigneeUserId) return;
-    patchTask.mutate({ assigneeUserId, version: currentTask.version });
-  };
-
-  const toggleRecurrenceWeekday = (day: number) => {
-    setRecurrenceDraft((current) => ({
-      ...current,
-      daysOfWeek: current.daysOfWeek.includes(day)
-        ? current.daysOfWeek.filter((item) => item !== day)
-        : [...current.daysOfWeek, day].sort((left, right) => left - right),
-    }));
-  };
-
-  const saveRecurrence = () => {
-    if (!currentTask) return;
-
-    const parsedInterval = Number.parseInt(recurrenceDraft.interval, 10);
-    if (!Number.isFinite(parsedInterval) || parsedInterval < 1 || !recurrenceDraft.startDate) {
-      setRecurrenceError(t('recurrenceSaveFailed'));
-      return;
-    }
-
-    if (recurrenceDraft.frequency === 'WEEKLY' && recurrenceDraft.daysOfWeek.length === 0) {
-      setRecurrenceError(t('recurrenceWeeklyValidation'));
-      return;
-    }
-
-    const parsedDayOfMonth = Number.parseInt(recurrenceDraft.dayOfMonth, 10);
-    if (
-      recurrenceDraft.frequency === 'MONTHLY'
-      && (!Number.isFinite(parsedDayOfMonth) || parsedDayOfMonth < 1 || parsedDayOfMonth > 31)
-    ) {
-      setRecurrenceError(t('recurrenceMonthlyValidation'));
-      return;
-    }
-
-    const body = {
-      frequency: recurrenceDraft.frequency,
-      interval: parsedInterval,
-      daysOfWeek: recurrenceDraft.frequency === 'WEEKLY' ? recurrenceDraft.daysOfWeek : [],
-      dayOfMonth: recurrenceDraft.frequency === 'MONTHLY' ? parsedDayOfMonth : null,
-      startDate: normalizeDateOnlyUtcIso(recurrenceDraft.startDate),
-      endDate: recurrenceDraft.endDate ? normalizeDateOnlyUtcIso(recurrenceDraft.endDate) : null,
-    };
-
-    if (currentRecurringRule) {
-      updateRecurrence.mutate({ ruleId: currentRecurringRule.id, body });
-      return;
-    }
-
-    createRecurrence.mutate({
-      ...body,
-      title: currentTask.title.trim() || t('untitledTask'),
-      description: currentTask.descriptionText ?? currentTask.description ?? '',
-      sectionId: currentTask.sectionId,
-      sourceTaskId: currentTask.id,
-      assigneeUserId: currentTask.assigneeUserId ?? undefined,
-      priority: currentTask.priority ?? undefined,
-      tags: currentTask.tags ?? [],
-    });
-  };
-
-  const toggleRecurrenceActive = (nextActive: boolean) => {
-    if (!currentRecurringRule) return;
-    updateRecurrence.mutate({
-      ruleId: currentRecurringRule.id,
-      body: { isActive: nextActive },
-    });
   };
 
   return (
@@ -1026,603 +321,28 @@ export default function TaskDetailDrawer({
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-              {tab === 'details' ? (
-                <div className="space-y-5">
-                  <section className="space-y-1 border-b border-border/50 pb-4">
-                    <MetadataRow icon={<UserCircle2 className="h-3.5 w-3.5" />} label={t('assignee')}>
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-border/60 bg-muted/30 text-[11px] font-medium">
-                          {initials(currentAssignee)}
-                        </span>
-                        <select
-                          value={assigneeInput}
-                          onChange={(event) => {
-                            const next = event.target.value;
-                            setAssigneeInput(next);
-                            commitAssignee(next);
-                          }}
-                          className="h-8 rounded-md border border-transparent bg-transparent px-2 text-sm hover:bg-muted/30 focus:border-border focus:outline-none"
-                        >
-                          <option value="unassigned">{t('unassigned')}</option>
-                          {members.map((member) => {
-                            const label = member.user.displayName || member.user.email || member.user.id;
-                            return (
-                              <option key={member.userId} value={member.userId}>
-                                {label}
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </div>
-                    </MetadataRow>
-
-                    <MetadataRow icon={<CalendarDays className="h-3.5 w-3.5" />} label={t('startDate')}>
-                      <Input
-                        type="date"
-                        value={startDateInput}
-                        onChange={(event) => {
-                          setStartDateInput(event.target.value);
-                          commitStartDate(event.target.value);
-                        }}
-                        onBlur={() => commitStartDate()}
-                        className="h-8 w-[220px] border-transparent bg-transparent px-2 shadow-none hover:bg-muted/30 focus-visible:border-border"
-                        data-testid="task-detail-start-date"
-                      />
-                    </MetadataRow>
-
-                    <MetadataRow icon={<CalendarDays className="h-3.5 w-3.5" />} label={t('endDate')}>
-                      <Input
-                        type="date"
-                        value={dueDateInput}
-                        onChange={(event) => {
-                          setDueDateInput(event.target.value);
-                          commitDueDate(event.target.value);
-                        }}
-                        onBlur={() => commitDueDate()}
-                        className="h-8 w-[220px] border-transparent bg-transparent px-2 shadow-none hover:bg-muted/30 focus-visible:border-border"
-                        data-testid="task-detail-due-date"
-                      />
-                    </MetadataRow>
-
-                    <MetadataRow icon={<Gauge className="h-3.5 w-3.5" />} label={t('progress')}>
-                      <div className="flex items-center gap-3">
-                        <Input
-                          type="number"
-                          min={0}
-                          max={100}
-                          value={progressInput}
-                          onChange={(event) => setProgressInput(event.target.value)}
-                          onBlur={commitProgress}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter') event.currentTarget.blur();
-                          }}
-                          className="h-8 w-[88px] border-transparent bg-transparent px-2 shadow-none hover:bg-muted/30 focus-visible:border-border"
-                        />
-                        <div className="h-[4px] w-40 overflow-hidden rounded bg-muted">
-                          <div
-                            className={cn('h-full rounded transition-all', (currentTask?.progressPercent ?? 0) >= 100 ? 'bg-emerald-500' : 'bg-primary')}
-                            style={{ width: `${Math.max(0, Math.min(100, currentTask?.progressPercent ?? 0))}%` }}
-                          />
-                        </div>
-                      </div>
-                    </MetadataRow>
-
-                    <MetadataRow icon={<CheckCircle2 className="h-3.5 w-3.5" />} label={t('status')}>
-                      <select
-                        value={statusInput}
-                        onChange={(event) => {
-                          const next = event.target.value as Task['status'];
-                          setStatusInput(next);
-                          commitStatus(next);
-                        }}
-                        className="h-8 min-w-[200px] rounded-full border border-transparent bg-transparent px-3 text-sm hover:bg-muted/30 focus:border-border focus:outline-none"
-                      >
-                        {(['TODO', 'IN_PROGRESS', 'DONE', 'BLOCKED'] as const).map((status) => (
-                          <option key={status} value={status}>
-                            {statusLabel(status, t)}
-                          </option>
-                        ))}
-                      </select>
-                    </MetadataRow>
-
-                    <MetadataRow icon={<Tag className="h-3.5 w-3.5" />} label={t('taskType')}>
-                      <select
-                        value={currentTask?.type ?? 'TASK'}
-                        onChange={(event) => {
-                          const nextType = event.target.value as Task['type'];
-                          if (!currentTask) return;
-                          patchTask.mutate({ type: nextType, version: currentTask.version });
-                        }}
-                        disabled={!currentTask || patchTask.isPending}
-                        className="h-8 min-w-[200px] rounded-full border border-transparent bg-transparent px-3 text-sm hover:bg-muted/30 focus:border-border focus:outline-none disabled:opacity-50"
-                        data-testid="task-detail-type"
-                      >
-                        {(['TASK', 'MILESTONE', 'APPROVAL'] as const).map((type) => (
-                          <option key={type} value={type}>
-                            {type === 'TASK' ? t('taskTypeTask') : type === 'MILESTONE' ? t('taskTypeMilestone') : t('taskTypeApproval')}
-                          </option>
-                        ))}
-                      </select>
-                    </MetadataRow>
-
-                    <MetadataRow icon={<Folder className="h-3.5 w-3.5" />} label={t('projects')}>
-                      {taskId ? (
-                        <ProjectSelector
-                          taskId={taskId}
-                          workspaceId={projectQuery.data?.workspaceId ?? ''}
-                          availableProjects={projectsQuery.data ?? []}
-                        />
-                      ) : (
-                        <span className="text-sm text-muted-foreground">{t('loading')}...</span>
-                      )}
-                    </MetadataRow>
-
-                    {currentTask ? (
-                      <MetadataRow icon={<UserCircle2 className="h-3.5 w-3.5" />} label={t('followers')}>
-                        <FollowerToggle
-                          compact
-                          count={currentTask.followerCount ?? 0}
-                          isFollowed={currentTask.isFollowedByCurrentUser ?? false}
-                          isPending={followTask.isPending || unfollowTask.isPending}
-                          onToggle={() => {
-                            if (followTask.isPending || unfollowTask.isPending) return;
-                            if (currentTask.isFollowedByCurrentUser) {
-                              unfollowTask.mutate();
-                              return;
-                            }
-                            followTask.mutate();
-                          }}
-                          buttonTestId="task-follow-toggle"
-                          countTestId="task-follower-count"
-                          followLabel={t('follow')}
-                          followingLabel={t('following')}
-                          followerLabel={t('follower')}
-                          followersLabel={t('followers')}
-                        />
-                      </MetadataRow>
-                    ) : null}
-
-                    {currentTask?.type === 'MILESTONE' && (
-                      <div className="flex items-center gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                        <Flag className="h-4 w-4" />
-                        {t('milestoneProgressFixed')}
-                      </div>
-                    )}
-
-                    {currentTask?.type === 'APPROVAL' && meQuery.data?.id && (
-                      <ApprovalSection 
-                        task={currentTask} 
-                        currentUserId={meQuery.data.id} 
-                        isProjectAdmin={membersQuery.data?.some(m => m.userId === meQuery.data?.id && m.role === 'ADMIN') ?? false}
-                      />
-                    )}
-
-                    <div className="mt-2 flex items-center justify-between gap-2 rounded-md bg-muted/30 px-2 py-1.5">
-                      <div className="text-xs text-muted-foreground" data-testid="subtask-rollup">
-                        {t('subtasks')}: {subtaskProgress.done}/{subtaskProgress.total} ({subtaskProgress.percent}%)
-                      </div>
-                      <Badge variant={blockingCount > 0 ? 'destructive' : 'secondary'} data-testid="dependency-blocked-indicator">
-                        {blockingCount > 0 ? `${t('blockedBy')} ${blockingCount}` : t('dependenciesClear')}
-                      </Badge>
-                    </div>
-                  </section>
-
-                  <section className="space-y-2 pb-4">
-                    <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{t('dueReminder')}</div>
-                    <div className="flex flex-wrap items-center gap-2 rounded-md px-1 py-1 transition-colors hover:bg-muted/25">
-                      <Input
-                        type="datetime-local"
-                        value={reminderInput}
-                        onChange={(event) => setReminderAtInput(event.target.value)}
-                        className="h-8 w-[250px] border-transparent bg-transparent shadow-none hover:bg-muted/30 focus-visible:border-border"
-                        disabled={!reminderPreferences.enabled}
-                        data-testid="task-reminder-input"
-                      />
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          const iso = new Date(reminderInput).toISOString();
-                          setReminder.mutate(iso);
-                          setReminderAtInput('');
-                        }}
-                        disabled={!reminderInput || setReminder.isPending || !reminderPreferences.enabled}
-                        data-testid="task-reminder-save"
-                      >
-                        {setReminder.isPending ? t('saving') : t('saveReminder')}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          clearReminder.mutate();
-                          setReminderAtInput('');
-                        }}
-                        disabled={!reminderQuery.data?.id || clearReminder.isPending}
-                        data-testid="task-reminder-clear"
-                      >
-                        <Clock3 className="mr-1 h-4 w-4" />
-                        {t('clearReminder')}
-                      </Button>
-                    </div>
-                    {!reminderPreferences.enabled ? (
-                      <p className="px-1 text-xs text-muted-foreground" data-testid="task-reminder-disabled-note">
-                        {t('taskReminderDeliveryPaused')}
-                      </p>
-                    ) : (
-                      !reminderQuery.data?.id &&
-                      defaultReminderInput && (
-                        <p className="px-1 text-xs text-muted-foreground" data-testid="task-reminder-default-note">
-                          {t('taskReminderDefaultTimingHint')}
-                        </p>
-                      )
-                    )}
-                  </section>
-
-                  <section
-                    className="space-y-3 rounded-lg border border-border/60 bg-card/50 p-3"
-                    data-testid="task-detail-recurrence-section"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                          {t('recurrence')}
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                          {currentTask?.recurringRuleId ? t('recurrenceGeneratedHint') : t('recurrenceHelp')}
-                        </p>
-                      </div>
-                      {currentRecurringRule ? (
-                        <Badge variant="secondary">
-                          {currentRecurringRule.isActive ? t('recurrenceActive') : t('recurrenceDisabled')}
-                        </Badge>
-                      ) : null}
-                    </div>
-
-                    {recurrenceError ? (
-                      <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                        {recurrenceError}
-                      </div>
-                    ) : null}
-
-                    {!isRecurrenceEditing ? (
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div
-                          className="text-sm text-foreground"
-                          data-testid="task-detail-recurrence-summary"
-                        >
-                          {currentRecurringRule
-                            ? recurrenceSummary(currentRecurringRule, locale, t)
-                            : t('recurrenceEmpty')}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          {currentRecurringRule ? (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                data-testid="task-detail-recurrence-edit"
-                                onClick={() => {
-                                  setRecurrenceDraft(createRecurrenceDraft(currentTask, currentRecurringRule));
-                                  setRecurrenceError(null);
-                                  setIsRecurrenceEditing(true);
-                                }}
-                              >
-                                {t('recurrenceEdit')}
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                data-testid="task-detail-recurrence-disable"
-                                disabled={updateRecurrence.isPending}
-                                onClick={() => toggleRecurrenceActive(!currentRecurringRule.isActive)}
-                              >
-                                {currentRecurringRule.isActive ? t('recurrenceDisable') : t('recurrenceEnable')}
-                              </Button>
-                            </>
-                          ) : (
-                            <Button
-                              size="sm"
-                              data-testid="task-detail-recurrence-create"
-                              onClick={() => {
-                                setRecurrenceDraft(createRecurrenceDraft(currentTask, null));
-                                setRecurrenceError(null);
-                                setIsRecurrenceEditing(true);
-                              }}
-                            >
-                              {t('recurrenceCreate')}
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <label className="space-y-1 text-sm">
-                            <span className="text-muted-foreground">{t('recurrenceFrequency')}</span>
-                            <select
-                              value={recurrenceDraft.frequency}
-                              onChange={(event) =>
-                                setRecurrenceDraft((current) => ({
-                                  ...current,
-                                  frequency: event.target.value as RecurringFrequency,
-                                }))
-                              }
-                              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                              data-testid="task-detail-recurrence-frequency"
-                            >
-                              <option value="DAILY">{t('recurrenceDaily')}</option>
-                              <option value="WEEKLY">{t('recurrenceWeekly')}</option>
-                              <option value="MONTHLY">{t('recurrenceMonthly')}</option>
-                            </select>
-                          </label>
-                          <label className="space-y-1 text-sm">
-                            <span className="text-muted-foreground">{t('recurrenceInterval')}</span>
-                            <Input
-                              type="number"
-                              min={1}
-                              value={recurrenceDraft.interval}
-                              onChange={(event) =>
-                                setRecurrenceDraft((current) => ({ ...current, interval: event.target.value }))
-                              }
-                              data-testid="task-detail-recurrence-interval"
-                            />
-                          </label>
-                          <label className="space-y-1 text-sm">
-                            <span className="text-muted-foreground">{t('recurrenceStartDate')}</span>
-                            <Input
-                              type="date"
-                              value={recurrenceDraft.startDate}
-                              onChange={(event) =>
-                                setRecurrenceDraft((current) => ({ ...current, startDate: event.target.value }))
-                              }
-                              data-testid="task-detail-recurrence-start-date"
-                            />
-                          </label>
-                          <label className="space-y-1 text-sm">
-                            <span className="text-muted-foreground">{t('recurrenceEndDate')}</span>
-                            <Input
-                              type="date"
-                              value={recurrenceDraft.endDate}
-                              onChange={(event) =>
-                                setRecurrenceDraft((current) => ({ ...current, endDate: event.target.value }))
-                              }
-                              data-testid="task-detail-recurrence-end-date"
-                            />
-                          </label>
-                        </div>
-
-                        {recurrenceDraft.frequency === 'WEEKLY' ? (
-                          <div className="space-y-2">
-                            <div className="text-sm text-muted-foreground">{t('recurrenceDays')}</div>
-                            <div className="flex flex-wrap gap-2">
-                              {RECURRENCE_WEEKDAY_KEYS.map((labelKey, day) => (
-                                <Button
-                                  key={labelKey}
-                                  type="button"
-                                  size="sm"
-                                  variant={recurrenceDraft.daysOfWeek.includes(day) ? 'default' : 'outline'}
-                                  data-testid={`task-detail-recurrence-weekday-${day}`}
-                                  onClick={() => toggleRecurrenceWeekday(day)}
-                                >
-                                  {t(labelKey)}
-                                </Button>
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
-
-                        {recurrenceDraft.frequency === 'MONTHLY' ? (
-                          <label className="space-y-1 text-sm">
-                            <span className="text-muted-foreground">{t('recurrenceDayOfMonth')}</span>
-                            <Input
-                              type="number"
-                              min={1}
-                              max={31}
-                              value={recurrenceDraft.dayOfMonth}
-                              onChange={(event) =>
-                                setRecurrenceDraft((current) => ({ ...current, dayOfMonth: event.target.value }))
-                              }
-                              data-testid="task-detail-recurrence-day-of-month"
-                            />
-                          </label>
-                        ) : null}
-
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button
-                            size="sm"
-                            data-testid="task-detail-recurrence-save"
-                            disabled={createRecurrence.isPending || updateRecurrence.isPending}
-                            onClick={saveRecurrence}
-                          >
-                            {createRecurrence.isPending || updateRecurrence.isPending ? t('saving') : t('recurrenceSave')}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setRecurrenceDraft(createRecurrenceDraft(currentTask, currentRecurringRule));
-                              setRecurrenceError(null);
-                              setIsRecurrenceEditing(false);
-                            }}
-                          >
-                            {t('cancel')}
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </section>
-
-                  {taskId ? (
-                    <TaskDescriptionEditor
-                      taskId={taskId}
-                      descriptionDoc={taskQuery.data?.descriptionDoc ?? null}
-                      descriptionVersion={taskQuery.data?.descriptionVersion ?? 0}
-                      members={members}
-                      onSaved={async (updated) => {
-                        syncTaskCaches(updated);
-                        await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(updated.id) });
-                      }}
-                      onReloadLatest={async () => {
-                        await queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(taskId) });
-                      }}
-                      onAttachmentChanged={() => {
-                        void queryClient.invalidateQueries({ queryKey: queryKeys.taskAttachments(taskId) });
-                        void queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(taskId) });
-                      }}
-                    />
-                  ) : null}
-
-                  {attachments.length ? (
-                    <section ref={attachmentsSectionRef} className="space-y-2 border-b border-border/50 pb-4">
-                      <div className="mb-1 flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                        <Paperclip className="h-4 w-4" /> {t('attachments')}
-                      </div>
-                      <div className="space-y-1">
-                        {attachments.map((item) => (
-                          <div key={item.id} className="flex items-center justify-between px-1 py-1 text-sm" data-testid={`attachment-${item.id}`}>
-                            <a href={`${apiBaseUrl}${item.url}`} target="_blank" rel="noreferrer" className="truncate hover:underline">
-                              {item.fileName}
-                            </a>
-                            <Button size="sm" variant="ghost" onClick={() => deleteAttachment.mutate(item.id)}>
-                              {t('delete')}
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                  ) : null}
-
-                  {taskId && (
-                    <>
-                      <SubtaskList
-                        taskId={taskId}
-                        projectId={projectId}
-                        canCreateSubtask={!currentTask?.parentId}
-                        onTaskClick={(newTaskId) => {
-                          queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(newTaskId) });
-                          const next = new URLSearchParams(searchParams.toString());
-                          next.set('task', newTaskId);
-                          router.push(`${pathname}?${next.toString()}`, { scroll: false });
-                        }}
-                      />
-                      <DependencyManager taskId={taskId} />
-                    </>
-                  )}
-                </div>
+              {tab === 'details' && taskId ? (
+                <TaskDetailDetailsTab
+                  taskId={taskId}
+                  projectId={projectId}
+                  currentTask={currentTask}
+                  attachmentsSectionRef={attachmentsSectionRef}
+                  onTaskUpdated={async (updated) => {
+                    syncTaskCaches(updated);
+                    await queryClient.invalidateQueries({ queryKey: queryKeys.taskAudit(updated.id) });
+                    await queryClient.invalidateQueries({ queryKey: queryKeys.projectTasksGrouped(projectId) });
+                  }}
+                />
               ) : null}
 
-              {tab === 'comments' ? (
-                <div className="space-y-3">
-                  <div className="relative flex gap-2">
-                    <Textarea
-                      value={newComment}
-                      onChange={(event) => {
-                        const normalized = normalizeComposerMentions(event.target.value);
-                        setNewComment(normalized);
-                        tryCommentMentionLookup(normalized);
-                      }}
-                      placeholder={t('addCommentPlaceholder')}
-                      className="min-h-[88px] border-border/60"
-                      data-testid="comment-composer"
-                    />
-                    <Button
-                      className="min-w-[96px] shrink-0 self-start whitespace-nowrap px-3"
-                      onClick={() => createComment.mutate(newComment)}
-                      disabled={!newComment.trim() || createComment.isPending}
-                      data-testid="add-comment-btn"
-                    >
-                      {t('comment')}
-                    </Button>
-
-                    {commentMentionQuery && mentionCandidates.length ? (
-                      <div className="absolute left-2 top-[86px] z-20 w-72 rounded-md border bg-popover p-1 shadow" data-testid="comment-mention-menu">
-                        {mentionCandidates.slice(0, 6).map((member) => {
-                          const label = member.user.displayName ?? member.user.email ?? member.user.id;
-                          return (
-                            <button
-                              key={member.userId}
-                              type="button"
-                              className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-muted"
-                              data-testid={`comment-mention-option-${member.userId}`}
-                              onClick={() => {
-                                setNewComment((prev) => prev.replace(/(?:^|\s)@[a-zA-Z0-9._-]*$/, ` @${member.userId} `));
-                                setCommentMentionQuery('');
-                              }}
-                            >
-                              {label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="space-y-2">
-                    {comments.map((comment) => {
-                      const mine = comment.authorUserId === meQuery.data?.id;
-                      return (
-                        <div key={comment.id} className="border-b border-border/60 pb-3" data-testid={`comment-${comment.id}`}>
-                          <div className="mb-1 text-xs text-muted-foreground">
-                            {comment.author?.displayName ?? comment.authorUserId} • {new Date(comment.createdAt).toLocaleString()}
-                          </div>
-                          {editingCommentId === comment.id ? (
-                            <div className="space-y-2">
-                              <Input value={editingBody} onChange={(event) => setEditingBody(event.target.value)} />
-                              <div className="flex gap-2">
-                                <Button size="sm" onClick={() => updateComment.mutate({ id: comment.id, body: editingBody })}>
-                                  {t('save')}
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => setEditingCommentId(null)}>
-                                  {t('cancel')}
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="text-sm">
-                              {parseCommentBody(comment.body).map((chunk, index) =>
-                                chunk.type === 'mention' ? (
-                                  <span
-                                    key={`${comment.id}-m-${index}`}
-                                    className="mr-1 inline-flex rounded bg-muted px-1 py-0.5 text-xs font-medium"
-                                    data-testid={`comment-mention-pill-${comment.id}`}
-                                  >
-                                    {chunk.value}
-                                  </span>
-                                ) : (
-                                  <span key={`${comment.id}-t-${index}`}>{chunk.value}</span>
-                                ),
-                              )}
-                            </div>
-                          )}
-                          {mine && editingCommentId !== comment.id ? (
-                            <div className="mt-2 flex gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  setEditingCommentId(comment.id);
-                                  setEditingBody(comment.body);
-                                }}
-                              >
-                                {t('edit')}
-                              </Button>
-                              <Button size="sm" variant="outline" onClick={() => deleteComment.mutate(comment.id)}>
-                                {t('delete')}
-                              </Button>
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                    {!comments.length ? <div className="text-sm text-muted-foreground">{t('noCommentsYet')}</div> : null}
-                  </div>
-                </div>
+              {tab === 'comments' && taskId ? (
+                <TaskDetailCommentsTab taskId={taskId} members={members} />
               ) : null}
 
               {tab === 'activity' ? (
                 <AuditActivityList
                   events={activity}
-                  members={membersQuery.data ?? []}
+                  members={members}
                   sections={sectionsQuery.data ?? []}
                 />
               ) : null}
@@ -1643,9 +363,7 @@ export default function TaskDetailDrawer({
                 data-testid="task-detail-complete-undo-action"
                 disabled={restoreComplete.isPending}
                 onClick={() => {
-                  if (undoCompleteTimerRef.current) {
-                    clearTimeout(undoCompleteTimerRef.current);
-                  }
+                  if (undoCompleteTimerRef.current) clearTimeout(undoCompleteTimerRef.current);
                   const latest = queryClient.getQueryData<Task>(queryKeys.taskDetail(undoComplete.taskId));
                   if (!latest) {
                     setUndoComplete(null);
@@ -1664,9 +382,7 @@ export default function TaskDetailDrawer({
                 size="sm"
                 variant="ghost"
                 onClick={() => {
-                  if (undoCompleteTimerRef.current) {
-                    clearTimeout(undoCompleteTimerRef.current);
-                  }
+                  if (undoCompleteTimerRef.current) clearTimeout(undoCompleteTimerRef.current);
                   setUndoComplete(null);
                 }}
               >
