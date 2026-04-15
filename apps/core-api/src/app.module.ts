@@ -39,6 +39,8 @@ import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
 import { TaskProjectLinksModule } from './task-project-links/task-project-links.module';
 import { ApiThrottlingModule } from './common/throttling';
 import { AttachmentDownloadUrlService } from './tasks/attachment-download-url.service';
+import { TaskAttachmentsController } from './tasks/task-attachments.controller';
+import { TaskAttachmentsService } from './tasks/task-attachments.service';
 import { TaskCommentsController } from './tasks/task-comments.controller';
 import { TaskCommentsService } from './tasks/task-comments.service';
 import { TaskMentionsService } from './tasks/task-mentions.service';
@@ -70,6 +72,7 @@ import { GuestAccessController } from './guest-access/guest-access.controller';
     WebhooksController,
     AuditController,
     PublicAttachmentsController,
+    TaskAttachmentsController,
     TaskCommentsController,
     CollabController,
     WorkspaceAdminController,
@@ -93,6 +96,7 @@ import { GuestAccessController } from './guest-access/guest-access.controller';
     WebhookDeliveryService,
     NotificationsService,
     AttachmentDownloadUrlService,
+    TaskAttachmentsService,
     TaskCommentsService,
     TaskMentionsService,
     PublicFormSubmissionThrottleGuard,
