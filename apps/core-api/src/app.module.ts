@@ -39,9 +39,14 @@ import { ProjectRoleGuard, WorkspaceRoleGuard } from './auth/role.guard';
 import { TaskProjectLinksModule } from './task-project-links/task-project-links.module';
 import { ApiThrottlingModule } from './common/throttling';
 import { AttachmentDownloadUrlService } from './tasks/attachment-download-url.service';
+import { TaskAttachmentsController } from './tasks/task-attachments.controller';
+import { TaskAttachmentsService } from './tasks/task-attachments.service';
 import { TaskCommentsController } from './tasks/task-comments.controller';
 import { TaskCommentsService } from './tasks/task-comments.service';
+import { TaskDependenciesController } from './tasks/task-dependencies.controller';
 import { TaskMentionsService } from './tasks/task-mentions.service';
+import { TaskRemindersController } from './tasks/task-reminders.controller';
+import { TaskRemindersService } from './tasks/task-reminders.service';
 import { GoalsModule } from './goals/goals.module';
 import { CapacityModule } from './capacity/capacity.module';
 import { GuestAccessController } from './guest-access/guest-access.controller';
@@ -70,7 +75,10 @@ import { GuestAccessController } from './guest-access/guest-access.controller';
     WebhooksController,
     AuditController,
     PublicAttachmentsController,
+    TaskAttachmentsController,
     TaskCommentsController,
+    TaskDependenciesController,
+    TaskRemindersController,
     CollabController,
     WorkspaceAdminController,
     NotificationsController,
@@ -93,8 +101,10 @@ import { GuestAccessController } from './guest-access/guest-access.controller';
     WebhookDeliveryService,
     NotificationsService,
     AttachmentDownloadUrlService,
+    TaskAttachmentsService,
     TaskCommentsService,
     TaskMentionsService,
+    TaskRemindersService,
     PublicFormSubmissionThrottleGuard,
     ProjectRoleGuard,
     WorkspaceRoleGuard,

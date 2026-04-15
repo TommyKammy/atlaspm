@@ -953,10 +953,18 @@ describe('Core API Integration', () => {
       .expect(200);
     expect(reminderGet.body.id).toBe(reminderSet.body.id);
 
-    await request(app.getHttpServer())
+    const reminderClear = await request(app.getHttpServer())
       .delete(`/tasks/${t1.body.id}/reminder`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
+    expect(reminderClear.body.id).toBe(reminderSet.body.id);
+    expect(typeof reminderClear.body.deletedAt).toBe('string');
+
+    const reminderClearAgain = await request(app.getHttpServer())
+      .delete(`/tasks/${t1.body.id}/reminder`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(reminderClearAgain.body).toEqual({ ok: true });
 
     const reminderAfterClear = await request(app.getHttpServer())
       .get(`/tasks/${t1.body.id}/reminder`)
@@ -1613,6 +1621,130 @@ describe('Core API Integration', () => {
     expect(attachment.uploadToken).toBeUndefined();
   });
 
+  test('attachment uploads reject deleted and completed attachments without mutating them', async () => {
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
+
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Attachment upload guard ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSectionId =
+      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
+        sectionsRes.body[0])?.id as string;
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sectionId: defaultSectionId, title: 'Attachment upload guards' })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+
+    const onePxPng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7aY9kAAAAASUVORK5CYII=',
+      'base64',
+    );
+
+    const deletedAttachmentInit = await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/attachments/initiate`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ fileName: 'deleted.png', mimeType: 'image/png', sizeBytes: onePxPng.length })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .delete(`/attachments/${deletedAttachmentInit.body.attachmentId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post(String(deletedAttachmentInit.body.uploadUrl))
+      .set('Authorization', `Bearer ${token}`)
+      .attach('file', onePxPng, { filename: 'deleted.png', contentType: 'image/png' })
+      .expect(404);
+
+    const completedAttachmentInit = await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/attachments/initiate`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ fileName: 'completed.png', mimeType: 'image/png', sizeBytes: onePxPng.length })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(String(completedAttachmentInit.body.uploadUrl))
+      .set('Authorization', `Bearer ${token}`)
+      .attach('file', onePxPng, { filename: 'completed.png', contentType: 'image/png' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/attachments/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ attachmentId: completedAttachmentInit.body.attachmentId })
+      .expect(201);
+
+    const completedAttachment = await prisma.taskAttachment.findUniqueOrThrow({
+      where: { id: completedAttachmentInit.body.attachmentId },
+    });
+    expect(completedAttachment.uploadToken).toBeTruthy();
+
+    await request(app.getHttpServer())
+      .post(
+        `/attachments/${completedAttachment.id}/upload?token=${completedAttachment.uploadToken as string}`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .attach('file', onePxPng, { filename: 'completed.png', contentType: 'image/png' })
+      .expect(409);
+  });
+
+  test('attachment initiation rejects declared sizes above the upload limit at validation time', async () => {
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
+
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Attachment validation ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSectionId =
+      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
+        sectionsRes.body[0])?.id as string;
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sectionId: defaultSectionId, title: 'Attachment validation limit' })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+
+    const oversizeInit = await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/attachments/initiate`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ fileName: 'large.png', mimeType: 'image/png', sizeBytes: 5_000_001 })
+      .expect(409);
+    expect(oversizeInit.body.message).toContain('Image too large');
+  });
+
   test('attachment public download URLs expire after a short TTL', async () => {
     const frozenNow = new Date('2026-03-10T03:00:00.000Z');
     const previousAttachmentDownloadTtl = process.env.ATTACHMENT_DOWNLOAD_URL_TTL_SEC;
@@ -1751,6 +1883,88 @@ describe('Core API Integration', () => {
       .expect(200);
 
     await request(app.getHttpServer()).get(downloadUrl).expect(404);
+  });
+
+  test('attachment completion is idempotent on retry', async () => {
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
+
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Attachment completion retry ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSectionId =
+      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
+        sectionsRes.body[0])?.id as string;
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sectionId: defaultSectionId, title: 'Attachment completion retry' })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+
+    const onePxPng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7aY9kAAAAASUVORK5CYII=',
+      'base64',
+    );
+    const attachmentInit = await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/attachments/initiate`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ fileName: 'retry.png', mimeType: 'image/png', sizeBytes: onePxPng.length })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(String(attachmentInit.body.uploadUrl))
+      .set('Authorization', `Bearer ${token}`)
+      .attach('file', onePxPng, { filename: 'retry.png', contentType: 'image/png' })
+      .expect(201);
+
+    const outboxBefore = await prisma.outboxEvent.count({
+      where: { type: 'task.attachment.created' },
+    });
+
+    const firstComplete = await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/attachments/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ attachmentId: attachmentInit.body.attachmentId })
+      .expect(201);
+
+    const storedAfterFirstComplete = await prisma.taskAttachment.findUniqueOrThrow({
+      where: { id: attachmentInit.body.attachmentId },
+    });
+
+    const secondComplete = await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/attachments/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ attachmentId: attachmentInit.body.attachmentId })
+      .expect(201);
+
+    const storedAfterSecondComplete = await prisma.taskAttachment.findUniqueOrThrow({
+      where: { id: attachmentInit.body.attachmentId },
+    });
+    const outboxAfter = await prisma.outboxEvent.count({
+      where: { type: 'task.attachment.created' },
+    });
+
+    expect(secondComplete.body).toEqual(firstComplete.body);
+    expect(storedAfterSecondComplete.uploadToken).toBe(storedAfterFirstComplete.uploadToken);
+    expect(storedAfterSecondComplete.completedAt?.toISOString()).toBe(
+      storedAfterFirstComplete.completedAt?.toISOString(),
+    );
+    expect(outboxAfter).toBe(outboxBefore + 1);
   });
 
   test('GET /projects/:id/audit includes project-scoped member and rule changes', async () => {

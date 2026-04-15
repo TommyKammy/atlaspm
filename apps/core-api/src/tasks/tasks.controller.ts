@@ -3,16 +3,13 @@ import {
   BadRequestException,
   Controller,
   Delete,
-  ForbiddenException,
   Get,
   Param,
   Patch,
   Post,
   Put,
   Query,
-  UploadedFile,
   UseGuards,
-  UseInterceptors,
   ConflictException,
   NotFoundException,
   Inject,
@@ -29,7 +26,6 @@ import {
   IsOptional,
   IsString,
   IsUUID,
-  MaxLength,
   Max,
   Min,
   ValidateNested,
@@ -40,7 +36,7 @@ import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { assertValidDateRange, normalizeDateOnlyField, parseTaskDateQuery, toDateOnlyDate } from '../common/date-validation';
-import { Prisma, Priority, ProjectRole, TaskStatus, TaskType, DependencyType, CustomFieldType } from '@prisma/client';
+import { Prisma, Priority, ProjectRole, TaskStatus, TaskType, CustomFieldType } from '@prisma/client';
 import {
   completeTaskLifecycle,
   DomainConflictError,
@@ -48,14 +44,8 @@ import {
   normalizeProjectViewState,
   type ProjectViewState,
 } from '@atlaspm/domain';
-import { SubtaskService } from './subtask.service';
 import { SearchService } from '../search/search.service';
 import { createTaskLifecycleUnitOfWorkFromTx } from './task-lifecycle-prisma.adapter';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { promises as fs } from 'node:fs';
-import { randomBytes, randomUUID } from 'node:crypto';
-import { dirname } from 'node:path';
-import { resolveAttachmentPath } from './attachment-storage';
 import {
   parseRuleDefinition,
   templateDefinition,
@@ -70,7 +60,6 @@ import {
   type ParsedCustomFieldValue,
   type TaskCustomFieldFilter,
 } from '../custom-fields/custom-field.validation';
-import { AttachmentDownloadUrlService } from './attachment-download-url.service';
 import { TaskMentionsService } from './task-mentions.service';
 
 class TaskQuery {
@@ -426,77 +415,8 @@ class PatchDescriptionDto {
   expectedVersion!: number;
 }
 
-class InitiateAttachmentDto {
-  @IsString()
-  @MaxLength(255)
-  fileName!: string;
-
-  @IsString()
-  @MaxLength(120)
-  mimeType!: string;
-
-  @IsInt()
-  @Min(1)
-  @Max(10_000_000)
-  sizeBytes!: number;
-}
-
-class CompleteAttachmentDto {
-  @IsUUID()
-  attachmentId!: string;
-}
-
-class UpsertTaskReminderDto {
-  @IsISO8601()
-  remindAt!: string;
-}
-
-class CreateSubtaskDto {
-  @IsString()
-  title!: string;
-
-  @IsOptional()
-  @IsString()
-  description?: string;
-
-  @IsOptional()
-  @IsEnum(TaskStatus)
-  status?: TaskStatus;
-
-  @IsOptional()
-  @IsEnum(Priority)
-  priority?: Priority;
-
-  @IsOptional()
-  @IsString()
-  assigneeUserId?: string;
-
-  @IsOptional()
-  @IsISO8601()
-  startAt?: string;
-
-  @IsOptional()
-  @IsISO8601()
-  dueAt?: string;
-
-  @IsOptional()
-  @IsArray()
-  tags?: string[];
-}
-
-class AddDependencyDto {
-  @IsUUID()
-  dependsOnId!: string;
-
-  @IsOptional()
-  @IsEnum(DependencyType)
-  type?: DependencyType;
-}
-
 const MAX_DESCRIPTION_DOC_BYTES = 200_000;
 const MAX_DESCRIPTION_TEXT_LENGTH = 20_000;
-const MAX_IMAGE_UPLOAD_BYTES = 5_000_000;
-const IMAGE_MIME_ALLOWLIST = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const TIMELINE_LANE_ORDER_BASE_LIMIT = 500;
 const TIMELINE_GROUP_BY_VALUES = ['section', 'assignee'] as const;
 const TIMELINE_VIEW_MODE_VALUES = ['timeline', 'gantt'] as const;
@@ -574,10 +494,8 @@ export class TasksController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(DomainService) private readonly domain: DomainService,
-    @Inject(SubtaskService) private readonly subtaskService: SubtaskService,
     @Inject(SearchService) private readonly searchService: SearchService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
-    @Inject(AttachmentDownloadUrlService) private readonly attachmentDownloadUrls: AttachmentDownloadUrlService,
     @Inject(TaskMentionsService) private readonly mentions: TaskMentionsService,
   ) {}
 
@@ -1950,322 +1868,6 @@ export class TasksController {
     });
   }
 
-  @Get('tasks/:id/attachments')
-  async listAttachments(
-    @Param('id') taskId: string,
-    @Query('includeDeleted') includeDeletedRaw: string | undefined,
-    @CurrentRequest() req: AppRequest,
-  ) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
-    const includeDeleted = String(includeDeletedRaw ?? '').toLowerCase() === 'true';
-    const where: Prisma.TaskAttachmentWhereInput = {
-      taskId,
-      completedAt: { not: null },
-      ...(includeDeleted ? {} : { deletedAt: null }),
-    };
-    const attachments = await this.prisma.taskAttachment.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-    });
-    return attachments.map((item) => this.serializeAttachment(item));
-  }
-
-  @Post('tasks/:id/attachments/initiate')
-  async initiateAttachment(
-    @Param('id') taskId: string,
-    @Body() body: InitiateAttachmentDto,
-    @CurrentRequest() req: AppRequest,
-  ) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
-    if (!IMAGE_MIME_ALLOWLIST.has(body.mimeType)) {
-      throw new ConflictException('Unsupported image mime type');
-    }
-    if (body.sizeBytes > MAX_IMAGE_UPLOAD_BYTES) {
-      throw new ConflictException('Image too large');
-    }
-
-    const uploadToken = randomBytes(16).toString('hex');
-    const storageKey = `${taskId}/${randomUUID()}-${this.sanitizeFileName(body.fileName)}`;
-    const attachment = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.taskAttachment.create({
-        data: {
-          taskId,
-          uploaderUserId: req.user.sub,
-          fileName: this.sanitizeFileName(body.fileName),
-          mimeType: body.mimeType,
-          sizeBytes: body.sizeBytes,
-          storageKey,
-          uploadToken,
-        },
-      });
-      await this.domain.appendAuditOutbox({
-        tx,
-        actor: req.user.sub,
-        entityType: 'Task',
-        entityId: taskId,
-        action: 'task.attachment.initiated',
-        afterJson: created,
-        correlationId: req.correlationId,
-        outboxType: 'task.attachment.initiated',
-        payload: { taskId, attachmentId: created.id },
-      });
-      return created;
-    });
-
-    return {
-      attachmentId: attachment.id,
-      uploadUrl: `/attachments/${attachment.id}/upload?token=${uploadToken}`,
-      maxBytes: MAX_IMAGE_UPLOAD_BYTES,
-    };
-  }
-
-  @Post('attachments/:id/upload')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      limits: { fileSize: MAX_IMAGE_UPLOAD_BYTES },
-    }),
-  )
-  async uploadAttachment(
-    @Param('id') id: string,
-    @Query('token') token: string,
-    @UploadedFile() file: { mimetype: string; size: number; buffer: Buffer },
-    @CurrentRequest() req: AppRequest,
-  ) {
-    if (!token) throw new ConflictException('Missing upload token');
-    const attachment = await this.prisma.taskAttachment.findUniqueOrThrow({
-      where: { id },
-      include: { task: true },
-    });
-    await this.domain.requireProjectRole(attachment.task.projectId, req.user.sub, ProjectRole.MEMBER);
-    if (!attachment.uploadToken || attachment.uploadToken !== token) {
-      throw new ForbiddenException('Invalid upload token');
-    }
-    if (!file) throw new ConflictException('Missing file');
-    if (!IMAGE_MIME_ALLOWLIST.has(file.mimetype)) throw new ConflictException('Unsupported image mime type');
-    if (file.size <= 0 || file.size > MAX_IMAGE_UPLOAD_BYTES) throw new ConflictException('Image too large');
-
-    const diskPath = resolveAttachmentPath(attachment.storageKey);
-    await fs.mkdir(dirname(diskPath), { recursive: true });
-    await fs.writeFile(diskPath, file.buffer);
-
-    await this.prisma.taskAttachment.update({
-      where: { id: attachment.id },
-      data: { sizeBytes: file.size, mimeType: file.mimetype },
-    });
-    return { ok: true };
-  }
-
-  @Post('tasks/:id/attachments/complete')
-  async completeAttachment(
-    @Param('id') taskId: string,
-    @Body() body: CompleteAttachmentDto,
-    @CurrentRequest() req: AppRequest,
-  ) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
-    const attachment = await this.prisma.taskAttachment.findUniqueOrThrow({
-      where: { id: body.attachmentId },
-    });
-    if (attachment.taskId !== taskId) throw new ConflictException('Attachment does not belong to task');
-    if (attachment.deletedAt) throw new NotFoundException('Attachment not found');
-
-    const diskPath = resolveAttachmentPath(attachment.storageKey);
-    const stat = await fs.stat(diskPath).catch(() => null);
-    if (!stat) throw new ConflictException('Attachment upload not found');
-
-    const accessToken = randomBytes(16).toString('hex');
-    return this.prisma.$transaction(async (tx) => {
-      const completed = await tx.taskAttachment.update({
-        where: { id: attachment.id },
-        data: { completedAt: new Date(), uploadToken: accessToken, sizeBytes: Number(stat.size) },
-      });
-      await this.domain.appendAuditOutbox({
-        tx,
-        actor: req.user.sub,
-        entityType: 'Task',
-        entityId: taskId,
-        action: 'task.attachment.created',
-        afterJson: completed,
-        correlationId: req.correlationId,
-        outboxType: 'task.attachment.created',
-        payload: { taskId, attachmentId: completed.id },
-      });
-      return this.serializeAttachment(completed);
-    });
-  }
-
-  @Delete('attachments/:id')
-  async deleteAttachment(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
-    const attachment = await this.prisma.taskAttachment.findUniqueOrThrow({
-      where: { id },
-      include: { task: true },
-    });
-    await this.domain.requireProjectRole(attachment.task.projectId, req.user.sub, ProjectRole.MEMBER);
-    if (attachment.deletedAt) return this.serializeAttachment(attachment);
-    return this.prisma.$transaction(async (tx) => {
-      const deleted = await tx.taskAttachment.update({
-        where: { id },
-        data: { deletedAt: new Date() },
-      });
-      await this.domain.appendAuditOutbox({
-        tx,
-        actor: req.user.sub,
-        entityType: 'Task',
-        entityId: attachment.taskId,
-        action: 'task.attachment.deleted',
-        beforeJson: attachment,
-        afterJson: deleted,
-        correlationId: req.correlationId,
-        outboxType: 'task.attachment.deleted',
-        payload: { taskId: attachment.taskId, attachmentId: id },
-      });
-      return this.serializeAttachment(deleted);
-    });
-  }
-
-  @Post('attachments/:id/restore')
-  async restoreAttachment(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
-    const attachment = await this.prisma.taskAttachment.findUniqueOrThrow({
-      where: { id },
-      include: { task: true },
-    });
-    await this.domain.requireProjectRole(attachment.task.projectId, req.user.sub, ProjectRole.MEMBER);
-    if (!attachment.deletedAt) return this.serializeAttachment(attachment);
-    return this.prisma.$transaction(async (tx) => {
-      const restored = await tx.taskAttachment.update({
-        where: { id },
-        data: { deletedAt: null, uploadToken: randomBytes(16).toString('hex') },
-      });
-      await this.domain.appendAuditOutbox({
-        tx,
-        actor: req.user.sub,
-        entityType: 'Task',
-        entityId: attachment.taskId,
-        action: 'task.attachment.restored',
-        beforeJson: attachment,
-        afterJson: restored,
-        correlationId: req.correlationId,
-        outboxType: 'task.attachment.restored',
-        payload: { taskId: attachment.taskId, attachmentId: id },
-      });
-      return this.serializeAttachment(restored);
-    });
-  }
-
-  private serializeAttachment(item: {
-    id: string;
-    taskId: string;
-    uploaderUserId: string;
-    fileName: string;
-    mimeType: string;
-    sizeBytes: number;
-    completedAt: Date | null;
-    createdAt: Date;
-    deletedAt: Date | null;
-    uploadToken: string | null;
-  }) {
-    return {
-      id: item.id,
-      taskId: item.taskId,
-      uploaderUserId: item.uploaderUserId,
-      fileName: item.fileName,
-      mimeType: item.mimeType,
-      sizeBytes: item.sizeBytes,
-      completedAt: item.completedAt,
-      createdAt: item.createdAt,
-      deletedAt: item.deletedAt,
-      url:
-        item.deletedAt || !item.completedAt
-          ? null
-          : this.attachmentDownloadUrls.buildUrl(item),
-    };
-  }
-
-  @Get('tasks/:id/reminder')
-  async getMyReminder(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
-    const reminder = await this.prisma.taskReminder.findFirst({
-      where: { taskId, userId: req.user.sub, deletedAt: null },
-      orderBy: { createdAt: 'desc' },
-    });
-    return reminder ?? null;
-  }
-
-  @Put('tasks/:id/reminder')
-  async upsertMyReminder(
-    @Param('id') taskId: string,
-    @Body() body: UpsertTaskReminderDto,
-    @CurrentRequest() req: AppRequest,
-  ) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
-    const remindAt = new Date(body.remindAt);
-    if (Number.isNaN(+remindAt)) throw new ConflictException('Invalid remindAt');
-
-    return this.prisma.$transaction(async (tx) => {
-      const current = await tx.taskReminder.findFirst({
-        where: { taskId, userId: req.user.sub, deletedAt: null },
-        orderBy: { createdAt: 'desc' },
-      });
-      const reminder = current
-        ? await tx.taskReminder.update({
-            where: { id: current.id },
-            data: { remindAt, deletedAt: null },
-          })
-        : await tx.taskReminder.create({
-            data: { taskId, userId: req.user.sub, remindAt },
-          });
-
-      await this.domain.appendAuditOutbox({
-        tx,
-        actor: req.user.sub,
-        entityType: 'Task',
-        entityId: taskId,
-        action: 'task.reminder.set',
-        beforeJson: current,
-        afterJson: reminder,
-        correlationId: req.correlationId,
-        outboxType: 'task.reminder.set',
-        payload: { taskId, userId: req.user.sub, remindAt: reminder.remindAt },
-      });
-      return reminder;
-    });
-  }
-
-  @Delete('tasks/:id/reminder')
-  async clearMyReminder(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
-    const current = await this.prisma.taskReminder.findFirst({
-      where: { taskId, userId: req.user.sub, deletedAt: null },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!current) return { ok: true };
-
-    return this.prisma.$transaction(async (tx) => {
-      const deleted = await tx.taskReminder.update({
-        where: { id: current.id },
-        data: { deletedAt: new Date() },
-      });
-      await this.domain.appendAuditOutbox({
-        tx,
-        actor: req.user.sub,
-        entityType: 'Task',
-        entityId: taskId,
-        action: 'task.reminder.cleared',
-        beforeJson: current,
-        afterJson: deleted,
-        correlationId: req.correlationId,
-        outboxType: 'task.reminder.cleared',
-        payload: { taskId, userId: req.user.sub },
-      });
-      return deleted;
-    });
-  }
-
   @Post('tasks/bulk')
   async bulk(@Body() body: BulkTaskDto, @CurrentRequest() req: AppRequest) {
     const tasks = await this.prisma.task.findMany({ where: { id: { in: body.taskIds }, deletedAt: null } });
@@ -2410,100 +2012,6 @@ export class TasksController {
       });
       return { task: updated, sectionTasks };
     });
-  }
-
-  // Subtask endpoints
-  @Post('tasks/:id/subtasks')
-  async createSubtask(@Param('id') parentId: string, @Body() body: CreateSubtaskDto, @CurrentRequest() req: AppRequest) {
-    const parentTask = await this.prisma.task.findFirstOrThrow({ where: { id: parentId, deletedAt: null } });
-    await this.domain.requireProjectRole(parentTask.projectId, req.user.sub, ProjectRole.MEMBER);
-    if (parentTask.parentId) {
-      throw new BadRequestException('Nested subtasks are not supported');
-    }
-    assertValidDateRange(body.startAt, body.dueAt);
-    const startAt = toDateOnlyDate(body.startAt) ?? null;
-    const dueAt = toDateOnlyDate(body.dueAt) ?? null;
-
-    const topTask = await this.prisma.task.findFirst({
-      where: { projectId: parentTask.projectId, sectionId: parentTask.sectionId, deletedAt: null },
-      orderBy: { position: 'asc' },
-    });
-    const position = (topTask?.position ?? 1000) - 1000;
-
-    const taskData = {
-      ...body,
-      projectId: parentTask.projectId,
-      sectionId: parentTask.sectionId,
-      position,
-      startAt,
-      dueAt,
-    };
-    return this.subtaskService.createSubtask(parentId, taskData);
-  }
-
-  @Get('tasks/:id/subtasks')
-  async getSubtasks(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
-    return this.subtaskService.getSubtasks(taskId);
-  }
-
-  @Get('tasks/:id/subtasks/tree')
-  async getSubtaskTree(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
-    return this.subtaskService.getSubtaskTree(taskId);
-  }
-
-  @Get('tasks/:id/breadcrumbs')
-  async getBreadcrumbs(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
-    return this.subtaskService.getBreadcrumbPath(taskId);
-  }
-
-  // Dependency endpoints
-  @Post('tasks/:id/dependencies')
-  async addDependency(@Param('id') taskId: string, @Body() body: AddDependencyDto, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
-    return this.subtaskService.addDependency(taskId, body.dependsOnId, body.type, req.user.sub, req.correlationId);
-  }
-
-  @Delete('tasks/:id/dependencies/:dependsOnId')
-  async removeDependency(@Param('id') taskId: string, @Param('dependsOnId') dependsOnId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
-    await this.subtaskService.removeDependencyWithAudit(taskId, dependsOnId, req.user.sub, req.correlationId);
-    return { success: true };
-  }
-
-  @Get('tasks/:id/dependencies')
-  async getDependencies(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
-    return this.subtaskService.getDependencies(taskId);
-  }
-
-  @Get('tasks/:id/dependents')
-  async getDependents(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
-    return this.subtaskService.getDependents(taskId);
-  }
-
-  @Get('tasks/:id/blocked')
-  async isBlocked(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
-    const blocked = await this.subtaskService.isBlocked(taskId);
-    return { blocked };
-  }
-
-  @Get('projects/:id/dependency-graph')
-  async getDependencyGraph(@Param('id') projectId: string, @CurrentRequest() req: AppRequest) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
-    return this.subtaskService.getDependencyGraph(projectId);
   }
 
   private toTaskCustomFieldFilterWhere(filter: TaskCustomFieldFilter): Prisma.TaskWhereInput {
@@ -2766,10 +2274,6 @@ export class TasksController {
     if (descriptionDoc.type !== 'doc' || !Array.isArray(descriptionDoc.content)) {
       throw new ConflictException('descriptionDoc must be a valid ProseMirror doc');
     }
-  }
-
-  private sanitizeFileName(value: string) {
-    return value.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'upload.bin';
   }
 
   private extractPlainTextFromDoc(node: unknown): string {
