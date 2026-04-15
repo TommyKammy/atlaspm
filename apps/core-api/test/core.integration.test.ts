@@ -953,10 +953,17 @@ describe('Core API Integration', () => {
       .expect(200);
     expect(reminderGet.body.id).toBe(reminderSet.body.id);
 
-    await request(app.getHttpServer())
+    const reminderClear = await request(app.getHttpServer())
       .delete(`/tasks/${t1.body.id}/reminder`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
+    expect(reminderClear.body).toEqual({ ok: true });
+
+    const reminderClearAgain = await request(app.getHttpServer())
+      .delete(`/tasks/${t1.body.id}/reminder`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(reminderClearAgain.body).toEqual({ ok: true });
 
     const reminderAfterClear = await request(app.getHttpServer())
       .get(`/tasks/${t1.body.id}/reminder`)
@@ -1611,6 +1618,45 @@ describe('Core API Integration', () => {
     const attachment = attachmentsRes.body.find((item: any) => item.id === attachmentInit.body.attachmentId);
     expect(attachment).toBeTruthy();
     expect(attachment.uploadToken).toBeUndefined();
+  });
+
+  test('attachment initiation rejects declared sizes above the upload limit at validation time', async () => {
+    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
+
+    const workspaceRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const workspaceId = workspaceRes.body[0].id as string;
+
+    const projectRes = await request(app.getHttpServer())
+      .post('/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workspaceId, name: `Attachment validation ${Date.now()}` })
+      .expect(201);
+    const projectId = projectRes.body.id as string;
+
+    const sectionsRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/sections`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const defaultSectionId =
+      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
+        sectionsRes.body[0])?.id as string;
+
+    const taskRes = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sectionId: defaultSectionId, title: 'Attachment validation limit' })
+      .expect(201);
+    const taskId = taskRes.body.id as string;
+
+    const oversizeInit = await request(app.getHttpServer())
+      .post(`/tasks/${taskId}/attachments/initiate`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ fileName: 'large.png', mimeType: 'image/png', sizeBytes: 5_000_001 })
+      .expect(400);
+    expect(oversizeInit.body.message).toContain('sizeBytes must not be greater than 5000000');
   });
 
   test('attachment public download URLs expire after a short TTL', async () => {

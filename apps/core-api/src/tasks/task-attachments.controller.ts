@@ -16,6 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
+import { MAX_IMAGE_UPLOAD_BYTES } from './task-attachments.constants';
 import { TaskAttachmentsService } from './task-attachments.service';
 
 class InitiateAttachmentDto {
@@ -29,7 +30,7 @@ class InitiateAttachmentDto {
 
   @IsInt()
   @Min(1)
-  @Max(10_000_000)
+  @Max(MAX_IMAGE_UPLOAD_BYTES)
   sizeBytes!: number;
 }
 
@@ -37,8 +38,6 @@ class CompleteAttachmentDto {
   @IsUUID()
   attachmentId!: string;
 }
-
-const MAX_IMAGE_UPLOAD_BYTES = 5_000_000;
 
 @Controller()
 @UseGuards(AuthGuard)

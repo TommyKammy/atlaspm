@@ -13,9 +13,9 @@ import { DomainService } from '../common/domain.service';
 import type { AppRequest } from '../common/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { AttachmentDownloadUrlService } from './attachment-download-url.service';
+import { MAX_IMAGE_UPLOAD_BYTES } from './task-attachments.constants';
 import { resolveAttachmentPath } from './attachment-storage';
 
-const MAX_IMAGE_UPLOAD_BYTES = 5_000_000;
 const IMAGE_MIME_ALLOWLIST = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
 @Injectable()
