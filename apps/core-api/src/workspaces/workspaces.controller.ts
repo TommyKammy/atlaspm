@@ -3,9 +3,10 @@ import { Type } from 'class-transformer';
 import { IsBoolean, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
+import { AuditOutboxService } from '../common/audit-outbox.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
+import { WorkspaceDefaultsService } from '../common/workspace-defaults.service';
 
 const DEFAULT_REMINDER_PREFERENCES = {
   enabled: true,
@@ -30,19 +31,20 @@ class UpdateReminderPreferencesDto {
 export class WorkspacesController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(WorkspaceDefaultsService) private readonly defaults: WorkspaceDefaultsService,
   ) {}
 
   @Get('me')
   async me(@CurrentRequest() req: AppRequest) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: req.user.sub } });
-    await this.domain.ensureDefaultWorkspaceForUser(user.id);
+    await this.defaults.ensureDefaultWorkspaceForUser(user.id);
     return user;
   }
 
   @Get('me/reminder-preferences')
   async reminderPreferences(@CurrentRequest() req: AppRequest) {
-    await this.domain.ensureDefaultWorkspaceForUser(req.user.sub);
+    await this.defaults.ensureDefaultWorkspaceForUser(req.user.sub);
     const preferences = await this.prisma.userReminderPreference.findUnique({
       where: { userId: req.user.sub },
     });
@@ -58,7 +60,7 @@ export class WorkspacesController {
       throw new BadRequestException('enabled or defaultLeadTimeMinutes is required');
     }
 
-    await this.domain.ensureDefaultWorkspaceForUser(req.user.sub);
+    await this.defaults.ensureDefaultWorkspaceForUser(req.user.sub);
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.userReminderPreference.findUnique({
         where: { userId: req.user.sub },
@@ -82,7 +84,7 @@ export class WorkspacesController {
             },
           });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'UserReminderPreference',
@@ -105,7 +107,7 @@ export class WorkspacesController {
 
   @Get('workspaces')
   async workspaces(@CurrentRequest() req: AppRequest) {
-    await this.domain.ensureDefaultWorkspaceForUser(req.user.sub);
+    await this.defaults.ensureDefaultWorkspaceForUser(req.user.sub);
     const memberships = await this.prisma.workspaceMembership.findMany({
       where: { userId: req.user.sub },
       include: { workspace: true },

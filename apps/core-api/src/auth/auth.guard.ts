@@ -1,20 +1,22 @@
-import { CanActivate, ExecutionContext, ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Inject, Injectable } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import type { AppRequest } from '../common/types';
 import { PrismaService } from '../prisma/prisma.service';
-import { GuestAccessScopeType, GuestAccessStatus, Prisma, UserStatus } from '@prisma/client';
+import { GuestAccessScopeType, GuestAccessStatus, Prisma } from '@prisma/client';
+import { IdentityService } from '../common/identity.service';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
     @Inject(AuthService) private readonly authService: AuthService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(IdentityService) private readonly identity: IdentityService,
   ) {}
 
   canActivate = async (context: ExecutionContext): Promise<boolean> => {
     const req = context.switchToHttp().getRequest<AppRequest>();
     req.user = await this.authService.verify(req.headers.authorization, req.headers.cookie);
-    await this.syncAuthenticatedUser(req.user.sub, req.user.email, req.user.name);
+    await this.identity.syncAuthenticatedUser(req.user);
     const normalizedEmail = (req.user.email ?? '').trim().toLowerCase();
     if (normalizedEmail) {
       await this.acceptPendingInvitations(req.user.sub, normalizedEmail, req.correlationId ?? 'n/a');
@@ -22,52 +24,6 @@ export class AuthGuard implements CanActivate {
     }
     return true;
   };
-
-  private async syncAuthenticatedUser(
-    userId: string,
-    email: string | undefined,
-    displayName?: string,
-  ) {
-    const now = new Date();
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const existing = await this.prisma.user.findUnique({ where: { id: userId } });
-      if (existing?.status === UserStatus.SUSPENDED) {
-        throw new ForbiddenException('User is suspended');
-      }
-      const normalizedEmail = (email ?? existing?.email ?? '').trim().toLowerCase();
-
-      try {
-        if (!existing) {
-          await this.prisma.user.create({
-            data: {
-              id: userId,
-              email: normalizedEmail || null,
-              displayName,
-              status: UserStatus.ACTIVE,
-              lastSeenAt: now,
-            },
-          });
-          return;
-        }
-
-        await this.prisma.user.update({
-          where: { id: userId },
-          data: {
-            email: normalizedEmail || null,
-            lastSeenAt: now,
-          },
-        });
-        return;
-      } catch (error) {
-        const maybePrismaError = error as { code?: string };
-        const isRetryableRace =
-          maybePrismaError.code === 'P2002' || maybePrismaError.code === 'P2025';
-        if (!isRetryableRace || attempt === 2) {
-          throw error;
-        }
-      }
-    }
-  }
 
   private async acceptPendingInvitations(userId: string, email: string, correlationId: string) {
     const pending = await this.prisma.invitation.findMany({

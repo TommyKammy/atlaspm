@@ -3,10 +3,11 @@ import { GuestAccessScopeType, GuestAccessStatus, Prisma, ProjectRole, Workspace
 import { IsEnum, IsString, IsUUID } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
+import { AuditOutboxService } from '../common/audit-outbox.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { ProjectRoleGuard, RequireProjectRole, RequireWorkspaceRole, WorkspaceRoleGuard } from '../auth/role.guard';
+import { WorkspaceDefaultsService } from '../common/workspace-defaults.service';
 
 class CreateProjectDto {
   @IsUUID()
@@ -34,7 +35,8 @@ class UpdateProjectMemberDto {
 export class ProjectsController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(WorkspaceDefaultsService) private readonly defaults: WorkspaceDefaultsService,
   ) {}
 
   @Get()
@@ -80,7 +82,7 @@ export class ProjectsController {
       await tx.projectMembership.create({
         data: { projectId: project.id, userId: req.user.sub, role: ProjectRole.ADMIN },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Project',
@@ -91,7 +93,7 @@ export class ProjectsController {
         outboxType: 'project.created',
         payload: project,
       });
-      await this.domain.ensureProjectDefaultsInTx(tx, project.id, req.user.sub, req.correlationId);
+      await this.defaults.ensureProjectDefaultsInTx(tx, project.id, req.user.sub, req.correlationId);
       return project;
     });
     return this.hydrateProjectWithFollowerState(project, req.user.sub);
@@ -131,7 +133,7 @@ export class ProjectsController {
         const follower = await tx.projectFollower.create({
           data: { projectId, userId: req.user.sub },
         });
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: req.user.sub,
           entityType: 'ProjectFollower',
@@ -172,7 +174,7 @@ export class ProjectsController {
       });
       if (existing) {
         await tx.projectFollower.delete({ where: { id: existing.id } });
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: req.user.sub,
           entityType: 'ProjectFollower',
@@ -234,7 +236,7 @@ export class ProjectsController {
         create: { projectId, userId: body.userId, role: body.role },
         update: { role: body.role },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'ProjectMembership',
@@ -265,7 +267,7 @@ export class ProjectsController {
         where: { id: existing.id },
         data: { role: body.role },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'ProjectMembership',
@@ -293,7 +295,7 @@ export class ProjectsController {
         where: { projectId_userId: { projectId, userId } },
       });
       await tx.projectMembership.delete({ where: { id: existing.id } });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'ProjectMembership',
