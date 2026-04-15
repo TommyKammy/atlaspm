@@ -682,6 +682,38 @@ test('buildTimelineLaneSubtaskMeta hides collapsed descendants and cascades row 
   });
 });
 
+test('buildTimelineLaneSubtaskMeta keeps cyclic tasks visible', () => {
+  const meta = buildTimelineLaneSubtaskMeta(
+    [
+      { id: 'cycle-a', parentId: 'cycle-b' },
+      { id: 'cycle-b', parentId: 'cycle-a' },
+      { id: 'self-parent', parentId: 'self-parent' },
+    ],
+    new Set(),
+    {
+      'cycle-b': 2,
+      'self-parent': 4,
+    },
+  );
+
+  assert.deepEqual(meta.visibleTaskIds, ['cycle-a', 'cycle-b', 'self-parent']);
+  assert.deepEqual(meta.childIdsByParentId, {
+    'cycle-a': ['cycle-b'],
+    'cycle-b': ['cycle-a'],
+    'self-parent': ['self-parent'],
+  });
+  assert.deepEqual(meta.depthByTaskId, {
+    'cycle-a': 0,
+    'cycle-b': 1,
+    'self-parent': 0,
+  });
+  assert.deepEqual(meta.rowHintByTaskId, {
+    'cycle-a': 0,
+    'cycle-b': 2,
+    'self-parent': 4,
+  });
+});
+
 test('buildTimelineLayout respects manual order for overlapping tasks even when dates start earlier', () => {
   const layout = buildTimelineLayout({
     lanes: [

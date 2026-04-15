@@ -577,10 +577,13 @@ export function buildTimelineLaneSubtaskMeta<TTask extends { id: string; parentI
   const visibleTaskIds: string[] = [];
   const depthByTaskId: Record<string, number> = {};
   const rowHintByTaskId: Record<string, number> = {};
+  const visitedTaskIds = new Set<string>();
 
   const visit = (taskId: string, depth: number, inheritedRowHint: number) => {
+    if (visitedTaskIds.has(taskId)) return;
     const task = taskById.get(taskId);
     if (!task) return;
+    visitedTaskIds.add(taskId);
     depthByTaskId[taskId] = depth;
     const ownRowHint = Math.max(baseRowByTaskId?.[taskId] ?? 0, inheritedRowHint);
     rowHintByTaskId[taskId] = ownRowHint;
@@ -591,6 +594,9 @@ export function buildTimelineLaneSubtaskMeta<TTask extends { id: string; parentI
   };
 
   roots.forEach((task) => visit(task.id, 0, baseRowByTaskId?.[task.id] ?? 0));
+  for (const task of tasks) {
+    visit(task.id, 0, baseRowByTaskId?.[task.id] ?? 0);
+  }
 
   return {
     visibleTaskIds,
