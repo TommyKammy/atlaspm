@@ -1,6 +1,5 @@
 import { Type } from 'class-transformer';
 import { IsInt, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
-import { MAX_IMAGE_UPLOAD_BYTES } from './task-attachments.constants';
 
 export class InitiateAttachmentDto {
   @IsString()
@@ -14,7 +13,7 @@ export class InitiateAttachmentDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(MAX_IMAGE_UPLOAD_BYTES)
+  @Max(10_000_000)
   sizeBytes!: number;
 }
 

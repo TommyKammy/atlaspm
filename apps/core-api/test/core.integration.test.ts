@@ -957,7 +957,8 @@ describe('Core API Integration', () => {
       .delete(`/tasks/${t1.body.id}/reminder`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    expect(reminderClear.body).toEqual({ ok: true });
+    expect(reminderClear.body.id).toBe(reminderSet.body.id);
+    expect(typeof reminderClear.body.deletedAt).toBe('string');
 
     const reminderClearAgain = await request(app.getHttpServer())
       .delete(`/tasks/${t1.body.id}/reminder`)
@@ -1740,8 +1741,8 @@ describe('Core API Integration', () => {
       .post(`/tasks/${taskId}/attachments/initiate`)
       .set('Authorization', `Bearer ${token}`)
       .send({ fileName: 'large.png', mimeType: 'image/png', sizeBytes: 5_000_001 })
-      .expect(400);
-    expect(oversizeInit.body.message).toContain('sizeBytes must not be greater than 5000000');
+      .expect(409);
+    expect(oversizeInit.body.message).toContain('Image too large');
   });
 
   test('attachment public download URLs expire after a short TTL', async () => {

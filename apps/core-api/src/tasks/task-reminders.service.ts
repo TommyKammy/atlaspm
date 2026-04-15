@@ -83,7 +83,7 @@ export class TaskRemindersService {
         outboxType: 'task.reminder.cleared',
         payload: { taskId, userId: req.user.sub },
       });
-      return { ok: true };
+      return deleted;
     });
   }
 }
