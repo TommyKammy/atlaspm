@@ -10,10 +10,10 @@ import type { AuditEvent, ProjectMember, Section, SectionTaskGroup, Task, TaskTr
 import { AuditActivityList } from '@/components/audit-activity-list';
 import { TaskDetailCommentsTab } from '@/components/task-detail/task-detail-comments-tab';
 import { TaskDetailDetailsTab } from '@/components/task-detail/task-detail-details-tab';
+import { renderTaskTypeCompletionIcon } from '@/components/task-presentation-utils';
 import {
   compactSnapshotActivity,
   countOpenSubtasks,
-  renderTaskTypeCompletionIcon,
 } from '@/components/task-detail/task-detail-utils';
 import { Button } from '@/components/ui/button';
 import {
@@ -235,7 +235,13 @@ export default function TaskDetailDrawer({
                 onClick={handleToggleCompleteClick}
                 disabled={!currentTask || toggleComplete.isPending}
               >
-                {renderTaskTypeCompletionIcon(currentTask ?? null, isDone)}
+                {renderTaskTypeCompletionIcon(currentTask ?? null, isDone, {
+                  className: 'mr-1 h-4 w-4 shrink-0',
+                  milestoneDoneClassName: 'text-emerald-600',
+                  milestonePendingClassName: 'text-muted-foreground',
+                  approvalDoneClassName: 'text-emerald-600',
+                  approvalPendingClassName: 'text-muted-foreground',
+                })}
                 {isDone ? t('markIncomplete') : t('markComplete')}
               </Button>
               <div className="flex items-center gap-1">

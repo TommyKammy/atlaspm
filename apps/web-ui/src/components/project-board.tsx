@@ -58,14 +58,13 @@ import { useProjectBoardState } from '@/components/project-board/project-board-s
 import {
   customFieldColumnKey,
   findTaskCustomFieldValue,
-  initials,
   optimisticCustomFieldValues,
   removeTaskFromGroups,
-  renderTaskTypeCompletionIcon,
   resolveAssigneeLabel,
   taskMatchesCustomFieldFilter,
   upsertTaskInSection,
 } from '@/components/project-board/project-board-utils';
+import { initials, renderTaskTypeCompletionIcon } from '@/components/task-presentation-utils';
 import TaskDetailDrawer from '@/components/task-detail-drawer';
 import { useI18n } from '@/lib/i18n';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -634,7 +633,11 @@ function TaskRow({
                 onToggleDone(task);
               }}
             >
-              {renderTaskTypeCompletionIcon(task, isDone)}
+              {renderTaskTypeCompletionIcon(task, isDone, {
+                className: 'h-5 w-5',
+                taskDoneClassName: 'text-emerald-600',
+                taskPendingClassName: 'text-muted-foreground',
+              })}
             </button>
             {isEditingTitle ? (
               <Input

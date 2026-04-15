@@ -1,6 +1,5 @@
 'use client';
 
-import { CheckCircle2, Circle, Diamond, Stamp } from 'lucide-react';
 import type {
   CustomFieldDefinition,
   ProjectMember,
@@ -9,24 +8,9 @@ import type {
   TaskCustomFieldValue,
 } from '@/lib/types';
 import type { CustomFieldFilter } from '@/lib/project-filters';
-import { cn } from '@/lib/utils';
 
 function sortByPosition(tasks: Task[]) {
   return [...tasks].sort((a, b) => a.position - b.position);
-}
-
-export function renderTaskTypeCompletionIcon(task: Task, isDone: boolean) {
-  if (task.type === 'MILESTONE') {
-    return (
-      <Diamond
-        className={cn('h-5 w-5', isDone ? 'fill-current text-emerald-600' : 'text-muted-foreground')}
-      />
-    );
-  }
-  if (task.type === 'APPROVAL') {
-    return <Stamp className={cn('h-5 w-5', isDone ? 'text-emerald-600' : 'text-muted-foreground')} />;
-  }
-  return isDone ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />;
 }
 
 export function removeTaskFromGroups(groups: SectionTaskGroup[], taskId: string) {
@@ -49,11 +33,6 @@ export function resolveAssigneeLabel(task: Task, members: ProjectMember[]) {
   const member = members.find((item) => item.userId === task.assigneeUserId);
   if (!member) return task.assigneeUserId;
   return member.user.displayName || member.user.email || member.userId;
-}
-
-export function initials(label: string) {
-  const pieces = label.trim().split(/\s+/).slice(0, 2);
-  return pieces.map((piece) => piece.charAt(0).toUpperCase()).join('') || 'U';
 }
 
 export function customFieldColumnKey(fieldId: string) {

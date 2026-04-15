@@ -1,10 +1,8 @@
 'use client';
 
 import { dateOnlyInputToLocalDate, dateOnlyInputValue } from '@atlaspm/domain';
-import { CheckCircle2, Circle, Diamond, Stamp } from 'lucide-react';
 import { type ReactNode } from 'react';
 import type { AuditEvent, ProjectMember, RecurringFrequency, RecurringRule, Task, TaskTree } from '@/lib/types';
-import { cn } from '@/lib/utils';
 
 export function getAuditDescriptionText(event: AuditEvent) {
   const beforeRaw = event.beforeJson?.descriptionText;
@@ -47,16 +45,6 @@ export function compactSnapshotActivity(events: AuditEvent[]) {
     compacted.push(event);
   }
   return compacted;
-}
-
-export function renderTaskTypeCompletionIcon(task: Task | null | undefined, isDone: boolean) {
-  if (task?.type === 'MILESTONE') {
-    return <Diamond className={cn('mr-1 h-4 w-4 shrink-0', isDone ? 'fill-current text-emerald-600' : 'text-muted-foreground')} />;
-  }
-  if (task?.type === 'APPROVAL') {
-    return <Stamp className={cn('mr-1 h-4 w-4 shrink-0', isDone ? 'text-emerald-600' : 'text-muted-foreground')} />;
-  }
-  return isDone ? <CheckCircle2 className="mr-1 h-4 w-4 shrink-0" /> : <Circle className="mr-1 h-4 w-4 shrink-0" />;
 }
 
 export function parseCommentBody(body: string) {
@@ -111,11 +99,6 @@ export function assigneeLabel(task: Task | undefined, members: ProjectMember[], 
   const member = members.find((item) => item.userId === task.assigneeUserId);
   if (!member) return task.assigneeUserId;
   return member.user.displayName || member.user.email || member.user.id;
-}
-
-export function initials(value: string) {
-  const pieces = value.trim().split(/\s+/).slice(0, 2);
-  return pieces.map((piece) => piece.charAt(0).toUpperCase()).join('') || 'U';
 }
 
 export function toDateInputValue(value?: string | null) {
