@@ -601,11 +601,11 @@ export function buildTimelineLaneSubtaskMeta<TTask extends { id: string; parentI
       if (!parentId || !laneTaskIds.has(parentId)) {
         return false;
       }
-      if (collapsedParentIds.has(parentId)) {
-        return false;
-      }
       if (seenTaskIds.has(parentId)) {
         return true;
+      }
+      if (collapsedParentIds.has(parentId)) {
+        return false;
       }
       seenTaskIds.add(parentId);
       currentTask = taskById.get(parentId);

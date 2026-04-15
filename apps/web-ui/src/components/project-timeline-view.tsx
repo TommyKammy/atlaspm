@@ -1195,7 +1195,7 @@ export function ProjectScheduleCanvas({
         effectiveScheduleFilter,
         effectiveSortMode,
         ganttRiskFilterMode,
-        today: new Date(),
+        today,
       }),
     [
       effectiveScheduleFilter,
@@ -1205,6 +1205,7 @@ export function ProjectScheduleCanvas({
       priorityFilter,
       search,
       statusFilter,
+      today,
       timeline.dependencyEdges,
       timeline.tasks,
     ],

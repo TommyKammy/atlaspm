@@ -714,6 +714,32 @@ test('buildTimelineLaneSubtaskMeta keeps cyclic tasks visible', () => {
   });
 });
 
+test('buildTimelineLaneSubtaskMeta keeps collapsed cyclic parents visible for re-expansion', () => {
+  const meta = buildTimelineLaneSubtaskMeta(
+    [
+      { id: 'cycle-a', parentId: 'cycle-b' },
+      { id: 'cycle-b', parentId: 'cycle-a' },
+    ],
+    new Set(['cycle-a']),
+    {
+      'cycle-a': 3,
+      'cycle-b': 1,
+    },
+  );
+
+  assert.deepEqual(meta.visibleTaskIds, ['cycle-a']);
+  assert.deepEqual(meta.childIdsByParentId, {
+    'cycle-a': ['cycle-b'],
+    'cycle-b': ['cycle-a'],
+  });
+  assert.deepEqual(meta.depthByTaskId, {
+    'cycle-a': 0,
+  });
+  assert.deepEqual(meta.rowHintByTaskId, {
+    'cycle-a': 3,
+  });
+});
+
 test('buildTimelineLayout respects manual order for overlapping tasks even when dates start earlier', () => {
   const layout = buildTimelineLayout({
     lanes: [

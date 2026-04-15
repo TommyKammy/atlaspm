@@ -58,21 +58,25 @@ function buildViewModel(args: {
   tasks: TimelineTask[];
   dependencyEdges?: DependencyGraphEdge[];
   mode?: TimelineMode;
+  search?: string;
+  statusFilter?: 'ALL' | Task['status'];
+  priorityFilter?: 'ALL' | NonNullable<Task['priority']>;
   scheduleFilter?: TimelineScheduleFilter;
   sortMode?: TimelineSortMode;
   ganttRiskFilterMode?: 'all' | 'risk';
+  today?: Date;
 }) {
   return buildTimelineTaskViewModel({
     tasks: args.tasks,
     dependencyEdges: args.dependencyEdges ?? [],
     mode: args.mode ?? 'timeline',
-    search: '',
-    statusFilter: 'ALL',
-    priorityFilter: 'ALL',
+    search: args.search ?? '',
+    statusFilter: args.statusFilter ?? 'ALL',
+    priorityFilter: args.priorityFilter ?? 'ALL',
     effectiveScheduleFilter: args.scheduleFilter ?? 'all',
     effectiveSortMode: args.sortMode ?? 'manual',
     ganttRiskFilterMode: args.ganttRiskFilterMode ?? 'all',
-    today: new Date('2026-03-10T09:00:00.000Z'),
+    today: args.today ?? new Date('2026-03-10T09:00:00.000Z'),
   });
 }
 
@@ -140,6 +144,53 @@ describe('project timeline view model', () => {
     });
   });
 
+  test('keeps gantt risk metadata from blockers that are filtered out of the visible task list', () => {
+    const blocker = createTask({
+      id: 'task-blocker',
+      title: 'Hidden blocker',
+      status: 'IN_PROGRESS',
+      startAt: '2026-03-01T00:00:00.000Z',
+      dueAt: '2026-03-04T00:00:00.000Z',
+      timelineStart: new Date('2026-03-01T00:00:00.000Z'),
+      timelineEnd: new Date('2026-03-04T00:00:00.000Z'),
+      hasSchedule: true,
+      inWindow: true,
+    });
+    const target = createTask({
+      id: 'task-target',
+      title: 'Visible target',
+      status: 'TODO',
+      startAt: '2026-03-05T00:00:00.000Z',
+      dueAt: '2026-03-06T00:00:00.000Z',
+      timelineStart: new Date('2026-03-05T00:00:00.000Z'),
+      timelineEnd: new Date('2026-03-06T00:00:00.000Z'),
+      hasSchedule: true,
+      inWindow: true,
+    });
+
+    const viewModel = buildViewModel({
+      tasks: [blocker, target],
+      dependencyEdges: [
+        { source: 'task-blocker', target: 'task-target', type: 'BLOCKS' } as DependencyGraphEdge,
+      ],
+      mode: 'gantt',
+      statusFilter: 'TODO',
+      scheduleFilter: 'scheduled',
+      ganttRiskFilterMode: 'risk',
+      today: new Date('2026-03-01T00:00:00.000Z'),
+    });
+
+    expect(viewModel.baseFilteredTasks.map((task) => task.id)).toEqual(['task-target']);
+    expect(viewModel.filteredTasks.map((task) => task.id)).toEqual(['task-target']);
+    expect(viewModel.ganttRiskTasks.map((task) => task.id)).toEqual(['task-target']);
+    expect(viewModel.ganttRiskByTaskId.get('task-target')).toEqual({
+      isAtRisk: true,
+      overdue: false,
+      blockedByOpen: 1,
+      blockedByLate: 0,
+    });
+  });
+
   test('normalizes legacy and malformed manual layout state', () => {
     const state = normalizeTimelineManualLayoutState({
       section: {
@@ -153,7 +204,16 @@ describe('project timeline view model', () => {
           },
         },
       },
-      assignee: [],
+      assignee: {
+        'assignee:user-1': {
+          taskOrder: [' task-6 ', 'task-7', 'task-6'],
+          rowByTaskId: {
+            ' task-6 ': 1,
+            'task-7': 9,
+            'task-8': 0,
+          },
+        },
+      },
       status: {
         'status:TODO': ['task-4', 'task-5'],
       },
@@ -169,7 +229,15 @@ describe('project timeline view model', () => {
           },
         },
       },
-      assignee: {},
+      assignee: {
+        'assignee:user-1': {
+          orderedTaskIds: ['task-6', 'task-7'],
+          rowByTaskId: {
+            'task-6': 1,
+            'task-7': 1,
+          },
+        },
+      },
       status: {
         'status:TODO': {
           orderedTaskIds: ['task-4', 'task-5'],

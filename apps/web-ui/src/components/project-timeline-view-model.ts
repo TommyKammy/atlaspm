@@ -176,7 +176,7 @@ export function buildTimelineTaskViewModel(input: BuildTimelineTaskViewModelInpu
     .sort((left, right) => compareTimelineTasks(left, right, input.effectiveSortMode));
 
   const ganttRiskByTaskId = buildGanttRiskByTaskId(
-    baseFilteredTasks,
+    input.tasks,
     input.dependencyEdges,
     input.today,
   );
@@ -237,6 +237,8 @@ export function normalizeTimelineManualLayoutByLane(value: unknown): TimelineMan
           ? {
               orderedTaskIds: Array.isArray((rawTaskIds as Record<string, unknown>).orderedTaskIds)
                 ? ((rawTaskIds as Record<string, unknown>).orderedTaskIds as unknown[])
+                : Array.isArray((rawTaskIds as Record<string, unknown>).taskOrder)
+                  ? ((rawTaskIds as Record<string, unknown>).taskOrder as unknown[])
                 : Array.isArray((rawTaskIds as Record<string, unknown>).taskIds)
                   ? ((rawTaskIds as Record<string, unknown>).taskIds as unknown[])
                   : [],
