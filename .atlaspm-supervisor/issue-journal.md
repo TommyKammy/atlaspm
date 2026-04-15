@@ -3,8 +3,8 @@
 ## Supervisor Snapshot
 - Issue URL: https://github.com/TommyKammy/atlaspm/issues/312
 - Branch: codex/issue-312
-- Workspace: /Users/tomoakikawada/Dev/atlaspm-worktrees/issue-312
-- Journal: /Users/tomoakikawada/Dev/atlaspm-worktrees/issue-312/.atlaspm-supervisor/issue-journal.md
+- Workspace: atlaspm-worktree/issue-312
+- Journal: atlaspm-worktree/issue-312/.atlaspm-supervisor/issue-journal.md
 - Current phase: reproducing
 - Attempt count: 1
 - Last head SHA: 9b3ec6dcc4d847200317a1a7f7c9c8fe44e02437
