@@ -75,56 +75,9 @@ export class WorkspaceDefaultsService {
   }
 
   async ensureProjectDefaults(projectId: string, actor: string, correlationId: string) {
-    const tx = this.prisma;
-    const defaultSection = await tx.section.findFirst({ where: { projectId, isDefault: true } });
-    if (!defaultSection) {
-      const section = await tx.section.create({
-        data: { projectId, name: 'No Section', isDefault: true, position: 1000 },
-      });
-      await this.auditOutbox.appendAuditOutbox({
-        tx,
-        actor,
-        entityType: 'Section',
-        entityId: section.id,
-        action: 'section.created.default',
-        afterJson: section,
-        correlationId,
-        outboxType: 'section.created',
-        payload: section,
-      });
-    }
-
-    const templates = [
-      { name: 'Progress to Done', templateKey: 'progress_to_done' },
-      { name: 'Progress to In Progress', templateKey: 'progress_to_in_progress' },
-    ] as const;
-    for (const tpl of templates) {
-      const rule = await tx.rule.upsert({
-        where: { projectId_templateKey: { projectId, templateKey: tpl.templateKey } },
-        create: {
-          projectId,
-          name: tpl.name,
-          templateKey: tpl.templateKey,
-          definition: templateDefinition(tpl.templateKey) as Prisma.InputJsonValue,
-          enabled: true,
-          cooldownSec: 60,
-        },
-        update: {
-          definition: templateDefinition(tpl.templateKey) as Prisma.InputJsonValue,
-        },
-      });
-      await this.auditOutbox.appendAuditOutbox({
-        tx,
-        actor,
-        entityType: 'Rule',
-        entityId: rule.id,
-        action: 'rule.ensure_template',
-        afterJson: rule,
-        correlationId,
-        outboxType: 'rule.created',
-        payload: rule,
-      });
-    }
+    await this.prisma.$transaction(async (tx) => {
+      await this.ensureProjectDefaultsInTx(tx, projectId, actor, correlationId);
+    });
   }
 
   async ensureProjectDefaultsInTx(
@@ -156,14 +109,27 @@ export class WorkspaceDefaultsService {
       { name: 'Progress to In Progress', templateKey: 'progress_to_in_progress' },
     ] as const;
     for (const tpl of templates) {
+      const definition = templateDefinition(tpl.templateKey) as Prisma.InputJsonValue;
       const existing = await tx.rule.findUnique({
         where: { projectId_templateKey: { projectId, templateKey: tpl.templateKey } },
       });
       if (existing) {
-        if (!existing.definition) {
-          await tx.rule.update({
+        if (JSON.stringify(existing.definition) !== JSON.stringify(definition)) {
+          const rule = await tx.rule.update({
             where: { id: existing.id },
-            data: { definition: templateDefinition(tpl.templateKey) as Prisma.InputJsonValue },
+            data: { definition },
+          });
+          await this.auditOutbox.appendAuditOutbox({
+            tx,
+            actor,
+            entityType: 'Rule',
+            entityId: rule.id,
+            action: 'rule.ensure_template',
+            beforeJson: existing,
+            afterJson: rule,
+            correlationId,
+            outboxType: 'rule.updated',
+            payload: rule,
           });
         }
         continue;
@@ -173,7 +139,7 @@ export class WorkspaceDefaultsService {
           projectId,
           name: tpl.name,
           templateKey: tpl.templateKey,
-          definition: templateDefinition(tpl.templateKey) as Prisma.InputJsonValue,
+          definition,
           enabled: true,
           cooldownSec: 60,
         },

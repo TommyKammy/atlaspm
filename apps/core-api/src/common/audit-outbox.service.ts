@@ -3,6 +3,16 @@ import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class AuditOutboxService {
+  private normalizeJson(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (value === null) {
+      return Prisma.JsonNull;
+    }
+    return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+  }
+
   async appendAuditOutbox(args: {
     tx: Prisma.TransactionClient;
     actor: string;
@@ -16,19 +26,9 @@ export class AuditOutboxService {
     payload: unknown;
   }) {
     const correlationId = args.correlationId ?? 'test-correlation-id';
-    const beforeJson =
-      args.beforeJson === undefined
-        ? undefined
-        : args.beforeJson === null
-          ? Prisma.JsonNull
-          : (args.beforeJson as Prisma.InputJsonValue);
-    const afterJson =
-      args.afterJson === undefined
-        ? undefined
-        : args.afterJson === null
-          ? Prisma.JsonNull
-          : (args.afterJson as Prisma.InputJsonValue);
-    const payload = args.payload === null ? Prisma.JsonNull : (args.payload as Prisma.InputJsonValue);
+    const beforeJson = this.normalizeJson(args.beforeJson);
+    const afterJson = this.normalizeJson(args.afterJson);
+    const payload = this.normalizeJson(args.payload) ?? Prisma.JsonNull;
 
     await args.tx.auditEvent.create({
       data: {

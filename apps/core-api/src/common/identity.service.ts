@@ -8,19 +8,24 @@ export class IdentityService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async ensureUser(sub: string, email?: string, name?: string) {
-    const normalizedEmail = (email ?? '').trim().toLowerCase() || null;
     const existing = await this.prisma.user.findUnique({ where: { id: sub } });
+    const normalizedEmail = email === undefined ? undefined : email.trim().toLowerCase() || null;
     if (!existing) {
       return this.prisma.user.create({
-        data: { id: sub, email: normalizedEmail, displayName: name, status: UserStatus.ACTIVE },
+        data: { id: sub, email: normalizedEmail ?? null, displayName: name, status: UserStatus.ACTIVE },
       });
     }
+
+    const data: { displayName?: string | null; email?: string | null } = {
+      displayName: existing.displayName ?? name,
+    };
+    if (normalizedEmail !== undefined) {
+      data.email = normalizedEmail;
+    }
+
     return this.prisma.user.update({
       where: { id: sub },
-      data: {
-        email: normalizedEmail,
-        displayName: existing.displayName ?? name,
-      },
+      data,
     });
   }
 
