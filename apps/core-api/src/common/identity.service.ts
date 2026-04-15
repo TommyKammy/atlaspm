@@ -16,11 +16,15 @@ export class IdentityService {
       });
     }
 
-    const data: { displayName?: string | null; email?: string | null } = {
-      displayName: existing.displayName ?? name,
-    };
+    const data: { displayName?: string | null; email?: string | null } = {};
+    if (existing.displayName == null && name !== undefined) {
+      data.displayName = name;
+    }
     if (normalizedEmail !== undefined) {
       data.email = normalizedEmail;
+    }
+    if (Object.keys(data).length === 0) {
+      return existing;
     }
 
     return this.prisma.user.update({

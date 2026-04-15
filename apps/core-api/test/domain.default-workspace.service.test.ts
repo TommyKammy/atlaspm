@@ -70,8 +70,53 @@ describe('WorkspaceDefaultsService project defaults', () => {
     await service.ensureProjectDefaults('project-1', 'user-1', 'corr-1');
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 5000,
+      timeout: 10000,
+      isolationLevel: 'Serializable',
+    });
     expect(tx.section.findFirst).toHaveBeenCalledTimes(1);
     expect(auditOutbox.appendAuditOutbox).not.toHaveBeenCalled();
+  });
+
+  it('retries project default provisioning after a serializable transaction conflict', async () => {
+    const tx = {
+      section: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'section-1', projectId: 'project-1', isDefault: true }),
+      },
+      rule: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValueOnce({
+            id: 'rule-1',
+            projectId: 'project-1',
+            name: 'Progress to Done',
+            templateKey: 'progress_to_done',
+            definition: templateDefinition('progress_to_done'),
+          })
+          .mockResolvedValueOnce({
+            id: 'rule-2',
+            projectId: 'project-1',
+            name: 'Progress to In Progress',
+            templateKey: 'progress_to_in_progress',
+            definition: templateDefinition('progress_to_in_progress'),
+          }),
+        update: vi.fn(),
+        create: vi.fn(),
+      },
+    };
+    const prisma = {
+      $transaction: vi
+        .fn()
+        .mockRejectedValueOnce({ code: 'P2034', message: 'serialization failure' })
+        .mockImplementationOnce(async (callback: (txArg: typeof tx) => Promise<void>) => callback(tx)),
+    };
+    const auditOutbox = { appendAuditOutbox: vi.fn() };
+    const service = new WorkspaceDefaultsService(prisma as any, auditOutbox as any);
+
+    await expect(service.ensureProjectDefaults('project-1', 'user-1', 'corr-1')).resolves.toBeUndefined();
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(tx.section.findFirst).toHaveBeenCalledTimes(1);
   });
 
   it('emits rule.updated instead of rule.created when repairing an existing template', async () => {

@@ -6,15 +6,25 @@ import { AuditOutboxService } from './audit-outbox.service';
 
 @Injectable()
 export class WorkspaceDefaultsService {
-  private static readonly defaultWorkspaceRetryDelaysMs = [10, 25, 50, 100, 200, 400];
+  private static readonly serializableRetryDelaysMs = [10, 25, 50, 100, 200, 400];
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
   ) {}
 
+  private static isRetryableTransactionConflict(error: unknown) {
+    const maybePrismaError = error as { code?: string; message?: string };
+    return (
+      maybePrismaError.code === 'P2034' ||
+      maybePrismaError.message?.includes('write conflict') ||
+      maybePrismaError.message?.includes('deadlock') ||
+      maybePrismaError.message?.includes('serialization')
+    );
+  }
+
   async ensureDefaultWorkspaceForUser(sub: string) {
-    for (let attempt = 0; attempt < WorkspaceDefaultsService.defaultWorkspaceRetryDelaysMs.length; attempt += 1) {
+    for (let attempt = 0; attempt < WorkspaceDefaultsService.serializableRetryDelaysMs.length; attempt += 1) {
       try {
         return await this.prisma.$transaction(
           async (tx) => {
@@ -40,14 +50,10 @@ export class WorkspaceDefaultsService {
           },
         );
       } catch (error) {
-        const maybePrismaError = error as { code?: string; message?: string };
-        const isRetryableTxnConflict =
-          maybePrismaError.code === 'P2034' ||
-          maybePrismaError.message?.includes('write conflict') ||
-          maybePrismaError.message?.includes('deadlock') ||
-          maybePrismaError.message?.includes('serialization');
-
-        if (!isRetryableTxnConflict || attempt === WorkspaceDefaultsService.defaultWorkspaceRetryDelaysMs.length - 1) {
+        if (
+          !WorkspaceDefaultsService.isRetryableTransactionConflict(error) ||
+          attempt === WorkspaceDefaultsService.serializableRetryDelaysMs.length - 1
+        ) {
           const membership = await this.prisma.workspaceMembership.findFirst({
             where: { userId: sub },
             include: { workspace: true },
@@ -66,7 +72,7 @@ export class WorkspaceDefaultsService {
           return membership.workspace;
         }
 
-        const delayMs = WorkspaceDefaultsService.defaultWorkspaceRetryDelaysMs[attempt];
+        const delayMs = WorkspaceDefaultsService.serializableRetryDelaysMs[attempt];
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
     }
@@ -75,9 +81,31 @@ export class WorkspaceDefaultsService {
   }
 
   async ensureProjectDefaults(projectId: string, actor: string, correlationId: string) {
-    await this.prisma.$transaction(async (tx) => {
-      await this.ensureProjectDefaultsInTx(tx, projectId, actor, correlationId);
-    });
+    for (let attempt = 0; attempt < WorkspaceDefaultsService.serializableRetryDelaysMs.length; attempt += 1) {
+      try {
+        await this.prisma.$transaction(
+          async (tx) => {
+            await this.ensureProjectDefaultsInTx(tx, projectId, actor, correlationId);
+          },
+          {
+            maxWait: 5000,
+            timeout: 10000,
+            isolationLevel: 'Serializable',
+          },
+        );
+        return;
+      } catch (error) {
+        if (
+          !WorkspaceDefaultsService.isRetryableTransactionConflict(error) ||
+          attempt === WorkspaceDefaultsService.serializableRetryDelaysMs.length - 1
+        ) {
+          throw error;
+        }
+
+        const delayMs = WorkspaceDefaultsService.serializableRetryDelaysMs[attempt];
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
   }
 
   async ensureProjectDefaultsInTx(
