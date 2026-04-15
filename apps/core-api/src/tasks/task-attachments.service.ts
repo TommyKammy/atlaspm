@@ -119,13 +119,21 @@ export class TaskAttachmentsService {
     if (file.size <= 0 || file.size > MAX_IMAGE_UPLOAD_BYTES) throw new ConflictException('Image too large');
 
     const diskPath = resolveAttachmentPath(attachment.storageKey);
-    await fs.mkdir(dirname(diskPath), { recursive: true });
-    await fs.writeFile(diskPath, file.buffer);
-
-    await this.prisma.taskAttachment.update({
-      where: { id: attachment.id },
+    const { count } = await this.prisma.taskAttachment.updateMany({
+      where: {
+        id: attachment.id,
+        uploadToken: token,
+        deletedAt: null,
+        completedAt: null,
+      },
       data: { sizeBytes: file.size, mimeType: file.mimetype },
     });
+    if (count !== 1) {
+      throw new ConflictException('Attachment is no longer uploadable');
+    }
+
+    await fs.mkdir(dirname(diskPath), { recursive: true });
+    await fs.writeFile(diskPath, file.buffer);
     return { ok: true };
   }
 
