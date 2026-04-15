@@ -708,6 +708,14 @@ test('timeline align action saves dependency chains ahead of unrelated blockers'
     dependsOnId: chainA.id,
     type: 'BLOCKS',
   });
+  await api(`/projects/${projectId}/timeline/preferences/view-state/timeline`, token, 'PUT', {
+    zoom: 'week',
+    anchorDate: blocker.startAt,
+    swimlane: 'section',
+    sortMode: 'manual',
+    scheduleFilter: 'all',
+    workingDaysOnly: false,
+  });
 
   await page.goto(`/projects/${projectId}?view=timeline`);
   await expect(page.locator('[data-testid="timeline-view"]')).toBeVisible();
