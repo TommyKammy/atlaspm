@@ -593,8 +593,29 @@ export function buildTimelineLaneSubtaskMeta<TTask extends { id: string; parentI
     childIds.forEach((childId) => visit(childId, depth + 1, ownRowHint + 1));
   };
 
+  const shouldFallbackVisit = (taskId: string) => {
+    const seenTaskIds = new Set<string>([taskId]);
+    let currentTask = taskById.get(taskId);
+    while (currentTask) {
+      const parentId = currentTask.parentId ?? null;
+      if (!parentId || !laneTaskIds.has(parentId)) {
+        return false;
+      }
+      if (collapsedParentIds.has(parentId)) {
+        return false;
+      }
+      if (seenTaskIds.has(parentId)) {
+        return true;
+      }
+      seenTaskIds.add(parentId);
+      currentTask = taskById.get(parentId);
+    }
+    return false;
+  };
+
   roots.forEach((task) => visit(task.id, 0, baseRowByTaskId?.[task.id] ?? 0));
   for (const task of tasks) {
+    if (!shouldFallbackVisit(task.id)) continue;
     visit(task.id, 0, baseRowByTaskId?.[task.id] ?? 0);
   }
 
