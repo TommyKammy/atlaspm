@@ -43,6 +43,7 @@ import { TaskAttachmentsController } from './tasks/task-attachments.controller';
 import { TaskAttachmentsService } from './tasks/task-attachments.service';
 import { TaskCommentsController } from './tasks/task-comments.controller';
 import { TaskCommentsService } from './tasks/task-comments.service';
+import { TaskDependenciesController } from './tasks/task-dependencies.controller';
 import { TaskMentionsService } from './tasks/task-mentions.service';
 import { TaskRemindersController } from './tasks/task-reminders.controller';
 import { TaskRemindersService } from './tasks/task-reminders.service';
@@ -76,6 +77,7 @@ import { GuestAccessController } from './guest-access/guest-access.controller';
     PublicAttachmentsController,
     TaskAttachmentsController,
     TaskCommentsController,
+    TaskDependenciesController,
     TaskRemindersController,
     CollabController,
     WorkspaceAdminController,
