@@ -108,6 +108,12 @@ export class TaskAttachmentsService {
     if (!attachment.uploadToken || attachment.uploadToken !== token) {
       throw new ForbiddenException('Invalid upload token');
     }
+    if (attachment.deletedAt) {
+      throw new NotFoundException('Attachment not found');
+    }
+    if (attachment.completedAt) {
+      throw new ConflictException('Attachment already completed');
+    }
     if (!file) throw new ConflictException('Missing file');
     if (!IMAGE_MIME_ALLOWLIST.has(file.mimetype)) throw new ConflictException('Unsupported image mime type');
     if (file.size <= 0 || file.size > MAX_IMAGE_UPLOAD_BYTES) throw new ConflictException('Image too large');
@@ -131,15 +137,26 @@ export class TaskAttachmentsService {
     });
     if (attachment.taskId !== taskId) throw new ConflictException('Attachment does not belong to task');
     if (attachment.deletedAt) throw new NotFoundException('Attachment not found');
+    if (attachment.completedAt) return this.serializeAttachment(attachment);
 
     const diskPath = resolveAttachmentPath(attachment.storageKey);
     const stat = await fs.stat(diskPath).catch(() => null);
     if (!stat) throw new ConflictException('Attachment upload not found');
 
-    const accessToken = randomBytes(16).toString('hex');
     return this.prisma.$transaction(async (tx) => {
-      const completed = await tx.taskAttachment.update({
+      const current = await tx.taskAttachment.findUniqueOrThrow({
         where: { id: attachment.id },
+      });
+      if (current.deletedAt) {
+        throw new NotFoundException('Attachment not found');
+      }
+      if (current.completedAt) {
+        return this.serializeAttachment(current);
+      }
+
+      const accessToken = randomBytes(16).toString('hex');
+      const completed = await tx.taskAttachment.update({
+        where: { id: current.id },
         data: { completedAt: new Date(), uploadToken: accessToken, sizeBytes: Number(stat.size) },
       });
       await this.domain.appendAuditOutbox({
