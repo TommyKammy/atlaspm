@@ -82,6 +82,13 @@ export type TimelineLayout<TTask extends TimelineLayoutTaskInput = TimelineLayou
   totalRowCount: number;
 };
 
+export type TimelineLaneSubtaskMeta = {
+  visibleTaskIds: string[];
+  childIdsByParentId: Record<string, string[]>;
+  depthByTaskId: Record<string, number>;
+  rowHintByTaskId: Record<string, number>;
+};
+
 export type TimelineManualLanePlacement = {
   orderedTaskIds?: string[];
   rowByTaskId?: Record<string, number>;
@@ -550,4 +557,45 @@ export function buildTimelineTaskOrderByLane<TTask extends TimelineLayoutTaskInp
       .map((task) => task.id);
   }
   return laneTaskOrder;
+}
+
+export function buildTimelineLaneSubtaskMeta<TTask extends { id: string; parentId?: string | null }>(
+  tasks: TTask[],
+  collapsedParentIds: Set<string>,
+  baseRowByTaskId?: Record<string, number>,
+): TimelineLaneSubtaskMeta {
+  const taskById = new Map(tasks.map((task) => [task.id, task] as const));
+  const laneTaskIds = new Set(tasks.map((task) => task.id));
+  const childIdsByParentId: Record<string, string[]> = {};
+  for (const task of tasks) {
+    const parentId = task.parentId ?? null;
+    if (!parentId || !laneTaskIds.has(parentId)) continue;
+    (childIdsByParentId[parentId] ??= []).push(task.id);
+  }
+
+  const roots = tasks.filter((task) => !task.parentId || !laneTaskIds.has(task.parentId));
+  const visibleTaskIds: string[] = [];
+  const depthByTaskId: Record<string, number> = {};
+  const rowHintByTaskId: Record<string, number> = {};
+
+  const visit = (taskId: string, depth: number, inheritedRowHint: number) => {
+    const task = taskById.get(taskId);
+    if (!task) return;
+    depthByTaskId[taskId] = depth;
+    const ownRowHint = Math.max(baseRowByTaskId?.[taskId] ?? 0, inheritedRowHint);
+    rowHintByTaskId[taskId] = ownRowHint;
+    visibleTaskIds.push(taskId);
+    if (collapsedParentIds.has(taskId)) return;
+    const childIds = childIdsByParentId[taskId] ?? [];
+    childIds.forEach((childId) => visit(childId, depth + 1, ownRowHint + 1));
+  };
+
+  roots.forEach((task) => visit(task.id, 0, baseRowByTaskId?.[task.id] ?? 0));
+
+  return {
+    visibleTaskIds,
+    childIdsByParentId,
+    depthByTaskId,
+    rowHintByTaskId,
+  };
 }

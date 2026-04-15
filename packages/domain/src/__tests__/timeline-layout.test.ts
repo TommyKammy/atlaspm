@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildTimelineLaneSubtaskMeta,
   buildTimelineLanes,
   buildTimelineLayout,
   buildTimelineTaskOrderByLane,
@@ -646,6 +647,39 @@ test('buildTimelineLayout preserves manual vertical order while still compacting
   assert.deepEqual(layout.taskRowsById['task-late'], { top: 32, height: 40 });
   assert.deepEqual(layout.taskRowsById['task-early'], { top: 32, height: 40 });
   assert.deepEqual(layout.taskRowsById['task-overlap'], { top: 72, height: 40 });
+});
+
+test('buildTimelineLaneSubtaskMeta hides collapsed descendants and cascades row hints', () => {
+  const meta = buildTimelineLaneSubtaskMeta(
+    [
+      { id: 'parent', parentId: null },
+      { id: 'child', parentId: 'parent' },
+      { id: 'grandchild', parentId: 'child' },
+      { id: 'sibling', parentId: null },
+    ],
+    new Set(['child']),
+    {
+      parent: 1,
+      grandchild: 0,
+      sibling: 4,
+    },
+  );
+
+  assert.deepEqual(meta.visibleTaskIds, ['parent', 'child', 'sibling']);
+  assert.deepEqual(meta.childIdsByParentId, {
+    parent: ['child'],
+    child: ['grandchild'],
+  });
+  assert.deepEqual(meta.depthByTaskId, {
+    parent: 0,
+    child: 1,
+    sibling: 0,
+  });
+  assert.deepEqual(meta.rowHintByTaskId, {
+    parent: 1,
+    child: 2,
+    sibling: 4,
+  });
 });
 
 test('buildTimelineLayout respects manual order for overlapping tasks even when dates start earlier', () => {

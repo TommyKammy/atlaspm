@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
+  buildTimelineLaneSubtaskMeta,
   buildTimelineLanes,
   buildTimelineLayout,
   buildTimelineTaskOrderByLane,
@@ -11,11 +12,40 @@ import {
   normalizeProjectViewState,
   resolveProjectViewState,
   type ProjectViewState as SavedProjectViewState,
+  type TimelineLaneSubtaskMeta,
 } from '@atlaspm/domain';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import TaskDetailDrawer from '@/components/task-detail-drawer';
+import {
+  applyResolvedTaskInGroups,
+  applyResolvedTasksInGroups,
+  applyTaskScheduleInGroups,
+  applyTaskSchedulesInGroups,
+  applyTaskTimelineMoveInGroups,
+  areSavedProjectViewStatesEqual,
+  buildTimelineTaskViewModel,
+  compareTimelineTasks,
+  findTaskInGroups,
+  getTimelineManualOrderedTaskIdsByLane,
+  getTimelineManualRowByTaskIdByLane,
+  hasTimelineManualLayout,
+  mergeTimelineManualLaneTaskOrder,
+  normalizeTimelineManualLayoutByLane,
+  normalizeTimelineManualLayoutState,
+  type GanttRiskFilterMode,
+  type GanttTaskRisk,
+  type TimelineLaneOrderGroupBy,
+  type TimelineManualLayoutByLane,
+  type TimelineManualLayoutState,
+  type TimelineMode,
+  type TimelineScheduleFilter,
+  type TimelineSortMode,
+  type TimelineSwimlane,
+  type TimelineViewState,
+  type TimelineZoom,
+} from '@/components/project-timeline-view-model';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useTimelineData, type TimelineTask } from '@/hooks/use-timeline-data';
@@ -38,43 +68,6 @@ const DRAG_START_THRESHOLD_PX = 6;
 const LANE_CHANGE_HORIZONTAL_THRESHOLD_PX = 8;
 const UNASSIGNED_LANE_ID = '__unassigned__';
 const UNSCHEDULED_TASK_DND_TYPE = 'application/x-atlaspm-unscheduled-task';
-
-type TimelineZoom = 'day' | 'week' | 'month';
-type TimelineMode = 'timeline' | 'gantt';
-type TimelineSwimlane = 'section' | 'assignee' | 'status';
-type TimelineSortMode = 'manual' | 'startAt' | 'dueAt';
-type TimelineScheduleFilter = 'all' | 'scheduled' | 'unscheduled';
-type GanttRiskFilterMode = 'all' | 'risk';
-type TimelineLaneOrderGroupBy = Extract<TimelineSwimlane, 'section' | 'assignee'>;
-type TimelineManualLaneLayout = {
-  orderedTaskIds: string[];
-  rowByTaskId?: Record<string, number>;
-};
-type TimelineManualLayoutByLane = Record<string, TimelineManualLaneLayout>;
-type TimelineManualLayoutState = Record<TimelineSwimlane, TimelineManualLayoutByLane>;
-type TimelineLaneSubtaskMeta = {
-  visibleTaskIds: string[];
-  childIdsByParentId: Record<string, string[]>;
-  depthByTaskId: Record<string, number>;
-  rowHintByTaskId: Record<string, number>;
-};
-type TimelineViewState = {
-  zoom?: TimelineZoom;
-  anchorDate?: string;
-  swimlane?: TimelineSwimlane;
-  sortMode?: TimelineSortMode;
-  scheduleFilter?: TimelineScheduleFilter;
-  workingDaysOnly?: boolean;
-  ganttRiskFilterMode?: GanttRiskFilterMode;
-  ganttStrictMode?: boolean;
-};
-
-type GanttTaskRisk = {
-  isAtRisk: boolean;
-  overdue: boolean;
-  blockedByOpen: number;
-  blockedByLate: number;
-};
 
 type TimelinePreferences = {
   projectId: string;
@@ -136,14 +129,6 @@ function getLegacyTimelineStorageKey(
   projectId: string,
 ): string {
   return `atlaspm:timeline-view:${userId}:${projectId}:${mode}`;
-}
-
-function createEmptyTimelineManualLayoutState(): TimelineManualLayoutState {
-  return {
-    section: {},
-    assignee: {},
-    status: {},
-  };
 }
 
 const TIMELINE_ZOOM_CONFIG: Record<
@@ -354,30 +339,6 @@ function normalizeTestIdSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '-');
 }
 
-function compareTimelineTasks(
-  left: TimelineTask,
-  right: TimelineTask,
-  sortMode: TimelineSortMode,
-): number {
-  if (sortMode === 'startAt') {
-    const leftStart = left.timelineStart ? dayNumber(left.timelineStart) : Number.MAX_SAFE_INTEGER;
-    const rightStart = right.timelineStart
-      ? dayNumber(right.timelineStart)
-      : Number.MAX_SAFE_INTEGER;
-    if (leftStart !== rightStart) return leftStart - rightStart;
-  } else if (sortMode === 'dueAt') {
-    const leftDue = left.timelineEnd ? dayNumber(left.timelineEnd) : Number.MAX_SAFE_INTEGER;
-    const rightDue = right.timelineEnd ? dayNumber(right.timelineEnd) : Number.MAX_SAFE_INTEGER;
-    if (leftDue !== rightDue) return leftDue - rightDue;
-  }
-
-  const sectionDelta = left.section.position - right.section.position;
-  if (sectionDelta !== 0) return sectionDelta;
-  const positionDelta = left.position - right.position;
-  if (positionDelta !== 0) return positionDelta;
-  return left.title.localeCompare(right.title);
-}
-
 function timelineTasksOverlap(left: TimelineTask, right: TimelineTask): boolean {
   if (
     !left.hasSchedule ||
@@ -396,23 +357,6 @@ function timelineTasksOverlap(left: TimelineTask, right: TimelineTask): boolean 
   return !(leftEnd < rightStart || rightEnd < leftStart);
 }
 
-function baselineVarianceDays(task: TimelineTask): number | null {
-  if (!task.baselineEnd || !task.timelineEnd) return null;
-  return dayDiff(task.baselineEnd, task.timelineEnd);
-}
-
-function taskMatchesFilters(
-  task: Task,
-  search: string,
-  statusFilter: 'ALL' | Task['status'],
-  priorityFilter: 'ALL' | NonNullable<Task['priority']>,
-) {
-  const bySearch = !search.trim() || task.title.toLowerCase().includes(search.trim().toLowerCase());
-  const byStatus = statusFilter === 'ALL' || task.status === statusFilter;
-  const byPriority = priorityFilter === 'ALL' || task.priority === priorityFilter;
-  return bySearch && byStatus && byPriority;
-}
-
 function isApiConflictError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   return /^API 409:/.test(error.message);
@@ -420,121 +364,6 @@ function isApiConflictError(error: unknown): boolean {
 
 function shiftIsoByDays(value: string | null | undefined, days: number): string | null {
   return shiftUtcDateOnlyIsoByDays(value, days);
-}
-
-function applyTaskScheduleInGroups(
-  groups: SectionTaskGroup[],
-  taskId: string,
-  next: { startAt: string | null; dueAt: string | null },
-) {
-  return groups.map((group) => ({
-    ...group,
-    tasks: group.tasks.map((task) =>
-      task.id === taskId
-        ? {
-            ...task,
-            startAt: next.startAt,
-            dueAt: next.dueAt,
-          }
-        : task,
-    ),
-  }));
-}
-
-function applyTaskSchedulesInGroups(
-  groups: SectionTaskGroup[],
-  nextByTaskId: Map<string, { startAt: string | null; dueAt: string | null }>,
-) {
-  return groups.map((group) => ({
-    ...group,
-    tasks: group.tasks.map((task) => {
-      const next = nextByTaskId.get(task.id);
-      return next
-        ? {
-            ...task,
-            startAt: next.startAt,
-            dueAt: next.dueAt,
-          }
-        : task;
-    }),
-  }));
-}
-
-function findTaskInGroups(groups: SectionTaskGroup[], taskId: string): Task | undefined {
-  for (const group of groups) {
-    const task = group.tasks.find((candidate) => candidate.id === taskId);
-    if (task) return task;
-  }
-  return undefined;
-}
-
-function applyResolvedTaskInGroups(groups: SectionTaskGroup[], resolvedTask: Task) {
-  const withoutTask = groups.map((group) => ({
-    ...group,
-    tasks: group.tasks.filter((task) => task.id !== resolvedTask.id),
-  }));
-
-  return withoutTask.map((group) =>
-    group.section.id === resolvedTask.sectionId
-      ? { ...group, tasks: [...group.tasks, resolvedTask] }
-      : group,
-  );
-}
-
-function applyResolvedTasksInGroups(groups: SectionTaskGroup[], resolvedTasks: Task[]) {
-  return resolvedTasks.reduce(
-    (current, resolvedTask) => applyResolvedTaskInGroups(current, resolvedTask),
-    groups,
-  );
-}
-
-function applyTaskTimelineMoveInGroups(
-  groups: SectionTaskGroup[],
-  taskId: string,
-  next: {
-    startAt?: string | null;
-    dueAt?: string | null;
-    assigneeUserId?: string | null;
-    sectionId?: string;
-    status?: Task['status'];
-  },
-) {
-  let movedTask: Task | null = null;
-  const withoutTask = groups.map((group) => ({
-    ...group,
-    tasks: group.tasks.filter((task) => {
-      if (task.id !== taskId) return true;
-      const updatedTask: Task = { ...task };
-      if (next.startAt !== undefined) {
-        updatedTask.startAt = next.startAt;
-      }
-      if (next.dueAt !== undefined) {
-        updatedTask.dueAt = next.dueAt;
-      }
-      if (next.assigneeUserId !== undefined) {
-        updatedTask.assigneeUserId = next.assigneeUserId;
-      }
-      if (next.sectionId !== undefined) {
-        updatedTask.sectionId = next.sectionId;
-      }
-      if (next.status !== undefined) {
-        updatedTask.status = next.status;
-        updatedTask.completedAt =
-          next.status === 'DONE' ? (task.completedAt ?? new Date().toISOString()) : null;
-      }
-      movedTask = updatedTask;
-      return false;
-    }),
-  }));
-
-  if (!movedTask) return groups;
-  const finalizedTask: Task = movedTask;
-  const targetSectionId = next.sectionId ?? finalizedTask.sectionId;
-  return withoutTask.map((group) =>
-    group.section.id === targetSectionId
-      ? { ...group, tasks: [...group.tasks, finalizedTask] }
-      : group,
-  );
 }
 
 function parseAssigneeLaneId(laneId: string): string | null | undefined {
@@ -790,14 +619,6 @@ function parseSavedProjectViewState(
   return Object.keys(normalizedLegacy).length > 0 ? normalizedLegacy : null;
 }
 
-function areSavedProjectViewStatesEqual(
-  mode: TimelineMode,
-  left: SavedProjectViewState | null | undefined,
-  right: SavedProjectViewState,
-): boolean {
-  return JSON.stringify(normalizeProjectViewState(mode, left)) === JSON.stringify(normalizeProjectViewState(mode, right));
-}
-
 function getTimelineLaneOrderStorageKey(
   projectId: string,
   groupBy: TimelineLaneOrderGroupBy,
@@ -816,156 +637,6 @@ function getTimelineManualLayoutStorageKey(
   return userId
     ? `${TIMELINE_MANUAL_LAYOUT_STORAGE_PREFIX}:${projectId}:${groupBy}:${userId}`
     : `${TIMELINE_MANUAL_LAYOUT_STORAGE_PREFIX}:${projectId}:${groupBy}`;
-}
-
-function normalizeTimelineManualLayoutByLane(value: unknown): TimelineManualLayoutByLane {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  const next: TimelineManualLayoutByLane = {};
-  for (const [laneIdRaw, rawTaskIds] of Object.entries(value as Record<string, unknown>)) {
-    const laneId = laneIdRaw.trim();
-    if (!laneId) continue;
-    const candidate =
-      Array.isArray(rawTaskIds)
-        ? { orderedTaskIds: rawTaskIds, rowByTaskId: {} as Record<string, unknown> }
-        : rawTaskIds && typeof rawTaskIds === 'object' && !Array.isArray(rawTaskIds)
-          ? {
-              orderedTaskIds: Array.isArray((rawTaskIds as Record<string, unknown>).orderedTaskIds)
-                ? ((rawTaskIds as Record<string, unknown>).orderedTaskIds as unknown[])
-                : Array.isArray((rawTaskIds as Record<string, unknown>).taskIds)
-                  ? ((rawTaskIds as Record<string, unknown>).taskIds as unknown[])
-                  : [],
-              rowByTaskId:
-                (rawTaskIds as Record<string, unknown>).rowByTaskId &&
-                typeof (rawTaskIds as Record<string, unknown>).rowByTaskId === 'object' &&
-                !Array.isArray((rawTaskIds as Record<string, unknown>).rowByTaskId)
-                  ? ((rawTaskIds as Record<string, unknown>).rowByTaskId as Record<string, unknown>)
-                  : (rawTaskIds as Record<string, unknown>).rowHints &&
-                      typeof (rawTaskIds as Record<string, unknown>).rowHints === 'object' &&
-                      !Array.isArray((rawTaskIds as Record<string, unknown>).rowHints)
-                    ? ((rawTaskIds as Record<string, unknown>).rowHints as Record<string, unknown>)
-                    : {},
-            }
-          : null;
-    if (!candidate) continue;
-    const seenTaskIds = new Set<string>();
-    const normalizedTaskIds: string[] = [];
-    for (const taskId of candidate.orderedTaskIds) {
-      if (typeof taskId !== 'string') continue;
-      const trimmedTaskId = taskId.trim();
-      if (!trimmedTaskId || seenTaskIds.has(trimmedTaskId)) continue;
-      seenTaskIds.add(trimmedTaskId);
-      normalizedTaskIds.push(trimmedTaskId);
-    }
-    if (normalizedTaskIds.length > 0) {
-      const rowByTaskId: Record<string, number> = {};
-      const maxRowIndex = Math.max(normalizedTaskIds.length - 1, 0);
-      for (const [taskIdRaw, rowIndex] of Object.entries(candidate.rowByTaskId)) {
-        const taskId = taskIdRaw.trim();
-        if (!taskId || !normalizedTaskIds.includes(taskId)) continue;
-        const numericRowIndex = Number(rowIndex);
-        if (!Number.isInteger(numericRowIndex) || numericRowIndex < 0) continue;
-        rowByTaskId[taskId] = Math.min(numericRowIndex, maxRowIndex);
-      }
-      next[laneId] =
-        Object.keys(rowByTaskId).length > 0
-          ? { orderedTaskIds: normalizedTaskIds, rowByTaskId }
-          : { orderedTaskIds: normalizedTaskIds };
-    }
-  }
-  return next;
-}
-
-function normalizeTimelineManualLayoutState(value: unknown): TimelineManualLayoutState {
-  const next = createEmptyTimelineManualLayoutState();
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return next;
-  const candidate = value as Record<string, unknown>;
-  next.section = normalizeTimelineManualLayoutByLane(candidate.section);
-  next.assignee = normalizeTimelineManualLayoutByLane(candidate.assignee);
-  next.status = normalizeTimelineManualLayoutByLane(candidate.status);
-  return next;
-}
-
-function hasTimelineManualLayout(layout: TimelineManualLayoutByLane): boolean {
-  return Object.values(layout).some((laneTaskOrder) => laneTaskOrder.orderedTaskIds.length > 0);
-}
-
-function mergeTimelineManualLaneTaskOrder(
-  existingLaneLayout: TimelineManualLaneLayout | undefined,
-  nextTaskOrder: string[],
-  nextRowByTaskId?: Record<string, number>,
-): TimelineManualLaneLayout {
-  const seenTaskIds = new Set(nextTaskOrder);
-  const orderedTaskIds = [
-    ...nextTaskOrder,
-    ...(existingLaneLayout?.orderedTaskIds ?? []).filter((taskId) => !seenTaskIds.has(taskId)),
-  ];
-  const rowByTaskId = {
-    ...(existingLaneLayout?.rowByTaskId ?? {}),
-    ...(nextRowByTaskId ?? {}),
-  };
-  for (const taskId of Object.keys(rowByTaskId)) {
-    if (!orderedTaskIds.includes(taskId)) delete rowByTaskId[taskId];
-  }
-  return Object.keys(rowByTaskId).length > 0 ? { orderedTaskIds, rowByTaskId } : { orderedTaskIds };
-}
-
-function getTimelineManualOrderedTaskIdsByLane(layout: TimelineManualLayoutByLane): Record<string, string[]> {
-  return Object.fromEntries(
-    Object.entries(layout)
-      .filter(([, laneLayout]) => laneLayout.orderedTaskIds.length > 0)
-      .map(([laneId, laneLayout]) => [laneId, laneLayout.orderedTaskIds]),
-  );
-}
-
-function getTimelineManualRowByTaskIdByLane(
-  layout: TimelineManualLayoutByLane,
-): Record<string, Record<string, number>> {
-  return Object.fromEntries(
-    Object.entries(layout)
-      .filter(([, laneLayout]) => Boolean(laneLayout.rowByTaskId && Object.keys(laneLayout.rowByTaskId).length))
-      .map(([laneId, laneLayout]) => [laneId, laneLayout.rowByTaskId ?? {}]),
-  );
-}
-
-function buildTimelineLaneSubtaskMeta<TTask extends { id: string; parentId?: string | null }>(
-  tasks: TTask[],
-  collapsedParentIds: Set<string>,
-  baseRowByTaskId?: Record<string, number>,
-): TimelineLaneSubtaskMeta {
-  const taskById = new Map(tasks.map((task) => [task.id, task] as const));
-  const laneTaskIds = new Set(tasks.map((task) => task.id));
-  const childIdsByParentId: Record<string, string[]> = {};
-  for (const task of tasks) {
-    const parentId = task.parentId ?? null;
-    if (!parentId || !laneTaskIds.has(parentId)) continue;
-    (childIdsByParentId[parentId] ??= []).push(task.id);
-  }
-
-  const roots = tasks.filter((task) => !task.parentId || !laneTaskIds.has(task.parentId));
-  const visibleTaskIds: string[] = [];
-  const depthByTaskId: Record<string, number> = {};
-  const rowHintByTaskId: Record<string, number> = {};
-
-  const visit = (taskId: string, depth: number, inheritedRowHint: number) => {
-    const task = taskById.get(taskId);
-    if (!task) return;
-    depthByTaskId[taskId] = depth;
-    const ownRowHint = Math.max(baseRowByTaskId?.[taskId] ?? 0, inheritedRowHint);
-    rowHintByTaskId[taskId] = ownRowHint;
-    visibleTaskIds.push(taskId);
-    if (collapsedParentIds.has(taskId)) return;
-    const childIds = childIdsByParentId[taskId] ?? [];
-    childIds.forEach((childId) => visit(childId, depth + 1, ownRowHint + 1));
-  };
-
-  roots.forEach((task) => visit(task.id, 0, baseRowByTaskId?.[task.id] ?? 0));
-
-  return {
-    visibleTaskIds,
-    childIdsByParentId,
-    depthByTaskId,
-    rowHintByTaskId,
-  };
 }
 
 function readStoredTimelineLaneOrder(keys: Array<string | null | undefined>): string[] {
@@ -1512,71 +1183,44 @@ export function ProjectScheduleCanvas({
     return list;
   }, [timeline.window.end, timeline.window.start]);
 
-  const baseFilteredTasks = useMemo(() => {
-    return timeline.tasks
-      .filter((task) => taskMatchesFilters(task, search, statusFilter, priorityFilter))
-      .filter((task) => {
-        if (effectiveScheduleFilter === 'scheduled') return task.hasSchedule;
-        if (effectiveScheduleFilter === 'unscheduled') return !task.hasSchedule;
-        return true;
-      })
-      .sort((left, right) => compareTimelineTasks(left, right, effectiveSortMode));
-  }, [
-    effectiveScheduleFilter,
-    effectiveSortMode,
-    priorityFilter,
-    search,
-    statusFilter,
-    timeline.tasks,
-  ]);
-
-  const ganttRiskByTaskId = useMemo(() => {
-    const taskById = new Map(baseFilteredTasks.map((task) => [task.id, task]));
-    const incomingDependenciesByTarget = new Map<string, TimelineTask[]>();
-    for (const edge of timeline.dependencyEdges) {
-      if (edge.type === 'RELATES_TO') continue;
-      const sourceTask = taskById.get(edge.source);
-      const targetTask = taskById.get(edge.target);
-      if (!sourceTask || !targetTask) continue;
-      const list = incomingDependenciesByTarget.get(edge.target) ?? [];
-      list.push(sourceTask);
-      incomingDependenciesByTarget.set(edge.target, list);
-    }
-
-    const today = startOfDay(new Date());
-    const todayDay = dayNumber(today);
-    const next = new Map<string, GanttTaskRisk>();
-    for (const task of baseFilteredTasks) {
-      const blockers = incomingDependenciesByTarget.get(task.id) ?? [];
-      let blockedByOpen = 0;
-      let blockedByLate = 0;
-      const taskDueDay = task.timelineEnd ? dayNumber(task.timelineEnd) : null;
-      for (const blocker of blockers) {
-        if (blocker.status !== 'DONE') {
-          blockedByOpen += 1;
-        }
-        if (
-          taskDueDay !== null &&
-          blocker.timelineEnd &&
-          dayNumber(blocker.timelineEnd) > taskDueDay
-        ) {
-          blockedByLate += 1;
-        }
-      }
-
-      const overdue = Boolean(
-        task.timelineEnd && dayNumber(task.timelineEnd) < todayDay && task.status !== 'DONE',
-      );
-      const isAtRisk = overdue || blockedByOpen > 0 || blockedByLate > 0;
-      next.set(task.id, {
-        isAtRisk,
-        overdue,
-        blockedByOpen,
-        blockedByLate,
-      });
-    }
-    return next;
-  }, [baseFilteredTasks, timeline.dependencyEdges]);
+  const timelineTaskViewModel = useMemo(
+    () =>
+      buildTimelineTaskViewModel({
+        tasks: timeline.tasks,
+        dependencyEdges: timeline.dependencyEdges,
+        mode,
+        search,
+        statusFilter,
+        priorityFilter,
+        effectiveScheduleFilter,
+        effectiveSortMode,
+        ganttRiskFilterMode,
+        today: new Date(),
+      }),
+    [
+      effectiveScheduleFilter,
+      effectiveSortMode,
+      ganttRiskFilterMode,
+      mode,
+      priorityFilter,
+      search,
+      statusFilter,
+      timeline.dependencyEdges,
+      timeline.tasks,
+    ],
+  );
+  const {
+    filteredTasks,
+    filteredTaskIds,
+    ganttAheadTasks,
+    ganttBlockedTasks,
+    ganttDelayedTasks,
+    ganttRiskByTaskId,
+    ganttRiskTasks,
+    ganttVarianceByTaskId,
+    scheduledTimelineTasks,
+    totalDependencyEdges,
+  } = timelineTaskViewModel;
 
   const describeTaskRisk = (risk: GanttTaskRisk | undefined) => {
     if (!risk?.isAtRisk) return null;
@@ -1584,15 +1228,6 @@ export function ProjectScheduleCanvas({
     if (risk.blockedByOpen > 0) return t('ganttRiskBlocked');
     return t('ganttRiskLateDependency');
   };
-
-  const filteredTasks = useMemo(() => {
-    if (mode !== 'gantt' || ganttRiskFilterMode === 'all') return baseFilteredTasks;
-    return baseFilteredTasks.filter((task) => ganttRiskByTaskId.get(task.id)?.isAtRisk);
-  }, [baseFilteredTasks, ganttRiskByTaskId, ganttRiskFilterMode, mode]);
-  const scheduledTimelineTasks = useMemo(
-    () => filteredTasks.filter((task) => task.hasSchedule),
-    [filteredTasks],
-  );
   const preferredLaneOrder = useMemo(() => {
     const storedLaneOrder = readStoredTimelineLaneOrder([
       laneOrderStorageUserKey,
@@ -1744,10 +1379,6 @@ export function ProjectScheduleCanvas({
     });
   }, [timelineLanes]);
 
-  const filteredTaskIds = useMemo(
-    () => new Set(filteredTasks.map((task) => task.id)),
-    [filteredTasks],
-  );
   const taskHasSubtasksById = useMemo(() => {
     const next = new Map<string, boolean>();
     for (const task of timeline.tasks) {
@@ -1764,40 +1395,7 @@ export function ProjectScheduleCanvas({
 
   const scheduledTasks = filteredTasks.filter((task) => task.hasSchedule && task.inWindow);
   const unscheduledTasks = filteredTasks.filter((task) => !task.hasSchedule);
-  const ganttRiskTasks = useMemo(
-    () => baseFilteredTasks.filter((task) => ganttRiskByTaskId.get(task.id)?.isAtRisk),
-    [baseFilteredTasks, ganttRiskByTaskId],
-  );
-  const ganttBlockedTasks = useMemo(
-    () =>
-      baseFilteredTasks.filter((task) => (ganttRiskByTaskId.get(task.id)?.blockedByOpen ?? 0) > 0),
-    [baseFilteredTasks, ganttRiskByTaskId],
-  );
-  const ganttVarianceByTaskId = useMemo(() => {
-    const next = new Map<string, number>();
-    for (const task of baseFilteredTasks) {
-      const variance = baselineVarianceDays(task);
-      if (variance !== null) next.set(task.id, variance);
-    }
-    return next;
-  }, [baseFilteredTasks]);
-  const ganttDelayedTasks = useMemo(
-    () => baseFilteredTasks.filter((task) => (ganttVarianceByTaskId.get(task.id) ?? 0) > 0),
-    [baseFilteredTasks, ganttVarianceByTaskId],
-  );
-  const ganttAheadTasks = useMemo(
-    () => baseFilteredTasks.filter((task) => (ganttVarianceByTaskId.get(task.id) ?? 0) < 0),
-    [baseFilteredTasks, ganttVarianceByTaskId],
-  );
   const gridWidth = Math.max(1, days.length) * zoomConfig.dayColWidth;
-
-  const totalDependencyEdges = useMemo(
-    () =>
-      timeline.dependencyEdges.filter(
-        (edge) => filteredTaskIds.has(edge.source) && filteredTaskIds.has(edge.target),
-      ).length,
-    [filteredTaskIds, timeline.dependencyEdges],
-  );
 
   const saveLaneOrderMutation = useMutation({
     mutationFn: async ({
@@ -2457,7 +2055,7 @@ export function ProjectScheduleCanvas({
   }
 
   const timelineLayout = useMemo(() => {
-    return buildTimelineLayout({
+    return buildTimelineLayout<TimelineTask>({
       lanes: visibleTimelineLanes,
       windowStart: timeline.window.start,
       windowEnd: timeline.window.end,
