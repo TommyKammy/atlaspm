@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { Prisma, WorkspaceRole } from '@prisma/client';
 import { templateDefinition } from '../rules/rule-definition';
@@ -142,7 +143,7 @@ export class WorkspaceDefaultsService {
         where: { projectId_templateKey: { projectId, templateKey: tpl.templateKey } },
       });
       if (existing) {
-        if (JSON.stringify(existing.definition) !== JSON.stringify(definition)) {
+        if (!isDeepStrictEqual(existing.definition, definition)) {
           const rule = await tx.rule.update({
             where: { id: existing.id },
             data: { definition },

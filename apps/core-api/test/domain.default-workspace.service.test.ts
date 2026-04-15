@@ -177,4 +177,49 @@ describe('WorkspaceDefaultsService project defaults', () => {
       payload: updatedRule,
     });
   });
+
+  it('does not update an existing template when only JSON property order differs', async () => {
+    const reorderedDefinition = {
+      actions: [{ status: 'DONE', type: 'setStatus' }, { type: 'setCompletedAtNow' }],
+      conditions: [{ value: 100, op: 'eq', field: 'progressPercent' }],
+      logicalOperator: 'AND',
+      trigger: 'task.progress.changed',
+    };
+    const tx = {
+      section: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'section-1', projectId: 'project-1', isDefault: true }),
+      },
+      rule: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValueOnce({
+            id: 'rule-1',
+            projectId: 'project-1',
+            name: 'Progress to Done',
+            templateKey: 'progress_to_done',
+            definition: reorderedDefinition,
+            enabled: true,
+            cooldownSec: 60,
+          })
+          .mockResolvedValueOnce({
+            id: 'rule-2',
+            projectId: 'project-1',
+            name: 'Progress to In Progress',
+            templateKey: 'progress_to_in_progress',
+            definition: templateDefinition('progress_to_in_progress'),
+            enabled: true,
+            cooldownSec: 60,
+          }),
+        update: vi.fn(),
+        create: vi.fn(),
+      },
+    };
+    const auditOutbox = { appendAuditOutbox: vi.fn() };
+    const service = new WorkspaceDefaultsService({} as any, auditOutbox as any);
+
+    await service.ensureProjectDefaultsInTx(tx as any, 'project-1', 'user-1', 'corr-1');
+
+    expect(tx.rule.update).not.toHaveBeenCalled();
+    expect(auditOutbox.appendAuditOutbox).not.toHaveBeenCalled();
+  });
 });

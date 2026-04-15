@@ -3,8 +3,8 @@
 ## Supervisor Snapshot
 - Issue URL: https://github.com/TommyKammy/atlaspm/issues/384
 - Branch: codex/reopen-issue-384
-- Workspace: /home/tommy/Dev/atlaspm-worktrees/issue-384
-- Journal: /home/tommy/Dev/atlaspm-worktrees/issue-384/.codex-supervisor/issue-journal.md
+- Workspace: <redacted-local-path>
+- Journal: <redacted-local-path>
 - Current phase: reproducing
 - Attempt count: 1
 - Last head SHA: 3f0dd1fad770877fea51ee37ed8788bd2899d42b
