@@ -10,10 +10,10 @@ import {
 } from '@nestjs/common';
 import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
+import { AuditOutboxService } from '../common/audit-outbox.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
 import { NotificationsService } from './notifications.service';
 import { normalizeInboxNotificationType } from './notification-taxonomy';
 
@@ -38,7 +38,7 @@ class MarkNotificationReadBody {
 export class NotificationsController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
   ) {}
 
@@ -79,7 +79,7 @@ export class NotificationsController {
     await this.prisma.$transaction(async (tx) => {
       const ids = unread.map((item) => item.id);
       await tx.inboxNotification.updateMany({ where: { id: { in: ids } }, data: { readAt: now } });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'User',
@@ -115,7 +115,7 @@ export class NotificationsController {
         where: { id: existing.id },
         data: { readAt: read ? new Date() : null },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'InboxNotification',

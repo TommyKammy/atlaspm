@@ -1,8 +1,9 @@
 import { Controller, Post, Get, Param, Body, UseGuards, NotFoundException, ConflictException, Inject } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
-import { DomainService } from '../common/domain.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, ProjectRole, TaskStatus, TaskType } from '@prisma/client';
 import { IsEnum, IsOptional, IsString } from 'class-validator';
@@ -32,7 +33,8 @@ class RespondApprovalDto {
 export class TaskApprovalController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
   ) {}
 
@@ -50,7 +52,7 @@ export class TaskApprovalController {
       throw new NotFoundException('Task not found');
     }
 
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
 
     return task.approval;
   }
@@ -74,7 +76,7 @@ export class TaskApprovalController {
       throw new ConflictException('Task is not an approval type');
     }
 
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
 
     if (task.approval?.status === 'PENDING') {
       throw new ConflictException('Approval request already pending');
@@ -109,7 +111,7 @@ export class TaskApprovalController {
         include: { approver: { select: { id: true, displayName: true } } },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'TaskApproval',
@@ -169,7 +171,7 @@ export class TaskApprovalController {
     }
 
     if (task.approval.approverUserId !== req.user.sub) {
-      await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.ADMIN);
+      await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.ADMIN);
     }
 
     const trimmedComment = body.comment?.trim() || null;
@@ -187,7 +189,7 @@ export class TaskApprovalController {
 
       const beforeApproval = task.approval;
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'TaskApproval',
@@ -207,7 +209,7 @@ export class TaskApprovalController {
           data: { status: TaskStatus.DONE, completedAt: new Date() },
         });
 
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: req.user.sub,
           entityType: 'Task',
@@ -266,14 +268,14 @@ export class TaskApprovalController {
       throw new NotFoundException('No approval request found');
     }
 
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
 
     await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const deletedApproval = await tx.taskApproval.delete({
         where: { taskId },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'TaskApproval',

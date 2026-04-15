@@ -32,13 +32,21 @@ describe('TaskAttachmentsService', () => {
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
     };
-    const domain = {
+    const auditOutbox = {
+      appendAuditOutbox: vi.fn(),
+    };
+    const authorization = {
       requireProjectRole: vi.fn().mockResolvedValue(undefined),
     };
     const downloadUrls = {
       buildUrl: vi.fn(),
     };
-    const service = new TaskAttachmentsService(prisma as any, domain as any, downloadUrls as any);
+    const service = new TaskAttachmentsService(
+      prisma as any,
+      auditOutbox as any,
+      authorization as any,
+      downloadUrls as any,
+    );
     const uploadPath = path.join(storageDir, 'task-1', 'race.png');
 
     await expect(

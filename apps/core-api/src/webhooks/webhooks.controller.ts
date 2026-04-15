@@ -1,8 +1,9 @@
 import { BadRequestException, Body, ConflictException, Controller, Get, Inject, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { IsString, IsUrl, IsUUID } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { ProjectRole } from '@prisma/client';
@@ -27,7 +28,8 @@ class RetryDeadLetterDto {
 export class WebhooksController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   @Post()
@@ -35,7 +37,7 @@ export class WebhooksController {
   async create(@Body() body: CreateWebhookDto, @CurrentRequest() req: AppRequest) {
     return this.prisma.$transaction(async (tx) => {
       const webhook = await tx.webhook.create({ data: body });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Webhook',
@@ -53,7 +55,7 @@ export class WebhooksController {
   @Get('dlq')
   async listDeadLetterEvents(@Query('projectId') projectId: string | undefined, @CurrentRequest() req: AppRequest) {
     if (!projectId) throw new BadRequestException('projectId is required');
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.ADMIN);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.ADMIN);
 
     const [projectTaskRows, projectSectionRows, deadLetterEvents] = await Promise.all([
       this.prisma.task.findMany({ where: { projectId }, select: { id: true } }),
@@ -113,7 +115,7 @@ export class WebhooksController {
       const updated = await tx.outboxEvent.findUniqueOrThrow({
         where: { id: eventId },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'OutboxEvent',

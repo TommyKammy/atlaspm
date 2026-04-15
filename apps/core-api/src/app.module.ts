@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { PrismaService } from './prisma/prisma.service';
 import { AuthModule } from './auth/auth.module';
 import { DevAuthModule } from './auth/dev-auth.module';
 import { WorkspacesController } from './workspaces/workspaces.controller';
@@ -10,7 +9,6 @@ import { TasksController } from './tasks/tasks.controller';
 import { RulesController } from './rules/rules.controller';
 import { WebhooksController } from './webhooks/webhooks.controller';
 import { AuditController } from './audit/audit.controller';
-import { DomainService } from './common/domain.service';
 import { SubtaskService } from './tasks/subtask.service';
 import { CycleDetectionService } from './tasks/cycle-detection.service';
 import { ReminderDeliveryService } from './tasks/reminder-delivery.service';
@@ -50,10 +48,12 @@ import { TaskRemindersService } from './tasks/task-reminders.service';
 import { GoalsModule } from './goals/goals.module';
 import { CapacityModule } from './capacity/capacity.module';
 import { GuestAccessController } from './guest-access/guest-access.controller';
+import { CommonServicesModule } from './common/common-services.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    CommonServicesModule,
     ApiThrottlingModule,
     AuthModule,
     DevAuthModule.register(),
@@ -92,8 +92,6 @@ import { GuestAccessController } from './guest-access/guest-access.controller';
     GuestAccessController,
   ],
   providers: [
-    PrismaService,
-    DomainService,
     SubtaskService,
     CycleDetectionService,
     ReminderDeliveryService,

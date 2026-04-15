@@ -15,7 +15,8 @@ import {
 import { IsEmail, IsEnum, IsOptional, IsString } from 'class-validator';
 import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
@@ -55,7 +56,8 @@ class AcceptInvitationDto {
 export class WorkspaceAdminController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   @Get('workspaces/:id/users')
@@ -126,14 +128,14 @@ export class WorkspaceAdminController {
 
     if (body.status) {
       if (!workspaceId) throw new BadRequestException('workspaceId is required when updating status');
-      await this.domain.requireWorkspaceRole(workspaceId, req.user.sub, WorkspaceRole.WS_ADMIN);
+      await this.authorization.requireWorkspaceRole(workspaceId, req.user.sub, WorkspaceRole.WS_ADMIN);
       const targetMembership = await this.prisma.workspaceMembership.findUnique({
         where: { workspaceId_userId: { workspaceId, userId } },
       });
       if (!targetMembership) throw new BadRequestException('Target user is not in workspace');
     } else if (req.user.sub !== userId) {
       if (!workspaceId) throw new BadRequestException('workspaceId is required when updating another user');
-      await this.domain.requireWorkspaceRole(workspaceId, req.user.sub, WorkspaceRole.WS_ADMIN);
+      await this.authorization.requireWorkspaceRole(workspaceId, req.user.sub, WorkspaceRole.WS_ADMIN);
       const targetMembership = await this.prisma.workspaceMembership.findUnique({
         where: { workspaceId_userId: { workspaceId, userId } },
       });
@@ -150,7 +152,7 @@ export class WorkspaceAdminController {
       });
 
       if (body.status && body.status !== target.status) {
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: req.user.sub,
           entityType: 'User',
@@ -165,7 +167,7 @@ export class WorkspaceAdminController {
       }
 
       if (body.displayName !== undefined && body.displayName !== target.displayName) {
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: req.user.sub,
           entityType: 'User',
@@ -206,7 +208,7 @@ export class WorkspaceAdminController {
           createdByUserId: req.user.sub,
         },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Invitation',
@@ -255,14 +257,14 @@ export class WorkspaceAdminController {
   @Delete('invitations/:id')
   async revokeInvitation(@Param('id') invitationId: string, @CurrentRequest() req: AppRequest) {
     const invitation = await this.prisma.invitation.findUniqueOrThrow({ where: { id: invitationId } });
-    await this.domain.requireWorkspaceRole(invitation.workspaceId, req.user.sub, WorkspaceRole.WS_ADMIN);
+    await this.authorization.requireWorkspaceRole(invitation.workspaceId, req.user.sub, WorkspaceRole.WS_ADMIN);
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.invitation.update({
         where: { id: invitationId },
         data: { revokedAt: new Date() },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Invitation',
@@ -281,7 +283,7 @@ export class WorkspaceAdminController {
   @Post('invitations/:id/reissue')
   async reissueInvitation(@Param('id') invitationId: string, @CurrentRequest() req: AppRequest) {
     const invitation = await this.prisma.invitation.findUniqueOrThrow({ where: { id: invitationId } });
-    await this.domain.requireWorkspaceRole(invitation.workspaceId, req.user.sub, WorkspaceRole.WS_ADMIN);
+    await this.authorization.requireWorkspaceRole(invitation.workspaceId, req.user.sub, WorkspaceRole.WS_ADMIN);
     if (invitation.acceptedAt) throw new BadRequestException('Accepted invitation cannot be reissued');
     if (invitation.revokedAt) throw new BadRequestException('Revoked invitation cannot be reissued');
 
@@ -294,7 +296,7 @@ export class WorkspaceAdminController {
         where: { id: invitationId },
         data: { revokedAt: new Date() },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Invitation',
@@ -317,7 +319,7 @@ export class WorkspaceAdminController {
           createdByUserId: req.user.sub,
         },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Invitation',
@@ -394,7 +396,7 @@ export class WorkspaceAdminController {
         data: { acceptedAt: new Date() },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Invitation',

@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, ProjectRole } from '@prisma/client';
-import { DomainService } from '../common/domain.service';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 type TaskWithProject = {
@@ -16,7 +17,8 @@ type TaskWithProject = {
 export class TaskProjectLinksService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   async listTaskProjects(taskId: string, actorUserId: string) {
@@ -70,7 +72,7 @@ export class TaskProjectLinksService {
             },
           });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: actorUserId,
         entityType: 'Task',
@@ -115,7 +117,7 @@ export class TaskProjectLinksService {
         data: { deletedAt: new Date() },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: actorUserId,
         entityType: 'Task',
@@ -171,7 +173,7 @@ export class TaskProjectLinksService {
         data: { projectId },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: actorUserId,
         entityType: 'Task',
@@ -212,12 +214,12 @@ export class TaskProjectLinksService {
       throw new NotFoundException('task not found');
     }
 
-    await this.domain.requireProjectRole(task.projectId, actorUserId, minRole);
+    await this.authorization.requireProjectRole(task.projectId, actorUserId, minRole);
     return task;
   }
 
   private async requireProjectWithRole(projectId: string, actorUserId: string, minRole: ProjectRole) {
-    await this.domain.requireProjectRole(projectId, actorUserId, minRole);
+    await this.authorization.requireProjectRole(projectId, actorUserId, minRole);
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
       select: { id: true, workspaceId: true },

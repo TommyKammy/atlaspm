@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ProjectRole, WorkspaceRole } from '@prisma/client';
-import { DomainService } from '../common/domain.service';
+import { AuthorizationService } from '../common/authorization.service';
 import type { AppRequest } from '../common/types';
 
 type Source = 'params' | 'body' | 'query';
@@ -54,7 +54,7 @@ function resolveTargetId(req: AppRequest, selector: IdSelector): string | undefi
 export class ProjectRoleGuard implements CanActivate {
   constructor(
     @Inject(Reflector) private readonly reflector: Reflector,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   async canActivate(context: ExecutionContext) {
@@ -69,7 +69,7 @@ export class ProjectRoleGuard implements CanActivate {
     if (!projectId) {
       throw new BadRequestException(`Missing project id: ${requirement.projectId.source}.${requirement.projectId.key}`);
     }
-    const membership = await this.domain.requireProjectRole(projectId, req.user.sub, requirement.minRole);
+    const membership = await this.authorization.requireProjectRole(projectId, req.user.sub, requirement.minRole);
     req.projectRole = membership.role;
     return true;
   }
@@ -79,7 +79,7 @@ export class ProjectRoleGuard implements CanActivate {
 export class WorkspaceRoleGuard implements CanActivate {
   constructor(
     @Inject(Reflector) private readonly reflector: Reflector,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   async canActivate(context: ExecutionContext) {
@@ -96,7 +96,7 @@ export class WorkspaceRoleGuard implements CanActivate {
         `Missing workspace id: ${requirement.workspaceId.source}.${requirement.workspaceId.key}`,
       );
     }
-    const membership = await this.domain.requireWorkspaceRole(workspaceId, req.user.sub, requirement.minRole);
+    const membership = await this.authorization.requireWorkspaceRole(workspaceId, req.user.sub, requirement.minRole);
     req.workspaceRole = membership.role;
     return true;
   }

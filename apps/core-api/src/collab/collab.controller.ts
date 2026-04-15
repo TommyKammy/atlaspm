@@ -16,7 +16,8 @@ import { IsIn, IsObject, IsOptional, IsString } from 'class-validator';
 import { SignJWT } from 'jose';
 import { createSecretKey, randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
@@ -53,7 +54,8 @@ export class CollabController {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
   ) {}
 
@@ -61,7 +63,7 @@ export class CollabController {
   @UseGuards(AuthGuard)
   async issueToken(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
-    const membership = await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    const membership = await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
 
     const mode: 'readonly' | 'readwrite' = membership.role === ProjectRole.VIEWER ? 'readonly' : 'readwrite';
     const roomId = `task:${taskId}:description`;
@@ -192,7 +194,7 @@ export class CollabController {
           snapshotActor,
         );
 
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: snapshotActor,
           entityType: 'Task',
@@ -396,7 +398,7 @@ export class CollabController {
       const created = await tx.taskMention.create({
         data: { taskId, mentionedUserId: userId, sourceType: 'description', sourceId: '' },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor,
         entityType: 'Task',
@@ -420,7 +422,7 @@ export class CollabController {
 
     for (const mention of toDelete) {
       await tx.taskMention.delete({ where: { id: mention.id } });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor,
         entityType: 'Task',

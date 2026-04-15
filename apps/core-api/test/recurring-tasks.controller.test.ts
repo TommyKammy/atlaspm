@@ -10,11 +10,14 @@ describe('RecurringTasksController', () => {
         findFirst: vi.fn(),
       },
     };
-    const domain = {
+    const auditOutbox = {
+      appendAuditOutbox: vi.fn(),
+    };
+    const authorization = {
       requireProjectRole: vi.fn(),
     };
 
-    const controller = new RecurringTasksController(prisma as any, domain as any);
+    const controller = new RecurringTasksController(prisma as any, auditOutbox as any, authorization as any);
 
     await expect(
       controller.update(
@@ -42,11 +45,14 @@ describe('RecurringTasksController', () => {
       },
       $transaction: vi.fn().mockRejectedValue(uniqueError),
     };
-    const domain = {
+    const auditOutbox = {
+      appendAuditOutbox: vi.fn(),
+    };
+    const authorization = {
       requireProjectRole: vi.fn().mockResolvedValue(undefined),
     };
 
-    const controller = new RecurringTasksController(prisma as any, domain as any);
+    const controller = new RecurringTasksController(prisma as any, auditOutbox as any, authorization as any);
 
     await expect(
       controller.create(

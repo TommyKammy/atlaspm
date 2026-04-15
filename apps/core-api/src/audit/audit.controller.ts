@@ -1,7 +1,7 @@
 import { BadRequestException, Controller, Get, Inject, Param, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { ProjectRole } from '@prisma/client';
@@ -11,19 +11,19 @@ import { ProjectRole } from '@prisma/client';
 export class AuditController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   @Get('tasks/:id/audit')
   async taskAudit(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
     return this.prisma.auditEvent.findMany({ where: { entityType: 'Task', entityId: taskId }, orderBy: { createdAt: 'desc' } });
   }
 
   @Get('projects/:id/audit')
   async projectAudit(@Param('id') projectId: string, @CurrentRequest() req: AppRequest) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
     return this.prisma.auditEvent.findMany({
       where: {
         OR: [
@@ -52,7 +52,7 @@ export class AuditController {
   @Get('sections/:id/audit')
   async sectionAudit(@Param('id') sectionId: string, @CurrentRequest() req: AppRequest) {
     const section = await this.prisma.section.findUniqueOrThrow({ where: { id: sectionId } });
-    await this.domain.requireProjectRole(section.projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(section.projectId, req.user.sub, ProjectRole.VIEWER);
     return this.prisma.auditEvent.findMany({ where: { entityType: 'Section', entityId: sectionId }, orderBy: { createdAt: 'desc' } });
   }
 
@@ -62,7 +62,7 @@ export class AuditController {
     @Query('projectId') projectId?: string,
   ) {
     if (!projectId) throw new BadRequestException('projectId is required');
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
 
     const [projectTaskRows, projectSectionRows, outbox] = await Promise.all([
       this.prisma.task.findMany({ where: { projectId }, select: { id: true } }),

@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { AuthorizationService } from '../common/authorization.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
 
 export interface CreatePortfolioDto {
   name: string;
@@ -27,12 +27,12 @@ export interface PortfolioProgress {
 export class PortfoliosService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly domain: DomainService,
+    private readonly authorization: AuthorizationService,
   ) {}
 
   async createPortfolio(workspaceId: string, userId: string, dto: CreatePortfolioDto) {
     // Verify user is workspace member
-    await this.domain.requireWorkspaceMembership(workspaceId, userId);
+    await this.authorization.requireWorkspaceMembership(workspaceId, userId);
 
     // Validate projectIds belong to workspace
     if (dto.projectIds && dto.projectIds.length > 0) {
@@ -74,7 +74,7 @@ export class PortfoliosService {
 
   async getPortfolios(workspaceId: string, userId: string) {
     // Verify user is workspace member
-    await this.domain.requireWorkspaceMembership(workspaceId, userId);
+    await this.authorization.requireWorkspaceMembership(workspaceId, userId);
 
     const portfolios = await this.prisma.portfolio.findMany({
       where: { workspaceId },
@@ -106,7 +106,7 @@ export class PortfoliosService {
 
   async getPortfolio(workspaceId: string, portfolioId: string, userId: string) {
     // Verify user is workspace member
-    await this.domain.requireWorkspaceMembership(workspaceId, userId);
+    await this.authorization.requireWorkspaceMembership(workspaceId, userId);
 
     const portfolio = await this.prisma.portfolio.findFirst({
       where: { id: portfolioId, workspaceId },
@@ -161,7 +161,7 @@ export class PortfoliosService {
     dto: UpdatePortfolioDto,
   ) {
     // Verify user is workspace member
-    await this.domain.requireWorkspaceMembership(workspaceId, userId);
+    await this.authorization.requireWorkspaceMembership(workspaceId, userId);
 
     const portfolio = await this.prisma.portfolio.findFirst({
       where: { id: portfolioId, workspaceId },
@@ -189,7 +189,7 @@ export class PortfoliosService {
 
   async deletePortfolio(workspaceId: string, portfolioId: string, userId: string) {
     // Verify user is workspace member
-    await this.domain.requireWorkspaceMembership(workspaceId, userId);
+    await this.authorization.requireWorkspaceMembership(workspaceId, userId);
 
     const portfolio = await this.prisma.portfolio.findFirst({
       where: { id: portfolioId, workspaceId },
@@ -213,7 +213,7 @@ export class PortfoliosService {
     userId: string,
   ) {
     // Verify user is workspace member
-    await this.domain.requireWorkspaceMembership(workspaceId, userId);
+    await this.authorization.requireWorkspaceMembership(workspaceId, userId);
 
     // Verify portfolio exists
     const portfolio = await this.prisma.portfolio.findFirst({
@@ -274,7 +274,7 @@ export class PortfoliosService {
     userId: string,
   ) {
     // Verify user is workspace member
-    await this.domain.requireWorkspaceMembership(workspaceId, userId);
+    await this.authorization.requireWorkspaceMembership(workspaceId, userId);
 
     // Verify portfolio exists
     const portfolio = await this.prisma.portfolio.findFirst({

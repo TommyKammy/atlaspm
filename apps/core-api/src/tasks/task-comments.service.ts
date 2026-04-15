@@ -6,7 +6,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ProjectRole } from '@prisma/client';
-import { DomainService } from '../common/domain.service';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import type { AppRequest } from '../common/types';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -18,14 +19,15 @@ const MAX_COMMENT_BODY_LENGTH = 5000;
 export class TaskCommentsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
     @Inject(TaskMentionsService) private readonly mentions: TaskMentionsService,
   ) {}
 
   async listMentions(taskId: string, req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
 
     const mentions = await this.prisma.taskMention.findMany({
       where: { taskId },
@@ -52,7 +54,7 @@ export class TaskCommentsService {
 
   async listComments(taskId: string, req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
     const comments = await this.prisma.taskComment.findMany({
       where: { taskId, deletedAt: null },
       orderBy: { createdAt: 'asc' },
@@ -84,7 +86,7 @@ export class TaskCommentsService {
 
   async createComment(taskId: string, commentBody: string, req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     const trimmedBody = this.normalizeCommentBody(commentBody);
 
     return this.prisma.$transaction(async (tx) => {
@@ -95,7 +97,7 @@ export class TaskCommentsService {
           body: trimmedBody,
         },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -133,7 +135,7 @@ export class TaskCommentsService {
 
   async patchComment(id: string, commentBody: string, req: AppRequest) {
     const comment = await this.prisma.taskComment.findUniqueOrThrow({ where: { id }, include: { task: true } });
-    await this.domain.requireProjectRole(comment.task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(comment.task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (comment.deletedAt) throw new NotFoundException('Comment not found');
     if (comment.authorUserId !== req.user.sub) throw new ForbiddenException('Can only edit your own comment');
     const trimmedBody = this.normalizeCommentBody(commentBody);
@@ -143,7 +145,7 @@ export class TaskCommentsService {
         where: { id },
         data: { body: trimmedBody },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -171,7 +173,7 @@ export class TaskCommentsService {
 
   async deleteComment(id: string, req: AppRequest) {
     const comment = await this.prisma.taskComment.findUniqueOrThrow({ where: { id }, include: { task: true } });
-    await this.domain.requireProjectRole(comment.task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(comment.task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (comment.deletedAt) return comment;
     if (comment.authorUserId !== req.user.sub) throw new ForbiddenException('Can only delete your own comment');
 
@@ -188,7 +190,7 @@ export class TaskCommentsService {
           where: { id: { in: existingMentions.map((item) => item.id) } },
         });
         for (const mention of existingMentions) {
-          await this.domain.appendAuditOutbox({
+          await this.auditOutbox.appendAuditOutbox({
             tx,
             actor: req.user.sub,
             entityType: 'Task',
@@ -206,7 +208,7 @@ export class TaskCommentsService {
           });
         }
       }
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',

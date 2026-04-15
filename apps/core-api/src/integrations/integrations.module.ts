@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
-import { DomainService } from '../common/domain.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { CommonServicesModule } from '../common/common-services.module';
 import { INTEGRATION_PROVIDERS, IntegrationProviderRegistry } from './integration-provider.registry';
 import { IntegrationRuntimeService } from './integration-runtime.service';
 import { GithubApiService } from './github-api.service';
@@ -14,11 +13,9 @@ import { SlackWebhookController } from './slack.controller';
 import { SlackIntegrationProvider } from './slack.provider';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, CommonServicesModule],
   controllers: [SlackWebhookController, IntegrationsController],
   providers: [
-    PrismaService,
-    DomainService,
     GithubApiService,
     IntegrationCredentialsService,
     IntegrationsService,

@@ -1,9 +1,9 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { GuestAccessStatus, ProjectRole, WorkspaceRole } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
-import { DomainService } from '../src/common/domain.service';
+import { AuthorizationService } from '../src/common/authorization.service';
 
-describe('DomainService guest authorization', () => {
+describe('AuthorizationService guest authorization', () => {
   it('allows a project-scoped active guest grant to satisfy project access', async () => {
     const prisma = {
       workspaceMembership: {
@@ -27,7 +27,7 @@ describe('DomainService guest authorization', () => {
       },
     };
 
-    const domain = new DomainService(prisma as any);
+    const domain = new AuthorizationService(prisma as any);
 
     await expect(domain.requireProjectRole('project-1', 'guest-1', ProjectRole.VIEWER)).resolves.toMatchObject({
       projectId: 'project-1',
@@ -72,7 +72,7 @@ describe('DomainService guest authorization', () => {
       },
     };
 
-    const domain = new DomainService(prisma as any);
+    const domain = new AuthorizationService(prisma as any);
 
     await expect(domain.requireProjectRole('project-1', 'guest-1', ProjectRole.VIEWER)).rejects.toBeInstanceOf(
       ForbiddenException,
@@ -105,7 +105,7 @@ describe('DomainService guest authorization', () => {
       },
     };
 
-    const domain = new DomainService(prisma as any);
+    const domain = new AuthorizationService(prisma as any);
 
     await expect(domain.requireWorkspaceRole('workspace-1', 'guest-1', WorkspaceRole.WS_MEMBER)).rejects.toBeInstanceOf(
       NotFoundException,

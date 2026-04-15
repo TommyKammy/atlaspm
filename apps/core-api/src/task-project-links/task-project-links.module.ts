@@ -1,13 +1,12 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
-import { DomainService } from '../common/domain.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { CommonServicesModule } from '../common/common-services.module';
 import { TaskProjectLinksController } from './task-project-links.controller';
 import { TaskProjectLinksService } from './task-project-links.service';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, CommonServicesModule],
   controllers: [TaskProjectLinksController],
-  providers: [PrismaService, DomainService, TaskProjectLinksService],
+  providers: [TaskProjectLinksService],
 })
 export class TaskProjectLinksModule {}

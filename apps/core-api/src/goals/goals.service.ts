@@ -6,7 +6,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { GoalStatus, Prisma, ProjectRole, ProjectStatusHealth, WorkspaceRole } from '@prisma/client';
-import { DomainService } from '../common/domain.service';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 type GoalRecord = {
@@ -36,7 +37,8 @@ const DEFAULT_GOAL_HISTORY_TAKE = 100;
 export class GoalsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   async createGoal(
@@ -51,7 +53,7 @@ export class GoalsService {
       progressPercent?: number;
     },
   ) {
-    await this.domain.requireWorkspaceRole(workspaceId, actorUserId, WorkspaceRole.WS_MEMBER);
+    await this.authorization.requireWorkspaceRole(workspaceId, actorUserId, WorkspaceRole.WS_MEMBER);
     const ownerUserId = input.ownerUserId ?? actorUserId;
     await this.requireWorkspaceOwner(workspaceId, ownerUserId);
 
@@ -67,7 +69,7 @@ export class GoalsService {
         },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: actorUserId,
         entityType: 'Goal',
@@ -84,7 +86,7 @@ export class GoalsService {
   }
 
   async listGoals(workspaceId: string, actorUserId: string, includeArchived: boolean) {
-    await this.domain.requireWorkspaceMembership(workspaceId, actorUserId);
+    await this.authorization.requireWorkspaceMembership(workspaceId, actorUserId);
     const goals = await this.prisma.goal.findMany({
       where: {
         workspaceId,
@@ -176,7 +178,7 @@ export class GoalsService {
         },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: actorUserId,
         entityType: 'Goal',
@@ -209,7 +211,7 @@ export class GoalsService {
         data: { deletedAt: new Date() },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: actorUserId,
         entityType: 'Goal',
@@ -309,7 +311,7 @@ export class GoalsService {
               data: { goalId, projectId },
             });
 
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: actorUserId,
           entityType: 'GoalProjectLink',
@@ -363,7 +365,7 @@ export class GoalsService {
         data: { deletedAt: new Date() },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: actorUserId,
         entityType: 'GoalProjectLink',
@@ -422,7 +424,7 @@ export class GoalsService {
     if (!goal) {
       throw new NotFoundException('goal not found');
     }
-    await this.domain.requireWorkspaceRole(goal.workspaceId, actorUserId, options?.minRole ?? WorkspaceRole.WS_MEMBER);
+    await this.authorization.requireWorkspaceRole(goal.workspaceId, actorUserId, options?.minRole ?? WorkspaceRole.WS_MEMBER);
     if (options?.requireActive && goal.archivedAt) {
       throw new ConflictException('goal is archived');
     }
@@ -431,7 +433,7 @@ export class GoalsService {
 
   private async requireWorkspaceOwner(workspaceId: string, ownerUserId: string) {
     try {
-      await this.domain.requireWorkspaceMembership(workspaceId, ownerUserId);
+      await this.authorization.requireWorkspaceMembership(workspaceId, ownerUserId);
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw new BadRequestException('goal owner must be a workspace member');
@@ -441,7 +443,7 @@ export class GoalsService {
   }
 
   private async requireProject(projectId: string, actorUserId: string, minRole: ProjectRole) {
-    await this.domain.requireProjectRole(projectId, actorUserId, minRole);
+    await this.authorization.requireProjectRole(projectId, actorUserId, minRole);
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
       select: { id: true, workspaceId: true },
@@ -533,7 +535,7 @@ export class GoalsService {
       },
     });
 
-    await this.domain.appendAuditOutbox({
+    await this.auditOutbox.appendAuditOutbox({
       tx,
       actor: actorUserId,
       entityType: 'Goal',

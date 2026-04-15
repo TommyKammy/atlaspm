@@ -14,8 +14,10 @@ describe('TaskCommentsService', () => {
       },
       $transaction: vi.fn(),
     };
-    const domain = {
+    const authorization = {
       requireProjectRole: vi.fn().mockResolvedValue(undefined),
+    };
+    const auditOutbox = {
       appendAuditOutbox: vi.fn(),
     };
     const notifications = {
@@ -25,7 +27,13 @@ describe('TaskCommentsService', () => {
       syncTaskMentions: vi.fn(),
       extractMentionUserIdsFromComment: vi.fn(),
     };
-    const service = new TaskCommentsService(prisma as any, domain as any, notifications as any, mentions as any);
+    const service = new TaskCommentsService(
+      prisma as any,
+      auditOutbox as any,
+      authorization as any,
+      notifications as any,
+      mentions as any,
+    );
 
     await expect(
       service.createComment(
@@ -36,7 +44,7 @@ describe('TaskCommentsService', () => {
     ).rejects.toThrow(ConflictException);
 
     expect(prisma.task.findFirstOrThrow).toHaveBeenCalledTimes(1);
-    expect(domain.requireProjectRole).toHaveBeenCalledTimes(1);
+    expect(authorization.requireProjectRole).toHaveBeenCalledTimes(1);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });

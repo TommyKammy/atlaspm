@@ -25,8 +25,9 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AuthGuard } from '../auth/auth.guard';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { ProjectRole, FormQuestionType, Prisma } from '@prisma/client';
@@ -139,7 +140,8 @@ class ListFormsQuery {
 export class FormsController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   private logPublicFormSubmission(
@@ -167,7 +169,7 @@ export class FormsController {
     @Body() body: CreateFormDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
 
     const trimmedTitle = body.title.trim();
     if (!trimmedTitle) {
@@ -189,7 +191,7 @@ export class FormsController {
         },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Form',
@@ -212,7 +214,7 @@ export class FormsController {
     @Query() query: ListFormsQuery,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
 
     const includeArchived = query.includeArchived === 'true';
     const forms = await this.prisma.form.findMany({
@@ -256,7 +258,7 @@ export class FormsController {
       throw new NotFoundException('Form not found');
     }
 
-    await this.domain.requireProjectRole(form.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(form.projectId, req.user.sub, ProjectRole.MEMBER);
 
     return form;
   }
@@ -276,7 +278,7 @@ export class FormsController {
       throw new NotFoundException('Form not found');
     }
 
-    await this.domain.requireProjectRole(form.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(form.projectId, req.user.sub, ProjectRole.MEMBER);
 
     const data: Prisma.FormUpdateInput = {};
     if (body.title !== undefined) {
@@ -305,7 +307,7 @@ export class FormsController {
         },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Form',
@@ -336,7 +338,7 @@ export class FormsController {
       throw new NotFoundException('Form not found');
     }
 
-    await this.domain.requireProjectRole(form.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(form.projectId, req.user.sub, ProjectRole.MEMBER);
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.form.update({
@@ -344,7 +346,7 @@ export class FormsController {
         data: { archivedAt: new Date() },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Form',
@@ -376,7 +378,7 @@ export class FormsController {
       throw new NotFoundException('Form not found');
     }
 
-    await this.domain.requireProjectRole(form.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(form.projectId, req.user.sub, ProjectRole.MEMBER);
 
     const trimmedLabel = body.label.trim();
     if (!trimmedLabel) {
@@ -427,7 +429,7 @@ export class FormsController {
       throw new NotFoundException('Question not found');
     }
 
-    await this.domain.requireProjectRole(question.form.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(question.form.projectId, req.user.sub, ProjectRole.MEMBER);
 
     const data: Prisma.FormQuestionUpdateInput = {};
     if (body.type !== undefined) data.type = body.type;
@@ -460,7 +462,7 @@ export class FormsController {
       throw new NotFoundException('Question not found');
     }
 
-    await this.domain.requireProjectRole(question.form.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(question.form.projectId, req.user.sub, ProjectRole.MEMBER);
 
     await this.prisma.formQuestion.delete({
       where: { id: questionId },
@@ -503,7 +505,7 @@ export class FormsController {
       if (!req.user?.sub) {
         throw new ConflictException('Authentication required for non-public forms');
       }
-      await this.domain.requireProjectRole(form.projectId, req.user.sub, ProjectRole.MEMBER);
+      await this.authorization.requireProjectRole(form.projectId, req.user.sub, ProjectRole.MEMBER);
     }
 
     if (form.isPublic && body.website?.trim()) {
@@ -600,7 +602,7 @@ export class FormsController {
         data: { createdTaskId: task.id },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user?.sub ?? `anonymous:${body.submitterEmail}`,
         entityType: 'FormSubmission',
@@ -639,7 +641,7 @@ export class FormsController {
       throw new NotFoundException('Form not found');
     }
 
-    await this.domain.requireProjectRole(form.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(form.projectId, req.user.sub, ProjectRole.MEMBER);
 
     const submissions = await this.prisma.formSubmission.findMany({
       where: { formId },

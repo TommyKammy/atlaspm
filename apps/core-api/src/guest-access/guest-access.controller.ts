@@ -3,8 +3,9 @@ import { IsEmail, IsEnum, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { createHash, randomBytes } from 'node:crypto';
 import { GuestAccessScopeType, GuestAccessStatus, ProjectRole } from '@prisma/client';
 import { AuthGuard } from '../auth/auth.guard';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { CurrentRequest } from '../common/current-request';
-import { DomainService } from '../common/domain.service';
 import type { AppRequest } from '../common/types';
 import { ProjectRoleGuard, RequireProjectRole, WorkspaceRoleGuard } from '../auth/role.guard';
 import { evaluateGuestInvitationState, isGuestProjectRole } from './guest-access.contract';
@@ -29,7 +30,8 @@ class CreateGuestInvitationDto {
 export class GuestAccessController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   @Get('projects/:id/guest-access')
@@ -116,7 +118,7 @@ export class GuestAccessController {
           createdByUserId: req.user.sub,
         },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'GuestInvitation',
@@ -154,7 +156,7 @@ export class GuestAccessController {
       throw new BadRequestException('Workspace-scoped guest invitations are not supported by this endpoint');
     }
 
-    await this.domain.requireProjectRole(invitation.projectId, req.user.sub, ProjectRole.ADMIN);
+    await this.authorization.requireProjectRole(invitation.projectId, req.user.sub, ProjectRole.ADMIN);
 
     return this.prisma.$transaction(async (tx) => {
       const revokedAt = new Date();
@@ -176,7 +178,7 @@ export class GuestAccessController {
         },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'GuestInvitation',
