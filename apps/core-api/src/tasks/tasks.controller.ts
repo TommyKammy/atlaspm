@@ -416,11 +416,6 @@ class PatchDescriptionDto {
   expectedVersion!: number;
 }
 
-class UpsertTaskReminderDto {
-  @IsISO8601()
-  remindAt!: string;
-}
-
 class CreateSubtaskDto {
   @IsString()
   title!: string;
@@ -1914,89 +1909,6 @@ export class TasksController {
         req,
       );
       return updated;
-    });
-  }
-
-  @Get('tasks/:id/reminder')
-  async getMyReminder(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
-    const reminder = await this.prisma.taskReminder.findFirst({
-      where: { taskId, userId: req.user.sub, deletedAt: null },
-      orderBy: { createdAt: 'desc' },
-    });
-    return reminder ?? null;
-  }
-
-  @Put('tasks/:id/reminder')
-  async upsertMyReminder(
-    @Param('id') taskId: string,
-    @Body() body: UpsertTaskReminderDto,
-    @CurrentRequest() req: AppRequest,
-  ) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
-    const remindAt = new Date(body.remindAt);
-    if (Number.isNaN(+remindAt)) throw new ConflictException('Invalid remindAt');
-
-    return this.prisma.$transaction(async (tx) => {
-      const current = await tx.taskReminder.findFirst({
-        where: { taskId, userId: req.user.sub, deletedAt: null },
-        orderBy: { createdAt: 'desc' },
-      });
-      const reminder = current
-        ? await tx.taskReminder.update({
-            where: { id: current.id },
-            data: { remindAt, deletedAt: null },
-          })
-        : await tx.taskReminder.create({
-            data: { taskId, userId: req.user.sub, remindAt },
-          });
-
-      await this.domain.appendAuditOutbox({
-        tx,
-        actor: req.user.sub,
-        entityType: 'Task',
-        entityId: taskId,
-        action: 'task.reminder.set',
-        beforeJson: current,
-        afterJson: reminder,
-        correlationId: req.correlationId,
-        outboxType: 'task.reminder.set',
-        payload: { taskId, userId: req.user.sub, remindAt: reminder.remindAt },
-      });
-      return reminder;
-    });
-  }
-
-  @Delete('tasks/:id/reminder')
-  async clearMyReminder(@Param('id') taskId: string, @CurrentRequest() req: AppRequest) {
-    const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
-    const current = await this.prisma.taskReminder.findFirst({
-      where: { taskId, userId: req.user.sub, deletedAt: null },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!current) return { ok: true };
-
-    return this.prisma.$transaction(async (tx) => {
-      const deleted = await tx.taskReminder.update({
-        where: { id: current.id },
-        data: { deletedAt: new Date() },
-      });
-      await this.domain.appendAuditOutbox({
-        tx,
-        actor: req.user.sub,
-        entityType: 'Task',
-        entityId: taskId,
-        action: 'task.reminder.cleared',
-        beforeJson: current,
-        afterJson: deleted,
-        correlationId: req.correlationId,
-        outboxType: 'task.reminder.cleared',
-        payload: { taskId, userId: req.user.sub },
-      });
-      return deleted;
     });
   }
 
