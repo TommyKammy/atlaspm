@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, Inject } from '@nestjs/common';
+import { AuthorizationService } from '../common/authorization.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
 import { WorkspaceRole } from '@prisma/client';
 import { CapacityService } from '../capacity/capacity.service';
 
@@ -58,7 +58,7 @@ export class WorkloadService {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
     @Inject(CapacityService) private readonly capacityService: CapacityService,
   ) {}
 
@@ -68,9 +68,9 @@ export class WorkloadService {
     filters: WorkloadFilters,
     actorUserId: string,
   ): Promise<UserWorkload> {
-    await this.domain.requireWorkspaceMembership(workspaceId, actorUserId);
+    await this.authorization.requireWorkspaceMembership(workspaceId, actorUserId);
     if (actorUserId !== targetUserId) {
-      await this.domain.requireWorkspaceRole(workspaceId, actorUserId, WorkspaceRole.WS_ADMIN);
+      await this.authorization.requireWorkspaceRole(workspaceId, actorUserId, WorkspaceRole.WS_ADMIN);
     }
 
     const user = await this.prisma.user.findUnique({
@@ -138,7 +138,7 @@ export class WorkloadService {
     filters: WorkloadFilters,
     actorUserId: string,
   ): Promise<UserWorkload[]> {
-    await this.domain.requireWorkspaceMembership(workspaceId, actorUserId);
+    await this.authorization.requireWorkspaceMembership(workspaceId, actorUserId);
 
     const members = await this.prisma.workspaceMembership.findMany({
       where: { workspaceId },
@@ -168,7 +168,7 @@ export class WorkloadService {
     filters: WorkloadFilters,
     actorUserId: string,
   ): Promise<UserWorkload[]> {
-    await this.domain.requireWorkspaceMembership(workspaceId, actorUserId);
+    await this.authorization.requireWorkspaceMembership(workspaceId, actorUserId);
 
     const project = await this.prisma.project.findFirst({
       where: { id: projectId, workspaceId },

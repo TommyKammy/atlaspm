@@ -17,8 +17,8 @@ import {
 import { GithubApiService } from './github-api.service';
 import { GithubProviderSettings, type GithubIssue } from './github.types';
 import { IntegrationCredentialsService } from './integration-credentials.service';
+import { AuditOutboxService } from '../common/audit-outbox.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
 import {
   IntegrationCredentialKind,
   IntegrationMappingDirection,
@@ -40,7 +40,7 @@ export class GithubIntegrationProvider implements IntegrationProvider {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
     @Inject(GithubApiService) private readonly githubApi: GithubApiService,
     @Inject(IntegrationCredentialsService)
     private readonly credentials: IntegrationCredentialsService,
@@ -206,7 +206,7 @@ export class GithubIntegrationProvider implements IntegrationProvider {
             metadata,
           },
         });
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: input.actorUserId,
           entityType: 'Task',
@@ -251,7 +251,7 @@ export class GithubIntegrationProvider implements IntegrationProvider {
           metadata,
         },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: input.actorUserId,
         entityType: 'Task',

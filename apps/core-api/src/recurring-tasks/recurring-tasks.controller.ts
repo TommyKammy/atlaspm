@@ -29,8 +29,9 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AuthGuard } from '../auth/auth.guard';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { Prisma, ProjectRole, RecurringFrequency, Priority } from '@prisma/client';
@@ -170,7 +171,8 @@ class ListRecurringRulesQuery {
 export class RecurringTasksController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   @Post('projects/:id/recurring-rules')
@@ -179,7 +181,7 @@ export class RecurringTasksController {
     @Body() body: CreateRecurringRuleDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
 
     const trimmedTitle = body.title.trim();
     if (!trimmedTitle) {
@@ -242,7 +244,7 @@ export class RecurringTasksController {
           },
         });
 
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: req.user.sub,
           entityType: 'RecurringRule',
@@ -275,7 +277,7 @@ export class RecurringTasksController {
     @Query() query: ListRecurringRulesQuery,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
 
     const includeInactive = query.includeInactive === 'true';
     const rules = await this.prisma.recurringRule.findMany({
@@ -312,7 +314,7 @@ export class RecurringTasksController {
       throw new NotFoundException('Recurring rule not found');
     }
 
-    await this.domain.requireProjectRole(rule.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(rule.projectId, req.user.sub, ProjectRole.MEMBER);
 
     return rule;
   }
@@ -335,7 +337,7 @@ export class RecurringTasksController {
       throw new NotFoundException('Recurring rule not found');
     }
 
-    await this.domain.requireProjectRole(rule.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(rule.projectId, req.user.sub, ProjectRole.MEMBER);
 
     if (body.title !== undefined) {
       const trimmedTitle = body.title.trim();
@@ -407,7 +409,7 @@ export class RecurringTasksController {
         data,
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'RecurringRule',
@@ -443,14 +445,14 @@ export class RecurringTasksController {
       throw new NotFoundException('Recurring rule not found');
     }
 
-    await this.domain.requireProjectRole(rule.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(rule.projectId, req.user.sub, ProjectRole.MEMBER);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.recurringRule.delete({
         where: { id: ruleId },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'RecurringRule',

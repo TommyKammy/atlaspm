@@ -1,11 +1,5 @@
-import { Injectable, BadRequestException, ConflictException, Inject } from '@nestjs/common';
-import {
-  Prisma,
-  ProjectRole,
-  TaskStatus,
-  TaskType,
-  WorkspaceRole,
-} from '@prisma/client';
+import { Injectable, BadRequestException, ConflictException } from '@nestjs/common';
+import { TaskStatus, TaskType } from '@prisma/client';
 import {
   applyTaskProgressAutomation,
   assertTimelineScheduleRange as assertTimelineScheduleRangeInDomain,
@@ -17,77 +11,13 @@ import {
   type TaskStatus as DomainTaskStatus,
   type TaskType as DomainTaskType,
 } from '@atlaspm/domain';
-import type { AuthUser } from './types';
-import { AuditOutboxService } from './audit-outbox.service';
-import { AuthorizationService } from './authorization.service';
-import { IdentityService } from './identity.service';
-import { WorkspaceDefaultsService } from './workspace-defaults.service';
 
 @Injectable()
 export class DomainService {
   private static readonly defaultRuleTemplateKeys = ['progress_to_done', 'progress_to_in_progress'] as const;
 
-  constructor(
-    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
-    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
-    @Inject(IdentityService) private readonly identity: IdentityService,
-    @Inject(WorkspaceDefaultsService) private readonly defaults: WorkspaceDefaultsService,
-  ) {}
-
   isDefaultRuleTemplateKey(templateKey: string): boolean {
     return DomainService.defaultRuleTemplateKeys.includes(templateKey as typeof DomainService.defaultRuleTemplateKeys[number]);
-  }
-
-  async ensureUser(sub: string, email?: string, name?: string) {
-    return this.identity.ensureUser(sub, email, name);
-  }
-
-  async syncAuthenticatedUser(user: AuthUser) {
-    return this.identity.syncAuthenticatedUser(user);
-  }
-
-  async ensureDefaultWorkspaceForUser(sub: string) {
-    return this.defaults.ensureDefaultWorkspaceForUser(sub);
-  }
-
-  async requireWorkspaceRole(workspaceId: string, userId: string, min: WorkspaceRole) {
-    return this.authorization.requireWorkspaceRole(workspaceId, userId, min);
-  }
-
-  async requireWorkspaceMembership(workspaceId: string, userId: string) {
-    return this.authorization.requireWorkspaceMembership(workspaceId, userId);
-  }
-
-  async requireProjectRole(projectId: string, userId: string, min: ProjectRole) {
-    return this.authorization.requireProjectRole(projectId, userId, min);
-  }
-
-  async appendAuditOutbox(args: {
-    tx: Prisma.TransactionClient;
-    actor: string;
-    entityType: string;
-    entityId: string;
-    action: string;
-    beforeJson?: unknown;
-    afterJson?: unknown;
-    correlationId?: string;
-    outboxType: string;
-    payload: unknown;
-  }) {
-    return this.auditOutbox.appendAuditOutbox(args);
-  }
-
-  async ensureProjectDefaults(projectId: string, actor: string, correlationId: string) {
-    return this.defaults.ensureProjectDefaults(projectId, actor, correlationId);
-  }
-
-  async ensureProjectDefaultsInTx(
-    tx: Prisma.TransactionClient,
-    projectId: string,
-    actor: string,
-    correlationId: string,
-  ) {
-    return this.defaults.ensureProjectDefaultsInTx(tx, projectId, actor, correlationId);
   }
 
   ensureProgressRange(progressPercent?: number) {

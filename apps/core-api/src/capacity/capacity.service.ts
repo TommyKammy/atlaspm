@@ -12,14 +12,16 @@ import {
   TimeOffEvent,
   WorkspaceRole,
 } from '@prisma/client';
-import { DomainService } from '../common/domain.service';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class CapacityService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   private readonly DEFAULT_WEEKLY_CAPACITY_MINUTES = 40 * 60;
@@ -37,7 +39,7 @@ export class CapacityService {
       daysOfWeek: number[];
     },
   ) {
-    await this.domain.requireWorkspaceRole(workspaceId, actorUserId, WorkspaceRole.WS_ADMIN);
+    await this.authorization.requireWorkspaceRole(workspaceId, actorUserId, WorkspaceRole.WS_ADMIN);
     const normalized = await this.normalizeScheduleInput(workspaceId, input);
 
     try {
@@ -49,7 +51,7 @@ export class CapacityService {
           },
         });
 
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: actorUserId,
           entityType: 'CapacitySchedule',
@@ -70,7 +72,7 @@ export class CapacityService {
   }
 
   async listCapacitySchedules(workspaceId: string, actorUserId: string) {
-    await this.domain.requireWorkspaceMembership(workspaceId, actorUserId);
+    await this.authorization.requireWorkspaceMembership(workspaceId, actorUserId);
 
     const schedules = await this.prisma.capacitySchedule.findMany({
       where: { workspaceId },
@@ -98,7 +100,7 @@ export class CapacityService {
       throw new NotFoundException('Capacity schedule not found');
     }
 
-    await this.domain.requireWorkspaceRole(existing.workspaceId, actorUserId, WorkspaceRole.WS_ADMIN);
+    await this.authorization.requireWorkspaceRole(existing.workspaceId, actorUserId, WorkspaceRole.WS_ADMIN);
     const normalized = this.normalizeSchedulePatch(input);
 
     return this.prisma.$transaction(async (tx) => {
@@ -107,7 +109,7 @@ export class CapacityService {
         data: normalized,
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: actorUserId,
         entityType: 'CapacitySchedule',
@@ -136,7 +138,7 @@ export class CapacityService {
       reason?: string;
     },
   ) {
-    await this.domain.requireWorkspaceRole(workspaceId, actorUserId, WorkspaceRole.WS_ADMIN);
+    await this.authorization.requireWorkspaceRole(workspaceId, actorUserId, WorkspaceRole.WS_ADMIN);
     await this.requireWorkspaceUser(workspaceId, input.userId);
     const normalized = this.normalizeTimeOffInput(input);
 
@@ -149,7 +151,7 @@ export class CapacityService {
         },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: actorUserId,
         entityType: 'TimeOffEvent',
@@ -166,7 +168,7 @@ export class CapacityService {
   }
 
   async listTimeOff(workspaceId: string, actorUserId: string, userId?: string) {
-    await this.domain.requireWorkspaceMembership(workspaceId, actorUserId);
+    await this.authorization.requireWorkspaceMembership(workspaceId, actorUserId);
     if (userId) {
       await this.requireWorkspaceUser(workspaceId, userId);
     }
@@ -200,7 +202,7 @@ export class CapacityService {
       throw new NotFoundException('Time off event not found');
     }
 
-    await this.domain.requireWorkspaceRole(existing.workspaceId, actorUserId, WorkspaceRole.WS_ADMIN);
+    await this.authorization.requireWorkspaceRole(existing.workspaceId, actorUserId, WorkspaceRole.WS_ADMIN);
     const normalized = this.normalizeTimeOffPatch(existing, input);
 
     return this.prisma.$transaction(async (tx) => {
@@ -209,7 +211,7 @@ export class CapacityService {
         data: normalized,
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: actorUserId,
         entityType: 'TimeOffEvent',
@@ -234,14 +236,14 @@ export class CapacityService {
       throw new NotFoundException('Time off event not found');
     }
 
-    await this.domain.requireWorkspaceRole(existing.workspaceId, actorUserId, WorkspaceRole.WS_ADMIN);
+    await this.authorization.requireWorkspaceRole(existing.workspaceId, actorUserId, WorkspaceRole.WS_ADMIN);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.timeOffEvent.delete({
         where: { id: timeOffId },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: actorUserId,
         entityType: 'TimeOffEvent',
@@ -454,7 +456,7 @@ export class CapacityService {
   }
 
   private async requireWorkspaceUser(workspaceId: string, userId: string) {
-    await this.domain.requireWorkspaceMembership(workspaceId, userId);
+    await this.authorization.requireWorkspaceMembership(workspaceId, userId);
   }
 
   private normalizeRequiredString(value: string, field: string) {

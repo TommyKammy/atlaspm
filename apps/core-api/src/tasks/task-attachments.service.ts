@@ -9,7 +9,8 @@ import { Prisma, ProjectRole } from '@prisma/client';
 import { promises as fs } from 'node:fs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
-import { DomainService } from '../common/domain.service';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import type { AppRequest } from '../common/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { AttachmentDownloadUrlService } from './attachment-download-url.service';
@@ -22,14 +23,15 @@ const IMAGE_MIME_ALLOWLIST = new Set(['image/png', 'image/jpeg', 'image/webp', '
 export class TaskAttachmentsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
     @Inject(AttachmentDownloadUrlService)
     private readonly attachmentDownloadUrls: AttachmentDownloadUrlService,
   ) {}
 
   async listAttachments(taskId: string, includeDeletedRaw: string | undefined, req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
     const includeDeleted = String(includeDeletedRaw ?? '').toLowerCase() === 'true';
     const where: Prisma.TaskAttachmentWhereInput = {
       taskId,
@@ -49,7 +51,7 @@ export class TaskAttachmentsService {
     req: AppRequest,
   ) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (!IMAGE_MIME_ALLOWLIST.has(body.mimeType)) {
       throw new ConflictException('Unsupported image mime type');
     }
@@ -72,7 +74,7 @@ export class TaskAttachmentsService {
           uploadToken,
         },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -104,7 +106,7 @@ export class TaskAttachmentsService {
       where: { id },
       include: { task: true },
     });
-    await this.domain.requireProjectRole(attachment.task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(attachment.task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (!attachment.uploadToken || attachment.uploadToken !== token) {
       throw new ForbiddenException('Invalid upload token');
     }
@@ -139,7 +141,7 @@ export class TaskAttachmentsService {
 
   async completeAttachment(taskId: string, attachmentId: string, req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     const attachment = await this.prisma.taskAttachment.findUniqueOrThrow({
       where: { id: attachmentId },
     });
@@ -167,7 +169,7 @@ export class TaskAttachmentsService {
         where: { id: current.id },
         data: { completedAt: new Date(), uploadToken: accessToken, sizeBytes: Number(stat.size) },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -187,14 +189,14 @@ export class TaskAttachmentsService {
       where: { id },
       include: { task: true },
     });
-    await this.domain.requireProjectRole(attachment.task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(attachment.task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (attachment.deletedAt) return this.serializeAttachment(attachment);
     return this.prisma.$transaction(async (tx) => {
       const deleted = await tx.taskAttachment.update({
         where: { id },
         data: { deletedAt: new Date() },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -215,14 +217,14 @@ export class TaskAttachmentsService {
       where: { id },
       include: { task: true },
     });
-    await this.domain.requireProjectRole(attachment.task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(attachment.task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (!attachment.deletedAt) return this.serializeAttachment(attachment);
     return this.prisma.$transaction(async (tx) => {
       const restored = await tx.taskAttachment.update({
         where: { id },
         data: { deletedAt: null, uploadToken: randomBytes(16).toString('hex') },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',

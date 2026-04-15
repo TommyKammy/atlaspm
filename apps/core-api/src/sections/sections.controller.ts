@@ -11,8 +11,9 @@ import {
 } from '@nestjs/common';
 import { IsArray, IsString, IsUUID } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { ProjectRole } from '@prisma/client';
@@ -42,7 +43,8 @@ class ReorderSectionDto {
 export class SectionsController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   @Get('projects/:id/sections')
@@ -63,7 +65,7 @@ export class SectionsController {
       const section = await tx.section.create({
         data: { projectId, name: body.name, position: (last?.position ?? 0) + 1000 },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Section',
@@ -81,11 +83,11 @@ export class SectionsController {
   @Patch('sections/:id')
   async patch(@Param('id') id: string, @Body() body: PatchSectionDto, @CurrentRequest() req: AppRequest) {
     const section = await this.prisma.section.findUniqueOrThrow({ where: { id } });
-    await this.domain.requireProjectRole(section.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(section.projectId, req.user.sub, ProjectRole.MEMBER);
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.section.update({ where: { id }, data: { name: body.name } });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Section',
@@ -114,7 +116,7 @@ export class SectionsController {
       for (const [i, sectionId] of body.orderedSectionIds.entries()) {
         await tx.section.update({ where: { id: sectionId }, data: { position: (i + 1) * 1000 } });
       }
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Section',

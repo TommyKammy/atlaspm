@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { AuditOutboxService } from '../common/audit-outbox.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
 import { RecurringFrequency, TaskStatus } from '@prisma/client';
 import {
   calculateNextScheduledAtAfter,
@@ -20,7 +20,7 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
   ) {}
 
   onModuleInit() {
@@ -208,7 +208,7 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
           },
         });
 
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: 'system:recurring-worker',
           entityType: 'RecurringTaskGeneration',
@@ -347,7 +347,7 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
           },
         });
 
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: 'system:recurring-worker',
           entityType: 'RecurringTaskGeneration',
@@ -474,7 +474,7 @@ export class RecurringTaskWorker implements OnModuleInit, OnModuleDestroy {
             },
           });
 
-          await this.domain.appendAuditOutbox({
+          await this.auditOutbox.appendAuditOutbox({
             tx,
             actor: 'system:recurring-worker',
             entityType: 'RecurringTaskGeneration',

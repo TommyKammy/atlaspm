@@ -1,6 +1,7 @@
 import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { ProjectRole } from '@prisma/client';
-import { DomainService } from '../common/domain.service';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import type { AppRequest } from '../common/types';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -8,12 +9,13 @@ import { PrismaService } from '../prisma/prisma.service';
 export class TaskRemindersService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   async getMyReminder(taskId: string, req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
     const reminder = await this.prisma.taskReminder.findFirst({
       where: { taskId, userId: req.user.sub, deletedAt: null },
       orderBy: { createdAt: 'desc' },
@@ -23,7 +25,7 @@ export class TaskRemindersService {
 
   async upsertMyReminder(taskId: string, remindAtRaw: string, req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     const remindAt = new Date(remindAtRaw);
     if (Number.isNaN(+remindAt)) throw new ConflictException('Invalid remindAt');
 
@@ -41,7 +43,7 @@ export class TaskRemindersService {
             data: { taskId, userId: req.user.sub, remindAt },
           });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -59,7 +61,7 @@ export class TaskRemindersService {
 
   async clearMyReminder(taskId: string, req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id: taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     const current = await this.prisma.taskReminder.findFirst({
       where: { taskId, userId: req.user.sub, deletedAt: null },
       orderBy: { createdAt: 'desc' },
@@ -71,7 +73,7 @@ export class TaskRemindersService {
         where: { id: current.id },
         data: { deletedAt: new Date() },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',

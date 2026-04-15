@@ -1,6 +1,8 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Inject, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
@@ -47,6 +49,8 @@ class PatchRuleDto {
 @UseGuards(AuthGuard, ProjectRoleGuard)
 export class RulesController {
   constructor(
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(DomainService) private readonly domain: DomainService,
   ) {}
@@ -74,7 +78,7 @@ export class RulesController {
           cooldownSec: body.cooldownSec ?? 60,
         },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Rule',
@@ -92,7 +96,7 @@ export class RulesController {
   @Patch('rules/:id')
   async patch(@Param('id') id: string, @Body() body: PatchRuleDto, @CurrentRequest() req: AppRequest) {
     const rule = await this.prisma.rule.findUniqueOrThrow({ where: { id } });
-    await this.domain.requireProjectRole(rule.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(rule.projectId, req.user.sub, ProjectRole.MEMBER);
     const definition = body.definition ? parseRuleDefinition(body.definition) : undefined;
     this.ensureDefinitionHasConditions(definition);
 
@@ -105,7 +109,7 @@ export class RulesController {
           definition: definition as Prisma.InputJsonValue | undefined,
         },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Rule',
@@ -133,10 +137,10 @@ export class RulesController {
 
   private async setEnabled(id: string, enabled: boolean, req: AppRequest) {
     const rule = await this.prisma.rule.findUniqueOrThrow({ where: { id } });
-    await this.domain.requireProjectRole(rule.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(rule.projectId, req.user.sub, ProjectRole.MEMBER);
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.rule.update({ where: { id }, data: { enabled } });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Rule',
@@ -159,7 +163,7 @@ export class RulesController {
       throw new NotFoundException('Rule not found');
     }
 
-    await this.domain.requireProjectRole(rule.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(rule.projectId, req.user.sub, ProjectRole.MEMBER);
 
     if (rule.templateKey && this.domain.isDefaultRuleTemplateKey(rule.templateKey)) {
       throw new ConflictException({
@@ -170,7 +174,7 @@ export class RulesController {
 
     return this.prisma.$transaction(async (tx) => {
       await tx.rule.delete({ where: { id } });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Rule',

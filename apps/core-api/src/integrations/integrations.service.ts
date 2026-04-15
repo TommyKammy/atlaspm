@@ -6,8 +6,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { IntegrationCredentialKind, IntegrationProviderKind, WorkspaceRole } from '@prisma/client';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
 import { IntegrationRuntimeService, type RunIntegrationSyncJobResult } from './integration-runtime.service';
 import { IntegrationCredentialsService } from './integration-credentials.service';
 import { Prisma } from '@prisma/client';
@@ -29,7 +30,8 @@ type GithubConnectInput = {
 export class IntegrationsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
     @Inject(IntegrationRuntimeService)
     private readonly runtime: IntegrationRuntimeService,
     @Inject(IntegrationCredentialsService)
@@ -37,7 +39,7 @@ export class IntegrationsService {
   ) {}
 
   async listWorkspaceIntegrations(workspaceId: string, actorUserId: string) {
-    await this.domain.requireWorkspaceMembership(workspaceId, actorUserId);
+    await this.authorization.requireWorkspaceMembership(workspaceId, actorUserId);
     const configs = await this.prisma.integrationProviderConfig.findMany({
       where: { workspaceId },
       include: {
@@ -58,7 +60,7 @@ export class IntegrationsService {
   }
 
   async connectGithub(input: GithubConnectInput) {
-    await this.domain.requireWorkspaceRole(input.workspaceId, input.actorUserId, WorkspaceRole.WS_ADMIN);
+    await this.authorization.requireWorkspaceRole(input.workspaceId, input.actorUserId, WorkspaceRole.WS_ADMIN);
 
     const project = await this.prisma.project.findUnique({
       where: { id: input.projectId },
@@ -96,7 +98,7 @@ export class IntegrationsService {
 
     const refreshed = await this.getConfigOrThrow(providerConfig.id, input.workspaceId);
     await this.prisma.$transaction(async (tx) => {
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: input.actorUserId,
         entityType: 'IntegrationProviderConfig',
@@ -124,7 +126,7 @@ export class IntegrationsService {
     correlationId: string;
     scope: string;
   }) {
-    await this.domain.requireWorkspaceRole(input.workspaceId, input.actorUserId, WorkspaceRole.WS_ADMIN);
+    await this.authorization.requireWorkspaceRole(input.workspaceId, input.actorUserId, WorkspaceRole.WS_ADMIN);
     const config = await this.getConfigOrThrow(input.providerConfigId, input.workspaceId);
     const providerKey = this.mapProviderKey(config.provider);
     let result: RunIntegrationSyncJobResult;
@@ -142,7 +144,7 @@ export class IntegrationsService {
       const syncError = this.serializeSyncError(error);
 
       await this.prisma.$transaction(async (tx) => {
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: input.actorUserId,
           entityType: 'IntegrationProviderConfig',
@@ -171,7 +173,7 @@ export class IntegrationsService {
 
     if (result.status === 'completed') {
       await this.prisma.$transaction(async (tx) => {
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: input.actorUserId,
           entityType: 'IntegrationProviderConfig',

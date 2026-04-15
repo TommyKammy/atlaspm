@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Prisma, ProjectRole } from '@prisma/client';
+import { AuditOutboxService } from '../common/audit-outbox.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
 import {
   InboxNotificationType,
   NOTIFICATION_TYPE_APPROVAL_APPROVED,
@@ -19,7 +19,7 @@ import {
 export class NotificationsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
   ) {}
 
   private async upsertNotification(
@@ -69,7 +69,7 @@ export class NotificationsService {
           readAt: null,
         },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: input.actor,
         entityType: 'InboxNotification',
@@ -103,7 +103,7 @@ export class NotificationsService {
         triggeredByUserId: input.triggeredByUserId,
       },
     });
-    await this.domain.appendAuditOutbox({
+    await this.auditOutbox.appendAuditOutbox({
       tx,
       actor: input.actor,
       entityType: 'InboxNotification',

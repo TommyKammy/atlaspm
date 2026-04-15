@@ -22,8 +22,9 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AuthGuard } from '../auth/auth.guard';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -67,7 +68,8 @@ class ListStatusUpdatesQuery {
 export class ProjectStatusUpdatesController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
     @Inject(GoalsService) private readonly goalsService: GoalsService,
   ) {}
@@ -93,7 +95,7 @@ export class ProjectStatusUpdatesController {
     const blockers = this.normalizeListItems(body.blockers, 'blockers');
     const nextSteps = this.normalizeListItems(body.nextSteps, 'nextSteps');
 
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
 
     return this.prisma.$transaction(async (tx) => {
       const mentionedUserIds = await this.resolveMentionedProjectMemberIds(tx, projectId, [
@@ -121,7 +123,7 @@ export class ProjectStatusUpdatesController {
         },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'ProjectStatusUpdate',
@@ -178,7 +180,7 @@ export class ProjectStatusUpdatesController {
     @Query() query: ListStatusUpdatesQuery,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
 
     const take = query.take ?? 20;
 
@@ -216,7 +218,7 @@ export class ProjectStatusUpdatesController {
     @Param('id') projectId: string,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
 
     const statusUpdate = await this.prisma.projectStatusUpdate.findFirst({
       where: { projectId },
@@ -241,7 +243,7 @@ export class ProjectStatusUpdatesController {
     @Param('statusUpdateId') statusUpdateId: string,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
 
     const statusUpdate = await this.prisma.projectStatusUpdate.findFirst({
       where: {

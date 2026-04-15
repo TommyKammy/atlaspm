@@ -9,7 +9,6 @@ import { TasksController } from './tasks/tasks.controller';
 import { RulesController } from './rules/rules.controller';
 import { WebhooksController } from './webhooks/webhooks.controller';
 import { AuditController } from './audit/audit.controller';
-import { DomainService } from './common/domain.service';
 import { SubtaskService } from './tasks/subtask.service';
 import { CycleDetectionService } from './tasks/cycle-detection.service';
 import { ReminderDeliveryService } from './tasks/reminder-delivery.service';

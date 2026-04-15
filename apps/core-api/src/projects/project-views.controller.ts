@@ -29,7 +29,8 @@ import {
   type ProjectViewState,
 } from '@atlaspm/domain';
 import { AuthGuard } from '../auth/auth.guard';
-import { DomainService } from '../common/domain.service';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -80,12 +81,13 @@ type ProjectViewValidationContext = {
 export class ProjectViewsController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   @Get('projects/:id/saved-views')
   async list(@Param('id') projectId: string, @CurrentRequest() req: AppRequest) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
     return this.buildSavedViewsResponse(projectId, req.user.sub);
   }
 
@@ -96,7 +98,7 @@ export class ProjectViewsController {
     @Body() body: PutProjectViewDefaultDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
     const mode = this.parseProjectViewMode(rawMode);
 
     await this.prisma.$transaction(async (tx) => {
@@ -134,7 +136,7 @@ export class ProjectViewsController {
         },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'ProjectViewPreference',
@@ -163,7 +165,7 @@ export class ProjectViewsController {
     @Body() body: CreateProjectSavedViewDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
     const mode = this.parseProjectViewMode(body.mode);
     const name = this.normalizeSavedViewName(body.name);
 
@@ -184,7 +186,7 @@ export class ProjectViewsController {
         },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'ProjectSavedView',
@@ -207,7 +209,7 @@ export class ProjectViewsController {
     @CurrentRequest() req: AppRequest,
   ) {
     const existing = await this.getOwnedSavedViewOrThrow(viewId, req.user.sub);
-    await this.domain.requireProjectRole(existing.projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(existing.projectId, req.user.sub, ProjectRole.VIEWER);
     const mode = this.parseProjectViewMode(existing.mode);
 
     return this.prisma.$transaction(async (tx) => {
@@ -224,7 +226,7 @@ export class ProjectViewsController {
         },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'ProjectSavedView',
@@ -244,11 +246,11 @@ export class ProjectViewsController {
   @Delete('saved-views/:id')
   async remove(@Param('id') viewId: string, @CurrentRequest() req: AppRequest) {
     const existing = await this.getOwnedSavedViewOrThrow(viewId, req.user.sub);
-    await this.domain.requireProjectRole(existing.projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(existing.projectId, req.user.sub, ProjectRole.VIEWER);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.projectSavedView.delete({ where: { id: existing.id } });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'ProjectSavedView',

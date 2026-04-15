@@ -1,8 +1,8 @@
 import { BadRequestException, ConflictException, Injectable, Inject, Logger } from '@nestjs/common';
+import { AuditOutboxService } from '../common/audit-outbox.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CycleDetectionService } from './cycle-detection.service';
 import { Prisma, DependencyType, type Task } from '@prisma/client';
-import { DomainService } from '../common/domain.service';
 
 export interface SubtaskTreeNode extends Task {
   children: SubtaskTreeNode[];
@@ -29,7 +29,7 @@ export class SubtaskService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CycleDetectionService) private readonly cycleDetection: CycleDetectionService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
   ) {}
 
   /**
@@ -221,7 +221,7 @@ export class SubtaskService {
           createdAt: dependency.createdAt,
         };
 
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor,
           entityType: 'TaskDependency',
@@ -289,7 +289,7 @@ export class SubtaskService {
           where: { taskId_dependsOnId: { taskId, dependsOnId } },
         });
 
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor,
           entityType: 'TaskDependency',

@@ -1,13 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { DomainService } from '../common/domain.service';
+import { AuditOutboxService } from '../common/audit-outbox.service';
 import type { AppRequest } from '../common/types';
 import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class TaskMentionsService {
   constructor(
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
   ) {}
 
@@ -87,7 +87,7 @@ export class TaskMentionsService {
       const created = await tx.taskMention.create({
         data: { taskId: input.taskId, mentionedUserId: userId, sourceType: input.sourceType, sourceId },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -117,7 +117,7 @@ export class TaskMentionsService {
 
     for (const mention of toDelete) {
       await tx.taskMention.delete({ where: { id: mention.id } });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',

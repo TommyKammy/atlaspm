@@ -1,8 +1,9 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, NotFoundException, Inject } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
-import { DomainService } from '../common/domain.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, ProjectRole } from '@prisma/client';
 import { IsInt, IsOptional, IsString, Min } from 'class-validator';
@@ -39,7 +40,8 @@ class UpdateEstimateDto {
 export class TaskTimeTrackingController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   @Get('tasks/:id/time-logs')
@@ -55,7 +57,7 @@ export class TaskTimeTrackingController {
       throw new NotFoundException('Task not found');
     }
 
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
 
     return this.prisma.taskTimeLog.findMany({
       where: { taskId },
@@ -78,7 +80,7 @@ export class TaskTimeTrackingController {
       throw new NotFoundException('Task not found');
     }
 
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
 
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const timeLog = await tx.taskTimeLog.create({
@@ -96,7 +98,7 @@ export class TaskTimeTrackingController {
         data: { spentMinutes: { increment: body.minutes } },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'TaskTimeLog',
@@ -131,7 +133,7 @@ export class TaskTimeTrackingController {
     }
 
     const requiredRole = timeLog.userId === req.user.sub ? ProjectRole.MEMBER : ProjectRole.ADMIN;
-    await this.domain.requireProjectRole(timeLog.task.projectId, req.user.sub, requiredRole);
+    await this.authorization.requireProjectRole(timeLog.task.projectId, req.user.sub, requiredRole);
 
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const minutesDiff = (body.minutes ?? timeLog.minutes) - timeLog.minutes;
@@ -152,7 +154,7 @@ export class TaskTimeTrackingController {
         });
       }
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'TaskTimeLog',
@@ -187,7 +189,7 @@ export class TaskTimeTrackingController {
     }
 
     const requiredRole = timeLog.userId === req.user.sub ? ProjectRole.MEMBER : ProjectRole.ADMIN;
-    await this.domain.requireProjectRole(timeLog.task.projectId, req.user.sub, requiredRole);
+    await this.authorization.requireProjectRole(timeLog.task.projectId, req.user.sub, requiredRole);
 
     await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.taskTimeLog.delete({ where: { id } });
@@ -197,7 +199,7 @@ export class TaskTimeTrackingController {
         data: { spentMinutes: { decrement: timeLog.minutes } },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'TaskTimeLog',
@@ -228,7 +230,7 @@ export class TaskTimeTrackingController {
       throw new NotFoundException('Task not found');
     }
 
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
 
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const updated = await tx.task.update({
@@ -236,7 +238,7 @@ export class TaskTimeTrackingController {
         data: { estimateMinutes: body.estimateMinutes },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -258,7 +260,7 @@ export class TaskTimeTrackingController {
     @Param('id') projectId: string,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
 
     const [taskAgg, userAgg] = await Promise.all([
       this.prisma.taskTimeLog.groupBy({

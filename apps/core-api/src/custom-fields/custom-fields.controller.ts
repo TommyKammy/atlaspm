@@ -27,8 +27,9 @@ import {
 import { Type } from 'class-transformer';
 import { CustomFieldType, Prisma, ProjectRole } from '@prisma/client';
 import { AuthGuard } from '../auth/auth.guard';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
 import type { AppRequest } from '../common/types';
 import { parseCustomFieldDefinition } from './custom-field.validation';
@@ -125,7 +126,8 @@ type FieldWithOptions = Prisma.CustomFieldDefinitionGetPayload<{
 export class CustomFieldsController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DomainService) private readonly domain: DomainService,
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   @Get('projects/:id/custom-fields')
@@ -134,7 +136,7 @@ export class CustomFieldsController {
     @Query('includeArchived') includeArchivedRaw: string | undefined,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
     const includeArchived = includeArchivedRaw === 'true';
 
     const fields = await this.prisma.customFieldDefinition.findMany({
@@ -160,7 +162,7 @@ export class CustomFieldsController {
     @Body() body: CreateCustomFieldDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
     const parsed = parseCustomFieldDefinition(body);
 
     return this.prisma.$transaction(async (tx) => {
@@ -192,7 +194,7 @@ export class CustomFieldsController {
         include: { options: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] } },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'CustomFieldDefinition',
@@ -225,7 +227,7 @@ export class CustomFieldsController {
       throw new ConflictException('Archived custom fields cannot be updated');
     }
 
-    await this.domain.requireProjectRole(existing.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(existing.projectId, req.user.sub, ProjectRole.MEMBER);
 
     const activeExistingOptions = existing.options.filter((option) => !option.archivedAt);
     const targetType = body.type ?? existing.type;
@@ -278,7 +280,7 @@ export class CustomFieldsController {
         },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'CustomFieldDefinition',
@@ -304,7 +306,7 @@ export class CustomFieldsController {
     if (!existing) {
       throw new NotFoundException('Custom field definition not found');
     }
-    await this.domain.requireProjectRole(existing.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(existing.projectId, req.user.sub, ProjectRole.MEMBER);
 
     if (existing.archivedAt) {
       return { ok: true };
@@ -322,7 +324,7 @@ export class CustomFieldsController {
         data: { archivedAt },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'CustomFieldDefinition',

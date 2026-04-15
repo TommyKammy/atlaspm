@@ -31,6 +31,8 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
+import { AuditOutboxService } from '../common/audit-outbox.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainService } from '../common/domain.service';
 import { CurrentRequest } from '../common/current-request';
@@ -492,6 +494,8 @@ function createEmptyTimelineManualLayoutState(): TimelineManualLayoutState {
 @UseGuards(AuthGuard)
 export class TasksController {
   constructor(
+    @Inject(AuditOutboxService) private readonly auditOutbox: AuditOutboxService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(DomainService) private readonly domain: DomainService,
     @Inject(SearchService) private readonly searchService: SearchService,
@@ -501,7 +505,7 @@ export class TasksController {
 
   @Get('projects/:id/tasks')
   async list(@Param('id') projectId: string, @Query() query: TaskQuery, @CurrentRequest() req: AppRequest) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
 
     const customFieldFilters = parseTaskCustomFieldFilters(query.customFieldFilters ?? query.cf);
     const customFieldSort = parseTaskCustomFieldSort(query.customFieldSortFieldId, query.customFieldSortOrder);
@@ -581,7 +585,7 @@ export class TasksController {
 
   @Get('projects/:id/timeline/preferences')
   async getTimelinePreferences(@Param('id') projectId: string, @CurrentRequest() req: AppRequest) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.VIEWER);
     const preferences = await this.prisma.projectTimelinePreference.findUnique({
       where: { projectId_userId: { projectId, userId: req.user.sub } },
     });
@@ -603,7 +607,7 @@ export class TasksController {
     @Body() body: PutTimelineLaneOrderDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
     const groupBy = this.parseTimelineGroupBy(rawGroupBy);
 
     return this.prisma.$transaction(async (tx) => {
@@ -626,7 +630,7 @@ export class TasksController {
             : { laneOrderByAssignee: normalizedLaneOrder },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'ProjectTimelinePreference',
@@ -663,7 +667,7 @@ export class TasksController {
     @Body() body: PutTimelineManualLayoutDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
     const groupBy = this.parseTimelineSwimlane(rawGroupBy);
 
     return this.prisma.$transaction(async (tx) => {
@@ -699,7 +703,7 @@ export class TasksController {
         },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'ProjectTimelinePreference',
@@ -736,7 +740,7 @@ export class TasksController {
     @Body() body: PutTimelineViewStateDto,
     @CurrentRequest() req: AppRequest,
   ) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
     const mode = this.parseTimelineViewMode(rawMode);
     const normalizedViewState = this.normalizeTimelineViewState(mode, body);
 
@@ -758,7 +762,7 @@ export class TasksController {
             : { ganttViewState: normalizedViewState },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'ProjectTimelinePreference',
@@ -791,14 +795,14 @@ export class TasksController {
   @Get('tasks/:id')
   async getOne(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
     return this.hydrateTaskWithFollowerState(task, req.user.sub);
   }
 
   @Get('tasks/:id/followers')
   async followers(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
 
     const followers = await this.prisma.taskFollower.findMany({
       where: { taskId: id },
@@ -827,14 +831,14 @@ export class TasksController {
   @Post('tasks/:id/followers')
   async follow(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
 
     try {
       return await this.prisma.$transaction(async (tx) => {
         const follower = await tx.taskFollower.create({
           data: { taskId: id, userId: req.user.sub },
         });
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: req.user.sub,
           entityType: 'TaskFollower',
@@ -869,7 +873,7 @@ export class TasksController {
   @Delete('tasks/:id/followers/me')
   async unfollow(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.VIEWER);
 
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.taskFollower.findUnique({
@@ -877,7 +881,7 @@ export class TasksController {
       });
       if (existing) {
         await tx.taskFollower.delete({ where: { id: existing.id } });
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: req.user.sub,
           entityType: 'TaskFollower',
@@ -896,7 +900,7 @@ export class TasksController {
 
   @Post('projects/:id/tasks')
   async create(@Param('id') projectId: string, @Body() body: CreateTaskDto, @CurrentRequest() req: AppRequest) {
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
 
     assertValidDateRange(body.startAt, body.dueAt);
     assertValidDateRange(body.baselineStartAt, body.baselineDueAt, {
@@ -955,7 +959,7 @@ export class TasksController {
           position,
         },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -977,7 +981,7 @@ export class TasksController {
   @Patch('tasks/:id')
   async patch(@Param('id') id: string, @Body() body: PatchTaskDto, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (body.version && body.version !== task.version) throw new ConflictException('Version conflict');
 
     const effectiveStartAt = body.startAt === undefined ? normalizeDateOnlyField(task.startAt) : body.startAt;
@@ -1036,7 +1040,7 @@ export class TasksController {
           version: { increment: 1 },
         },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -1107,7 +1111,7 @@ export class TasksController {
   @Patch('tasks/:id/reschedule')
   async reschedule(@Param('id') id: string, @Body() body: RescheduleTaskDto, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (body.startAt === undefined && body.dueAt === undefined) {
       throw new BadRequestException('Either startAt or dueAt must be provided');
     }
@@ -1150,7 +1154,7 @@ export class TasksController {
 
       const updated = await tx.task.findFirstOrThrow({ where: { id, deletedAt: null } });
       const subtaskMovePolicy = await this.buildTimelineSubtaskMovePolicy(tx, id);
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -1192,7 +1196,7 @@ export class TasksController {
   @Patch('tasks/:id/timeline-move')
   async moveInTimeline(@Param('id') id: string, @Body() body: TimelineMoveTaskDto, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
 
     const rawDropAt = body.dropAt;
     const hasSchedulePatch = body.startAt !== undefined || body.dueAt !== undefined;
@@ -1230,7 +1234,7 @@ export class TasksController {
       throw new BadRequestException('assigneeUserId must be a non-empty string or null');
     }
     if (hasAssigneePatch && typeof body.assigneeUserId === 'string') {
-      await this.domain.requireProjectRole(task.projectId, body.assigneeUserId, ProjectRole.VIEWER);
+      await this.authorization.requireProjectRole(task.projectId, body.assigneeUserId, ProjectRole.VIEWER);
     }
     if (hasSectionPatch) {
       const section = await this.prisma.section.findFirst({
@@ -1458,7 +1462,7 @@ export class TasksController {
         });
         serializedCurrentCustomFieldValues = currentValues.map((value) => this.serializeTaskCustomFieldValue(value));
       }
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -1519,7 +1523,7 @@ export class TasksController {
     @CurrentRequest() req: AppRequest,
   ) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
 
     if (body.version !== task.version) {
       throw new ConflictException({
@@ -1630,7 +1634,7 @@ export class TasksController {
       });
       const serializedCurrent = currentValues.map((value) => this.serializeTaskCustomFieldValue(value));
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -1677,7 +1681,7 @@ export class TasksController {
   @Post('tasks/:id/complete')
   async complete(@Param('id') id: string, @Body() body: CompleteTaskDto, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
 
     return this.prisma.$transaction(async (tx) => {
       const unitOfWork = createTaskLifecycleUnitOfWorkFromTx(tx);
@@ -1707,7 +1711,7 @@ export class TasksController {
       });
       const updated = await tx.task.findUniqueOrThrow({ where: { id } });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -1736,7 +1740,7 @@ export class TasksController {
   @Delete('tasks/:id')
   async remove(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (task.deletedAt) return { success: true };
 
     return this.prisma.$transaction(async (tx) => {
@@ -1749,7 +1753,7 @@ export class TasksController {
         where: { id: { in: subtreeIds } },
         data: { deletedAt: now, deletedByUserId: req.user.sub, updatedAt: now, version: { increment: 1 } },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -1771,7 +1775,7 @@ export class TasksController {
   @Post('tasks/:id/restore')
   async restore(@Param('id') id: string, @CurrentRequest() req: AppRequest) {
     const task = await this.prisma.task.findUniqueOrThrow({ where: { id } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (!task.deletedAt) return task;
 
     return this.prisma.$transaction(async (tx) => {
@@ -1781,7 +1785,7 @@ export class TasksController {
         data: { deletedAt: null, deletedByUserId: null, version: { increment: 1 } },
       });
       const updatedTask = await tx.task.findUniqueOrThrow({ where: { id } });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -1808,7 +1812,7 @@ export class TasksController {
   ) {
     this.validateDescriptionDoc(body.descriptionDoc);
     const task = await this.prisma.task.findUniqueOrThrow({ where: { id } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
 
     if (task.descriptionVersion !== body.expectedVersion) {
       throw new ConflictException({
@@ -1834,7 +1838,7 @@ export class TasksController {
           version: { increment: 1 },
         },
       });
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -1875,7 +1879,7 @@ export class TasksController {
     const firstTask = tasks[0];
     if (!firstTask) return { count: 0 };
     const projectId = firstTask.projectId;
-    await this.domain.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(projectId, req.user.sub, ProjectRole.MEMBER);
 
     return this.prisma.$transaction(async (tx) => {
       const updated = [] as unknown[];
@@ -1910,7 +1914,7 @@ export class TasksController {
           },
         });
         updated.push(next);
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: req.user.sub,
           entityType: 'Task',
@@ -1935,7 +1939,7 @@ export class TasksController {
     @CurrentRequest() req: AppRequest,
   ) {
     const task = await this.prisma.task.findFirstOrThrow({ where: { id: body.taskId, deletedAt: null } });
-    await this.domain.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
+    await this.authorization.requireProjectRole(task.projectId, req.user.sub, ProjectRole.MEMBER);
     if (body.expectedVersion && body.expectedVersion !== task.version) {
       const sectionTasks = await this.prisma.task.findMany({
         where: { projectId: task.projectId, sectionId: targetSectionId, deletedAt: null },
@@ -1993,7 +1997,7 @@ export class TasksController {
         },
       });
 
-      await this.domain.appendAuditOutbox({
+      await this.auditOutbox.appendAuditOutbox({
         tx,
         actor: req.user.sub,
         entityType: 'Task',
@@ -2460,7 +2464,7 @@ export class TasksController {
       if (patch) {
         const before = { ...task };
         const updated = await tx.task.update({ where: { id: taskId }, data: patch });
-        await this.domain.appendAuditOutbox({
+        await this.auditOutbox.appendAuditOutbox({
           tx,
           actor: 'rule-engine',
           entityType: 'Task',
