@@ -11,9 +11,9 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
   COMMENT_MENTION_LOOKUP_REGEX,
-  COMMENT_MENTION_REPLACE_REGEX,
   normalizeComposerMentions,
   parseCommentBody,
+  replaceCommentMentionQuery,
   serializeCommentMentions,
 } from '@/components/task-detail/task-detail-utils';
 
@@ -130,7 +130,7 @@ export function TaskDetailCommentsTab({
                   className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-muted"
                   data-testid={`comment-mention-option-${member.userId}`}
                   onClick={() => {
-                    setNewComment((prev) => prev.replace(COMMENT_MENTION_REPLACE_REGEX, ` @${member.userId} `));
+                    setNewComment((prev) => replaceCommentMentionQuery(prev, member.userId));
                     setCommentMentionQuery('');
                   }}
                 >

@@ -23,6 +23,12 @@ export const COMMENT_MENTION_REPLACE_REGEX = new RegExp(
   String.raw`(?:^|\s)@[${COMMENT_MENTION_ID_CHARACTER_CLASS}]*$`,
 );
 
+export function replaceCommentMentionQuery(body: string, mentionId: string) {
+  return body.replace(COMMENT_MENTION_REPLACE_REGEX, (_match, offset: number) =>
+    (offset === 0 ? `@${mentionId} ` : ` @${mentionId} `),
+  );
+}
+
 export function getAuditDescriptionText(event: AuditEvent) {
   const beforeRaw = event.beforeJson?.descriptionText;
   const afterRaw = event.afterJson?.descriptionText;

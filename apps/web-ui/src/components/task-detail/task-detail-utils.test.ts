@@ -3,6 +3,7 @@ import {
   normalizeComposerMentions,
   parseCommentBody,
   parseReminderInputToIso,
+  replaceCommentMentionQuery,
   serializeCommentMentions,
 } from '@/components/task-detail/task-detail-utils';
 import type { ProjectMember } from '@/lib/types';
@@ -30,6 +31,11 @@ describe('task detail utils', () => {
       { type: 'text', value: 'Hi ' },
       { type: 'mention', userId: 'user.name:123', value: '@Alice Example' },
     ]);
+  });
+
+  test('inserts a selected mention without a leading space at the start of the composer', () => {
+    expect(replaceCommentMentionQuery('@user.na', 'user.name:123')).toBe('@user.name:123 ');
+    expect(replaceCommentMentionQuery('Hi @user.na', 'user.name:123')).toBe('Hi @user.name:123 ');
   });
 
   test('returns null for invalid reminder input values', () => {
