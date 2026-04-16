@@ -6,7 +6,8 @@ import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 
 export async function listTaskProjectLinks(taskId: string): Promise<TaskProjectLink[]> {
-  return (await api(`/tasks/${taskId}/projects`)) as TaskProjectLink[];
+  const data = await api(`/tasks/${taskId}/projects`);
+  return Array.isArray(data) ? (data as TaskProjectLink[]) : [];
 }
 
 export async function addTaskToProject(taskId: string, projectId: string): Promise<TaskProjectLinkMutationResult> {

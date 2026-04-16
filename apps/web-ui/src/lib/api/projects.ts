@@ -5,7 +5,8 @@ import type { Project } from '@atlaspm/shared-types';
 import { api } from '@/lib/api';
 
 export async function listProjects(): Promise<Project[]> {
-  return (await api('/projects')) as Project[];
+  const data = await api('/projects');
+  return Array.isArray(data) ? (data as Project[]) : [];
 }
 
 export function useProjects(workspaceId: string) {
