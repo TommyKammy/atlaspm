@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
+  COMMENT_MENTION_LOOKUP_REGEX,
+  COMMENT_MENTION_REPLACE_REGEX,
   normalizeComposerMentions,
   parseCommentBody,
   serializeCommentMentions,
@@ -53,7 +55,11 @@ export function TaskDetailCommentsTab({
   });
 
   const updateComment = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: string }) => api(`/comments/${id}`, { method: 'PATCH', body: { body } }) as Promise<TaskComment>,
+    mutationFn: ({ id, body }: { id: string; body: string }) =>
+      api(`/comments/${id}`, {
+        method: 'PATCH',
+        body: { body: serializeCommentMentions(body, members) },
+      }) as Promise<TaskComment>,
     onSuccess: async () => {
       setEditingCommentId(null);
       setEditingBody('');
@@ -82,7 +88,7 @@ export function TaskDetailCommentsTab({
   const comments = commentsQuery.data ?? [];
 
   const tryCommentMentionLookup = (text: string) => {
-    const match = text.match(/(?:^|\s)@([a-zA-Z0-9._-]*)$/);
+    const match = text.match(COMMENT_MENTION_LOOKUP_REGEX);
     if (!match) {
       setCommentMentionQuery('');
       return;
@@ -124,7 +130,7 @@ export function TaskDetailCommentsTab({
                   className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-muted"
                   data-testid={`comment-mention-option-${member.userId}`}
                   onClick={() => {
-                    setNewComment((prev) => prev.replace(/(?:^|\s)@[a-zA-Z0-9._-]*$/, ` @${member.userId} `));
+                    setNewComment((prev) => prev.replace(COMMENT_MENTION_REPLACE_REGEX, ` @${member.userId} `));
                     setCommentMentionQuery('');
                   }}
                 >

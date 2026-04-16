@@ -4,6 +4,25 @@ import { dateOnlyInputToLocalDate, dateOnlyInputValue } from '@atlaspm/domain';
 import { type ReactNode } from 'react';
 import type { AuditEvent, ProjectMember, RecurringFrequency, RecurringRule, Task, TaskTree } from '@/lib/types';
 
+const COMMENT_MENTION_ID_CHARACTER_CLASS = 'a-zA-Z0-9._:-';
+const COMMENT_MENTION_TOKEN_PATTERN = String.raw`@\[(?<id>[${COMMENT_MENTION_ID_CHARACTER_CLASS}]+)\|(?<label>[^\]]+)\]`;
+const COMMENT_MENTION_TYPED_PATTERN = String.raw`(^|\s)@([${COMMENT_MENTION_ID_CHARACTER_CLASS}]+)`;
+
+function commentMentionTokenRegex() {
+  return new RegExp(COMMENT_MENTION_TOKEN_PATTERN, 'g');
+}
+
+function commentMentionTypedRegex() {
+  return new RegExp(COMMENT_MENTION_TYPED_PATTERN, 'g');
+}
+
+export const COMMENT_MENTION_LOOKUP_REGEX = new RegExp(
+  String.raw`(?:^|\s)@([${COMMENT_MENTION_ID_CHARACTER_CLASS}]*)$`,
+);
+export const COMMENT_MENTION_REPLACE_REGEX = new RegExp(
+  String.raw`(?:^|\s)@[${COMMENT_MENTION_ID_CHARACTER_CLASS}]*$`,
+);
+
 export function getAuditDescriptionText(event: AuditEvent) {
   const beforeRaw = event.beforeJson?.descriptionText;
   const afterRaw = event.afterJson?.descriptionText;
@@ -48,7 +67,7 @@ export function compactSnapshotActivity(events: AuditEvent[]) {
 }
 
 export function parseCommentBody(body: string) {
-  const regex = /@\[(?<id>[a-zA-Z0-9:_-]+)\|(?<label>[^\]]+)\]/g;
+  const regex = commentMentionTokenRegex();
   const output: Array<{ type: 'text' | 'mention'; value: string; userId?: string }> = [];
   let cursor = 0;
   let match = regex.exec(body);
@@ -75,7 +94,7 @@ export function serializeCommentMentions(body: string, members: ProjectMember[])
     const label = member.user.displayName ?? member.user.email ?? member.user.id;
     idToLabel.set(member.userId.toLowerCase(), label);
   }
-  return body.replace(/(^|\s)@([a-zA-Z0-9._:|-]+)/g, (whole, prefix: string, mentionId: string) => {
+  return body.replace(commentMentionTypedRegex(), (whole, prefix: string, mentionId: string) => {
     const label = idToLabel.get(mentionId.toLowerCase());
     if (!label) return whole;
     return `${prefix}@[${mentionId}|${label}]`;
@@ -83,7 +102,13 @@ export function serializeCommentMentions(body: string, members: ProjectMember[])
 }
 
 export function normalizeComposerMentions(body: string) {
-  return body.replace(/@\[(?<id>[a-zA-Z0-9:_-]+)\|[^\]]+\]/g, (_whole, mentionId: string) => `@${mentionId}`);
+  return body.replace(commentMentionTokenRegex(), (_whole, mentionId: string) => `@${mentionId}`);
+}
+
+export function parseReminderInputToIso(value: string) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 export function statusLabel(status: Task['status'], t: (key: string) => string) {

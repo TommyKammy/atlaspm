@@ -115,9 +115,10 @@ function moveTaskPreview(
   const destination = cloned.find((group) => group.section.id === toSectionId);
   if (!destination) return groups;
 
-  const insertAt = targetTaskId
-    ? Math.max(destination.tasks.findIndex((task) => task.id === targetTaskId), 0)
-    : destination.tasks.length;
+  const targetIndex = targetTaskId
+    ? destination.tasks.findIndex((task) => task.id === targetTaskId)
+    : -1;
+  const insertAt = targetIndex >= 0 ? targetIndex : destination.tasks.length;
 
   destination.tasks.splice(insertAt, 0, { ...movingTask, sectionId: toSectionId });
   return cloned;

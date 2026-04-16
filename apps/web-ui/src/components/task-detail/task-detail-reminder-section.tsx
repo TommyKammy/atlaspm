@@ -10,6 +10,7 @@ import { DEFAULT_REMINDER_PREFERENCES } from '@/lib/reminder-preferences';
 import type { ReminderPreferences, Task, TaskReminder } from '@/lib/types';
 import {
   buildDefaultReminderInputValue,
+  parseReminderInputToIso,
   toDatetimeLocalInputValue,
 } from '@/components/task-detail/task-detail-utils';
 import { Button } from '@/components/ui/button';
@@ -47,6 +48,7 @@ export function TaskDetailReminderSection({
       ? buildDefaultReminderInputValue(currentTask?.dueAt, reminderPreferences.defaultLeadTimeMinutes)
       : '';
   const reminderInput = reminderAtInput || reminderLocal || defaultReminderInput;
+  const reminderIso = parseReminderInputToIso(reminderInput);
 
   const setReminder = useMutation({
     mutationFn: (remindAt: string) => api(`/tasks/${taskId}/reminder`, { method: 'PUT', body: { remindAt } }),
@@ -79,11 +81,11 @@ export function TaskDetailReminderSection({
         <Button
           size="sm"
           onClick={() => {
-            const iso = new Date(reminderInput).toISOString();
-            setReminder.mutate(iso);
+            if (!reminderIso) return;
+            setReminder.mutate(reminderIso);
             setReminderAtInput('');
           }}
-          disabled={!reminderInput || setReminder.isPending || !reminderPreferences.enabled}
+          disabled={!reminderIso || setReminder.isPending || !reminderPreferences.enabled}
           data-testid="task-reminder-save"
         >
           {setReminder.isPending ? t('saving') : t('saveReminder')}
