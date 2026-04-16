@@ -9,7 +9,7 @@ import {
   useAddProjectToPortfolio,
   useRemoveProjectFromPortfolio,
 } from '@/lib/api/portfolios';
-import { useProjects } from '@/lib/api';
+import { useProjects } from '@/lib/api/projects';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';

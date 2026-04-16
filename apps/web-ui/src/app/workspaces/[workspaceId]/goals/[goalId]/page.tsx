@@ -27,7 +27,7 @@ import {
   useUnlinkGoalProject,
   useUpdateGoal,
 } from '@/lib/api/goals';
-import { useProjects } from '@/lib/api';
+import { useProjects } from '@/lib/api/projects';
 import { useI18n } from '@/lib/i18n';
 import type { GoalStatus } from '@/lib/types';
 

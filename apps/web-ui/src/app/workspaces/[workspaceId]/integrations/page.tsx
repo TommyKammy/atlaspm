@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { CheckCircle2, GitBranch, RefreshCcw } from 'lucide-react';
-import { useProjects } from '@/lib/api';
+import { useProjects } from '@/lib/api/projects';
 import {
   useConnectGithubIntegration,
   useTriggerIntegrationSync,

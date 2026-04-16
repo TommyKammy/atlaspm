@@ -1,4 +1,4 @@
-import type { OverloadAlert, UserWorkload, WeeklyLoad } from '@/lib/api/workload';
+import type { OverloadAlert, UserWorkload, WeeklyLoad, WorkloadViewMode } from '@atlaspm/shared-types';
 
 export type WorkloadStatusFilter = 'all' | 'over-capacity' | 'reduced-capacity' | 'available';
 
@@ -19,7 +19,7 @@ export function createAlertsByWeekMap(overloadAlerts: OverloadAlert[]): Readonly
 
 export function getWeeklyCapacityState(
   week: WeeklyLoad,
-  viewMode: 'tasks' | 'effort',
+  viewMode: WorkloadViewMode,
   overloadAlert?: OverloadAlert,
 ): WeeklyCapacityState {
   const capacity = viewMode === 'effort'
@@ -42,7 +42,7 @@ export function getWeeklyCapacityState(
 
 export function getWorkloadStatus(
   workload: UserWorkload,
-  viewMode: 'tasks' | 'effort',
+  viewMode: WorkloadViewMode,
   alertsByWeek: ReadonlyMap<string, OverloadAlert> = createAlertsByWeekMap(workload.overloadAlerts),
 ): Exclude<WorkloadStatusFilter, 'all'> {
   let hasReducedCapacity = false;
@@ -61,7 +61,7 @@ export function getWorkloadStatus(
 export function filterWorkloads(
   workloads: UserWorkload[],
   filter: WorkloadStatusFilter,
-  viewMode: 'tasks' | 'effort',
+  viewMode: WorkloadViewMode,
   workloadStatusByUserId?: ReadonlyMap<string, Exclude<WorkloadStatusFilter, 'all'>>,
 ): UserWorkload[] {
   if (filter === 'all') {
@@ -76,7 +76,7 @@ export function filterWorkloads(
 export function filterWeeks(
   workload: UserWorkload,
   filter: WorkloadStatusFilter,
-  viewMode: 'tasks' | 'effort',
+  viewMode: WorkloadViewMode,
   alertsByWeek: ReadonlyMap<string, OverloadAlert> = createAlertsByWeekMap(workload.overloadAlerts),
 ): WeeklyLoad[] {
   if (filter === 'all') {

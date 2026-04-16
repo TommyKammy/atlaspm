@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import type { UserWorkload, WeeklyLoad } from '@/lib/api/workload';
+import type { UserWorkload, WeeklyLoad } from '@atlaspm/shared-types';
 import { filterWorkloads, getWeeklyCapacityState, getWorkloadStatus } from './workload-helpers';
 
 function createWeek(overrides: Partial<WeeklyLoad> = {}): WeeklyLoad {
