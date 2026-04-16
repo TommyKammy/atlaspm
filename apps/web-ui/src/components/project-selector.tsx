@@ -9,7 +9,7 @@ import {
   useAddTaskToProject,
   useRemoveTaskFromProject,
   useSetPrimaryProject,
-} from '@/lib/api';
+} from '@/lib/api/task-project-links';
 import { useI18n } from '@/lib/i18n';
 
 

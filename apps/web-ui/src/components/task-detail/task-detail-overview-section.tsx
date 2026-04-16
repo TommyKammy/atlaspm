@@ -12,7 +12,8 @@ import {
   UserCircle2,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, useProjects } from '@/lib/api';
+import { api } from '@/lib/api';
+import { useProjects } from '@/lib/api/projects';
 import { useI18n } from '@/lib/i18n';
 import { queryKeys } from '@/lib/query-keys';
 import type {

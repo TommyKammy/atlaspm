@@ -1,14 +1,8 @@
 import type { ProjectViewCustomFieldFilter, ProjectViewMode, ProjectViewState } from '@atlaspm/domain';
+import type { Project, TaskProjectLink } from '@atlaspm/shared-types';
 
 export type { ProjectViewCustomFieldFilter, ProjectViewMode, ProjectViewState };
-
-export type Project = {
-  id: string;
-  workspaceId: string;
-  name: string;
-  followerCount?: number;
-  isFollowedByCurrentUser?: boolean;
-};
+export type { Project, TaskProjectLink };
 
 export type ProjectSavedView = {
   id: string;
@@ -456,20 +450,6 @@ export type RuleCondition =
       value?: number;
       min?: number;
       max?: number;
-};
-
-export type TaskProjectLink = {
-  id: string;
-  taskId: string;
-  projectId: string;
-  isPrimary: boolean;
-  project: {
-    id: string;
-    name: string;
-    workspaceId: string;
-  };
-  createdAt: string;
-  updatedAt: string;
 };
 
 export type RuleAction =

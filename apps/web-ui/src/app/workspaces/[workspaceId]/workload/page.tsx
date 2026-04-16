@@ -2,9 +2,10 @@
 
 import { useState } from 'react';
 import { useParams } from 'next/navigation';
+import type { UserWorkload, WorkloadViewMode } from '@atlaspm/shared-types';
 import { AlertTriangle, Calendar, Users, Briefcase, Clock, List } from 'lucide-react';
 import { useTeamWorkload, useProjectWorkload } from '@/lib/api/workload';
-import { useProjects } from '@/lib/api';
+import { useProjects } from '@/lib/api/projects';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -205,8 +206,8 @@ function UserWorkloadCard({
   viewMode,
   statusFilter,
 }: {
-  workload: import('@/lib/api/workload').UserWorkload;
-  viewMode: 'tasks' | 'effort';
+  workload: UserWorkload;
+  viewMode: WorkloadViewMode;
   statusFilter: WorkloadStatusFilter;
 }) {
   const alertsByWeek = createAlertsByWeekMap(workload.overloadAlerts);

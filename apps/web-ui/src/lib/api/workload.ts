@@ -1,54 +1,18 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import type { OverloadAlert, UserWorkload, WeeklyLoad, WorkloadViewMode } from '@atlaspm/shared-types';
 import { api } from '@/lib/api';
-
-export interface WeeklyLoad {
-  week: string;
-  startDate: string;
-  endDate: string;
-  capacityMinutes: number;
-  capacityTasks: number;
-  taskCount: number;
-  estimateMinutes: number;
-  spentMinutes: number;
-  tasks: Array<{
-    id: string;
-    title: string;
-    dueAt: string | null;
-    priority: string;
-    status: string;
-    estimateMinutes: number | null;
-    spentMinutes: number;
-  }>;
-}
-
-export interface OverloadAlert {
-  week: string;
-  taskCount?: number;
-  estimateMinutes: number;
-  capacity: number;
-  excess: number;
-}
-
-export interface UserWorkload {
-  userId: string;
-  userName: string;
-  email: string;
-  totalTasks: number;
-  totalEstimateMinutes: number;
-  totalSpentMinutes: number;
-  weeklyBreakdown: WeeklyLoad[];
-  overloadAlerts: OverloadAlert[];
-}
 
 interface WorkloadFilters {
   startDate?: string;
   endDate?: string;
   projectId?: string;
-  viewMode?: 'tasks' | 'effort';
+  viewMode?: WorkloadViewMode;
   periodWeeks?: number;
 }
+
+export type { OverloadAlert, UserWorkload, WeeklyLoad, WorkloadFilters };
 
 async function fetchMyWorkload(workspaceId: string, filters?: WorkloadFilters): Promise<UserWorkload> {
   const params = new URLSearchParams();
