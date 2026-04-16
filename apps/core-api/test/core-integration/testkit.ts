@@ -40,7 +40,8 @@ function applyCoreIntegrationEnv() {
   process.env.WEBHOOK_SIGNING_SECRET = 'webhook-test-secret';
   process.env.RECURRING_WORKER_ENABLED = 'false';
   process.env.DATABASE_URL =
-    process.env.DATABASE_URL ?? 'postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public';
+    process.env.DATABASE_URL ??
+    'postgresql://atlaspm:atlaspm@localhost:55432/atlaspm?schema=public';
 }
 
 function createLiveProxy<T extends object>(

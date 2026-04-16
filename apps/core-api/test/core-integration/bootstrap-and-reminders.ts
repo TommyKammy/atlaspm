@@ -11,11 +11,7 @@ export function registerBootstrapAndReminderIntegrationTests({
   test('concurrent first authenticated requests bootstrap a fresh user without 500s', async () => {
     const auth = app.get(AuthService);
     const userId = `concurrent-user-${Date.now()}`;
-    const freshToken = await auth.mintDevToken(
-      userId,
-      `${userId}@example.com`,
-      'Concurrent User',
-    );
+    const freshToken = await auth.mintDevToken(userId, `${userId}@example.com`, 'Concurrent User');
 
     const responses = await Promise.all(
       Array.from({ length: 8 }, (_, index) =>
@@ -66,9 +62,10 @@ export function registerBootstrapAndReminderIntegrationTests({
       .get(`/projects/${projectId}/sections`)
       .set('Authorization', `Bearer ${reminderToken}`)
       .expect(200);
-    const defaultSectionId =
-      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
-        sectionsRes.body[0])?.id as string;
+    const defaultSectionId = (
+      sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
+      sectionsRes.body[0]
+    )?.id as string;
 
     const taskRes = await request(app.getHttpServer())
       .post(`/projects/${projectId}/tasks`)

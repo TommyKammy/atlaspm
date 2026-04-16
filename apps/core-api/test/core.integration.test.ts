@@ -1,19 +1,58 @@
 import { describe, expect, test, vi } from 'vitest';
 import request from 'supertest';
-import { createServer } from 'node:http';
-import { createHmac } from 'node:crypto';
 import { AuthService } from '../src/auth/auth.service';
 import { setupCoreIntegrationSuite } from './core-integration/testkit';
+import { registerAttachmentIntegrationTests } from './core-integration/attachments';
+import { registerBackgroundWorkerIntegrationTests } from './core-integration/background-workers';
 import { registerBootstrapAndReminderIntegrationTests } from './core-integration/bootstrap-and-reminders';
+import { registerNotificationDeliveryIntegrationTests } from './core-integration/notification-delivery';
 
 describe('Core API Integration', () => {
   const { app, prisma, token, reminderWorker, retentionWorker, webhookWorker, recurringWorker } =
     setupCoreIntegrationSuite();
 
-  registerBootstrapAndReminderIntegrationTests({ app, prisma, token, reminderWorker, retentionWorker, webhookWorker, recurringWorker });
+  registerBootstrapAndReminderIntegrationTests({
+    app,
+    prisma,
+    token,
+    reminderWorker,
+    retentionWorker,
+    webhookWorker,
+    recurringWorker,
+  });
+  registerAttachmentIntegrationTests({
+    app,
+    prisma,
+    token,
+    reminderWorker,
+    retentionWorker,
+    webhookWorker,
+    recurringWorker,
+  });
+  registerBackgroundWorkerIntegrationTests({
+    app,
+    prisma,
+    token,
+    reminderWorker,
+    retentionWorker,
+    webhookWorker,
+    recurringWorker,
+  });
+  registerNotificationDeliveryIntegrationTests({
+    app,
+    prisma,
+    token,
+    reminderWorker,
+    retentionWorker,
+    webhookWorker,
+    recurringWorker,
+  });
 
   test('project/member/sections/tasks/rules/reorder/audit/outbox flow', async () => {
-    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
+    await request(app.getHttpServer())
+      .get('/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
     const wsRes = await request(app.getHttpServer())
       .get('/workspaces')
       .set('Authorization', `Bearer ${token}`)
@@ -47,7 +86,11 @@ describe('Core API Integration', () => {
       .expect(201);
     expect(autoInviteRes.body.inviteLink).toContain('inviteToken=');
 
-    const autoInvitedToken = await auth.mintDevToken('invited-auto', 'invited-auto@example.com', 'Invited Auto');
+    const autoInvitedToken = await auth.mintDevToken(
+      'invited-auto',
+      'invited-auto@example.com',
+      'Invited Auto',
+    );
     await request(app.getHttpServer())
       .get('/me')
       .set('Authorization', `Bearer ${autoInvitedToken}`)
@@ -62,10 +105,22 @@ describe('Core API Integration', () => {
       .get(`/workspaces/${workspaceId}/users?query=invited-auto@example.com`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    expect(usersAfterAutoAccept.body.some((u: any) => u.email === 'invited-auto@example.com' && u.status === 'ACTIVE')).toBe(true);
-    expect(usersAfterAutoAccept.body.some((u: any) => u.email === 'invited-auto@example.com' && u.status === 'INVITED')).toBe(false);
+    expect(
+      usersAfterAutoAccept.body.some(
+        (u: any) => u.email === 'invited-auto@example.com' && u.status === 'ACTIVE',
+      ),
+    ).toBe(true);
+    expect(
+      usersAfterAutoAccept.body.some(
+        (u: any) => u.email === 'invited-auto@example.com' && u.status === 'INVITED',
+      ),
+    ).toBe(false);
 
-    const invitedToken = await auth.mintDevToken('invited-1', 'invited-1@example.com', 'Invited One');
+    const invitedToken = await auth.mintDevToken(
+      'invited-1',
+      'invited-1@example.com',
+      'Invited One',
+    );
     const inviteToken = String(invitationRes.body.inviteLink).split('inviteToken=')[1];
     await request(app.getHttpServer())
       .post('/invitations/accept')
@@ -96,13 +151,19 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ workspaceId, status: 'SUSPENDED' })
       .expect(200);
-    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${invitedToken}`).expect(403);
+    await request(app.getHttpServer())
+      .get('/me')
+      .set('Authorization', `Bearer ${invitedToken}`)
+      .expect(403);
     await request(app.getHttpServer())
       .patch('/users/invited-1')
       .set('Authorization', `Bearer ${token}`)
       .send({ workspaceId, status: 'ACTIVE' })
       .expect(200);
-    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${invitedToken}`).expect(200);
+    await request(app.getHttpServer())
+      .get('/me')
+      .set('Authorization', `Bearer ${invitedToken}`)
+      .expect(200);
 
     const revokedInvite = await request(app.getHttpServer())
       .post(`/workspaces/${workspaceId}/invitations`)
@@ -115,7 +176,11 @@ describe('Core API Integration', () => {
       .delete(`/invitations/${revokedInvitationId}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    const revokedUserToken = await auth.mintDevToken('revoked-1', 'revoked-1@example.com', 'Revoked One');
+    const revokedUserToken = await auth.mintDevToken(
+      'revoked-1',
+      'revoked-1@example.com',
+      'Revoked One',
+    );
     await request(app.getHttpServer())
       .post('/invitations/accept')
       .set('Authorization', `Bearer ${revokedUserToken}`)
@@ -132,7 +197,11 @@ describe('Core API Integration', () => {
       data: { expiresAt: new Date(Date.now() - 60_000) },
     });
     const expiredToken = String(expiredInvite.body.inviteLink).split('inviteToken=')[1];
-    const expiredUserToken = await auth.mintDevToken('expired-1', 'expired-1@example.com', 'Expired One');
+    const expiredUserToken = await auth.mintDevToken(
+      'expired-1',
+      'expired-1@example.com',
+      'Expired One',
+    );
     await request(app.getHttpServer())
       .post('/invitations/accept')
       .set('Authorization', `Bearer ${expiredUserToken}`)
@@ -161,7 +230,11 @@ describe('Core API Integration', () => {
     expect(secondToken).toBeTruthy();
     expect(secondToken).not.toBe(firstToken);
 
-    const reissueUserToken = await auth.mintDevToken('reissue-1', 'reissue-1@example.com', 'Reissue One');
+    const reissueUserToken = await auth.mintDevToken(
+      'reissue-1',
+      'reissue-1@example.com',
+      'Reissue One',
+    );
     await request(app.getHttpServer())
       .post('/invitations/accept')
       .set('Authorization', `Bearer ${reissueUserToken}`)
@@ -229,8 +302,16 @@ describe('Core API Integration', () => {
 
     const memberToken = await auth.mintDevToken('member-1', 'member-1@example.com', 'Member One');
     const viewerToken = await auth.mintDevToken('viewer-1', 'viewer-1@example.com', 'Viewer One');
-    const projectAdminToken = await auth.mintDevToken('project-admin-1', 'project-admin-1@example.com', 'Project Admin');
-    const outsiderToken = await auth.mintDevToken('outsider-1', 'outsider-1@example.com', 'Outsider One');
+    const projectAdminToken = await auth.mintDevToken(
+      'project-admin-1',
+      'project-admin-1@example.com',
+      'Project Admin',
+    );
+    const outsiderToken = await auth.mintDevToken(
+      'outsider-1',
+      'outsider-1@example.com',
+      'Outsider One',
+    );
 
     await request(app.getHttpServer())
       .patch(`/projects/${projectId}/members/member-1`)
@@ -384,7 +465,12 @@ describe('Core API Integration', () => {
 
     await prisma.task.update({
       where: { id: childTaskCreated.id },
-      data: { status: 'DONE', progressPercent: 100, completedAt: new Date(), version: { increment: 1 } },
+      data: {
+        status: 'DONE',
+        progressPercent: 100,
+        completedAt: new Date(),
+        version: { increment: 1 },
+      },
     });
 
     const parentCompletedAfterChild = await request(app.getHttpServer())
@@ -526,7 +612,9 @@ describe('Core API Integration', () => {
     ]);
     expect(snapshotRaceA.status).toBe(201);
     expect(snapshotRaceB.status).toBe(201);
-    const raceNoopCount = [snapshotRaceA.body?.noop, snapshotRaceB.body?.noop].filter(Boolean).length;
+    const raceNoopCount = [snapshotRaceA.body?.noop, snapshotRaceB.body?.noop].filter(
+      Boolean,
+    ).length;
     expect(raceNoopCount).toBe(1);
 
     const snapshotInvalidActorCorrelationId = `it-snapshot-invalid-actor-${Date.now()}`;
@@ -538,7 +626,9 @@ describe('Core API Integration', () => {
         roomId: `task:${snapshotTaskId}:description`,
         descriptionDoc: {
           type: 'doc',
-          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'snapshot invalid actor' }] }],
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'snapshot invalid actor' }] },
+          ],
         },
         descriptionText: 'snapshot invalid actor',
         participants: [{ userId: 'member-1', mode: 'readwrite' }],
@@ -551,7 +641,12 @@ describe('Core API Integration', () => {
     await request(app.getHttpServer())
       .post(`/sections/${secA.body.id}/tasks/reorder`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ taskId: t1.body.id, beforeTaskId: t2.body.id, afterTaskId: null, expectedVersion: p100.body.version })
+      .send({
+        taskId: t1.body.id,
+        beforeTaskId: t2.body.id,
+        afterTaskId: null,
+        expectedVersion: p100.body.version,
+      })
       .expect(201);
 
     await request(app.getHttpServer())
@@ -719,7 +814,9 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ attachmentId: attachmentInit.body.attachmentId })
       .expect(201);
-    expect(attachmentComplete.body.url).toContain(`/public/attachments/${attachmentInit.body.attachmentId}`);
+    expect(attachmentComplete.body.url).toContain(
+      `/public/attachments/${attachmentInit.body.attachmentId}`,
+    );
 
     const attachments = await request(app.getHttpServer())
       .get(`/tasks/${t1.body.id}/attachments`)
@@ -739,13 +836,17 @@ describe('Core API Integration', () => {
       .get(`/tasks/${t1.body.id}/attachments`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    expect(attachmentsAfterDelete.body.some((a: any) => a.id === attachmentInit.body.attachmentId)).toBe(false);
+    expect(
+      attachmentsAfterDelete.body.some((a: any) => a.id === attachmentInit.body.attachmentId),
+    ).toBe(false);
 
     const attachmentsIncludingDeleted = await request(app.getHttpServer())
       .get(`/tasks/${t1.body.id}/attachments?includeDeleted=true`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    const deletedAttachment = attachmentsIncludingDeleted.body.find((a: any) => a.id === attachmentInit.body.attachmentId);
+    const deletedAttachment = attachmentsIncludingDeleted.body.find(
+      (a: any) => a.id === attachmentInit.body.attachmentId,
+    );
     expect(deletedAttachment).toBeTruthy();
     expect(Boolean(deletedAttachment.deletedAt)).toBe(true);
     expect(deletedAttachment.url).toBeNull();
@@ -762,7 +863,9 @@ describe('Core API Integration', () => {
       .get(`/tasks/${t1.body.id}/attachments`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    expect(attachmentsAfterRestore.body.some((a: any) => a.id === attachmentInit.body.attachmentId)).toBe(true);
+    expect(
+      attachmentsAfterRestore.body.some((a: any) => a.id === attachmentInit.body.attachmentId),
+    ).toBe(true);
 
     const reminderSet = await request(app.getHttpServer())
       .put(`/tasks/${t1.body.id}/reminder`)
@@ -866,7 +969,10 @@ describe('Core API Integration', () => {
     expect((taskCreateOutbox?.payload as any)?.id).toBe(t1.body.id);
 
     const snapshotOutbox = await prisma.outboxEvent.findFirst({
-      where: { type: 'task.description.snapshot_saved', correlationId: observedSnapshotCorrelationId },
+      where: {
+        type: 'task.description.snapshot_saved',
+        correlationId: observedSnapshotCorrelationId,
+      },
       orderBy: { createdAt: 'desc' },
     });
     expect(snapshotOutbox).toBeTruthy();
@@ -886,7 +992,10 @@ describe('Core API Integration', () => {
     });
     expect(snapshotRaceOutbox).toHaveLength(1);
     const snapshotInvalidOutbox = await prisma.outboxEvent.findFirst({
-      where: { type: 'task.description.snapshot_saved', correlationId: snapshotInvalidActorCorrelationId },
+      where: {
+        type: 'task.description.snapshot_saved',
+        correlationId: snapshotInvalidActorCorrelationId,
+      },
       orderBy: { createdAt: 'desc' },
     });
     expect(snapshotInvalidOutbox).toBeTruthy();
@@ -903,7 +1012,8 @@ describe('Core API Integration', () => {
       .expect(200);
     expect(
       t1Audit.body.some(
-        (e: any) => e.action === 'task.created' && e.correlationId === observedCreateTaskCorrelationId,
+        (e: any) =>
+          e.action === 'task.created' && e.correlationId === observedCreateTaskCorrelationId,
       ),
     ).toBe(true);
     const t2Audit = await request(app.getHttpServer())
@@ -982,17 +1092,26 @@ describe('Core API Integration', () => {
       .send({ userId: viewerId, role: 'VIEWER' })
       .expect(201);
 
-    const viewerToken = await auth.mintDevToken(viewerId, `${viewerId}@example.com`, 'Follower Viewer');
+    const viewerToken = await auth.mintDevToken(
+      viewerId,
+      `${viewerId}@example.com`,
+      'Follower Viewer',
+    );
     const outsiderId = `follower-outsider-${projectId}`;
-    const outsiderToken = await auth.mintDevToken(outsiderId, `${outsiderId}@example.com`, 'Follower Outsider');
+    const outsiderToken = await auth.mintDevToken(
+      outsiderId,
+      `${outsiderId}@example.com`,
+      'Follower Outsider',
+    );
 
     const sectionsRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/sections`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    const defaultSectionId =
-      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
-        sectionsRes.body[0])?.id as string;
+    const defaultSectionId = (
+      sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
+      sectionsRes.body[0]
+    )?.id as string;
 
     const taskRes = await request(app.getHttpServer())
       .post(`/projects/${projectId}/tasks`)
@@ -1151,7 +1270,12 @@ describe('Core API Integration', () => {
       orderBy: { createdAt: 'asc' },
     });
     expect(followerAuditActions.map((event) => event.action)).toEqual(
-      expect.arrayContaining(['project.followed', 'project.unfollowed', 'task.followed', 'task.unfollowed']),
+      expect.arrayContaining([
+        'project.followed',
+        'project.unfollowed',
+        'task.followed',
+        'task.unfollowed',
+      ]),
     );
 
     const followerOutboxEvents = await prisma.outboxEvent.findMany({
@@ -1163,7 +1287,12 @@ describe('Core API Integration', () => {
       orderBy: { createdAt: 'asc' },
     });
     expect(followerOutboxEvents.map((event) => event.type)).toEqual(
-      expect.arrayContaining(['project.followed', 'project.unfollowed', 'task.followed', 'task.unfollowed']),
+      expect.arrayContaining([
+        'project.followed',
+        'project.unfollowed',
+        'task.followed',
+        'task.unfollowed',
+      ]),
     );
   });
 
@@ -1236,7 +1365,11 @@ describe('Core API Integration', () => {
       update: { role: 'MEMBER' },
     });
 
-    const followerOnlyToken = await auth.mintDevToken(followerOnlyId, followerOnlyEmail, 'Follower Only');
+    const followerOnlyToken = await auth.mintDevToken(
+      followerOnlyId,
+      followerOnlyEmail,
+      'Follower Only',
+    );
     const assigneeFollowerToken = await auth.mintDevToken(
       assigneeFollowerId,
       assigneeFollowerEmail,
@@ -1247,9 +1380,10 @@ describe('Core API Integration', () => {
       .get(`/projects/${projectId}/sections`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    const defaultSectionId =
-      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
-        sectionsRes.body[0])?.id as string;
+    const defaultSectionId = (
+      sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
+      sectionsRes.body[0]
+    )?.id as string;
 
     const taskRes = await request(app.getHttpServer())
       .post(`/projects/${projectId}/tasks`)
@@ -1287,7 +1421,8 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${followerOnlyToken}`)
       .expect(200);
     const followerOnlyCommentNotifications = followerOnlyNotifications.body.filter(
-      (item: any) => item.type === 'comment' && item.sourceType === 'comment' && item.taskId === taskId,
+      (item: any) =>
+        item.type === 'comment' && item.sourceType === 'comment' && item.taskId === taskId,
     );
     expect(followerOnlyCommentNotifications).toHaveLength(1);
     expect(followerOnlyCommentNotifications[0]).toMatchObject({
@@ -1302,7 +1437,8 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${assigneeFollowerToken}`)
       .expect(200);
     const assigneeFollowerCommentNotifications = assigneeFollowerNotifications.body.filter(
-      (item: any) => item.type === 'comment' && item.sourceType === 'comment' && item.taskId === taskId,
+      (item: any) =>
+        item.type === 'comment' && item.sourceType === 'comment' && item.taskId === taskId,
     );
     expect(assigneeFollowerCommentNotifications).toHaveLength(1);
 
@@ -1317,7 +1453,8 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${followerOnlyToken}`)
       .expect(200);
     const followerOnlyDueDateNotifications = followerOnlyNotificationsAfterDueDate.body.filter(
-      (item: any) => item.type === 'due_date' && item.sourceType === 'task' && item.taskId === taskId,
+      (item: any) =>
+        item.type === 'due_date' && item.sourceType === 'task' && item.taskId === taskId,
     );
     expect(followerOnlyDueDateNotifications).toHaveLength(1);
 
@@ -1325,9 +1462,11 @@ describe('Core API Integration', () => {
       .get('/notifications?status=unread')
       .set('Authorization', `Bearer ${assigneeFollowerToken}`)
       .expect(200);
-    const assigneeFollowerDueDateNotifications = assigneeFollowerNotificationsAfterDueDate.body.filter(
-      (item: any) => item.type === 'due_date' && item.sourceType === 'task' && item.taskId === taskId,
-    );
+    const assigneeFollowerDueDateNotifications =
+      assigneeFollowerNotificationsAfterDueDate.body.filter(
+        (item: any) =>
+          item.type === 'due_date' && item.sourceType === 'task' && item.taskId === taskId,
+      );
     expect(assigneeFollowerDueDateNotifications).toHaveLength(1);
 
     await request(app.getHttpServer())
@@ -1349,9 +1488,11 @@ describe('Core API Integration', () => {
       .get('/notifications?status=unread')
       .set('Authorization', `Bearer ${assigneeFollowerToken}`)
       .expect(200);
-    const assigneeFollowerStatusNotifications = assigneeFollowerNotificationsAfterStatusChange.body.filter(
-      (item: any) => item.type === 'status' && item.sourceType === 'task' && item.taskId === taskId,
-    );
+    const assigneeFollowerStatusNotifications =
+      assigneeFollowerNotificationsAfterStatusChange.body.filter(
+        (item: any) =>
+          item.type === 'status' && item.sourceType === 'task' && item.taskId === taskId,
+      );
     expect(assigneeFollowerStatusNotifications).toHaveLength(1);
 
     const statusUpdateRes = await request(app.getHttpServer())
@@ -1369,9 +1510,13 @@ describe('Core API Integration', () => {
       .get('/notifications?status=unread')
       .set('Authorization', `Bearer ${followerOnlyToken}`)
       .expect(200);
-    const followerProjectUpdateNotifications = followerOnlyNotificationsAfterProjectUpdate.body.filter(
-      (item: any) => item.type === 'status' && item.sourceType === 'project_status_update' && item.project?.id === projectId,
-    );
+    const followerProjectUpdateNotifications =
+      followerOnlyNotificationsAfterProjectUpdate.body.filter(
+        (item: any) =>
+          item.type === 'status' &&
+          item.sourceType === 'project_status_update' &&
+          item.project?.id === projectId,
+      );
     expect(followerProjectUpdateNotifications).toHaveLength(1);
     expect(followerProjectUpdateNotifications[0]).toMatchObject({
       sourceId: statusUpdateRes.body.id,
@@ -1383,418 +1528,13 @@ describe('Core API Integration', () => {
     });
   });
 
-  test('attachment list responses do not expose persistent download tokens', async () => {
-    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
-
-    const workspaceRes = await request(app.getHttpServer())
-      .get('/workspaces')
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    const workspaceId = workspaceRes.body[0].id as string;
-
-    const projectRes = await request(app.getHttpServer())
-      .post('/projects')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ workspaceId, name: `Attachment list tokens ${Date.now()}` })
-      .expect(201);
-    const projectId = projectRes.body.id as string;
-
-    const sectionsRes = await request(app.getHttpServer())
-      .get(`/projects/${projectId}/sections`)
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    const defaultSectionId =
-      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
-        sectionsRes.body[0])?.id as string;
-
-    const taskRes = await request(app.getHttpServer())
-      .post(`/projects/${projectId}/tasks`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ sectionId: defaultSectionId, title: 'Attachment list token leak' })
-      .expect(201);
-    const taskId = taskRes.body.id as string;
-
-    const onePxPng = Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7aY9kAAAAASUVORK5CYII=',
-      'base64',
-    );
-    const attachmentInit = await request(app.getHttpServer())
-      .post(`/tasks/${taskId}/attachments/initiate`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ fileName: 'tiny.png', mimeType: 'image/png', sizeBytes: onePxPng.length })
-      .expect(201);
-
-    await request(app.getHttpServer())
-      .post(String(attachmentInit.body.uploadUrl))
-      .set('Authorization', `Bearer ${token}`)
-      .attach('file', onePxPng, { filename: 'tiny.png', contentType: 'image/png' })
-      .expect(201);
-
-    await request(app.getHttpServer())
-      .post(`/tasks/${taskId}/attachments/complete`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ attachmentId: attachmentInit.body.attachmentId })
-      .expect(201);
-
-    const attachmentsRes = await request(app.getHttpServer())
-      .get(`/tasks/${taskId}/attachments`)
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    const attachment = attachmentsRes.body.find((item: any) => item.id === attachmentInit.body.attachmentId);
-    expect(attachment).toBeTruthy();
-    expect(attachment.uploadToken).toBeUndefined();
-  });
-
-  test('attachment uploads reject deleted and completed attachments without mutating them', async () => {
-    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
-
-    const workspaceRes = await request(app.getHttpServer())
-      .get('/workspaces')
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    const workspaceId = workspaceRes.body[0].id as string;
-
-    const projectRes = await request(app.getHttpServer())
-      .post('/projects')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ workspaceId, name: `Attachment upload guard ${Date.now()}` })
-      .expect(201);
-    const projectId = projectRes.body.id as string;
-
-    const sectionsRes = await request(app.getHttpServer())
-      .get(`/projects/${projectId}/sections`)
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    const defaultSectionId =
-      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
-        sectionsRes.body[0])?.id as string;
-
-    const taskRes = await request(app.getHttpServer())
-      .post(`/projects/${projectId}/tasks`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ sectionId: defaultSectionId, title: 'Attachment upload guards' })
-      .expect(201);
-    const taskId = taskRes.body.id as string;
-
-    const onePxPng = Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7aY9kAAAAASUVORK5CYII=',
-      'base64',
-    );
-
-    const deletedAttachmentInit = await request(app.getHttpServer())
-      .post(`/tasks/${taskId}/attachments/initiate`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ fileName: 'deleted.png', mimeType: 'image/png', sizeBytes: onePxPng.length })
-      .expect(201);
-
-    await request(app.getHttpServer())
-      .delete(`/attachments/${deletedAttachmentInit.body.attachmentId}`)
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-
-    await request(app.getHttpServer())
-      .post(String(deletedAttachmentInit.body.uploadUrl))
-      .set('Authorization', `Bearer ${token}`)
-      .attach('file', onePxPng, { filename: 'deleted.png', contentType: 'image/png' })
-      .expect(404);
-
-    const completedAttachmentInit = await request(app.getHttpServer())
-      .post(`/tasks/${taskId}/attachments/initiate`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ fileName: 'completed.png', mimeType: 'image/png', sizeBytes: onePxPng.length })
-      .expect(201);
-
-    await request(app.getHttpServer())
-      .post(String(completedAttachmentInit.body.uploadUrl))
-      .set('Authorization', `Bearer ${token}`)
-      .attach('file', onePxPng, { filename: 'completed.png', contentType: 'image/png' })
-      .expect(201);
-
-    await request(app.getHttpServer())
-      .post(`/tasks/${taskId}/attachments/complete`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ attachmentId: completedAttachmentInit.body.attachmentId })
-      .expect(201);
-
-    const completedAttachment = await prisma.taskAttachment.findUniqueOrThrow({
-      where: { id: completedAttachmentInit.body.attachmentId },
-    });
-    expect(completedAttachment.uploadToken).toBeTruthy();
-
-    await request(app.getHttpServer())
-      .post(
-        `/attachments/${completedAttachment.id}/upload?token=${completedAttachment.uploadToken as string}`,
-      )
-      .set('Authorization', `Bearer ${token}`)
-      .attach('file', onePxPng, { filename: 'completed.png', contentType: 'image/png' })
-      .expect(409);
-  });
-
-  test('attachment initiation rejects declared sizes above the upload limit at validation time', async () => {
-    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
-
-    const workspaceRes = await request(app.getHttpServer())
-      .get('/workspaces')
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    const workspaceId = workspaceRes.body[0].id as string;
-
-    const projectRes = await request(app.getHttpServer())
-      .post('/projects')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ workspaceId, name: `Attachment validation ${Date.now()}` })
-      .expect(201);
-    const projectId = projectRes.body.id as string;
-
-    const sectionsRes = await request(app.getHttpServer())
-      .get(`/projects/${projectId}/sections`)
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    const defaultSectionId =
-      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
-        sectionsRes.body[0])?.id as string;
-
-    const taskRes = await request(app.getHttpServer())
-      .post(`/projects/${projectId}/tasks`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ sectionId: defaultSectionId, title: 'Attachment validation limit' })
-      .expect(201);
-    const taskId = taskRes.body.id as string;
-
-    const oversizeInit = await request(app.getHttpServer())
-      .post(`/tasks/${taskId}/attachments/initiate`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ fileName: 'large.png', mimeType: 'image/png', sizeBytes: 5_000_001 })
-      .expect(409);
-    expect(oversizeInit.body.message).toContain('Image too large');
-  });
-
-  test('attachment public download URLs expire after a short TTL', async () => {
-    const frozenNow = new Date('2026-03-10T03:00:00.000Z');
-    const previousAttachmentDownloadTtl = process.env.ATTACHMENT_DOWNLOAD_URL_TTL_SEC;
-    process.env.ATTACHMENT_DOWNLOAD_URL_TTL_SEC = '300';
-    vi.useFakeTimers();
-    vi.setSystemTime(frozenNow);
-
-    try {
-      await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
-
-      const workspaceRes = await request(app.getHttpServer())
-        .get('/workspaces')
-        .set('Authorization', `Bearer ${token}`)
-        .expect(200);
-      const workspaceId = workspaceRes.body[0].id as string;
-
-      const projectRes = await request(app.getHttpServer())
-        .post('/projects')
-        .set('Authorization', `Bearer ${token}`)
-        .send({ workspaceId, name: `Attachment download TTL ${Date.now()}` })
-        .expect(201);
-      const projectId = projectRes.body.id as string;
-
-      const sectionsRes = await request(app.getHttpServer())
-        .get(`/projects/${projectId}/sections`)
-        .set('Authorization', `Bearer ${token}`)
-        .expect(200);
-      const defaultSectionId =
-        (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
-          sectionsRes.body[0])?.id as string;
-
-      const taskRes = await request(app.getHttpServer())
-        .post(`/projects/${projectId}/tasks`)
-        .set('Authorization', `Bearer ${token}`)
-        .send({ sectionId: defaultSectionId, title: 'Attachment download TTL' })
-        .expect(201);
-      const taskId = taskRes.body.id as string;
-
-      const onePxPng = Buffer.from(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7aY9kAAAAASUVORK5CYII=',
-        'base64',
-      );
-      const attachmentInit = await request(app.getHttpServer())
-        .post(`/tasks/${taskId}/attachments/initiate`)
-        .set('Authorization', `Bearer ${token}`)
-        .send({ fileName: 'tiny.png', mimeType: 'image/png', sizeBytes: onePxPng.length })
-        .expect(201);
-
-      await request(app.getHttpServer())
-        .post(String(attachmentInit.body.uploadUrl))
-        .set('Authorization', `Bearer ${token}`)
-        .attach('file', onePxPng, { filename: 'tiny.png', contentType: 'image/png' })
-        .expect(201);
-
-      const attachmentComplete = await request(app.getHttpServer())
-        .post(`/tasks/${taskId}/attachments/complete`)
-        .set('Authorization', `Bearer ${token}`)
-        .send({ attachmentId: attachmentInit.body.attachmentId })
-        .expect(201);
-      const downloadUrl = String(attachmentComplete.body.url);
-
-      await request(app.getHttpServer()).get(downloadUrl).expect(200);
-
-      vi.setSystemTime(new Date(frozenNow.getTime() + 10 * 60 * 1000));
-
-      await request(app.getHttpServer()).get(downloadUrl).expect(404);
-    } finally {
-      if (previousAttachmentDownloadTtl === undefined) {
-        delete process.env.ATTACHMENT_DOWNLOAD_URL_TTL_SEC;
-      } else {
-        process.env.ATTACHMENT_DOWNLOAD_URL_TTL_SEC = previousAttachmentDownloadTtl;
-      }
-      vi.useRealTimers();
-    }
-  });
-
-  test('attachment public download URLs are revoked when an attachment is deleted', async () => {
-    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
-
-    const workspaceRes = await request(app.getHttpServer())
-      .get('/workspaces')
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    const workspaceId = workspaceRes.body[0].id as string;
-
-    const projectRes = await request(app.getHttpServer())
-      .post('/projects')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ workspaceId, name: `Attachment revoke ${Date.now()}` })
-      .expect(201);
-    const projectId = projectRes.body.id as string;
-
-    const sectionsRes = await request(app.getHttpServer())
-      .get(`/projects/${projectId}/sections`)
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    const defaultSectionId =
-      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
-        sectionsRes.body[0])?.id as string;
-
-    const taskRes = await request(app.getHttpServer())
-      .post(`/projects/${projectId}/tasks`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ sectionId: defaultSectionId, title: 'Attachment revoke' })
-      .expect(201);
-    const taskId = taskRes.body.id as string;
-
-    const onePxPng = Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7aY9kAAAAASUVORK5CYII=',
-      'base64',
-    );
-    const attachmentInit = await request(app.getHttpServer())
-      .post(`/tasks/${taskId}/attachments/initiate`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ fileName: 'tiny.png', mimeType: 'image/png', sizeBytes: onePxPng.length })
-      .expect(201);
-
-    await request(app.getHttpServer())
-      .post(String(attachmentInit.body.uploadUrl))
-      .set('Authorization', `Bearer ${token}`)
-      .attach('file', onePxPng, { filename: 'tiny.png', contentType: 'image/png' })
-      .expect(201);
-
-    const attachmentComplete = await request(app.getHttpServer())
-      .post(`/tasks/${taskId}/attachments/complete`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ attachmentId: attachmentInit.body.attachmentId })
-      .expect(201);
-    const downloadUrl = String(attachmentComplete.body.url);
-
-    await request(app.getHttpServer()).get(downloadUrl).expect(200);
-
-    await request(app.getHttpServer())
-      .delete(`/attachments/${attachmentInit.body.attachmentId}`)
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-
-    await request(app.getHttpServer()).get(downloadUrl).expect(404);
-  });
-
-  test('attachment completion is idempotent on retry', async () => {
-    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
-
-    const workspaceRes = await request(app.getHttpServer())
-      .get('/workspaces')
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    const workspaceId = workspaceRes.body[0].id as string;
-
-    const projectRes = await request(app.getHttpServer())
-      .post('/projects')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ workspaceId, name: `Attachment completion retry ${Date.now()}` })
-      .expect(201);
-    const projectId = projectRes.body.id as string;
-
-    const sectionsRes = await request(app.getHttpServer())
-      .get(`/projects/${projectId}/sections`)
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    const defaultSectionId =
-      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
-        sectionsRes.body[0])?.id as string;
-
-    const taskRes = await request(app.getHttpServer())
-      .post(`/projects/${projectId}/tasks`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ sectionId: defaultSectionId, title: 'Attachment completion retry' })
-      .expect(201);
-    const taskId = taskRes.body.id as string;
-
-    const onePxPng = Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7aY9kAAAAASUVORK5CYII=',
-      'base64',
-    );
-    const attachmentInit = await request(app.getHttpServer())
-      .post(`/tasks/${taskId}/attachments/initiate`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ fileName: 'retry.png', mimeType: 'image/png', sizeBytes: onePxPng.length })
-      .expect(201);
-
-    await request(app.getHttpServer())
-      .post(String(attachmentInit.body.uploadUrl))
-      .set('Authorization', `Bearer ${token}`)
-      .attach('file', onePxPng, { filename: 'retry.png', contentType: 'image/png' })
-      .expect(201);
-
-    const outboxBefore = await prisma.outboxEvent.count({
-      where: { type: 'task.attachment.created' },
-    });
-
-    const firstComplete = await request(app.getHttpServer())
-      .post(`/tasks/${taskId}/attachments/complete`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ attachmentId: attachmentInit.body.attachmentId })
-      .expect(201);
-
-    const storedAfterFirstComplete = await prisma.taskAttachment.findUniqueOrThrow({
-      where: { id: attachmentInit.body.attachmentId },
-    });
-
-    const secondComplete = await request(app.getHttpServer())
-      .post(`/tasks/${taskId}/attachments/complete`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ attachmentId: attachmentInit.body.attachmentId })
-      .expect(201);
-
-    const storedAfterSecondComplete = await prisma.taskAttachment.findUniqueOrThrow({
-      where: { id: attachmentInit.body.attachmentId },
-    });
-    const outboxAfter = await prisma.outboxEvent.count({
-      where: { type: 'task.attachment.created' },
-    });
-
-    expect(secondComplete.body).toEqual(firstComplete.body);
-    expect(storedAfterSecondComplete.uploadToken).toBe(storedAfterFirstComplete.uploadToken);
-    expect(storedAfterSecondComplete.completedAt?.toISOString()).toBe(
-      storedAfterFirstComplete.completedAt?.toISOString(),
-    );
-    expect(outboxAfter).toBe(outboxBefore + 1);
-  });
-
   test('GET /projects/:id/audit includes project-scoped member and rule changes', async () => {
     const auth = app.get(AuthService);
 
-    await request(app.getHttpServer()).get('/me').set('Authorization', `Bearer ${token}`).expect(200);
+    await request(app.getHttpServer())
+      .get('/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
 
     const workspaceRes = await request(app.getHttpServer())
       .get('/workspaces')
@@ -1816,7 +1556,11 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ email: invitedEmail, role: 'WS_MEMBER' })
       .expect(201);
-    const invitedToken = await auth.mintDevToken(invitedUserId, invitedEmail, 'Project Audit Member');
+    const invitedToken = await auth.mintDevToken(
+      invitedUserId,
+      invitedEmail,
+      'Project Audit Member',
+    );
     await request(app.getHttpServer())
       .post('/invitations/accept')
       .set('Authorization', `Bearer ${invitedToken}`)
@@ -1858,9 +1602,19 @@ describe('Core API Integration', () => {
 
     expect(auditRes.body).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ entityType: 'Project', action: 'project.created', entityId: projectId }),
-        expect.objectContaining({ entityType: 'ProjectMembership', action: 'project.member.added' }),
-        expect.objectContaining({ entityType: 'ProjectMembership', action: 'project.member.role_changed' }),
+        expect.objectContaining({
+          entityType: 'Project',
+          action: 'project.created',
+          entityId: projectId,
+        }),
+        expect.objectContaining({
+          entityType: 'ProjectMembership',
+          action: 'project.member.added',
+        }),
+        expect.objectContaining({
+          entityType: 'ProjectMembership',
+          action: 'project.member.role_changed',
+        }),
         expect.objectContaining({ entityType: 'Rule', action: 'rule.created' }),
       ]),
     );
@@ -1957,7 +1711,9 @@ describe('Core API Integration', () => {
     expect(patchRes.body.name).toBe('Customer Segment');
     expect(patchRes.body.options.map((option: any) => option.value)).toEqual(['enterprise', 'smb']);
 
-    const enterpriseOptionId = patchRes.body.options.find((option: any) => option.value === 'enterprise')?.id;
+    const enterpriseOptionId = patchRes.body.options.find(
+      (option: any) => option.value === 'enterprise',
+    )?.id;
     const secondPatchRes = await request(app.getHttpServer())
       .patch(`/custom-fields/${fieldId}`)
       .set('Authorization', `Bearer ${memberToken}`)
@@ -2100,7 +1856,9 @@ describe('Core API Integration', () => {
       .get(`/tasks/${taskId}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    expect(taskDetail.body.customFieldValues.some((value: any) => value.fieldId === textField.body.id)).toBe(true);
+    expect(
+      taskDetail.body.customFieldValues.some((value: any) => value.fieldId === textField.body.id),
+    ).toBe(true);
 
     const listRes = await request(app.getHttpServer())
       .get(`/projects/${projectId}/tasks`)
@@ -2108,13 +1866,19 @@ describe('Core API Integration', () => {
       .expect(200);
     const listedTask = listRes.body.find((item: any) => item.id === taskId);
     expect(listedTask).toBeTruthy();
-    expect(listedTask.customFieldValues.some((value: any) => value.fieldId === selectField.body.id)).toBe(true);
+    expect(
+      listedTask.customFieldValues.some((value: any) => value.fieldId === selectField.body.id),
+    ).toBe(true);
 
     const filteredBySelect = await request(app.getHttpServer())
       .get(
         `/projects/${projectId}/tasks?customFieldFilters=${encodeURIComponent(
           JSON.stringify([
-            { fieldId: selectField.body.id, type: 'SELECT', optionIds: [selectField.body.options[0].id] },
+            {
+              fieldId: selectField.body.id,
+              type: 'SELECT',
+              optionIds: [selectField.body.options[0].id],
+            },
           ]),
         )}`,
       )
@@ -2214,7 +1978,9 @@ describe('Core API Integration', () => {
       .get(`/outbox?projectId=${projectId}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    expect(outbox.body.some((event: any) => event.type === 'task.custom_fields.updated')).toBe(true);
+    expect(outbox.body.some((event: any) => event.type === 'task.custom_fields.updated')).toBe(
+      true,
+    );
   }, 15_000);
 
   test('time tracking APIs update spent/estimate and reject logs on soft-deleted tasks', async () => {
@@ -2282,7 +2048,9 @@ describe('Core API Integration', () => {
       .expect(200);
     expect(agg.body.totalEstimateMinutes).toBe(120);
     expect(agg.body.totalSpentMinutes).toBe(45);
-    expect(agg.body.byTask.some((item: any) => item.taskId === taskId && item.totalMinutes === 45)).toBe(true);
+    expect(
+      agg.body.byTask.some((item: any) => item.taskId === taskId && item.totalMinutes === 45),
+    ).toBe(true);
 
     await request(app.getHttpServer())
       .delete(`/time-logs/${firstLog.body.id}`)
@@ -2397,8 +2165,14 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(linksAfterAdd.body.length).toBe(2);
-    expect(linksAfterAdd.body.some((link: any) => link.projectId === projectA.body.id && link.isPrimary)).toBe(true);
-    expect(linksAfterAdd.body.some((link: any) => link.projectId === projectB.body.id && !link.isPrimary)).toBe(true);
+    expect(
+      linksAfterAdd.body.some((link: any) => link.projectId === projectA.body.id && link.isPrimary),
+    ).toBe(true);
+    expect(
+      linksAfterAdd.body.some(
+        (link: any) => link.projectId === projectB.body.id && !link.isPrimary,
+      ),
+    ).toBe(true);
 
     await request(app.getHttpServer())
       .post(`/tasks/${taskId}/projects/${projectB.body.id}/primary`)
@@ -2440,445 +2214,16 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(outbox.body.some((event: any) => event.type === 'task.project_linked')).toBe(true);
-    expect(outbox.body.some((event: any) => event.type === 'task.primary_project_changed')).toBe(true);
-  });
-
-  test('task retention worker purges expired soft-deleted tasks and keeps recent deletions', async () => {
-    const wsRes = await request(app.getHttpServer())
-      .get('/workspaces')
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    const workspaceId = wsRes.body[0].id;
-
-    const projectRes = await request(app.getHttpServer())
-      .post('/projects')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ workspaceId, name: `Retention ${Date.now()}` })
-      .expect(201);
-    const projectId = projectRes.body.id as string;
-
-    const sectionsRes = await request(app.getHttpServer())
-      .get(`/projects/${projectId}/sections`)
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    const defaultSection = sectionsRes.body.find((section: any) => section.isDefault);
-    expect(defaultSection?.id).toBeTruthy();
-
-    const expiredTask = await request(app.getHttpServer())
-      .post(`/projects/${projectId}/tasks`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ title: 'Retention expired', sectionId: defaultSection.id })
-      .expect(201);
-
-    const recentTask = await request(app.getHttpServer())
-      .post(`/projects/${projectId}/tasks`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ title: 'Retention recent', sectionId: defaultSection.id })
-      .expect(201);
-
-    await request(app.getHttpServer())
-      .delete(`/tasks/${expiredTask.body.id}`)
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    await request(app.getHttpServer())
-      .delete(`/tasks/${recentTask.body.id}`)
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-
-    const now = new Date();
-    const oldDeletedAt = new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000);
-    await prisma.task.update({
-      where: { id: expiredTask.body.id },
-      data: { deletedAt: oldDeletedAt },
-    });
-
-    const purgedCount = await retentionWorker.processExpiredDeletes(now);
-    expect(purgedCount).toBeGreaterThanOrEqual(1);
-
-    const expiredAfter = await prisma.task.findUnique({ where: { id: expiredTask.body.id } });
-    expect(expiredAfter).toBeNull();
-
-    const recentAfter = await prisma.task.findUnique({ where: { id: recentTask.body.id } });
-    expect(recentAfter).toBeTruthy();
-    expect(Boolean(recentAfter?.deletedAt)).toBe(true);
-
-    const purgeAudit = await prisma.auditEvent.findFirst({
-      where: { entityType: 'Task', entityId: expiredTask.body.id, action: 'task.purged' },
-      orderBy: { createdAt: 'desc' },
-    });
-    expect(purgeAudit).toBeTruthy();
-    expect(typeof purgeAudit?.correlationId).toBe('string');
-    expect(purgeAudit?.correlationId.startsWith('task-retention-')).toBe(true);
-
-    const purgeOutbox = await prisma.outboxEvent.findFirst({
-      where: { type: 'task.purged' },
-      orderBy: { createdAt: 'desc' },
-    });
-    expect(purgeOutbox).toBeTruthy();
-    expect((purgeOutbox?.payload as any)?.taskId).toBe(expiredTask.body.id);
-    expect((purgeOutbox?.payload as any)?.projectId).toBe(projectId);
-  });
-
-  test('recurring worker generates overdue slots end to end and emits audit/outbox without duplicates', async () => {
-    const frozenNow = new Date();
-    vi.useFakeTimers();
-    vi.setSystemTime(frozenNow);
-
-    try {
-      const wsRes = await request(app.getHttpServer())
-        .get('/workspaces')
-        .set('Authorization', `Bearer ${token}`)
-        .expect(200);
-      const workspaceId = wsRes.body[0].id;
-
-      const projectRes = await request(app.getHttpServer())
-        .post('/projects')
-        .set('Authorization', `Bearer ${token}`)
-        .send({ workspaceId, name: `Recurring Integration ${Date.now()}` })
-        .expect(201);
-      const projectId = projectRes.body.id as string;
-
-      const sectionsRes = await request(app.getHttpServer())
-        .get(`/projects/${projectId}/sections`)
-        .set('Authorization', `Bearer ${token}`)
-        .expect(200);
-      const defaultSection =
-        sectionsRes.body.find((section: any) => section.isDefault) ?? sectionsRes.body[0];
-      expect(defaultSection?.id).toBeTruthy();
-
-      const sourceTask = await request(app.getHttpServer())
-        .post(`/projects/${projectId}/tasks`)
-        .set('Authorization', `Bearer ${token}`)
-        .send({ title: 'Recurring source', sectionId: defaultSection.id })
-        .expect(201);
-
-      const todayUtc = new Date(Date.UTC(
-        frozenNow.getUTCFullYear(),
-        frozenNow.getUTCMonth(),
-        frozenNow.getUTCDate(),
-      ));
-      const yesterdayUtc = new Date(todayUtc);
-      yesterdayUtc.setUTCDate(yesterdayUtc.getUTCDate() - 1);
-      const tomorrowUtc = new Date(todayUtc);
-      tomorrowUtc.setUTCDate(tomorrowUtc.getUTCDate() + 1);
-      const createCorrelationId = `recurring-rule-${Date.now()}`;
-
-      const ruleRes = await request(app.getHttpServer())
-        .post(`/projects/${projectId}/recurring-rules`)
-        .set('Authorization', `Bearer ${token}`)
-        .set('x-correlation-id', createCorrelationId)
-        .send({
-          title: 'Recurring source',
-          description: 'Generated via worker',
-          frequency: 'DAILY',
-          interval: 1,
-          sectionId: defaultSection.id,
-          sourceTaskId: sourceTask.body.id,
-          startDate: yesterdayUtc.toISOString(),
-          endDate: todayUtc.toISOString(),
-        })
-        .expect(201);
-      const ruleId = ruleRes.body.id as string;
-
-      await prisma.recurringRule.update({
-        where: { id: ruleId },
-        data: { nextScheduledAt: yesterdayUtc },
-      });
-
-      const firstRun = await recurringWorker.processDueRecurringTasks();
-      expect(firstRun).toEqual({ processed: 2, errors: 0 });
-
-      const secondRun = await recurringWorker.processDueRecurringTasks();
-      expect(secondRun).toEqual({ processed: 0, errors: 0 });
-
-      const ruleAfter = await prisma.recurringRule.findUniqueOrThrow({
-        where: { id: ruleId },
-      });
-      expect(ruleAfter.nextScheduledAt?.toISOString()).toBe(tomorrowUtc.toISOString());
-
-      const generations = await prisma.recurringTaskGeneration.findMany({
-        where: { ruleId },
-        orderBy: { scheduledAt: 'asc' },
-      });
-      expect(generations).toHaveLength(2);
-      expect(generations.map((generation) => generation.scheduledAt.toISOString())).toEqual([
-        yesterdayUtc.toISOString(),
-        todayUtc.toISOString(),
-      ]);
-      expect(generations.map((generation) => generation.status)).toEqual(['completed', 'completed']);
-
-      const generatedTasks = await prisma.task.findMany({
-        where: { recurringRuleId: ruleId },
-        orderBy: { createdAt: 'asc' },
-        select: {
-          id: true,
-          title: true,
-          description: true,
-          status: true,
-          recurringRuleId: true,
-        },
-      });
-      expect(generatedTasks).toHaveLength(2);
-      expect(generatedTasks.every((task) => task.recurringRuleId === ruleId)).toBe(true);
-      expect(generatedTasks.map((task) => task.title)).toEqual([
-        'Recurring source',
-        'Recurring source',
-      ]);
-      expect(generatedTasks.map((task) => task.description)).toEqual([
-        'Generated via worker',
-        'Generated via worker',
-      ]);
-      expect(generatedTasks.map((task) => task.status)).toEqual(['TODO', 'TODO']);
-
-      const createdRuleAudit = await prisma.auditEvent.findFirst({
-        where: {
-          entityType: 'RecurringRule',
-          entityId: ruleId,
-          action: 'recurring_rule.created',
-        },
-        orderBy: { createdAt: 'desc' },
-      });
-      expect(createdRuleAudit?.correlationId).toBe(createCorrelationId);
-
-      const generationAudit = await prisma.auditEvent.findMany({
-        where: {
-          entityType: 'RecurringTaskGeneration',
-          entityId: { in: generations.map((generation) => generation.id) },
-          action: 'recurring_task.generated',
-        },
-        orderBy: { createdAt: 'asc' },
-      });
-      expect(generationAudit).toHaveLength(2);
-
-      const recurringOutboxEvents = (await prisma.outboxEvent.findMany({
-        where: { type: 'recurring_task.generated' },
-        orderBy: { createdAt: 'asc' },
-      })).filter((event) => (event.payload as any)?.ruleId === ruleId);
-      expect(recurringOutboxEvents).toHaveLength(2);
-      expect(
-        recurringOutboxEvents.map((event) => {
-          const scheduledAt = (event.payload as any)?.scheduledAt;
-          if (typeof scheduledAt === 'string') {
-            return scheduledAt;
-          }
-          return scheduledAt?.toISOString?.() ?? null;
-        }),
-      ).toEqual([yesterdayUtc.toISOString(), todayUtc.toISOString()]);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  test('webhook delivery worker retries failed events, signs payloads, and exposes DLQ', async () => {
-    await prisma.outboxEvent.deleteMany({});
-
-    const wsRes = await request(app.getHttpServer())
-      .get('/workspaces')
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    const workspaceId = wsRes.body[0].id;
-    const projectRes = await request(app.getHttpServer())
-      .post('/projects')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ workspaceId, name: `Webhook Delivery ${Date.now()}` })
-      .expect(201);
-    const projectId = projectRes.body.id as string;
-
-    const received: Array<{ signature?: string; timestamp?: string; body: string }> = [];
-    const server = createServer((req, res) => {
-      const chunks: Buffer[] = [];
-      req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-      req.on('end', () => {
-        const body = Buffer.concat(chunks).toString('utf8');
-        if (req.url === '/ok') {
-          received.push({
-            signature: req.headers['x-atlaspm-signature']?.toString(),
-            timestamp: req.headers['x-atlaspm-timestamp']?.toString(),
-            body,
-          });
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ ok: true }));
-          return;
-        }
-        res.writeHead(500, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: false }));
-      });
-    });
-
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
-    const address = server.address();
-    if (!address || typeof address === 'string') {
-      throw new Error('Failed to obtain webhook test server port');
-    }
-    const baseUrl = `http://127.0.0.1:${address.port}`;
-
-    try {
-      const okWebhook = await request(app.getHttpServer())
-        .post('/webhooks')
-        .set('Authorization', `Bearer ${token}`)
-        .send({ projectId, targetUrl: `${baseUrl}/ok` })
-        .expect(201);
-
-      await prisma.outboxEvent.deleteMany({});
-
-      const successEvent = await prisma.outboxEvent.create({
-        data: {
-          type: 'task.updated',
-          payload: { projectId, taskId: 'fake-task' },
-          correlationId: `webhook-success-${Date.now()}`,
-        },
-      });
-
-      await webhookWorker.processDueEvents(new Date());
-      const delivered = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: successEvent.id } });
-      expect(Boolean(delivered.deliveredAt)).toBe(true);
-      expect(delivered.deadLetteredAt).toBeNull();
-      const captured = received.find((entry) => {
-        try {
-          return JSON.parse(entry.body).id === successEvent.id;
-        } catch {
-          return false;
-        }
-      });
-      expect(captured).toBeTruthy();
-      expect(captured?.signature).toMatch(/^v1=/);
-      expect(captured?.timestamp).toBeTruthy();
-      const expectedSig = `v1=${createHmac('sha256', 'webhook-test-secret')
-        .update(`${captured?.timestamp}.${captured?.body}`, 'utf8')
-        .digest('hex')}`;
-      expect(captured?.signature).toBe(expectedSig);
-
-      await prisma.webhook.update({
-        where: { id: okWebhook.body.id },
-        data: { active: false },
-      });
-      const failWebhook = await request(app.getHttpServer())
-        .post('/webhooks')
-        .set('Authorization', `Bearer ${token}`)
-        .send({ projectId, targetUrl: `${baseUrl}/fail` })
-        .expect(201);
-
-      const failingEvent = await prisma.outboxEvent.create({
-        data: {
-          type: 'task.updated',
-          payload: { projectId, taskId: 'fake-task' },
-          correlationId: `webhook-fail-${Date.now()}`,
-        },
-      });
-
-      await webhookWorker.processDueEvents(new Date());
-      let failedState = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: failingEvent.id } });
-      expect(failedState.deliveryAttempts).toBe(1);
-      expect(failedState.deadLetteredAt).toBeNull();
-      expect(failedState.deliveredAt).toBeNull();
-      expect(failedState.lastError).toContain('500');
-
-      await prisma.outboxEvent.update({
-        where: { id: failingEvent.id },
-        data: { nextRetryAt: new Date(Date.now() - 1_000) },
-      });
-      await webhookWorker.processDueEvents(new Date());
-      failedState = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: failingEvent.id } });
-      expect(failedState.deliveryAttempts).toBe(2);
-      expect(Boolean(failedState.deadLetteredAt)).toBe(true);
-      expect(failedState.deliveredAt).toBeNull();
-
-      const dlq = await request(app.getHttpServer())
-        .get(`/webhooks/dlq?projectId=${projectId}`)
-        .set('Authorization', `Bearer ${token}`)
-        .expect(200);
-      expect(dlq.body.some((event: any) => event.id === failingEvent.id)).toBe(true);
-
-      const auth = app.get(AuthService);
-      const projectMemberToken = await auth.mintDevToken(
-        `webhook-member-${Date.now()}`,
-        `webhook-member-${Date.now()}@example.com`,
-        'Webhook Member',
-      );
-      await request(app.getHttpServer())
-        .get(`/webhooks/dlq?projectId=${projectId}`)
-        .set('Authorization', `Bearer ${projectMemberToken}`)
-        .expect(404);
-
-      await request(app.getHttpServer())
-        .post(`/webhooks/dlq/${failingEvent.id}/retry`)
-        .set('Authorization', `Bearer ${projectMemberToken}`)
-        .send({ projectId })
-        .expect(404);
-
-      await prisma.webhook.update({
-        where: { id: okWebhook.body.id },
-        data: { active: true },
-      });
-      await prisma.webhook.update({
-        where: { id: failWebhook.body.id },
-        data: { active: false },
-      });
-
-      const redriveCorrelationId = `webhook-redrive-${Date.now()}`;
-      await request(app.getHttpServer())
-        .post(`/webhooks/dlq/${failingEvent.id}/retry`)
-        .set('Authorization', `Bearer ${token}`)
-        .set('x-correlation-id', redriveCorrelationId)
-        .send({ projectId })
-        .expect(201);
-
-      await request(app.getHttpServer())
-        .post(`/webhooks/dlq/${failingEvent.id}/retry`)
-        .set('Authorization', `Bearer ${token}`)
-        .send({ projectId })
-        .expect(409);
-
-      const resetState = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: failingEvent.id } });
-      expect(resetState.deadLetteredAt).toBeNull();
-      expect(resetState.deliveryAttempts).toBe(0);
-      expect(resetState.deliveredAt).toBeNull();
-
-      await webhookWorker.processDueEvents(new Date());
-      const redrivenState = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: failingEvent.id } });
-      expect(Boolean(redrivenState.deliveredAt)).toBe(true);
-      expect(redrivenState.deadLetteredAt).toBeNull();
-      const redriveDelivered = received.find((entry) => {
-        try {
-          return JSON.parse(entry.body).id === failingEvent.id;
-        } catch {
-          return false;
-        }
-      });
-      expect(redriveDelivered).toBeTruthy();
-
-      const redriveAudit = await prisma.auditEvent.findFirst({
-        where: {
-          entityType: 'OutboxEvent',
-          entityId: failingEvent.id,
-          action: 'webhook.delivery.retry_requested',
-          correlationId: redriveCorrelationId,
-        },
-        orderBy: { createdAt: 'desc' },
-      });
-      expect(redriveAudit).toBeTruthy();
-      const redriveOutbox = await prisma.outboxEvent.findFirst({
-        where: {
-          type: 'webhook.delivery.retry_requested',
-          correlationId: redriveCorrelationId,
-        },
-        orderBy: { createdAt: 'desc' },
-      });
-      expect(redriveOutbox).toBeTruthy();
-      expect((redriveOutbox?.payload as any)?.projectId).toBe(projectId);
-      expect((redriveOutbox?.payload as any)?.outboxEventId).toBe(failingEvent.id);
-    } finally {
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error) reject(error);
-          else resolve();
-        });
-      });
-    }
+    expect(outbox.body.some((event: any) => event.type === 'task.primary_project_changed')).toBe(
+      true,
+    );
   });
 
   test('DELETE /rules/:id deletes custom rules with audit/outbox and returns 404 for missing rules', async () => {
-    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
     const workspaceId = wsRes.body[0].id;
 
     const projectRes = await request(app.getHttpServer())
@@ -2905,7 +2250,10 @@ describe('Core API Integration', () => {
       .expect(201);
     const customRuleId = customRule.body.id;
 
-    await request(app.getHttpServer()).delete(`/rules/${customRuleId}`).set('Authorization', `Bearer ${token}`).expect(200);
+    await request(app.getHttpServer())
+      .delete(`/rules/${customRuleId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
 
     const deletedRule = await prisma.rule.findUnique({ where: { id: customRuleId } });
     expect(deletedRule).toBeNull();
@@ -2928,11 +2276,17 @@ describe('Core API Integration', () => {
     );
     expect(deleteOutbox).toBeTruthy();
 
-    await request(app.getHttpServer()).delete(`/rules/non-existent-rule-id`).set('Authorization', `Bearer ${token}`).expect(404);
+    await request(app.getHttpServer())
+      .delete(`/rules/non-existent-rule-id`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(404);
   });
 
   test('POST /projects/:id/rules creates rule with audit/outbox events', async () => {
-    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
     const workspaceId = wsRes.body[0].id;
 
     const projectRes = await request(app.getHttpServer())
@@ -2994,7 +2348,10 @@ describe('Core API Integration', () => {
   });
 
   test('DELETE /rules/:id returns 409 for template-backed rules', async () => {
-    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
     const workspaceId = wsRes.body[0].id;
 
     const projectRes = await request(app.getHttpServer())
@@ -3009,7 +2366,10 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const templateRule = rules.body.find((r: any) => r.templateKey === 'progress_to_done' || r.templateKey === 'progress_to_in_progress');
+    const templateRule = rules.body.find(
+      (r: any) =>
+        r.templateKey === 'progress_to_done' || r.templateKey === 'progress_to_in_progress',
+    );
     expect(templateRule).toBeTruthy();
     const templateRuleId = templateRule.id;
 
@@ -3028,7 +2388,10 @@ describe('Core API Integration', () => {
   });
 
   test('POST /projects/:id/tasks rejects invalid date range', async () => {
-    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
     const workspaceId = wsRes.body[0].id;
 
     const projectRes = await request(app.getHttpServer())
@@ -3060,7 +2423,10 @@ describe('Core API Integration', () => {
   });
 
   test('POST /projects/:id/tasks accepts valid date range', async () => {
-    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
     const workspaceId = wsRes.body[0].id;
 
     const projectRes = await request(app.getHttpServer())
@@ -3103,14 +2469,19 @@ describe('Core API Integration', () => {
       orderBy: { createdAt: 'desc' },
       take: 20,
     });
-    const dateCreateOutbox = dateCreateOutboxEvents.find((event) => (event.payload as any)?.id === taskId);
+    const dateCreateOutbox = dateCreateOutboxEvents.find(
+      (event) => (event.payload as any)?.id === taskId,
+    );
     expect(dateCreateOutbox).toBeTruthy();
     expect((dateCreateOutbox?.payload as any)?.startAt).toBeTruthy();
     expect((dateCreateOutbox?.payload as any)?.dueAt).toBeTruthy();
   });
 
   test('GET /projects/:id/tasks rejects unsupported due date query values', async () => {
-    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
     const workspaceId = wsRes.body[0].id;
 
     const projectRes = await request(app.getHttpServer())
@@ -3124,8 +2495,10 @@ describe('Core API Integration', () => {
       .get(`/projects/${projectId}/sections`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    const defaultSectionId =
-      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ?? sectionsRes.body[0])?.id as string;
+    const defaultSectionId = (
+      sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
+      sectionsRes.body[0]
+    )?.id as string;
 
     await request(app.getHttpServer())
       .post(`/projects/${projectId}/tasks`)
@@ -3159,7 +2532,10 @@ describe('Core API Integration', () => {
   });
 
   test('GET /projects/:id/tasks accepts explicit due date query formats', async () => {
-    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
     const workspaceId = wsRes.body[0].id;
 
     const projectRes = await request(app.getHttpServer())
@@ -3173,8 +2549,10 @@ describe('Core API Integration', () => {
       .get(`/projects/${projectId}/sections`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    const defaultSectionId =
-      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ?? sectionsRes.body[0])?.id as string;
+    const defaultSectionId = (
+      sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
+      sectionsRes.body[0]
+    )?.id as string;
 
     const includedTaskRes = await request(app.getHttpServer())
       .post(`/projects/${projectId}/tasks`)
@@ -3210,7 +2588,10 @@ describe('Core API Integration', () => {
   });
 
   test('schedule APIs normalize mixed timestamps to UTC date-only persistence', async () => {
-    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
     const workspaceId = wsRes.body[0].id;
 
     const projectRes = await request(app.getHttpServer())
@@ -3294,7 +2675,10 @@ describe('Core API Integration', () => {
   });
 
   test('POST /projects/:id/tasks accepts open-ended date ranges', async () => {
-    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
     const workspaceId = wsRes.body[0].id;
 
     const projectRes = await request(app.getHttpServer())
@@ -3339,7 +2723,10 @@ describe('Core API Integration', () => {
   });
 
   test('PATCH /tasks/:id rejects invalid date range update', async () => {
-    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
     const workspaceId = wsRes.body[0].id;
 
     const projectRes = await request(app.getHttpServer())
@@ -3377,7 +2764,10 @@ describe('Core API Integration', () => {
   });
 
   test('PATCH /tasks/:id rejects partial update that creates invalid range', async () => {
-    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
     const workspaceId = wsRes.body[0].id;
 
     const projectRes = await request(app.getHttpServer())
@@ -3421,7 +2811,10 @@ describe('Core API Integration', () => {
   });
 
   test('PATCH /tasks/:id/reschedule updates dates with optimistic locking and emits audit/outbox', async () => {
-    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
     const workspaceId = wsRes.body[0].id;
 
     const projectRes = await request(app.getHttpServer())
@@ -3459,7 +2852,9 @@ describe('Core API Integration', () => {
 
     expect(rescheduleRes.body.id).toBe(taskId);
     expect(rescheduleRes.body.version).toBe(taskRes.body.version + 1);
-    expect(String(rescheduleRes.body.dueAt).slice(0, 10)).toBe(newDueDate.toISOString().slice(0, 10));
+    expect(String(rescheduleRes.body.dueAt).slice(0, 10)).toBe(
+      newDueDate.toISOString().slice(0, 10),
+    );
 
     const rescheduleAudit = await prisma.auditEvent.findFirst({
       where: {
@@ -3478,14 +2873,19 @@ describe('Core API Integration', () => {
       orderBy: { createdAt: 'desc' },
       take: 20,
     });
-    const rescheduleOutbox = rescheduleOutboxEvents.find((event) => (event.payload as any)?.taskId === taskId);
+    const rescheduleOutbox = rescheduleOutboxEvents.find(
+      (event) => (event.payload as any)?.taskId === taskId,
+    );
     expect(rescheduleOutbox).toBeTruthy();
     expect((rescheduleOutbox?.payload as any)?.projectId).toBe(projectId);
     expect((rescheduleOutbox?.payload as any)?.dueAt).toBeTruthy();
   });
 
   test('PATCH /tasks/:id/reschedule returns 409 with latest server truth on version conflict', async () => {
-    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
     const workspaceId = wsRes.body[0].id;
 
     const projectRes = await request(app.getHttpServer())
@@ -3523,7 +2923,10 @@ describe('Core API Integration', () => {
   });
 
   test('PATCH /tasks/:id/reschedule prioritizes 409 over date validation when version is stale', async () => {
-    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
     const workspaceId = wsRes.body[0].id;
 
     const projectRes = await request(app.getHttpServer())
@@ -3569,7 +2972,10 @@ describe('Core API Integration', () => {
   });
 
   test('POST /tasks/:id/subtasks rejects invalid date range', async () => {
-    const wsRes = await request(app.getHttpServer()).get('/workspaces').set('Authorization', `Bearer ${token}`).expect(200);
+    const wsRes = await request(app.getHttpServer())
+      .get('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
     const workspaceId = wsRes.body[0].id;
 
     const projectRes = await request(app.getHttpServer())
@@ -3855,7 +3261,9 @@ describe('Core API Integration', () => {
         orderBy: { createdAt: 'desc' },
         take: 20,
       });
-      const dependencyCreateOutbox = dependencyCreateOutboxEvents.find((event) => (event.payload as any)?.id === dependencyId);
+      const dependencyCreateOutbox = dependencyCreateOutboxEvents.find(
+        (event) => (event.payload as any)?.id === dependencyId,
+      );
       expect(dependencyCreateOutbox).toBeTruthy();
       expect((dependencyCreateOutbox?.payload as any)?.taskId).toBe(taskAId);
       expect((dependencyCreateOutbox?.payload as any)?.dependsOnId).toBe(taskBId);
@@ -3882,7 +3290,9 @@ describe('Core API Integration', () => {
         orderBy: { createdAt: 'desc' },
         take: 20,
       });
-      const dependencyRemoveOutbox = dependencyRemoveOutboxEvents.find((event) => (event.payload as any)?.id === dependencyId);
+      const dependencyRemoveOutbox = dependencyRemoveOutboxEvents.find(
+        (event) => (event.payload as any)?.id === dependencyId,
+      );
       expect(dependencyRemoveOutbox).toBeTruthy();
       expect((dependencyRemoveOutbox?.payload as any)?.taskId).toBe(taskAId);
       expect((dependencyRemoveOutbox?.payload as any)?.dependsOnId).toBe(taskBId);
@@ -3929,9 +3339,10 @@ describe('Core API Integration', () => {
       .get(`/projects/${projectId}/sections`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    const defaultSectionId =
-      (sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
-        sectionsRes.body[0])?.id as string;
+    const defaultSectionId = (
+      sectionsRes.body.find((section: { isDefault: boolean }) => section.isDefault) ??
+      sectionsRes.body[0]
+    )?.id as string;
 
     const timelineTaskA = await request(app.getHttpServer())
       .post(`/projects/${projectId}/tasks`)
@@ -4100,7 +3511,11 @@ describe('Core API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         laneTaskOrder: {
-          [timelineStatusLaneId]: [timelineTaskA.body.id, timelineTaskB.body.id, timelineTaskC.body.id],
+          [timelineStatusLaneId]: [
+            timelineTaskA.body.id,
+            timelineTaskB.body.id,
+            timelineTaskC.body.id,
+          ],
         },
       })
       .expect(200);
@@ -4306,7 +3721,9 @@ describe('Core API Integration', () => {
       },
       orderBy: { createdAt: 'desc' },
     });
-    expect(matchingTimelineOutbox.find((event) => (event.payload as any)?.taskId === taskId)).toBeTruthy();
+    expect(
+      matchingTimelineOutbox.find((event) => (event.payload as any)?.taskId === taskId),
+    ).toBeTruthy();
 
     await request(app.getHttpServer())
       .patch(`/tasks/${taskId}/timeline-move`)
@@ -4632,9 +4049,7 @@ describe('Core API Integration', () => {
         blockers: [
           `Waiting on @[${mentionedUserId}|Status Mentioned Member] to confirm the rollout checklist.`,
         ],
-        nextSteps: [
-          `Review the mitigation plan with @${mentionedUserId}.`,
-        ],
+        nextSteps: [`Review the mitigation plan with @${mentionedUserId}.`],
       })
       .expect(201);
 
@@ -4752,7 +4167,10 @@ describe('Core API Integration', () => {
                 type: 'paragraph',
                 content: [
                   { type: 'text', text: 'Need feedback from ' },
-                  { type: 'mention', attrs: { id: mentionedUserId, label: 'Description Mention Member' } },
+                  {
+                    type: 'mention',
+                    attrs: { id: mentionedUserId, label: 'Description Mention Member' },
+                  },
                 ],
               },
             ],
@@ -5150,16 +4568,22 @@ describe('Core API Integration', () => {
       },
       orderBy: { createdAt: 'asc' },
     });
-    expect(
-      recentAuditEvents.some((event) => event.action === 'project.saved_view.created'),
-    ).toBe(true);
-    expect(
-      recentAuditEvents.some((event) => event.action === 'project.saved_view.updated'),
-    ).toBe(true);
+    expect(recentAuditEvents.some((event) => event.action === 'project.saved_view.created')).toBe(
+      true,
+    );
+    expect(recentAuditEvents.some((event) => event.action === 'project.saved_view.updated')).toBe(
+      true,
+    );
 
     const recentOutboxEvents = await prisma.outboxEvent.findMany({
       where: {
-        type: { in: ['project.view_default.updated', 'project.saved_view.created', 'project.saved_view.updated'] },
+        type: {
+          in: [
+            'project.view_default.updated',
+            'project.saved_view.created',
+            'project.saved_view.updated',
+          ],
+        },
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -5174,15 +4598,13 @@ describe('Core API Integration', () => {
     expect(
       recentOutboxEvents.some(
         (event) =>
-          event.type === 'project.saved_view.created' &&
-          (event.payload as any)?.id === savedViewId,
+          event.type === 'project.saved_view.created' && (event.payload as any)?.id === savedViewId,
       ),
     ).toBe(true);
     expect(
       recentOutboxEvents.some(
         (event) =>
-          event.type === 'project.saved_view.updated' &&
-          (event.payload as any)?.id === savedViewId,
+          event.type === 'project.saved_view.updated' && (event.payload as any)?.id === savedViewId,
       ),
     ).toBe(true);
 
@@ -5448,10 +4870,16 @@ describe('Core API Integration', () => {
       .expect(200);
     expect(legacyPrefsRes.body.timelineManualLayout).toEqual({
       section: Object.fromEntries(
-        Object.entries(legacySectionLayout).map(([laneId, orderedTaskIds]) => [laneId, { orderedTaskIds }]),
+        Object.entries(legacySectionLayout).map(([laneId, orderedTaskIds]) => [
+          laneId,
+          { orderedTaskIds },
+        ]),
       ),
       assignee: Object.fromEntries(
-        Object.entries(legacyAssigneeLayout).map(([laneId, orderedTaskIds]) => [laneId, { orderedTaskIds }]),
+        Object.entries(legacyAssigneeLayout).map(([laneId, orderedTaskIds]) => [
+          laneId,
+          { orderedTaskIds },
+        ]),
       ),
       status: {},
     });
@@ -5471,14 +4899,24 @@ describe('Core API Integration', () => {
       .expect(200);
     expect(statusManualLayoutRes.body.timelineManualLayout).toEqual({
       section: Object.fromEntries(
-        Object.entries(legacySectionLayout).map(([laneId, orderedTaskIds]) => [laneId, { orderedTaskIds }]),
+        Object.entries(legacySectionLayout).map(([laneId, orderedTaskIds]) => [
+          laneId,
+          { orderedTaskIds },
+        ]),
       ),
       assignee: Object.fromEntries(
-        Object.entries(legacyAssigneeLayout).map(([laneId, orderedTaskIds]) => [laneId, { orderedTaskIds }]),
+        Object.entries(legacyAssigneeLayout).map(([laneId, orderedTaskIds]) => [
+          laneId,
+          { orderedTaskIds },
+        ]),
       ),
       status: {
         [legacyStatusLaneId]: {
-          orderedTaskIds: [timelineTaskARes.body.id, timelineTaskBRes.body.id, timelineTaskCRes.body.id],
+          orderedTaskIds: [
+            timelineTaskARes.body.id,
+            timelineTaskBRes.body.id,
+            timelineTaskCRes.body.id,
+          ],
         },
       },
     });
@@ -5489,14 +4927,24 @@ describe('Core API Integration', () => {
       .expect(200);
     expect(persistedPrefsRes.body.timelineManualLayout).toEqual({
       section: Object.fromEntries(
-        Object.entries(legacySectionLayout).map(([laneId, orderedTaskIds]) => [laneId, { orderedTaskIds }]),
+        Object.entries(legacySectionLayout).map(([laneId, orderedTaskIds]) => [
+          laneId,
+          { orderedTaskIds },
+        ]),
       ),
       assignee: Object.fromEntries(
-        Object.entries(legacyAssigneeLayout).map(([laneId, orderedTaskIds]) => [laneId, { orderedTaskIds }]),
+        Object.entries(legacyAssigneeLayout).map(([laneId, orderedTaskIds]) => [
+          laneId,
+          { orderedTaskIds },
+        ]),
       ),
       status: {
         [legacyStatusLaneId]: {
-          orderedTaskIds: [timelineTaskARes.body.id, timelineTaskBRes.body.id, timelineTaskCRes.body.id],
+          orderedTaskIds: [
+            timelineTaskARes.body.id,
+            timelineTaskBRes.body.id,
+            timelineTaskCRes.body.id,
+          ],
         },
       },
     });
@@ -5616,7 +5064,9 @@ describe('Core API Integration', () => {
       },
       orderBy: { createdAt: 'desc' },
     });
-    const timelineOutboxPayload = matchingTimelineOutbox.find((event) => (event.payload as any)?.taskId === taskId)?.payload as any;
+    const timelineOutboxPayload = matchingTimelineOutbox.find(
+      (event) => (event.payload as any)?.taskId === taskId,
+    )?.payload as any;
     expect(timelineOutboxPayload).toBeTruthy();
     expect(timelineOutboxPayload?.taskId).toBe(taskId);
     expect(timelineOutboxPayload?.sectionId).toBe(laneSectionRes.body.id);
@@ -5771,7 +5221,6 @@ describe('Core API Integration', () => {
       .expect(200);
     expect(childDetailRes.body.startAt).toContain('2026-04-11');
     expect(childDetailRes.body.dueAt).toContain('2026-04-11');
-
   });
 
   test('POST /tasks/:id/subtasks rejects nested subtasks', async () => {
@@ -5992,7 +5441,9 @@ describe('Core API Integration', () => {
       })
       .expect(409)
       .expect((res) => {
-        expect(res.body.message).toContain('Subtasks must stay in the same timeline group as their parent');
+        expect(res.body.message).toContain(
+          'Subtasks must stay in the same timeline group as their parent',
+        );
       });
   });
 
@@ -6051,7 +5502,9 @@ describe('Core API Integration', () => {
       })
       .expect(409)
       .expect((res) => {
-        expect(res.body.message).toContain('Subtasks must stay in the same timeline group as their parent');
+        expect(res.body.message).toContain(
+          'Subtasks must stay in the same timeline group as their parent',
+        );
       });
   });
 
@@ -6113,130 +5566,5 @@ describe('Core API Integration', () => {
       sectionId: defaultSection.id,
       status: 'BLOCKED',
     });
-  });
-
-  test('GET /notifications/delivery-failures exposes retrying and dead-lettered webhook issues for project admins', async () => {
-    const workspaceRes = await request(app.getHttpServer())
-      .get('/workspaces')
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    const workspaceId = workspaceRes.body[0].id as string;
-
-    const projectRes = await request(app.getHttpServer())
-      .post('/projects')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ workspaceId, name: `Notification Delivery Visibility ${Date.now()}` })
-      .expect(201);
-    const projectId = projectRes.body.id as string;
-
-    const retryingEvent = await prisma.outboxEvent.create({
-      data: {
-        type: 'task.updated',
-        payload: { projectId, taskId: 'retrying-task' },
-        correlationId: `notif-delivery-retrying-${Date.now()}`,
-        deliveryAttempts: 2,
-        nextRetryAt: new Date(Date.now() + 60_000),
-        lastError: 'webhook-a:500',
-      },
-    });
-
-    const deadLetteredEvent = await prisma.outboxEvent.create({
-      data: {
-        type: 'task.updated',
-        payload: { projectId, taskId: 'dead-letter-task' },
-        correlationId: `notif-delivery-dead-${Date.now()}`,
-        deliveryAttempts: 5,
-        deadLetteredAt: new Date(),
-        lastError: 'webhook-b:timeout',
-      },
-    });
-
-    const response = await request(app.getHttpServer())
-      .get('/notifications/delivery-failures')
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-
-    expect(response.body).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          eventId: retryingEvent.id,
-          project: expect.objectContaining({ id: projectId }),
-          status: 'retrying',
-          deliveryAttempts: 2,
-          lastError: 'webhook-a:500',
-        }),
-        expect.objectContaining({
-          eventId: deadLetteredEvent.id,
-          project: expect.objectContaining({ id: projectId }),
-          status: 'dead_lettered',
-          deliveryAttempts: 5,
-          lastError: 'webhook-b:timeout',
-        }),
-      ]),
-    );
-    const retryingIndex = response.body.findIndex((item: any) => item.eventId === retryingEvent.id);
-    const deadLetteredIndex = response.body.findIndex((item: any) => item.eventId === deadLetteredEvent.id);
-    expect(deadLetteredIndex).toBeGreaterThanOrEqual(0);
-    expect(retryingIndex).toBeGreaterThanOrEqual(0);
-    expect(deadLetteredIndex).toBeLessThan(retryingIndex);
-  });
-
-  test('GET /notifications/delivery-failures paginates beyond unrelated failures to return admin project issues', async () => {
-    const auth = app.get(AuthService);
-    const ownerUserId = `delivery-pagination-owner-${Date.now()}`;
-    const ownerToken = await auth.mintDevToken(
-      ownerUserId,
-      `${ownerUserId}@example.com`,
-      'Delivery Pagination Owner',
-    );
-
-    const workspaceRes = await request(app.getHttpServer())
-      .get('/workspaces')
-      .set('Authorization', `Bearer ${ownerToken}`)
-      .expect(200);
-    const workspaceId = workspaceRes.body[0].id as string;
-
-    const projectRes = await request(app.getHttpServer())
-      .post('/projects')
-      .set('Authorization', `Bearer ${ownerToken}`)
-      .send({ workspaceId, name: `Notification Delivery Pagination ${Date.now()}` })
-      .expect(201);
-    const projectId = projectRes.body.id as string;
-
-    const laterRetryAt = new Date(Date.now() + 120_000);
-    for (let index = 0; index < 120; index += 1) {
-      await prisma.outboxEvent.create({
-        data: {
-          type: 'task.updated',
-          payload: { projectId: `other-project-${index}`, taskId: `other-task-${index}` },
-          correlationId: `notif-delivery-other-${index}-${Date.now()}`,
-          deliveryAttempts: 1,
-          nextRetryAt: laterRetryAt,
-        },
-      });
-    }
-
-    const targetEvent = await prisma.outboxEvent.create({
-      data: {
-        type: 'task.updated',
-        payload: { projectId, taskId: 'owned-task' },
-        correlationId: `notif-delivery-owned-${Date.now()}`,
-        deliveryAttempts: 1,
-        nextRetryAt: laterRetryAt,
-        createdAt: new Date(Date.now() - 60_000),
-      },
-    });
-
-    const response = await request(app.getHttpServer())
-      .get('/notifications/delivery-failures?take=1')
-      .set('Authorization', `Bearer ${ownerToken}`)
-      .expect(200);
-
-    expect(response.body).toEqual([
-      expect.objectContaining({
-        eventId: targetEvent.id,
-        project: expect.objectContaining({ id: projectId }),
-      }),
-    ]);
   });
 });
